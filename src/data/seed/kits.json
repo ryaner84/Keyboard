@@ -1,0 +1,39 @@
+[
+  { "groupBuySlug": "gmk-striker", "name": "Base Kit", "type": "BASE" },
+  { "groupBuySlug": "gmk-striker", "name": "Numpad Kit", "type": "NUMPAD" },
+  { "groupBuySlug": "gmk-striker", "name": "Novelties Kit", "type": "NOVELTIES" },
+  { "groupBuySlug": "gmk-striker", "name": "Spacebars Kit", "type": "SPACEBARS" },
+
+  { "groupBuySlug": "gmk-botanical", "name": "Base Kit", "type": "BASE" },
+  { "groupBuySlug": "gmk-botanical", "name": "Spacebars Kit", "type": "SPACEBARS" },
+  { "groupBuySlug": "gmk-botanical", "name": "Novelties Kit", "type": "NOVELTIES" },
+
+  { "groupBuySlug": "gmk-red-samurai", "name": "Base Kit", "type": "BASE" },
+  { "groupBuySlug": "gmk-red-samurai", "name": "Numpad Kit", "type": "NUMPAD" },
+  { "groupBuySlug": "gmk-red-samurai", "name": "Mac Kit", "type": "MAC" },
+
+  { "groupBuySlug": "gmk-arctic", "name": "Base Kit", "type": "BASE" },
+  { "groupBuySlug": "gmk-arctic", "name": "Spacebars Kit", "type": "SPACEBARS" },
+
+  { "groupBuySlug": "gmk-laser", "name": "Base Kit", "type": "BASE" },
+  { "groupBuySlug": "gmk-laser", "name": "Novelties Kit", "type": "NOVELTIES" },
+
+  { "groupBuySlug": "gmk-dracula", "name": "Base Kit", "type": "BASE" },
+  { "groupBuySlug": "gmk-dracula", "name": "Numpad Kit", "type": "NUMPAD" },
+  { "groupBuySlug": "gmk-dracula", "name": "Novelties Kit", "type": "NOVELTIES" },
+  { "groupBuySlug": "gmk-dracula", "name": "Spacebars Kit", "type": "SPACEBARS" },
+
+  { "groupBuySlug": "gmk-olive", "name": "Base Kit", "type": "BASE" },
+  { "groupBuySlug": "gmk-olive", "name": "Numpad Kit", "type": "NUMPAD" },
+
+  { "groupBuySlug": "gmk-serika-r2", "name": "Base Kit", "type": "BASE" },
+  { "groupBuySlug": "gmk-serika-r2", "name": "Novelties Kit", "type": "NOVELTIES" },
+  { "groupBuySlug": "gmk-serika-r2", "name": "Spacebars Kit", "type": "SPACEBARS" },
+
+  { "groupBuySlug": "gmk-futura", "name": "Base Kit", "type": "BASE" },
+  { "groupBuySlug": "gmk-futura", "name": "Numpad Kit", "type": "NUMPAD" },
+  { "groupBuySlug": "gmk-futura", "name": "Novelties Kit", "type": "NOVELTIES" },
+
+  { "groupBuySlug": "gmk-moonrise", "name": "Base Kit", "type": "BASE" },
+  { "groupBuySlug": "gmk-moonrise", "name": "Spacebars Kit", "type": "SPACEBARS" }
+]

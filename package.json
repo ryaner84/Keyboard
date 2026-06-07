@@ -1,0 +1,48 @@
+{
+  "name": "gmk-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts",
+    "db:migrate": "prisma migrate dev",
+    "db:generate": "prisma generate"
+  },
+  "prisma": {
+    "seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/pg": "^8.20.0",
+    "@types/qrcode": "^1.5.6",
+    "@vercel/og": "^0.11.1",
+    "bcryptjs": "^3.0.3",
+    "disqus-react": "^1.1.7",
+    "jsonwebtoken": "^9.0.3",
+    "next": "14.2.35",
+    "pg": "^8.21.0",
+    "prisma": "^7.8.0",
+    "qrcode": "^1.5.4",
+    "react": "^18",
+    "react-dom": "^18",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "dotenv": "^17.4.2",
+    "eslint": "^8",
+    "eslint-config-next": "14.2.35",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5"
+  }
+}

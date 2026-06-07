@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum GBStatus {
+  INTEREST_CHECK
+  ACTIVE_GB
+  SHIPPING
+  DELIVERED
+  IN_STOCK
+  CANCELLED
+}
+
+enum KitType {
+  BASE
+  NUMPAD
+  MAC
+  NOVELTIES
+  SPACEBARS
+  ISO
+  ADDON
+}
+
+enum Region {
+  US
+  CA
+  EU
+  UK
+  AU
+  SG
+  ASIA
+  OTHER
+}
+
+model GroupBuy {
+  id          String    @id @default(cuid())
+  slug        String    @unique
+  name        String
+  subtitle    String?
+  colorway    String?
+  designer    String
+  status      GBStatus
+  gbStart     DateTime?
+  gbEnd       DateTime?
+  imageUrl    String?
+  description String?
+  featured    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  kits        Kit[]
+}
+
+model Kit {
+  id         String      @id @default(cuid())
+  name       String
+  type       KitType
+  groupBuyId String
+  groupBuy   GroupBuy    @relation(fields: [groupBuyId], references: [id], onDelete: Cascade)
+  vendorKits VendorKit[]
+}
+
+model Vendor {
+  id            String         @id @default(cuid())
+  name          String
+  slug          String         @unique
+  region        Region
+  country       String
+  currency      String
+  websiteUrl    String
+  logoUrl       String?
+  vendorKits    VendorKit[]
+  shippingZones ShippingZone[]
+}
+
+model VendorKit {
+  id        String   @id @default(cuid())
+  kitId     String
+  kit       Kit      @relation(fields: [kitId], references: [id], onDelete: Cascade)
+  vendorId  String
+  vendor    Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  price     Float
+  currency  String
+  inStock   Boolean  @default(true)
+  gbUrl     String?
+  notes     String?
+  updatedAt DateTime @updatedAt
+
+  @@unique([kitId, vendorId])
+}
+
+model ShippingZone {
+  id                String  @id @default(cuid())
+  vendorId          String
+  vendor            Vendor  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  destinationRegion Region
+  baseShippingCost  Float
+  currency          String
+  estimatedDaysMin  Int
+  estimatedDaysMax  Int
+  shipsToRegion     Boolean @default(true)
+
+  @@unique([vendorId, destinationRegion])
+}
+
+model Currency {
+  code              String   @id
+  name              String
+  symbol            String
+  exchangeRateToUSD Float
+  lastUpdated       DateTime @default(now())
+}
