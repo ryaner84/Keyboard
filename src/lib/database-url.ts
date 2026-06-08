@@ -1,29 +1,53 @@
 // Resolves the Postgres connection string from environment variables.
 //
-// Two supported setups:
-//   A) Single var  — DATABASE_URL holds the full connection string (password included).
-//   B) Split vars  — DATABASE_URL holds the string with the literal token
-//                    `__PASSWORD__` where the password goes, and DATABASE_PASSWORD
-//                    holds the password separately. The password is URL-encoded
-//                    and spliced in here.
+// Three supported setups (checked in this order):
 //
-// Setup B lets you keep the secret password in its own Vercel variable.
+//   A) Full DATABASE_URL — holds the entire connection string (password included).
+//
+//   B) DATABASE_URL with placeholder — contains the literal token `__PASSWORD__`
+//      where the password goes; DATABASE_PASSWORD holds the password, spliced in.
+//
+//   C) Supabase components — no DATABASE_URL at all; the string is assembled from:
+//        SUPABASE_PROJECT_REF  (e.g. csvgqiuofaofomxnyfer)
+//        SUPABASE_REGION       (e.g. ap-southeast-1)
+//        DATABASE_PASSWORD     (the database password)
+//      Optional override: SUPABASE_DB_HOST (if your pooler host isn't the default
+//      `aws-0-<region>.pooler.supabase.com`).
+//
+// Setups B and C keep the secret password in its own variable.
 export function resolveDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;
   const password = process.env.DATABASE_PASSWORD;
 
-  if (!url) {
-    throw new Error("DATABASE_URL is not set");
+  // A) / B) explicit DATABASE_URL wins if present.
+  if (url) {
+    if (url.includes("__PASSWORD__")) {
+      if (!password) {
+        throw new Error(
+          "DATABASE_URL contains the __PASSWORD__ placeholder but DATABASE_PASSWORD is not set"
+        );
+      }
+      return url.replace("__PASSWORD__", encodeURIComponent(password));
+    }
+    return url;
   }
 
-  if (url.includes("__PASSWORD__")) {
+  // C) assemble from Supabase components.
+  const ref = process.env.SUPABASE_PROJECT_REF;
+  const region = process.env.SUPABASE_REGION;
+  if (ref && region) {
     if (!password) {
       throw new Error(
-        "DATABASE_URL contains the __PASSWORD__ placeholder but DATABASE_PASSWORD is not set"
+        "DATABASE_PASSWORD is required when using SUPABASE_PROJECT_REF + SUPABASE_REGION"
       );
     }
-    return url.replace("__PASSWORD__", encodeURIComponent(password));
+    const host =
+      process.env.SUPABASE_DB_HOST || `aws-0-${region}.pooler.supabase.com`;
+    const pw = encodeURIComponent(password);
+    return `postgresql://postgres.${ref}:${pw}@${host}:5432/postgres`;
   }
 
-  return url;
+  throw new Error(
+    "No database configuration found. Set DATABASE_URL, or SUPABASE_PROJECT_REF + SUPABASE_REGION + DATABASE_PASSWORD."
+  );
 }
