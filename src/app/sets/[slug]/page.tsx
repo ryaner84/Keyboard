@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Image from "next/image";
 import { prisma } from "@/lib/prisma";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { formatDateRange } from "@/lib/utils";
+import { formatDateRange, normalizeImageUrl } from "@/lib/utils";
 import { SetDetailClient } from "./SetDetailClient";
 import type { Metadata } from "next";
 
@@ -28,15 +28,15 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
       title: groupBuy.name,
       description: groupBuy.subtitle ?? `${groupBuy.name} by ${groupBuy.designer}`,
       url,
-      images: groupBuy.imageUrl
-        ? [{ url: groupBuy.imageUrl, width: 1200, height: 630, alt: groupBuy.name }]
+      images: normalizeImageUrl(groupBuy.imageUrl)
+        ? [{ url: normalizeImageUrl(groupBuy.imageUrl)!, width: 1200, height: 630, alt: groupBuy.name }]
         : [],
     },
     twitter: {
       card: "summary_large_image",
       title: groupBuy.name,
       description: groupBuy.subtitle ?? `Compare prices for ${groupBuy.name}`,
-      images: groupBuy.imageUrl ? [groupBuy.imageUrl] : [],
+      images: normalizeImageUrl(groupBuy.imageUrl) ? [normalizeImageUrl(groupBuy.imageUrl)!] : [],
     },
   };
 }
@@ -73,10 +73,10 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Hero */}
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden mb-6">
-        {groupBuy.imageUrl && (
+        {normalizeImageUrl(groupBuy.imageUrl) && (
           <div className="relative aspect-[21/9] w-full overflow-hidden">
             <Image
-              src={groupBuy.imageUrl}
+              src={normalizeImageUrl(groupBuy.imageUrl)!}
               alt={groupBuy.name}
               fill
               className="object-cover"

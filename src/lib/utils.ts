@@ -8,6 +8,16 @@ export function slugify(text: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+// KeycapLendar's `image` field points at the original upload under `keysets/`,
+// but those originals are deleted after the resize extension runs (HTTP 404).
+// The surviving copy lives under `thumbs/` with the same access token. We rewrite
+// the path at render time so images always load, regardless of what's stored in
+// the database (older rows may still hold the broken `keysets/` path).
+export function normalizeImageUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return url.replace("keysets%2F", "thumbs%2F").replace("/keysets/", "/thumbs/");
+}
+
 export function formatDate(date: Date | string | null): string {
   if (!date) return "TBD";
   return new Date(date).toLocaleDateString("en-SG", {

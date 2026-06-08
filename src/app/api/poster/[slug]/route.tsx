@@ -1,7 +1,7 @@
 import { ImageResponse } from "@vercel/og";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { STATUS_LABELS } from "@/lib/utils";
+import { STATUS_LABELS, normalizeImageUrl } from "@/lib/utils";
 import QRCode from "qrcode";
 import type { GBStatus } from "@/generated/prisma";
 
@@ -110,11 +110,11 @@ export async function GET(
         </div>
 
         {/* Set image */}
-        {groupBuy.imageUrl && (
+        {normalizeImageUrl(groupBuy.imageUrl) && (
           <div style={{ display: "flex", padding: "0" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={groupBuy.imageUrl}
+              src={normalizeImageUrl(groupBuy.imageUrl)!}
               alt={groupBuy.name}
               style={{
                 width: "100%",

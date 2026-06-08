@@ -7,6 +7,7 @@ import Image from "next/image";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
 import { useLocation } from "@/context/LocationContext";
+import { normalizeImageUrl } from "@/lib/utils";
 import type { GroupBuyWithKits } from "@/types";
 
 export default function TrackerContent() {
@@ -119,9 +120,9 @@ export default function TrackerContent() {
             >
               <Link href={`/sets/${set.slug}?country=${countryCode}`} className="block">
                 <div className="relative aspect-video bg-gray-50 overflow-hidden">
-                  {set.imageUrl ? (
+                  {normalizeImageUrl(set.imageUrl) ? (
                     <Image
-                      src={set.imageUrl}
+                      src={normalizeImageUrl(set.imageUrl)!}
                       alt={set.name}
                       fill
                       className="object-cover group-hover:scale-105 transition-transform duration-300"

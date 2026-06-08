@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { getCountdownLabel, formatDateRange } from "@/lib/utils";
+import { getCountdownLabel, formatDateRange, normalizeImageUrl } from "@/lib/utils";
 import { useLocation } from "@/context/LocationContext";
 import type { GroupBuyWithKits } from "@/types";
 
@@ -44,9 +44,9 @@ export function UpcomingCarousel({ sets }: UpcomingCarouselProps) {
           <div className="relative rounded-2xl overflow-hidden bg-gray-100 group">
             <Link href={href(current.slug)} className="block">
               <div className="relative aspect-[16/9] w-full">
-                {current.imageUrl ? (
+                {normalizeImageUrl(current.imageUrl) ? (
                   <Image
-                    src={current.imageUrl}
+                    src={normalizeImageUrl(current.imageUrl)!}
                     alt={current.name}
                     fill
                     className="object-cover transition-transform duration-500 group-hover:scale-105"
@@ -156,8 +156,8 @@ export function UpcomingCarousel({ sets }: UpcomingCarouselProps) {
                     }`}
                   >
                     <div className="relative w-16 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
-                      {set.imageUrl ? (
-                        <Image src={set.imageUrl} alt={set.name} fill className="object-cover" unoptimized />
+                      {normalizeImageUrl(set.imageUrl) ? (
+                        <Image src={normalizeImageUrl(set.imageUrl)!} alt={set.name} fill className="object-cover" unoptimized />
                       ) : (
                         <div className="absolute inset-0 flex items-center justify-center text-lg opacity-30">⌨</div>
                       )}

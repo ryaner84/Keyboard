@@ -2,7 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { prisma } from "@/lib/prisma";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { getCountdownLabel, formatDateRange } from "@/lib/utils";
+import { getCountdownLabel, formatDateRange, normalizeImageUrl } from "@/lib/utils";
 import type { GroupBuyWithKits } from "@/types";
 import type { Metadata } from "next";
 
@@ -87,8 +87,8 @@ export default async function TimelinePage() {
                         className="flex items-center gap-4 bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-3 hover:border-indigo-200 dark:hover:border-indigo-600 hover:shadow-sm transition-all"
                       >
                         <div className="relative w-20 h-14 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-800 flex-shrink-0">
-                          {set.imageUrl ? (
-                            <Image src={set.imageUrl} alt={set.name} fill className="object-cover" unoptimized />
+                          {normalizeImageUrl(set.imageUrl) ? (
+                            <Image src={normalizeImageUrl(set.imageUrl)!} alt={set.name} fill className="object-cover" unoptimized />
                           ) : (
                             <div className="absolute inset-0 flex items-center justify-center text-xl opacity-30">⌨</div>
                           )}

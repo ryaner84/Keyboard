@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { formatRelativeDate, getCountdownLabel } from "@/lib/utils";
+import { formatRelativeDate, getCountdownLabel, normalizeImageUrl } from "@/lib/utils";
 import { formatCurrency } from "@/lib/currency-utils";
 import { computeCheapest, latestUpdate } from "@/lib/pricing";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
@@ -30,9 +30,9 @@ export function SetCard({ set }: SetCardProps) {
     <div className="group bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden hover:border-indigo-200 dark:hover:border-indigo-600 hover:shadow-md transition-all duration-200 flex flex-col">
       <Link href={href} className="block">
         <div className="relative aspect-video bg-gray-50 overflow-hidden">
-          {set.imageUrl ? (
+          {normalizeImageUrl(set.imageUrl) ? (
             <Image
-              src={set.imageUrl}
+              src={normalizeImageUrl(set.imageUrl)!}
               alt={set.name}
               fill
               className="object-cover group-hover:scale-105 transition-transform duration-300"
