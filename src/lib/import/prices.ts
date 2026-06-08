@@ -110,8 +110,13 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
   const candidates = await prisma.vendorKit.findMany({
     where: {
       productUrl: { not: null },
-      priceSource: { not: "MANUAL" },
-      OR: [{ priceUpdatedAt: null }, { priceUpdatedAt: { lt: cutoff } }],
+      // Never touch manually-entered prices. NULL priceSource (freshly imported,
+      // never scraped) must be included — `not: "MANUAL"` alone would exclude
+      // NULLs because `NULL <> 'MANUAL'` is NULL (not true) in SQL.
+      OR: [{ priceSource: null }, { priceSource: { not: "MANUAL" } }],
+      AND: {
+        OR: [{ priceUpdatedAt: null }, { priceUpdatedAt: { lt: cutoff } }],
+      },
     },
     orderBy: [{ priceUpdatedAt: { sort: "asc", nulls: "first" } }],
     take: limit,

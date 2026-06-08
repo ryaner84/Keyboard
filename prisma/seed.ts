@@ -1,12 +1,15 @@
+import "dotenv/config";
 import { PrismaClient } from "../src/generated/prisma";
 import type { Region, KitType } from "../src/generated/prisma";
+import { PrismaPg } from "@prisma/adapter-pg";
 import groupBuysData from "../src/data/seed/group-buys.json";
 import vendorsData from "../src/data/seed/vendors.json";
 import kitsData from "../src/data/seed/kits.json";
 import vendorKitsData from "../src/data/seed/vendor-kits.json";
 import shippingZonesData from "../src/data/seed/shipping-zones.json";
 
-const prisma = new PrismaClient();
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+const prisma = new PrismaClient({ adapter });
 
 const CURRENCIES = [
   { code: "USD", name: "US Dollar", symbol: "$", exchangeRateToUSD: 1.0 },
