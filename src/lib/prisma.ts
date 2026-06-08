@@ -3,11 +3,12 @@
 // "@/lib/currency-utils" instead, never from here.
 import { PrismaClient } from "@/generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { resolveDatabaseUrl } from "@/lib/database-url";
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
 function createPrismaClient() {
-  const connectionString = process.env.DATABASE_URL!;
+  const connectionString = resolveDatabaseUrl();
   const adapter = new PrismaPg({ connectionString });
   return new PrismaClient({
     adapter,
