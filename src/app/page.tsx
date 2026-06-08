@@ -172,6 +172,9 @@ export default async function HomePage() {
           <div className="flex items-center justify-between mb-1">
             <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
               <span className="text-red-500">⏳</span> Finishing Soon
+              <span className="px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400 text-xs font-semibold border border-red-100 dark:border-red-900">
+                ≤ 7 days left
+              </span>
             </h2>
             <Link href="/browse?finishing=7" className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700 font-medium">
               View all →

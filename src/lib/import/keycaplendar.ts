@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/utils";
 import { unwrapFields, type FirestoreDoc } from "./firestore";
+import { applyVendorOverride } from "./vendor-overrides";
+import { buildShippingZones } from "./shipping";
 import type { GBStatus, Region } from "@/generated/prisma";
 
 const PROJECT_ID = process.env.KEYCAPLENDAR_PROJECT_ID || "keycaplendar";
@@ -169,7 +171,8 @@ export async function importGmkSets(): Promise<ImportResult> {
       if (!v.name) continue;
       const vSlug = slugify(v.name);
       if (!vSlug) continue;
-      const { region, currency, country } = mapRegion(v.region);
+      // Correct known-mislabelled vendors (e.g. SG stores tagged as "America").
+      const { region, currency, country } = applyVendorOverride(vSlug, mapRegion(v.region));
 
       let vendorId = vendorCache.get(vSlug);
       if (!vendorId) {
@@ -194,6 +197,14 @@ export async function importGmkSets(): Promise<ImportResult> {
         vendorId = vendor.id;
         vendorCache.set(vSlug, vendorId);
         result.vendors++;
+
+        // Seed DHL-estimate shipping zones for every destination region so the
+        // vendor is reachable from any user location. Idempotent: skipDuplicates
+        // leaves existing (or manually-edited) zones untouched.
+        await prisma.shippingZone.createMany({
+          data: buildShippingZones(region).map((z) => ({ vendorId: vendor.id, ...z })),
+          skipDuplicates: true,
+        });
       }
 
       // Don't overwrite manually-entered prices; preserve existing price data.

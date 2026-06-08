@@ -33,7 +33,11 @@ export function VendorTable({
 }: VendorTableProps) {
   const rows: RowData[] = useMemo(() => {
     return vendorKits.map((vk) => {
-      const zone = vk.vendor.shippingZones?.[0];
+      // Pick the shipping zone for the *user's* region (was incorrectly using
+      // the first zone, so SG users saw another region's rate or "doesn't ship").
+      const zone = vk.vendor.shippingZones?.find(
+        (z) => z.destinationRegion === userRegion
+      );
       const shipsToRegion = zone?.shipsToRegion ?? false;
 
       const hasPrice = vk.price != null && vk.currency != null;
@@ -58,7 +62,7 @@ export function VendorTable({
 
       return { vk, hasPrice, kitPriceLocal, shippingLocal, totalLocal, shipsToRegion, estimatedDays };
     });
-  }, [vendorKits, userCurrency, rates]);
+  }, [vendorKits, userRegion, userCurrency, rates]);
 
   const sorted = useMemo(() => {
     // Priced + ships-here rows first (cheapest first), then the rest.
@@ -125,53 +129,72 @@ export function VendorTable({
               </div>
             </div>
 
-            {/* Price area */}
-            {row.hasPrice && !unavailable ? (
+            {/* Price + shipping area */}
+            {!unavailable ? (
               <>
-                <div className="text-right hidden sm:block">
+                {/* Kit price (hidden on the smallest screens) */}
+                <div className="text-right hidden sm:block w-20">
                   <p className="text-xs text-gray-400">Kit</p>
-                  <p className="text-sm text-gray-700">{formatCurrency(row.kitPriceLocal!, userCurrency)}</p>
-                </div>
-                <div className="text-right hidden sm:block">
-                  <p className="text-xs text-gray-400">Shipping</p>
                   <p className="text-sm text-gray-700">
-                    {row.shippingLocal === 0
-                      ? "Free"
-                      : row.shippingLocal != null
-                        ? formatCurrency(row.shippingLocal, userCurrency)
-                        : "—"}
+                    {row.hasPrice ? formatCurrency(row.kitPriceLocal!, userCurrency) : "—"}
                   </p>
                 </div>
-                <div className="text-right">
-                  <p className="text-xs text-gray-400">Total</p>
-                  <p className={`text-base font-bold ${isBest ? "text-green-700" : "text-gray-900"}`}>
-                    {formatCurrency(row.totalLocal!, userCurrency)}
+                {/* Shipping — always shown (DHL estimate) */}
+                <div className="text-right w-24">
+                  <p className="text-xs text-gray-400">
+                    Ship <span className="text-gray-300">· DHL est.</span>
                   </p>
-                  {row.vk.priceUpdatedAt && (
-                    <p className="text-[10px] text-gray-400 mt-0.5">
-                      Updated {formatRelativeDate(row.vk.priceUpdatedAt)}
-                    </p>
-                  )}
+                  <p className="text-sm text-gray-700">
+                    {row.shippingLocal != null
+                      ? formatCurrency(row.shippingLocal, userCurrency)
+                      : "—"}
+                  </p>
                 </div>
-                {(row.vk.gbUrl || row.vk.productUrl) && (
-                  <a
-                    href={(row.vk.gbUrl || row.vk.productUrl)!}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="ml-1 px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 transition-colors whitespace-nowrap flex-shrink-0"
-                  >
-                    Buy →
-                  </a>
+                {/* Total + buy/view action */}
+                {row.hasPrice ? (
+                  <>
+                    <div className="text-right w-24">
+                      <p className="text-xs text-gray-400">Total</p>
+                      <p className={`text-base font-bold ${isBest ? "text-green-700" : "text-gray-900"}`}>
+                        {formatCurrency(row.totalLocal!, userCurrency)}
+                      </p>
+                      {row.vk.priceUpdatedAt && (
+                        <p className="text-[10px] text-gray-400 mt-0.5">
+                          Updated {formatRelativeDate(row.vk.priceUpdatedAt)}
+                        </p>
+                      )}
+                    </div>
+                    {(row.vk.gbUrl || row.vk.productUrl) && (
+                      <a
+                        href={(row.vk.gbUrl || row.vk.productUrl)!}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-1 px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 transition-colors whitespace-nowrap flex-shrink-0"
+                      >
+                        Buy →
+                      </a>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-right flex flex-col items-end gap-1">
+                    <span className="text-[11px] text-gray-400">Kit price on site</span>
+                    {(row.vk.gbUrl || row.vk.productUrl) && (
+                      <a
+                        href={(row.vk.gbUrl || row.vk.productUrl)!}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:border-indigo-300 hover:text-indigo-600 transition-colors whitespace-nowrap flex-shrink-0"
+                      >
+                        View on vendor site →
+                      </a>
+                    )}
+                  </div>
                 )}
               </>
             ) : (
               <div className="flex items-center gap-3 ml-auto">
                 <span className="text-xs text-gray-400 text-right">
-                  {!row.vk.inStock
-                    ? "Out of stock"
-                    : !row.shipsToRegion
-                      ? `Doesn't ship to ${userRegion}`
-                      : "Price not available"}
+                  {!row.vk.inStock ? "Not in stock yet" : `Doesn't ship to ${userRegion}`}
                 </span>
                 {(row.vk.gbUrl || row.vk.productUrl) && (
                   <a
@@ -188,6 +211,12 @@ export function VendorTable({
           </div>
         );
       })}
+
+      {/* DHL shipping disclaimer */}
+      <p className="text-xs text-gray-400 pt-2">
+        Shipping is an estimate via DHL Express (~1&nbsp;kg parcel) to {userRegion}. The
+        final shipping cost is set at checkout on the vendor&apos;s own site.
+      </p>
     </div>
   );
 }
