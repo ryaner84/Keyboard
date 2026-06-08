@@ -11,11 +11,14 @@ async function main() {
     `Imported ${importResult.sets} sets, ${importResult.vendors} vendors, ${importResult.vendorKits} vendor listings.`
   );
 
-  const limit = Number(process.env.PRICE_LIMIT ?? "200");
+  const limit = Number(process.env.PRICE_LIMIT ?? "5000");
   console.log(`Refreshing up to ${limit} vendor prices...`);
-  const priceResult = await refreshPrices({ limit, maxAgeHours: 0 });
+  // Local run: no serverless limit, so give it plenty of time to finish.
+  const priceResult = await refreshPrices({ limit, maxAgeHours: 0, maxRuntimeMs: 10 * 60_000 });
   console.log(
-    `Prices: attempted ${priceResult.attempted}, updated ${priceResult.updated}, failed ${priceResult.failed}.`
+    `Prices: attempted ${priceResult.attempted}, updated ${priceResult.updated}, failed ${priceResult.failed}` +
+      (priceResult.stoppedEarly ? " (stopped early — time budget hit)" : "") +
+      "."
   );
 
   console.log("Done.");

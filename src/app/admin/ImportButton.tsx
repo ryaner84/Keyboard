@@ -5,7 +5,7 @@ interface ImportResult {
   ok: boolean;
   error?: string;
   import?: { sets: number; vendors: number; vendorKits: number } | null;
-  prices?: { attempted: number; updated: number; failed: number };
+  prices?: { attempted: number; updated: number; failed: number; stoppedEarly?: boolean };
   ranAt?: string;
 }
 
@@ -84,6 +84,11 @@ export default function ImportButton() {
                   Prices: <strong>{result.prices.attempted}</strong> attempted ·{" "}
                   <strong>{result.prices.updated}</strong> updated ·{" "}
                   <strong>{result.prices.failed}</strong> failed
+                  {result.prices.stoppedEarly && (
+                    <span className="opacity-70">
+                      {" "}· time budget hit — the rest continues tonight
+                    </span>
+                  )}
                 </p>
               )}
               <p className="text-xs opacity-60">

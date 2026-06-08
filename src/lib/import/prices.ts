@@ -7,7 +7,20 @@ const BROWSER_HEADERS = {
   "Accept-Language": "en-US,en;q=0.9",
 };
 
-const FETCH_TIMEOUT_MS = 8000;
+// Per-request timeout. Most vendor stores behind Cloudflare reject datacenter
+// IPs with a fast 403, but a few hang — cap them so one slow host can't stall
+// the whole run.
+const FETCH_TIMEOUT_MS = 6000;
+
+// How many product URLs to fetch in parallel. Vendors are distinct hosts, so
+// this is safe; it keeps the run well inside the serverless time limit.
+const DEFAULT_CONCURRENCY = 8;
+
+// Hard wall-clock budget for a single refresh run. Vercel Hobby functions are
+// capped at 60s, so we stop starting new fetches at 50s and return what we have.
+// Oldest-checked rows are processed first, so the next daily run resumes where
+// this one left off — nothing is ever starved.
+const DEFAULT_MAX_RUNTIME_MS = 50_000;
 
 export interface PriceResult {
   price: number;
@@ -91,20 +104,66 @@ export async function fetchVendorPrice(productUrl: string): Promise<PriceResult 
 }
 
 export interface RefreshOptions {
-  limit?: number; // max VendorKits to process this run (time-boxing)
+  limit?: number; // max VendorKits to consider this run (DB query cap)
   maxAgeHours?: number; // only refresh entries older than this
+  concurrency?: number; // how many URLs to fetch in parallel
+  maxRuntimeMs?: number; // wall-clock budget; stop starting new fetches past this
 }
 
 export interface RefreshResult {
   attempted: number;
   updated: number;
   failed: number;
+  stoppedEarly: boolean; // true if the time budget was hit before finishing
+}
+
+// Refresh one VendorKit's cached price: fetch, then write the outcome.
+async function refreshOne(
+  vk: { id: string; productUrl: string | null },
+  result: RefreshResult
+): Promise<void> {
+  if (!vk.productUrl) return;
+  result.attempted++;
+  const priceData = await fetchVendorPrice(vk.productUrl);
+  if (priceData) {
+    await prisma.vendorKit.update({
+      where: { id: vk.id },
+      data: {
+        price: priceData.price,
+        currency: priceData.currency,
+        priceUpdatedAt: new Date(),
+        priceSource: "SCRAPED",
+      },
+    });
+    result.updated++;
+  } else {
+    // Record the attempt so we don't hammer the same blocked URL every run.
+    await prisma.vendorKit.update({
+      where: { id: vk.id },
+      data: { priceUpdatedAt: new Date() },
+    });
+    result.failed++;
+  }
 }
 
 // Refresh cached prices for VendorKits, oldest-checked first. Never touches
-// MANUAL prices. Time-boxed via `limit` to fit serverless execution limits.
+// MANUAL prices.
+//
+// Two safety limits keep this inside the serverless execution budget no matter
+// how many vendors hang:
+//   • `limit` caps how many rows we pull from the DB this run.
+//   • `maxRuntimeMs` is a wall-clock budget — once exceeded we stop starting new
+//     fetches and return. Because rows are processed oldest-first, the next
+//     daily run resumes with whatever wasn't reached.
+// Fetches run `concurrency`-at-a-time (vendors are distinct hosts), so a typical
+// run clears its batch in seconds even though most stores block datacenter IPs.
 export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshResult> {
-  const { limit = 40, maxAgeHours = 20 } = opts;
+  const {
+    limit = 200,
+    maxAgeHours = 20,
+    concurrency = DEFAULT_CONCURRENCY,
+    maxRuntimeMs = DEFAULT_MAX_RUNTIME_MS,
+  } = opts;
   const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
 
   const candidates = await prisma.vendorKit.findMany({
@@ -120,34 +179,30 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
     },
     orderBy: [{ priceUpdatedAt: { sort: "asc", nulls: "first" } }],
     take: limit,
+    select: { id: true, productUrl: true },
   });
 
-  const result: RefreshResult = { attempted: 0, updated: 0, failed: 0 };
+  const result: RefreshResult = { attempted: 0, updated: 0, failed: 0, stoppedEarly: false };
+  const start = Date.now();
+  let next = 0;
 
-  for (const vk of candidates) {
-    if (!vk.productUrl) continue;
-    result.attempted++;
-    const priceData = await fetchVendorPrice(vk.productUrl);
-    if (priceData) {
-      await prisma.vendorKit.update({
-        where: { id: vk.id },
-        data: {
-          price: priceData.price,
-          currency: priceData.currency,
-          priceUpdatedAt: new Date(),
-          priceSource: "SCRAPED",
-        },
-      });
-      result.updated++;
-    } else {
-      // Record the attempt so we don't hammer the same blocked URL every run.
-      await prisma.vendorKit.update({
-        where: { id: vk.id },
-        data: { priceUpdatedAt: new Date() },
-      });
-      result.failed++;
+  // Worker-pool: each lane pulls the next index until the list is drained or the
+  // time budget runs out. Index handout is synchronous (single-threaded JS), so
+  // no two workers ever grab the same row.
+  async function worker(): Promise<void> {
+    while (true) {
+      if (Date.now() - start > maxRuntimeMs) {
+        result.stoppedEarly = true;
+        return;
+      }
+      const i = next++;
+      if (i >= candidates.length) return;
+      await refreshOne(candidates[i], result);
     }
   }
+
+  const lanes = Math.max(1, Math.min(concurrency, candidates.length));
+  await Promise.all(Array.from({ length: lanes }, () => worker()));
 
   return result;
 }

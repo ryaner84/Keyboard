@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { importGmkSets } from "@/lib/import/keycaplendar";
 import { refreshPrices } from "@/lib/import/prices";
 
-// Allow up to 300s on Pro, falls back to 60s on Hobby — importing + scraping takes time.
-export const maxDuration = 300;
+// Vercel Hobby caps serverless functions at 60s. We stay safely under that and
+// let refreshPrices() time-box itself, so the run always returns gracefully.
+export const maxDuration = 60;
 export const dynamic = "force-dynamic";
+
+// Wall-clock ceiling for the whole request, with a small margin under maxDuration.
+const REQUEST_BUDGET_MS = 55_000;
 
 function isAuthorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -21,9 +25,17 @@ export async function GET(req: NextRequest) {
   const skipImport = req.nextUrl.searchParams.get("skipImport") === "true";
 
   try {
+    const start = Date.now();
     const importResult = skipImport ? null : await importGmkSets();
+
+    // Give the price scrape whatever time is left in the budget after the import,
+    // so import + scrape together never exceed the function limit.
+    const remaining = REQUEST_BUDGET_MS - (Date.now() - start);
     const limitParam = req.nextUrl.searchParams.get("limit");
-    const priceResult = await refreshPrices({ limit: limitParam ? Number(limitParam) : 200 });
+    const priceResult = await refreshPrices({
+      limit: limitParam ? Number(limitParam) : 1000,
+      maxRuntimeMs: Math.max(5_000, remaining),
+    });
 
     return NextResponse.json({
       ok: true,
