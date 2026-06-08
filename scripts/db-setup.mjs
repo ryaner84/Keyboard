@@ -46,7 +46,19 @@ async function main() {
     return;
   }
 
-  const client = new pg.Client({ connectionString, connectionTimeoutMillis: 15000 });
+  // Supabase requires SSL. Skip it for local Postgres (no SSL support).
+  const isLocal = /localhost|127\.0\.0\.1/.test(connectionString);
+  const ssl = isLocal ? undefined : { rejectUnauthorized: false };
+
+  // Log the host (never the password) so the build log is diagnostic.
+  try {
+    const host = new URL(connectionString).host;
+    console.log(`[db-setup] Connecting to ${host} (ssl: ${ssl ? "on" : "off"}) …`);
+  } catch {
+    /* ignore */
+  }
+
+  const client = new pg.Client({ connectionString, ssl, connectionTimeoutMillis: 15000 });
   try {
     await client.connect();
   } catch (err) {

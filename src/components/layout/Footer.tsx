@@ -1,3 +1,35 @@
+function VersionStamp() {
+  const sha = process.env.NEXT_PUBLIC_COMMIT_SHA || "";
+  const ref = process.env.NEXT_PUBLIC_COMMIT_REF || "";
+  const env = process.env.NEXT_PUBLIC_VERCEL_ENV || "local";
+  const buildTime = process.env.NEXT_PUBLIC_BUILD_TIME || "";
+
+  const short = sha ? sha.slice(0, 7) : "dev";
+  const built = buildTime ? new Date(buildTime).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "";
+  const label = `${env} · ${ref || "local"} @ ${short}${built ? " · built " + built : ""}`;
+
+  const inner = (
+    <span className="font-mono">{label}</span>
+  );
+
+  return (
+    <p className="text-[11px] text-gray-300 dark:text-gray-600 text-center mt-6">
+      {sha ? (
+        <a
+          href={`https://github.com/ryaner84/Keyboard/commit/${sha}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-gray-500 transition-colors"
+        >
+          {inner}
+        </a>
+      ) : (
+        inner
+      )}
+    </p>
+  );
+}
+
 export function Footer() {
   return (
     <footer className="border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 mt-16">
@@ -17,6 +49,7 @@ export function Footer() {
             <a href="/tracker" className="hover:text-gray-600 transition-colors">Tracker</a>
           </div>
         </div>
+        <VersionStamp />
       </div>
     </footer>
   );
