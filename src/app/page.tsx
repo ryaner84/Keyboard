@@ -11,6 +11,10 @@ export const metadata: Metadata = {
     "Find GMK keycap group buys and new releases. Compare prices from vendors worldwide in your local currency, including shipping.",
 };
 
+// Render at request time so featured sets / stats are always fresh and the
+// build never depends on a live database connection.
+export const dynamic = "force-dynamic";
+
 async function getFeaturedSets() {
   try {
     return await prisma.groupBuy.findMany({
