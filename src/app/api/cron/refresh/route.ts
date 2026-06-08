@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { importGmkSets } from "@/lib/import/keycaplendar";
 import { refreshPrices } from "@/lib/import/prices";
 
-// Allow up to 60s — importing + scraping takes time.
-export const maxDuration = 60;
+// Allow up to 300s on Pro, falls back to 60s on Hobby — importing + scraping takes time.
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 function isAuthorized(req: NextRequest): boolean {
@@ -22,7 +22,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const importResult = skipImport ? null : await importGmkSets();
-    const priceResult = await refreshPrices({ limit: 40 });
+    const limitParam = req.nextUrl.searchParams.get("limit");
+    const priceResult = await refreshPrices({ limit: limitParam ? Number(limitParam) : 200 });
 
     return NextResponse.json({
       ok: true,

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import ImportButton from "./ImportButton";
 
 async function getStats() {
   const [groupBuys, vendors, vendorKits] = await Promise.all([
@@ -32,6 +33,10 @@ export default async function AdminDashboard() {
             <p className="text-sm text-gray-500 mt-1">{s.label}</p>
           </Link>
         ))}
+      </div>
+
+      <div className="mb-4">
+        <ImportButton />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
