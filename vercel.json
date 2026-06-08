@@ -6,6 +6,10 @@
     {
       "path": "/api/currencies?force=true",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/refresh",
+      "schedule": "0 16 * * *"
     }
   ]
 }

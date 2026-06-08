@@ -85,3 +85,29 @@ export const REGION_LABELS: Record<string, string> = {
 };
 
 export const DEFAULT_COUNTRY = COUNTRY_BY_CODE["SG"];
+
+// Currencies the user can pick for display (independent of shipping location).
+export interface DisplayCurrency {
+  code: string;
+  symbol: string;
+  name: string;
+}
+
+export const DISPLAY_CURRENCIES: DisplayCurrency[] = [
+  { code: "SGD", symbol: "S$", name: "Singapore Dollar" },
+  { code: "USD", symbol: "$", name: "US Dollar" },
+  { code: "EUR", symbol: "€", name: "Euro" },
+  { code: "GBP", symbol: "£", name: "British Pound" },
+  { code: "CAD", symbol: "CA$", name: "Canadian Dollar" },
+  { code: "AUD", symbol: "A$", name: "Australian Dollar" },
+  { code: "JPY", symbol: "¥", name: "Japanese Yen" },
+  { code: "CNY", symbol: "¥", name: "Chinese Yuan" },
+  { code: "KRW", symbol: "₩", name: "Korean Won" },
+  { code: "MYR", symbol: "RM", name: "Malaysian Ringgit" },
+  { code: "HKD", symbol: "HK$", name: "Hong Kong Dollar" },
+  { code: "NZD", symbol: "NZ$", name: "New Zealand Dollar" },
+];
+
+export const CURRENCY_BY_CODE: Record<string, DisplayCurrency> = Object.fromEntries(
+  DISPLAY_CURRENCIES.map((c) => [c.code, c])
+);

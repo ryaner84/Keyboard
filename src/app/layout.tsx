@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { LocationProvider } from "@/context/LocationContext";
+import { ThemeProvider } from "@/context/ThemeContext";
 import { LocationSelector } from "@/components/home/LocationSelector";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
+import { ShippingLocationTab } from "@/components/layout/ShippingLocationTab";
 
 export const metadata: Metadata = {
   title: {
@@ -24,14 +26,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className="bg-gray-50 min-h-screen flex flex-col">
-        <LocationProvider>
-          <LocationSelector />
-          <Header />
-          <main className="flex-1">{children}</main>
-          <Footer />
-        </LocationProvider>
+    <html lang="en" suppressHydrationWarning>
+      <body className="bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 min-h-screen flex flex-col">
+        <ThemeProvider>
+          <LocationProvider>
+            <LocationSelector />
+            <Header />
+            <ShippingLocationTab />
+            <main className="flex-1">{children}</main>
+            <Footer />
+          </LocationProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

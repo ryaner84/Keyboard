@@ -4,18 +4,20 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { SetCard } from "@/components/browse/SetCard";
 import { BrowseFilters } from "@/components/browse/BrowseFilters";
-import type { GroupBuyWithKits, GBStatus } from "@/types";
+import type { GroupBuyWithPricing, GBStatus } from "@/types";
 
 export default function BrowseContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const [sets, setSets] = useState<GroupBuyWithKits[]>([]);
+  const [sets, setSets] = useState<GroupBuyWithPricing[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const search = searchParams.get("search") ?? "";
   const sortBy = searchParams.get("sort") ?? "date-desc";
+  const finishing = searchParams.get("finishing") ?? "";
+  const newDays = searchParams.get("new") ?? "";
   const rawStatuses = searchParams.getAll("status") as GBStatus[];
   const statuses: GBStatus[] = useMemo(
     () => (rawStatuses.length > 0 ? rawStatuses : []),
@@ -28,6 +30,9 @@ export default function BrowseContent() {
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (sortBy) params.set("sort", sortBy);
+    if (finishing) params.set("finishing", finishing);
+    if (newDays) params.set("new", newDays);
+    params.set("limit", "60");
     statuses.forEach((s) => params.append("status", s));
 
     try {
@@ -40,7 +45,7 @@ export default function BrowseContent() {
     } finally {
       setLoading(false);
     }
-  }, [search, sortBy, statuses]);
+  }, [search, sortBy, statuses, finishing, newDays]);
 
   useEffect(() => {
     fetchSets();
@@ -69,11 +74,25 @@ export default function BrowseContent() {
     updateParams({ status: next });
   };
 
+  // Finishing-soon and new-arrivals are mutually exclusive quick filters.
+  const handleFinishingToggle = () => {
+    updateParams({ finishing: finishing ? "" : "7", new: "" });
+  };
+  const handleNewToggle = () => {
+    updateParams({ new: newDays ? "" : "14", finishing: "" });
+  };
+
+  const title = finishing
+    ? "Finishing Soon"
+    : newDays
+      ? "New Group Buys"
+      : "Browse Sets";
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Browse Sets</h1>
-        <p className="text-sm text-gray-500 mt-1">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{title}</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
           {loading ? "Loading..." : `${total} set${total !== 1 ? "s" : ""} found`}
         </p>
       </div>
@@ -84,9 +103,13 @@ export default function BrowseContent() {
             search={search}
             statuses={statuses}
             sortBy={sortBy}
+            finishingSoon={!!finishing}
+            newArrivals={!!newDays}
             onSearchChange={(v) => updateParams({ search: v })}
             onStatusToggle={handleStatusToggle}
             onSortChange={(v) => updateParams({ sort: v })}
+            onFinishingToggle={handleFinishingToggle}
+            onNewToggle={handleNewToggle}
           />
         </aside>
 

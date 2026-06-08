@@ -62,12 +62,49 @@ export interface ShippingZoneSummary {
 
 export interface VendorKitWithDetails {
   id: string;
-  price: number;
-  currency: string;
+  price: number | null;
+  currency: string | null;
   inStock: boolean;
   gbUrl: string | null;
+  productUrl?: string | null;
+  priceUpdatedAt?: Date | string | null;
+  priceSource?: string | null;
   notes: string | null;
   vendor: VendorWithZones;
+}
+
+// Lightweight vendor pricing attached to a kit for catalog card previews.
+export interface VendorKitPreview {
+  id: string;
+  price: number | null;
+  currency: string | null;
+  inStock: boolean;
+  gbUrl: string | null;
+  productUrl: string | null;
+  priceUpdatedAt: Date | string | null;
+  vendor: {
+    name: string;
+    region: Region;
+    country: string;
+    shippingZones: ShippingZoneSummary[];
+  };
+}
+
+export interface KitWithVendors extends KitSummary {
+  vendorKits: VendorKitPreview[];
+}
+
+// GroupBuy whose kits carry vendor pricing — used by catalog cards.
+export interface GroupBuyWithPricing extends Omit<GroupBuyWithKits, "kits"> {
+  kits: KitWithVendors[];
+}
+
+// A single computed vendor price for the user's region/currency.
+export interface ComputedVendorPrice {
+  vendorName: string;
+  totalLocal: number;
+  priceUpdatedAt: Date | string | null;
+  gbUrl: string | null;
 }
 
 export interface BrowseFilters {

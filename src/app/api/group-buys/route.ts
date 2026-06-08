@@ -11,9 +11,22 @@ export async function GET(req: NextRequest) {
   const sortBy = searchParams.get("sort") ?? "date-desc";
   const page = parseInt(searchParams.get("page") ?? "1");
   const limit = parseInt(searchParams.get("limit") ?? "20");
+  const finishing = searchParams.get("finishing"); // days until gbEnd
+  const newDays = searchParams.get("new"); // days since gbStart
+
+  const now = new Date();
+  let dateFilter: Record<string, unknown> = {};
+  if (finishing) {
+    const end = new Date(now.getTime() + Number(finishing) * 24 * 60 * 60 * 1000);
+    dateFilter = { status: "ACTIVE_GB", gbEnd: { gte: now, lte: end } };
+  } else if (newDays) {
+    const start = new Date(now.getTime() - Number(newDays) * 24 * 60 * 60 * 1000);
+    dateFilter = { status: "ACTIVE_GB", gbStart: { gte: start, lte: now } };
+  }
 
   const where = {
     ...(statuses.length > 0 && { status: { in: statuses } }),
+    ...dateFilter,
     ...(search && {
       OR: [
         { name: { contains: search, mode: "insensitive" as const } },
@@ -37,7 +50,15 @@ export async function GET(req: NextRequest) {
       orderBy,
       skip: (page - 1) * limit,
       take: limit,
-      include: { kits: { select: { id: true, name: true, type: true } } },
+      include: {
+        kits: {
+          include: {
+            vendorKits: {
+              include: { vendor: { include: { shippingZones: true } } },
+            },
+          },
+        },
+      },
     }),
   ]);
 

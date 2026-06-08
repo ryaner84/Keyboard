@@ -78,17 +78,20 @@ model Vendor {
 }
 
 model VendorKit {
-  id        String   @id @default(cuid())
-  kitId     String
-  kit       Kit      @relation(fields: [kitId], references: [id], onDelete: Cascade)
-  vendorId  String
-  vendor    Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  price     Float
-  currency  String
-  inStock   Boolean  @default(true)
-  gbUrl     String?
-  notes     String?
-  updatedAt DateTime @updatedAt
+  id             String    @id @default(cuid())
+  kitId          String
+  kit            Kit       @relation(fields: [kitId], references: [id], onDelete: Cascade)
+  vendorId       String
+  vendor         Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  price          Float?
+  currency       String?
+  inStock        Boolean   @default(true)
+  gbUrl          String?
+  productUrl     String?
+  priceUpdatedAt DateTime?
+  priceSource    String? // "LIVE" | "SCRAPED" | "MANUAL"
+  notes          String?
+  updatedAt      DateTime  @updatedAt
 
   @@unique([kitId, vendorId])
 }

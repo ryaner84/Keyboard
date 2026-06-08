@@ -1,4 +1,6 @@
-import "server-only";
+// NOTE: This module must only be imported from server code (server components,
+// route handlers, import scripts). Client components import from
+// "@/lib/currency-utils" instead, never from here.
 import { PrismaClient } from "@/generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
 

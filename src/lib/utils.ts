@@ -27,6 +27,55 @@ export function formatDateRange(
   return `${formatDate(start)} – ${formatDate(end)}`;
 }
 
+// Short relative date for "Updated …" labels, e.g. "today", "3 Jun".
+export function formatRelativeDate(date: Date | string | null): string {
+  if (!date) return "never";
+  const d = new Date(date);
+  const diffMs = Date.now() - d.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays <= 0) return "today";
+  if (diffDays === 1) return "yesterday";
+  if (diffDays < 7) return `${diffDays} days ago`;
+  return d.toLocaleDateString("en-SG", { day: "numeric", month: "short" });
+}
+
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+function daysUntil(target: Date): number {
+  const today = new Date();
+  const t = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), target.getUTCDate()));
+  const n = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  return Math.round((t.getTime() - n.getTime()) / MS_PER_DAY);
+}
+
+// Countdown label shown on carousel art / cards.
+// Active GBs count down to gbEnd; upcoming ones count up to gbStart.
+export function getCountdownLabel(
+  status: GBStatus,
+  gbStart: Date | string | null,
+  gbEnd: Date | string | null
+): string | null {
+  if (status === "ACTIVE_GB" && gbEnd) {
+    const days = daysUntil(new Date(gbEnd));
+    if (days < 0) return "Ending soon";
+    if (days === 0) return "Ends today";
+    if (days === 1) return "Last day";
+    return `Remaining ${days} days`;
+  }
+  if (status === "INTEREST_CHECK") {
+    if (gbStart) {
+      const days = daysUntil(new Date(gbStart));
+      if (days === 0) return "Starting today";
+      if (days === 1) return "Starting tomorrow";
+      if (days > 1) return `Starting in ${days} days`;
+    }
+    return "Interest Check";
+  }
+  if (status === "SHIPPING") return "Shipping now";
+  if (status === "IN_STOCK") return "In stock";
+  return null;
+}
+
 export const STATUS_LABELS: Record<GBStatus, string> = {
   INTEREST_CHECK: "Interest Check",
   ACTIVE_GB: "Active GB",

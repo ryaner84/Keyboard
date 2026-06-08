@@ -1,13 +1,13 @@
 export function Footer() {
   return (
-    <footer className="border-t border-gray-100 bg-white mt-16">
+    <footer className="border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 mt-16">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center">
               <span className="text-white text-xs">⌨</span>
             </div>
-            <span className="font-bold text-gray-900">GMK Tracker</span>
+            <span className="font-bold text-gray-900 dark:text-white">GMK Tracker</span>
           </div>
           <p className="text-sm text-gray-400 text-center">
             Community price tracker for GMK keycap group buys. Not affiliated with GMK or any vendor.

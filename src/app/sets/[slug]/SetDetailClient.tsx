@@ -61,14 +61,14 @@ export function SetDetailClient({ groupBuy, pageUrl }: Props) {
     if (!rates || Object.keys(rates).length === 0) return null;
     const available = vendorKitsForRegion.filter((vk) => {
       const zone = vk.vendor.shippingZones[0];
-      return vk.inStock && zone?.shipsToRegion;
+      return vk.inStock && zone?.shipsToRegion && vk.price != null && vk.currency != null;
     });
     if (available.length === 0) return null;
 
     let min = Infinity;
     for (const vk of available) {
       const zone = vk.vendor.shippingZones[0];
-      const kit = convertCurrency(vk.price, vk.currency, currency, rates);
+      const kit = convertCurrency(vk.price as number, vk.currency as string, currency, rates);
       const ship = zone ? convertCurrency(zone.baseShippingCost, zone.currency, currency, rates) : 0;
       const total = kit + ship;
       if (total < min) min = total;

@@ -1,8 +1,9 @@
 import Link from "next/link";
-import Image from "next/image";
 import { prisma } from "@/lib/prisma";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { formatDateRange } from "@/lib/utils";
+import { UpcomingCarousel } from "@/components/home/UpcomingCarousel";
+import { SetCard } from "@/components/browse/SetCard";
+import { LocationReminder } from "@/components/home/LocationReminder";
+import type { GroupBuyWithKits, GroupBuyWithPricing } from "@/types";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -15,14 +16,68 @@ export const metadata: Metadata = {
 // build never depends on a live database connection.
 export const dynamic = "force-dynamic";
 
-async function getFeaturedSets() {
+// Include base-kit vendor pricing so catalog cards can show cheapest vendors.
+const PRICING_INCLUDE = {
+  kits: {
+    include: {
+      vendorKits: {
+        include: { vendor: { include: { shippingZones: true } } },
+      },
+    },
+  },
+} as const;
+
+async function getFeaturedSets(): Promise<GroupBuyWithPricing[]> {
   try {
-    return await prisma.groupBuy.findMany({
+    return (await prisma.groupBuy.findMany({
       where: { featured: true },
-      include: { kits: { select: { id: true, name: true, type: true } } },
+      include: PRICING_INCLUDE,
       orderBy: { createdAt: "desc" },
       take: 6,
-    });
+    })) as unknown as GroupBuyWithPricing[];
+  } catch {
+    return [];
+  }
+}
+
+async function getFinishingSoon(): Promise<GroupBuyWithPricing[]> {
+  try {
+    const now = new Date();
+    const in7 = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    return (await prisma.groupBuy.findMany({
+      where: { status: "ACTIVE_GB", gbEnd: { gte: now, lte: in7 } },
+      include: PRICING_INCLUDE,
+      orderBy: { gbEnd: "asc" },
+      take: 5,
+    })) as unknown as GroupBuyWithPricing[];
+  } catch {
+    return [];
+  }
+}
+
+async function getNewGroupBuys(): Promise<GroupBuyWithPricing[]> {
+  try {
+    const now = new Date();
+    const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+    return (await prisma.groupBuy.findMany({
+      where: { status: "ACTIVE_GB", gbStart: { gte: twoWeeksAgo, lte: now } },
+      include: PRICING_INCLUDE,
+      orderBy: { gbStart: "desc" },
+      take: 5,
+    })) as unknown as GroupBuyWithPricing[];
+  } catch {
+    return [];
+  }
+}
+
+async function getUpcomingSets(): Promise<GroupBuyWithKits[]> {
+  try {
+    return (await prisma.groupBuy.findMany({
+      where: { status: { in: ["ACTIVE_GB", "INTEREST_CHECK"] } },
+      include: { kits: { select: { id: true, name: true, type: true } } },
+      orderBy: [{ featured: "desc" }, { status: "asc" }, { gbEnd: "asc" }],
+      take: 5,
+    })) as GroupBuyWithKits[];
   } catch {
     return [];
   }
@@ -42,27 +97,43 @@ async function getStats() {
 }
 
 export default async function HomePage() {
-  const [featured, stats] = await Promise.all([getFeaturedSets(), getStats()]);
+  const [featured, stats, upcoming, finishingSoon, newGBs] = await Promise.all([
+    getFeaturedSets(),
+    getStats(),
+    getUpcomingSets(),
+    getFinishingSoon(),
+    getNewGroupBuys(),
+  ]);
 
   return (
     <div>
+      {/* Upcoming GB carousel */}
+      {upcoming.length > 0 && <UpcomingCarousel sets={upcoming} />}
+
       {/* Hero */}
-      <section className="bg-white border-b border-gray-100">
+      <section className="bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24">
           <div className="text-center max-w-3xl mx-auto">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-indigo-50 text-indigo-700 rounded-full text-sm font-medium mb-6">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 rounded-full text-sm font-medium mb-6">
               <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" />
               {stats.activeGBs} Active Group Buys
             </div>
-            <h1 className="text-4xl sm:text-5xl font-extrabold text-gray-900 tracking-tight mb-4">
-              Find the best price for{" "}
-              <span className="text-indigo-600">GMK keycaps</span>{" "}
-              near you
+            <h1 className="text-4xl sm:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-4">
+              Find the cheapest{" "}
+              <span className="text-indigo-600 dark:text-indigo-400">GMK keycaps</span>{" "}
+              shipped to you
             </h1>
-            <p className="text-lg text-gray-500 mb-8">
-              Compare prices from all regional vendors in your local currency — kit cost,
-              shipping included. Like Skyscanner, but for keyboards.
+            <p className="text-lg text-gray-500 dark:text-gray-400 mb-6">
+              We compare every regional vendor and show you the lowest total price —
+              kit cost <strong>plus shipping to your country</strong>, in your currency.
+              Like Skyscanner, but for keycaps.
             </p>
+
+            {/* Shipping-location reminder / confirmation */}
+            <div className="mb-8 flex justify-center">
+              <LocationReminder />
+            </div>
+
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Link
                 href="/browse"
@@ -72,7 +143,7 @@ export default async function HomePage() {
               </Link>
               <Link
                 href="/browse?status=IN_STOCK"
-                className="px-6 py-3 bg-white text-gray-700 rounded-xl font-semibold border border-gray-200 hover:border-indigo-300 hover:text-indigo-600 transition-colors"
+                className="px-6 py-3 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 rounded-xl font-semibold border border-gray-200 dark:border-gray-700 hover:border-indigo-300 hover:text-indigo-600 transition-colors"
               >
                 In-Stock Now →
               </Link>
@@ -87,72 +158,75 @@ export default async function HomePage() {
               { label: "Sets Tracked", value: stats.totalSets },
             ].map((s) => (
               <div key={s.label} className="text-center">
-                <p className="text-3xl font-bold text-gray-900">{s.value}</p>
-                <p className="text-sm text-gray-500">{s.label}</p>
+                <p className="text-3xl font-bold text-gray-900 dark:text-white">{s.value}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">{s.label}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
+      {/* Finishing Soon */}
+      {finishingSoon.length > 0 && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <span className="text-red-500">⏳</span> Finishing Soon
+            </h2>
+            <Link href="/browse?finishing=7" className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700 font-medium">
+              View all →
+            </Link>
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">Group buys ending within the next 7 days — last chance to order.</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+            {finishingSoon.map((set) => (
+              <SetCard key={set.id} set={set} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* New Group Buys */}
+      {newGBs.length > 0 && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <span className="text-green-500">✨</span> New Group Buys
+            </h2>
+            <Link href="/browse?new=14" className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700 font-medium">
+              View all →
+            </Link>
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">Just launched in the last 2 weeks.</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+            {newGBs.map((set) => (
+              <SetCard key={set.id} set={set} />
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Featured sets */}
       {featured.length > 0 && (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-gray-900">Featured Sets</h2>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Featured Sets</h2>
             <Link href="/browse" className="text-sm text-indigo-600 hover:text-indigo-700 font-medium">
               View all →
             </Link>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {featured.map((set) => (
-              <Link
-                key={set.id}
-                href={`/sets/${set.slug}`}
-                className="group bg-white rounded-2xl border border-gray-100 overflow-hidden hover:border-indigo-200 hover:shadow-md transition-all duration-200"
-              >
-                <div className="relative aspect-video bg-gray-50 overflow-hidden">
-                  {set.imageUrl ? (
-                    <Image
-                      src={set.imageUrl}
-                      alt={set.name}
-                      fill
-                      className="object-cover group-hover:scale-105 transition-transform duration-300"
-                      unoptimized
-                    />
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-50 to-purple-50">
-                      <span className="text-5xl opacity-30">⌨</span>
-                    </div>
-                  )}
-                  <div className="absolute top-3 left-3">
-                    <StatusBadge status={set.status} size="sm" />
-                  </div>
-                </div>
-                <div className="p-4">
-                  <h3 className="font-semibold text-gray-900 group-hover:text-indigo-600 transition-colors">
-                    {set.name}
-                  </h3>
-                  {set.subtitle && (
-                    <p className="text-xs text-gray-500 mt-0.5 truncate">{set.subtitle}</p>
-                  )}
-                  <div className="mt-2 flex items-center justify-between">
-                    <span className="text-xs text-gray-400">by {set.designer}</span>
-                    <span className="text-xs text-gray-400">
-                      {formatDateRange(set.gbStart, set.gbEnd)}
-                    </span>
-                  </div>
-                </div>
-              </Link>
+              <SetCard key={set.id} set={set} />
             ))}
           </div>
         </section>
       )}
 
       {/* How it works */}
-      <section className="bg-white border-t border-gray-100 py-12">
+      <section className="bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 py-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h2 className="text-xl font-bold text-gray-900 mb-8 text-center">How it works</h2>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-8 text-center">How it works</h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
             {[
               {
@@ -173,8 +247,8 @@ export default async function HomePage() {
             ].map((step) => (
               <div key={step.title} className="text-center px-4">
                 <div className="text-4xl mb-3">{step.icon}</div>
-                <h3 className="font-semibold text-gray-900 mb-1">{step.title}</h3>
-                <p className="text-sm text-gray-500">{step.desc}</p>
+                <h3 className="font-semibold text-gray-900 dark:text-white mb-1">{step.title}</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">{step.desc}</p>
               </div>
             ))}
           </div>
