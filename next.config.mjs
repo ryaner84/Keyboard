@@ -9,11 +9,18 @@ const nextConfig = {
     NEXT_PUBLIC_BUILD_TIME: new Date().toISOString(),
   },
   images: {
+    // Hotlink images directly from their source (KeycapLendar / vendor CDNs)
+    // instead of downloading, optimizing, and caching them through Vercel.
+    // This avoids Vercel's image-optimization quota and stores nothing — the
+    // <Image> tags render a plain <img> pointing at the remote URL.
+    unoptimized: true,
     remotePatterns: [
       { protocol: "https", hostname: "images.unsplash.com" },
       { protocol: "https", hostname: "*.supabase.co" },
       { protocol: "https", hostname: "*.cloudinary.com" },
       { protocol: "https", hostname: "cdn.shopify.com" },
+      // KeycapLendar set renders are served from Firebase storage.
+      { protocol: "https", hostname: "firebasestorage.googleapis.com" },
     ],
   },
   webpack: (config, { isServer }) => {

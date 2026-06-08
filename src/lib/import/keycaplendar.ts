@@ -71,6 +71,14 @@ function originOf(url?: string): string {
   }
 }
 
+// KeycapLendar's `image` field points at the original upload under `keysets/`,
+// but those are deleted after the resize extension runs — only the `thumbs/`
+// copy survives (same token). Rewrite the path so the image actually loads.
+function fixImageUrl(url?: string): string | null {
+  if (!url) return null;
+  return url.replace("keysets%2F", "thumbs%2F").replace("/keysets/", "/thumbs/");
+}
+
 // Fetch all keyset documents, paginating through nextPageToken.
 export async function fetchAllKeysets(): Promise<Keyset[]> {
   const keysets: Keyset[] = [];
@@ -127,7 +135,7 @@ export async function importGmkSets(): Promise<ImportResult> {
         status,
         gbStart: parseDate(ks.gbLaunch),
         gbEnd: parseDate(ks.gbEnd),
-        imageUrl: ks.image ?? null,
+        imageUrl: fixImageUrl(ks.image),
         description: ks.notes ?? null,
       },
       create: {
@@ -138,7 +146,7 @@ export async function importGmkSets(): Promise<ImportResult> {
         status,
         gbStart: parseDate(ks.gbLaunch),
         gbEnd: parseDate(ks.gbEnd),
-        imageUrl: ks.image ?? null,
+        imageUrl: fixImageUrl(ks.image),
         description: ks.notes ?? null,
         featured: status === "ACTIVE_GB",
       },

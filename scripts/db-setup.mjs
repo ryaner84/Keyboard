@@ -77,6 +77,18 @@ async function main() {
     if (exists.rows[0].present) {
       const { rows } = await client.query('SELECT count(*)::int AS n FROM public."GroupBuy"');
       alreadyPopulated = rows[0].n > 0;
+
+      // Auto-repair: older data stored image URLs under the deleted `keysets/`
+      // path. The live image lives under `thumbs/`. Fix any stragglers each
+      // deploy (idempotent — only touches rows that still have the old path).
+      const fix = await client.query(
+        `UPDATE public."GroupBuy"
+         SET "imageUrl" = replace("imageUrl", 'keysets%2F', 'thumbs%2F')
+         WHERE "imageUrl" LIKE '%keysets%2F%'`
+      );
+      if (fix.rowCount > 0) {
+        console.log(`[db-setup] Repaired ${fix.rowCount} image URLs (keysets/ -> thumbs/).`);
+      }
     }
 
     if (alreadyPopulated) {
