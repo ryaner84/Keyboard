@@ -1,0 +1,15 @@
+[
+  { "name": "iLumkb", "slug": "ilumkb", "region": "SG", "country": "SG", "currency": "SGD", "websiteUrl": "https://ilumkb.com", "logoUrl": null },
+  { "name": "Ashkeebs", "slug": "ashkeebs", "region": "SG", "country": "SG", "currency": "SGD", "websiteUrl": "https://ashkeebs.com", "logoUrl": null },
+  { "name": "CannonKeys", "slug": "cannonkeys", "region": "US", "country": "US", "currency": "USD", "websiteUrl": "https://cannonkeys.com", "logoUrl": null },
+  { "name": "NovelKeys", "slug": "novelkeys", "region": "US", "country": "US", "currency": "USD", "websiteUrl": "https://novelkeys.com", "logoUrl": null },
+  { "name": "TheKey.Company", "slug": "thekeyco", "region": "US", "country": "US", "currency": "USD", "websiteUrl": "https://thekey.company", "logoUrl": null },
+  { "name": "ProtoTypist", "slug": "prototypist", "region": "CA", "country": "CA", "currency": "CAD", "websiteUrl": "https://prototypist.net", "logoUrl": null },
+  { "name": "MyKeyboard.eu", "slug": "mykeyboard-eu", "region": "EU", "country": "BE", "currency": "EUR", "websiteUrl": "https://mykeyboard.eu", "logoUrl": null },
+  { "name": "Keygem", "slug": "keygem", "region": "EU", "country": "DE", "currency": "EUR", "websiteUrl": "https://keygem.com", "logoUrl": null },
+  { "name": "Vendor Keys UK", "slug": "vendor-keys-uk", "region": "UK", "country": "GB", "currency": "GBP", "websiteUrl": "https://vendorkeys.com", "logoUrl": null },
+  { "name": "Vala Supply", "slug": "vala-supply", "region": "AU", "country": "AU", "currency": "AUD", "websiteUrl": "https://vala.supply", "logoUrl": null },
+  { "name": "Daily Clack", "slug": "daily-clack", "region": "AU", "country": "AU", "currency": "AUD", "websiteUrl": "https://dailyclack.com", "logoUrl": null },
+  { "name": "zFrontier", "slug": "zfrontier", "region": "ASIA", "country": "CN", "currency": "USD", "websiteUrl": "https://en.zfrontier.com", "logoUrl": null },
+  { "name": "KBDfans", "slug": "kbdfans", "region": "ASIA", "country": "CN", "currency": "USD", "websiteUrl": "https://kbdfans.com", "logoUrl": null }
+]

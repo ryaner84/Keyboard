@@ -1,0 +1,94 @@
+import type { GBStatus, KitType, Region } from "@/generated/prisma";
+
+export type { GBStatus, KitType, Region };
+
+export interface Country {
+  code: string;
+  name: string;
+  region: Region;
+  currency: string;
+  flag: string;
+}
+
+export interface LocationState {
+  countryCode: string;
+  region: Region;
+  currency: string;
+  country: Country | null;
+}
+
+export interface GroupBuyWithKits {
+  id: string;
+  slug: string;
+  name: string;
+  subtitle: string | null;
+  colorway: string | null;
+  designer: string;
+  status: GBStatus;
+  gbStart: Date | null;
+  gbEnd: Date | null;
+  imageUrl: string | null;
+  description: string | null;
+  featured: boolean;
+  kits: KitSummary[];
+}
+
+export interface KitSummary {
+  id: string;
+  name: string;
+  type: KitType;
+}
+
+export interface VendorWithZones {
+  id: string;
+  name: string;
+  slug: string;
+  region: Region;
+  country: string;
+  currency: string;
+  websiteUrl: string;
+  logoUrl: string | null;
+  shippingZones: ShippingZoneSummary[];
+}
+
+export interface ShippingZoneSummary {
+  destinationRegion: Region;
+  baseShippingCost: number;
+  currency: string;
+  estimatedDaysMin: number;
+  estimatedDaysMax: number;
+  shipsToRegion: boolean;
+}
+
+export interface VendorKitWithDetails {
+  id: string;
+  price: number;
+  currency: string;
+  inStock: boolean;
+  gbUrl: string | null;
+  notes: string | null;
+  vendor: VendorWithZones;
+}
+
+export interface BrowseFilters {
+  statuses: GBStatus[];
+  search: string;
+  sortBy: "date-desc" | "date-asc" | "name" | "price-asc" | "price-desc";
+  regionFilter: Region | "ALL";
+}
+
+export interface ExchangeRates {
+  [code: string]: number;
+}
+
+export interface PriceResult {
+  kitPriceUSD: number;
+  shippingUSD: number | null;
+  totalUSD: number;
+  kitPriceLocal: number;
+  shippingLocal: number | null;
+  totalLocal: number;
+  shipsToRegion: boolean;
+  estimatedDaysMin: number | null;
+  estimatedDaysMax: number | null;
+}
