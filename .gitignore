@@ -37,3 +37,10 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+
+# scraper (Windows WorkSpace) — secrets & local artifacts, never commit
+/scraper/credentials.csv
+/scraper/.scraper-profile/
+/scraper/logs/
+/scraper/.venv/
+/scraper/__pycache__/
