@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { verifyAdminToken } from "@/lib/auth";
 import { importGmkSets } from "@/lib/import/keycaplendar";
 import { refreshPrices } from "@/lib/import/prices";
+import { enrichImagesFromGmk } from "@/lib/import/enrich-images";
 
 // Vercel Hobby caps serverless functions at 60s. The price scrape is time-boxed
 // against the remaining budget below so the request always returns gracefully.
@@ -35,13 +36,19 @@ export async function POST(req: NextRequest) {
     const priceResult = await refreshPrices({
       limit: priceLimit ?? 200,
       maxAgeHours: 0,
-      maxRuntimeMs: Math.max(5_000, remaining),
+      maxRuntimeMs: Math.max(5_000, remaining * 0.7),
+    });
+
+    const imgBudget = REQUEST_BUDGET_MS - (Date.now() - start);
+    const imageResult = await enrichImagesFromGmk({
+      maxRuntimeMs: Math.max(3_000, imgBudget),
     });
 
     return NextResponse.json({
       ok: true,
       import: importResult,
       prices: priceResult,
+      images: imageResult,
       ranAt: new Date().toISOString(),
     });
   } catch (err) {
