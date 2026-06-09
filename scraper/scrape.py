@@ -25,6 +25,7 @@ import getpass
 import os
 import re
 import sys
+import time
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -148,10 +149,17 @@ def load_config() -> dict:
     return {"ref": ref, "region": region, "host": host}
 
 
+# Use the TRANSACTION pooler (port 6543), not the session pooler (5432). The
+# session pooler caps at 15 clients and a force-closed run leaks its slot until
+# it times out; the transaction pooler only holds a server slot during each
+# query/commit, so a long mostly-idle scrape never saturates it.
+POOLER_PORT = 6543
+
+
 def build_conn_string(cfg: dict, password: str) -> str:
     pw = urllib.parse.quote(password, safe="")
     return (
-        f"postgresql://postgres.{cfg['ref']}:{pw}@{cfg['host']}:5432/postgres"
+        f"postgresql://postgres.{cfg['ref']}:{pw}@{cfg['host']}:{POOLER_PORT}/postgres"
         f"?sslmode=require"
     )
 
@@ -159,6 +167,10 @@ def build_conn_string(cfg: dict, password: str) -> str:
 def try_connect(conn_string: str):
     """Return a live connection or raise OperationalError on bad auth/unreachable."""
     conn = psycopg2.connect(conn_string, connect_timeout=15)
+    # autocommit: every statement is its own transaction, so the transaction
+    # pooler returns the server connection to the pool immediately and we never
+    # sit idle-in-transaction between slow browser steps.
+    conn.autocommit = True
     with conn.cursor() as cur:
         cur.execute("SELECT 1")
         cur.fetchone()
@@ -186,6 +198,32 @@ def save_password(password: str) -> None:
     log(f"Saved working password to {CREDENTIALS_PATH.name} (gitignored).")
 
 
+def _is_max_clients(err: Exception) -> bool:
+    s = str(err).lower()
+    return "max clients reached" in s or "emaxconnsession" in s
+
+
+def connect_with_pool_retry(conn_string: str, attempts: int = 6):
+    """try_connect, but ride out a transient 'max clients reached' by waiting.
+
+    Leaked pooler sessions from force-closed runs free up within a couple of
+    minutes; rather than bounce the user back to the password prompt, we wait
+    and retry. Auth failures are NOT retried — they re-raise immediately.
+    """
+    delay = 10
+    for i in range(attempts):
+        try:
+            return try_connect(conn_string)
+        except OperationalError as e:
+            if _is_max_clients(e) and i < attempts - 1:
+                log(f"Pooler is busy (max clients). Waiting {delay}s for slots "
+                    f"to free up, then retrying ({i + 1}/{attempts - 1}) ...")
+                time.sleep(delay)
+                delay = min(delay * 2, 60)
+                continue
+            raise
+
+
 def get_connection(cfg: dict):
     """
     First-run flow: try the saved password; if missing or wrong, prompt the user
@@ -194,7 +232,7 @@ def get_connection(cfg: dict):
     saved = read_saved_password()
     if saved:
         try:
-            conn = try_connect(build_conn_string(cfg, saved))
+            conn = connect_with_pool_retry(build_conn_string(cfg, saved))
             log("Database connection OK (saved password).")
             return conn
         except OperationalError as e:
@@ -217,7 +255,7 @@ def get_connection(cfg: dict):
             print("  (empty — try again)")
             continue
         try:
-            conn = try_connect(build_conn_string(cfg, password))
+            conn = connect_with_pool_retry(build_conn_string(cfg, password))
             log("Database connection OK.")
             save_password(password)
             return conn
