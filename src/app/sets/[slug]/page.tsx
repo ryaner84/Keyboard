@@ -66,9 +66,6 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
 
   if (!groupBuy) notFound();
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://gmktracker.com";
-  const pageUrl = `${siteUrl}/sets/${slug}?country=${country}`;
-
   // Gallery: prefer the multi-image array, fall back to the single hero image.
   // De-duplicate and normalize each Firebase path so all thumbnails load.
   const heroImages = Array.from(
@@ -116,7 +113,6 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
       <SetDetailClient
         groupBuy={groupBuy as never}
         initialCountry={country}
-        pageUrl={pageUrl}
       />
     </div>
   );

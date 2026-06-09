@@ -30,15 +30,41 @@ async function fetchHtml(url: string): Promise<string | null> {
   }
 }
 
+// Shopware renders "related products" / "customers also bought" carousels at the
+// bottom of a product page, each carrying its own /media/ images. Those belong to
+// OTHER sets and must not leak into this set's gallery. Cut the HTML at the first
+// cross-selling / related-products marker so only the main product gallery remains.
+function trimToMainGallery(html: string): string {
+  const markers = [
+    "cross-selling",
+    "cross-sell",
+    "cms-element-product-slider",
+    "product-slider",
+    "js-cross-selling",
+    "Related products",
+    "Customers also",
+    "You may also",
+  ];
+  let cut = html.length;
+  for (const marker of markers) {
+    const idx = html.search(new RegExp(marker, "i"));
+    if (idx !== -1 && idx < cut) cut = idx;
+  }
+  return html.slice(0, cut);
+}
+
 // Pull product image URLs out of a gmk.net product page. The shop (Shopware)
 // serves media under /media/... — we collect unique image URLs in DOM order.
 export function extractGmkImages(html: string): string[] {
   const urls = new Set<string>();
 
+  // Only scan the main product gallery, not the related-products carousels.
+  const scope = trimToMainGallery(html);
+
   // Match src / data-src / srcset / og:image referencing image files.
   const re = /(?:src|data-src|data-zoom-image|content)\s*=\s*["']([^"']+\.(?:jpe?g|png|webp)[^"']*)["']/gi;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
+  while ((m = re.exec(scope)) !== null) {
     let u = m[1];
     if (u.startsWith("//")) u = "https:" + u;
     if (!/^https?:\/\//.test(u)) continue;

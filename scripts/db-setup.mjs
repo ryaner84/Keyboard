@@ -170,6 +170,7 @@ async function main() {
 
       if (alreadyPopulated) {
         await ensureImagesColumn(client);
+        await resetPollutedGalleries(client);
         await backfillShipping(client);
         await cleanupInterestChecks(client);
       }
@@ -188,6 +189,7 @@ async function main() {
     console.log(`[db-setup] Done. Loaded ${rows[0].n} group buys.`);
 
     await ensureImagesColumn(client);
+    await resetPollutedGalleries(client);
     await backfillShipping(client);
     await cleanupInterestChecks(client);
   } catch (err) {
@@ -216,6 +218,48 @@ async function ensureImagesColumn(client) {
     }
   } catch (err) {
     console.warn(`[db-setup] images column setup skipped: ${err.message}`);
+  }
+}
+
+// ONE-TIME cleanup: earlier gallery scraping pulled gmk.net "related products"
+// images into sets' images[] arrays, so set pages showed unrelated keycaps after
+// the real renders. The scraper is now scoped to the main product gallery, but
+// the already-polluted rows won't self-heal (enrichment skips sets that already
+// have >1 image). Reset every multi-image gallery back to the single trusted
+// KeycapLendar render so the fixed scraper can repopulate it correctly.
+//
+// Guarded by a sentinel table so it runs EXACTLY ONCE — it must not wipe good
+// galleries on every future deploy.
+async function resetPollutedGalleries(client) {
+  const KEY = "reset_polluted_galleries_v1";
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."_AppMigrations" (
+         key text PRIMARY KEY,
+         applied_at timestamptz NOT NULL DEFAULT now()
+       )`
+    );
+    const done = await client.query(
+      `SELECT 1 FROM public."_AppMigrations" WHERE key = $1`,
+      [KEY]
+    );
+    if (done.rowCount > 0) return; // already applied
+
+    const reset = await client.query(
+      `UPDATE public."GroupBuy"
+       SET images = ARRAY["imageUrl"]
+       WHERE cardinality(images) > 1 AND "imageUrl" IS NOT NULL`
+    );
+    await client.query(
+      `INSERT INTO public."_AppMigrations" (key) VALUES ($1)
+       ON CONFLICT (key) DO NOTHING`,
+      [KEY]
+    );
+    if (reset.rowCount > 0) {
+      console.log(`[db-setup] Reset ${reset.rowCount} polluted galleries to the single render (one-time).`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Gallery cleanup skipped: ${err.message}`);
   }
 }
 

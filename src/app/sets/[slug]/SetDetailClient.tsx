@@ -4,7 +4,6 @@ import { useState, useMemo } from "react";
 import { KitSelector } from "@/components/set-detail/KitSelector";
 import { VendorTable } from "@/components/set-detail/VendorTable";
 import { SharePosterButton } from "@/components/set-detail/SharePosterButton";
-import { DisqusComments } from "@/components/set-detail/DisqusComments";
 import { useLocation } from "@/context/LocationContext";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
@@ -27,10 +26,9 @@ interface GroupBuyData {
 interface Props {
   groupBuy: GroupBuyData;
   initialCountry?: string;
-  pageUrl: string;
 }
 
-export function SetDetailClient({ groupBuy, pageUrl }: Props) {
+export function SetDetailClient({ groupBuy }: Props) {
   const { region, currency, countryCode } = useLocation();
   const { rates, loading } = useCurrency(currency);
   const { isTracked, toggle } = useTrackedSets();
@@ -149,13 +147,6 @@ export function SetDetailClient({ groupBuy, pageUrl }: Props) {
           loading={loading}
         />
       </div>
-
-      {/* Disqus */}
-      <DisqusComments
-        slug={groupBuy.slug}
-        title={groupBuy.name}
-        url={pageUrl}
-      />
     </div>
   );
 }

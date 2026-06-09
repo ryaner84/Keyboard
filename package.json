@@ -25,7 +25,6 @@
     "@types/qrcode": "^1.5.6",
     "@vercel/og": "^0.11.1",
     "bcryptjs": "^3.0.3",
-    "disqus-react": "^1.1.7",
     "jsonwebtoken": "^9.0.3",
     "next": "14.2.35",
     "pg": "^8.21.0",
