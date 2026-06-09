@@ -40,6 +40,7 @@ next-env.d.ts
 
 # scraper (Windows WorkSpace) — secrets & local artifacts, never commit
 /scraper/credentials.csv
+/scraper/config.local.ini
 /scraper/.scraper-profile/
 /scraper/logs/
 /scraper/.venv/

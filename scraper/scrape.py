@@ -39,6 +39,7 @@ from playwright.sync_api import sync_playwright, Page, BrowserContext
 # ----------------------------------------------------------------------------
 HERE = Path(__file__).resolve().parent
 CONFIG_PATH = HERE / "config.ini"
+LOCAL_CONFIG_PATH = HERE / "config.local.ini"
 CREDENTIALS_PATH = HERE / "credentials.csv"
 PROFILE_DIR = HERE / ".scraper-profile"
 LOG_DIR = HERE / "logs"
@@ -69,51 +70,81 @@ def log(msg: str) -> None:
 # ----------------------------------------------------------------------------
 PLACEHOLDER_REF = "your-project-ref"
 
+# Parse a Supabase session-pooler connection string:
+#   postgresql://postgres.<ref>:<password>@<host>:5432/postgres
+# Captures group(1)=ref, group(2)=host.
+_CONN_RE = re.compile(
+    r"postgres(?:ql)?://postgres\.([A-Za-z0-9]+):[^@]*@([^:/\s]+)",
+    re.IGNORECASE,
+)
+# Pull the region out of a pooler host like aws-1-ap-northeast-1.pooler.supabase.com
+_REGION_RE = re.compile(r"aws-\d+-([a-z0-9-]+)\.pooler", re.IGNORECASE)
 
-def save_config(cfg_parser: configparser.ConfigParser) -> None:
-    with CONFIG_PATH.open("w", encoding="utf-8") as f:
-        cfg_parser.write(f)
+
+def save_local_config(ref: str, host: str, region: str) -> None:
+    """Persist connection details to the gitignored config.local.ini.
+
+    We never write to the tracked config.ini: that keeps your project ref/host
+    out of git and avoids merge conflicts when run-scraper.bat does git pull.
+    """
+    local = configparser.ConfigParser()
+    if LOCAL_CONFIG_PATH.exists():
+        local.read(LOCAL_CONFIG_PATH)
+    if not local.has_section("supabase"):
+        local.add_section("supabase")
+    local["supabase"]["project_ref"] = ref
+    local["supabase"]["host"] = host
+    if region:
+        local["supabase"]["region"] = region
+    with LOCAL_CONFIG_PATH.open("w", encoding="utf-8") as f:
+        local.write(f)
+    log(f"Saved connection details to {LOCAL_CONFIG_PATH.name} (gitignored).")
+
+
+def prompt_connection() -> tuple[str, str, str]:
+    """Ask for the full Supabase connection string and parse ref + host from it."""
+    if not sys.stdin or not sys.stdin.isatty():
+        log("ERROR: no Supabase connection configured and no terminal to prompt. "
+            "Run scraper/run-scraper.bat manually once to enter it.")
+        sys.exit(1)
+    print()
+    print("Paste your Supabase SESSION POOLER connection string.")
+    print("  Supabase -> Project Settings -> Database -> Connection string -> Session pooler")
+    print("Example:")
+    print("  postgresql://postgres.abcdef123:[YOUR-PASSWORD]@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres")
+    while True:
+        raw = input("Connection string: ").strip()
+        m = _CONN_RE.search(raw)
+        if m:
+            ref, host = m.group(1), m.group(2)
+            rm = _REGION_RE.search(host)
+            region = rm.group(1) if rm else ""
+            return ref, host, region
+        # Fallback to manual entry if the paste couldn't be parsed.
+        print("  Couldn't parse that. Enter the two values manually instead:")
+        ref = input("    project ref (the part after 'postgres.'): ").strip()
+        host = input("    pooler host (aws-...pooler.supabase.com): ").strip()
+        if ref and host and ref != PLACEHOLDER_REF:
+            rm = _REGION_RE.search(host)
+            return ref, host, (rm.group(1) if rm else "")
+        print("  (still incomplete — try again)")
 
 
 def load_config() -> dict:
+    # Local override file takes precedence over the committed template.
     cfg = configparser.ConfigParser()
-    if CONFIG_PATH.exists():
-        cfg.read(CONFIG_PATH)
-    if not cfg.has_section("supabase"):
-        cfg.add_section("supabase")
-    s = cfg["supabase"]
+    cfg.read([str(CONFIG_PATH), str(LOCAL_CONFIG_PATH)])
+    s = cfg["supabase"] if cfg.has_section("supabase") else {}
 
-    ref = (s.get("project_ref") or "").strip()
-    region = (s.get("region") or "").strip()
+    ref = (s.get("project_ref") or "").strip() if s else ""
+    host = (s.get("host") or "").strip() if s else ""
+    region = (s.get("region") or "").strip() if s else ""
 
-    # Prompt for project_ref if missing or still the template placeholder.
-    if not ref or ref == PLACEHOLDER_REF:
-        if not sys.stdin or not sys.stdin.isatty():
-            log("ERROR: config.ini has no project_ref and there's no terminal to "
-                "prompt. Edit scraper/config.ini and set project_ref.")
-            sys.exit(1)
-        print()
-        print("Your Supabase project ref is the part after 'postgres.' in the")
-        print("Connection string (Supabase -> Project Settings -> Database).")
-        print("It's also the subdomain of your project URL, e.g. for")
-        print("  https://abcdwxyz1234.supabase.co  the ref is  abcdwxyz1234")
-        while True:
-            ref = input("Enter your Supabase project ref: ").strip()
-            if ref and ref != PLACEHOLDER_REF:
-                break
-            print("  (that doesn't look right — try again)")
-        s["project_ref"] = ref
-        save_config(cfg)
-        log("Saved project_ref to config.ini")
+    # If anything essential is missing or still the placeholder, prompt for it.
+    if not ref or ref == PLACEHOLDER_REF or not host:
+        ref, host, region = prompt_connection()
+        save_local_config(ref, host, region)
 
-    # Region defaults to ap-southeast-1 (Singapore) if not set.
-    if not region:
-        region = input("Enter your Supabase region [ap-southeast-1]: ").strip() or "ap-southeast-1"
-        s["region"] = region
-        save_config(cfg)
-        log(f"Saved region {region} to config.ini")
-
-    host = (s.get("host") or "").strip() or f"aws-0-{region}.pooler.supabase.com"
     return {"ref": ref, "region": region, "host": host}
 
 
