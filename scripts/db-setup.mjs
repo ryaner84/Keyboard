@@ -145,6 +145,7 @@ async function main() {
       }
 
       if (alreadyPopulated) {
+        await ensureImagesColumn(client);
         await backfillShipping(client);
         await cleanupInterestChecks(client);
       }
@@ -162,6 +163,7 @@ async function main() {
     const { rows } = await client.query('SELECT count(*)::int AS n FROM public."GroupBuy"');
     console.log(`[db-setup] Done. Loaded ${rows[0].n} group buys.`);
 
+    await ensureImagesColumn(client);
     await backfillShipping(client);
     await cleanupInterestChecks(client);
   } catch (err) {
@@ -169,6 +171,27 @@ async function main() {
     console.warn("[db-setup] The app will still deploy; you can re-run by redeploying once the DB is reachable.");
   } finally {
     await client.end().catch(() => {});
+  }
+}
+
+// Ensure the GroupBuy.images array column exists (added after first deploys),
+// then backfill it from imageUrl so the carousel always has at least one image.
+async function ensureImagesColumn(client) {
+  try {
+    await client.query(
+      `ALTER TABLE public."GroupBuy"
+       ADD COLUMN IF NOT EXISTS images text[] DEFAULT ARRAY[]::text[] NOT NULL`
+    );
+    const { rowCount } = await client.query(
+      `UPDATE public."GroupBuy"
+       SET images = ARRAY["imageUrl"]
+       WHERE (images IS NULL OR cardinality(images) = 0) AND "imageUrl" IS NOT NULL`
+    );
+    if (rowCount > 0) {
+      console.log(`[db-setup] Backfilled images[] for ${rowCount} sets.`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] images column setup skipped: ${err.message}`);
   }
 }
 

@@ -28,6 +28,7 @@ export interface GroupBuyWithKits {
   gbStart: Date | null;
   gbEnd: Date | null;
   imageUrl: string | null;
+  images: string[];
   description: string | null;
   featured: boolean;
   kits: KitSummary[];

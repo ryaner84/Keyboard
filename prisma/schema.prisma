@@ -48,6 +48,7 @@ model GroupBuy {
   gbStart     DateTime?
   gbEnd       DateTime?
   imageUrl    String?
+  images      String[]  @default([])
   description String?
   featured    Boolean   @default(false)
   createdAt   DateTime  @default(now())

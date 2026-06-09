@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import Image from "next/image";
+import { SetImageCarousel } from "@/components/set-detail/SetImageCarousel";
 import { prisma } from "@/lib/prisma";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { formatDateRange, normalizeImageUrl } from "@/lib/utils";
@@ -69,21 +69,22 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://gmktracker.com";
   const pageUrl = `${siteUrl}/sets/${slug}?country=${country}`;
 
+  // Gallery: prefer the multi-image array, fall back to the single hero image.
+  // De-duplicate and normalize each Firebase path so all thumbnails load.
+  const heroImages = Array.from(
+    new Set(
+      [...(groupBuy.images ?? []), groupBuy.imageUrl]
+        .map((u) => normalizeImageUrl(u))
+        .filter((u): u is string => !!u)
+    )
+  );
+
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Hero */}
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden mb-6">
-        {normalizeImageUrl(groupBuy.imageUrl) && (
-          <div className="relative aspect-[21/9] w-full overflow-hidden">
-            <Image
-              src={normalizeImageUrl(groupBuy.imageUrl)!}
-              alt={groupBuy.name}
-              fill
-              className="object-cover"
-              unoptimized
-              priority
-            />
-          </div>
+        {heroImages.length > 0 && (
+          <SetImageCarousel images={heroImages} alt={groupBuy.name} />
         )}
         <div className="p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">

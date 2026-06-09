@@ -130,9 +130,11 @@ export async function importGmkSets(): Promise<ImportResult> {
 
     const status = deriveStatus(ks, now);
     const designer = (ks.designer ?? []).filter(Boolean).join(" + ") || "Unknown";
+    const render = fixImageUrl(ks.image);
 
     const groupBuy = await prisma.groupBuy.upsert({
       where: { slug },
+      // On update, leave `images` untouched so any scraped gallery survives.
       update: {
         name,
         colorway: ks.colorway ?? null,
@@ -140,7 +142,7 @@ export async function importGmkSets(): Promise<ImportResult> {
         status,
         gbStart: parseDate(ks.gbLaunch),
         gbEnd: parseDate(ks.gbEnd),
-        imageUrl: fixImageUrl(ks.image),
+        imageUrl: render,
         description: ks.notes ?? null,
       },
       create: {
@@ -151,7 +153,8 @@ export async function importGmkSets(): Promise<ImportResult> {
         status,
         gbStart: parseDate(ks.gbLaunch),
         gbEnd: parseDate(ks.gbEnd),
-        imageUrl: fixImageUrl(ks.image),
+        imageUrl: render,
+        images: render ? [render] : [],
         description: ks.notes ?? null,
         featured: status === "ACTIVE_GB",
       },
