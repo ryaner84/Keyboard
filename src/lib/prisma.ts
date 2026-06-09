@@ -9,7 +9,8 @@ const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
 function createPrismaClient() {
   const connectionString = resolveDatabaseUrl();
-  const adapter = new PrismaPg({ connectionString });
+  // max:1 — each serverless invocation is its own process; no need for >1 connection.
+  const adapter = new PrismaPg({ connectionString, max: 1 });
   return new PrismaClient({
     adapter,
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
