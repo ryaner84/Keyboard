@@ -67,20 +67,53 @@ def log(msg: str) -> None:
 # ----------------------------------------------------------------------------
 # Connection string (mirrors src/lib/database-url.ts Setup C)
 # ----------------------------------------------------------------------------
+PLACEHOLDER_REF = "your-project-ref"
+
+
+def save_config(cfg_parser: configparser.ConfigParser) -> None:
+    with CONFIG_PATH.open("w", encoding="utf-8") as f:
+        cfg_parser.write(f)
+
+
 def load_config() -> dict:
     cfg = configparser.ConfigParser()
-    if not CONFIG_PATH.exists():
-        log(f"ERROR: missing {CONFIG_PATH}. Copy config.ini and fill in your "
-            f"SUPABASE_PROJECT_REF and SUPABASE_REGION.")
-        sys.exit(1)
-    cfg.read(CONFIG_PATH)
+    if CONFIG_PATH.exists():
+        cfg.read(CONFIG_PATH)
+    if not cfg.has_section("supabase"):
+        cfg.add_section("supabase")
     s = cfg["supabase"]
+
     ref = (s.get("project_ref") or "").strip()
     region = (s.get("region") or "").strip()
+
+    # Prompt for project_ref if missing or still the template placeholder.
+    if not ref or ref == PLACEHOLDER_REF:
+        if not sys.stdin or not sys.stdin.isatty():
+            log("ERROR: config.ini has no project_ref and there's no terminal to "
+                "prompt. Edit scraper/config.ini and set project_ref.")
+            sys.exit(1)
+        print()
+        print("Your Supabase project ref is the part after 'postgres.' in the")
+        print("Connection string (Supabase -> Project Settings -> Database).")
+        print("It's also the subdomain of your project URL, e.g. for")
+        print("  https://abcdwxyz1234.supabase.co  the ref is  abcdwxyz1234")
+        while True:
+            ref = input("Enter your Supabase project ref: ").strip()
+            if ref and ref != PLACEHOLDER_REF:
+                break
+            print("  (that doesn't look right — try again)")
+        s["project_ref"] = ref
+        save_config(cfg)
+        log("Saved project_ref to config.ini")
+
+    # Region defaults to ap-southeast-1 (Singapore) if not set.
+    if not region:
+        region = input("Enter your Supabase region [ap-southeast-1]: ").strip() or "ap-southeast-1"
+        s["region"] = region
+        save_config(cfg)
+        log(f"Saved region {region} to config.ini")
+
     host = (s.get("host") or "").strip() or f"aws-0-{region}.pooler.supabase.com"
-    if not ref or not region:
-        log("ERROR: config.ini needs project_ref and region under [supabase].")
-        sys.exit(1)
     return {"ref": ref, "region": region, "host": host}
 
 

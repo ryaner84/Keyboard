@@ -170,7 +170,16 @@ if !ERRORLEVEL! neq 0 (
 "%VENV_PY%" -m playwright install chromium
 
 REM --- 4. Register the nightly 00:00 GMT+8 schedule ---------------------------
-for /f "usebackq delims=" %%T in (`"%VENV_PY%" "%SCRAPER%\schedule_time.py"`) do set "LOCALTIME=%%T"
+REM Compute the local time via schedule_time.py, writing to a temp file. The
+REM for /f "usebackq" form chokes when the command starts with a quoted path
+REM ("filename syntax incorrect"), so we use a temp file instead - bulletproof.
+set "SCHED_TMP=%TEMP%\gmk_sched_time.txt"
+set "LOCALTIME="
+"%VENV_PY%" "%SCRAPER%\schedule_time.py" > "%SCHED_TMP%" 2>nul
+if exist "%SCHED_TMP%" (
+    set /p LOCALTIME=<"%SCHED_TMP%"
+    del "%SCHED_TMP%" >nul 2>&1
+)
 if defined LOCALTIME (
     echo [run] 00:00 GMT+8 = !LOCALTIME! local time on this PC.
     schtasks /Create /TN "GMK Scraper" /TR "%SCRAPER%\run-scraper.bat" /SC DAILY /ST !LOCALTIME! /RL HIGHEST /F
