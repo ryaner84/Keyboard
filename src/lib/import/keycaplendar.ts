@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/utils";
 import { unwrapFields, type FirestoreDoc } from "./firestore";
+import { applyVendorOverride } from "./vendor-overrides";
+import { buildShippingZones } from "./shipping";
 import type { GBStatus, Region } from "@/generated/prisma";
 
 const PROJECT_ID = process.env.KEYCAPLENDAR_PROJECT_ID || "keycaplendar";
@@ -163,29 +165,39 @@ export async function importGmkSets(): Promise<ImportResult> {
       if (!vSlug) continue;
       const { region, currency, country } = mapRegion(v.region);
 
+      // Apply known overrides before upsert (KCL mislabels some SG vendors as US/Asia).
+      const { region: vendorRegion, currency: vendorCurrency, country: vendorCountry } =
+        applyVendorOverride(vSlug, { region, currency, country });
+
       let vendorId = vendorCache.get(vSlug);
       if (!vendorId) {
         const vendor = await prisma.vendor.upsert({
           where: { slug: vSlug },
           update: {
             name: v.name,
-            region,
-            country,
-            currency,
+            region: vendorRegion,
+            country: vendorCountry,
+            currency: vendorCurrency,
             websiteUrl: originOf(v.storeLink) || v.storeLink || "",
           },
           create: {
             slug: vSlug,
             name: v.name,
-            region,
-            country,
-            currency,
+            region: vendorRegion,
+            country: vendorCountry,
+            currency: vendorCurrency,
             websiteUrl: originOf(v.storeLink) || v.storeLink || "",
           },
         });
         vendorId = vendor.id;
         vendorCache.set(vSlug, vendorId);
         result.vendors++;
+
+        // Seed DHL shipping zones for every destination (skipDuplicates = safe to re-run).
+        await prisma.shippingZone.createMany({
+          data: buildShippingZones(vendorRegion).map((z) => ({ vendorId: vendor.id, ...z })),
+          skipDuplicates: true,
+        });
       }
 
       // Don't overwrite manually-entered prices; preserve existing price data.

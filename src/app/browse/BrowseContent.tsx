@@ -6,6 +6,8 @@ import { SetCard } from "@/components/browse/SetCard";
 import { BrowseFilters } from "@/components/browse/BrowseFilters";
 import type { GroupBuyWithPricing, GBStatus } from "@/types";
 
+const DEFAULT_STATUSES: GBStatus[] = ["INTEREST_CHECK", "ACTIVE_GB"];
+
 export default function BrowseContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -20,7 +22,7 @@ export default function BrowseContent() {
   const newDays = searchParams.get("new") ?? "";
   const rawStatuses = searchParams.getAll("status") as GBStatus[];
   const statuses: GBStatus[] = useMemo(
-    () => (rawStatuses.length > 0 ? rawStatuses : []),
+    () => (rawStatuses.length > 0 ? rawStatuses : DEFAULT_STATUSES),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [searchParams.toString()]
   );

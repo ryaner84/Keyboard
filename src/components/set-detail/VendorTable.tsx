@@ -33,7 +33,9 @@ export function VendorTable({
 }: VendorTableProps) {
   const rows: RowData[] = useMemo(() => {
     return vendorKits.map((vk) => {
-      const zone = vk.vendor.shippingZones?.[0];
+      const zone = vk.vendor.shippingZones?.find(
+        (z) => z.destinationRegion === userRegion
+      );
       const shipsToRegion = zone?.shipsToRegion ?? false;
 
       const hasPrice = vk.price != null && vk.currency != null;
@@ -58,14 +60,19 @@ export function VendorTable({
 
       return { vk, hasPrice, kitPriceLocal, shippingLocal, totalLocal, shipsToRegion, estimatedDays };
     });
-  }, [vendorKits, userCurrency, rates]);
+  }, [vendorKits, userRegion, userCurrency, rates]);
 
   const sorted = useMemo(() => {
-    // Priced + ships-here rows first (cheapest first), then the rest.
-    const priced = rows.filter((r) => r.totalLocal != null && r.shipsToRegion && r.vk.inStock);
-    const rest = rows.filter((r) => !(r.totalLocal != null && r.shipsToRegion && r.vk.inStock));
-    priced.sort((a, b) => (a.totalLocal! - b.totalLocal!));
-    return [...priced, ...rest];
+    // Ships-here + in-stock rows first; priced ones sorted cheapest-first within that group.
+    const ships = rows.filter((r) => r.shipsToRegion && r.vk.inStock);
+    const rest = rows.filter((r) => !r.shipsToRegion || !r.vk.inStock);
+    ships.sort((a, b) => {
+      if (a.totalLocal != null && b.totalLocal != null) return a.totalLocal - b.totalLocal;
+      if (a.totalLocal != null) return -1; // priced before unpriced
+      if (b.totalLocal != null) return 1;
+      return 0;
+    });
+    return [...ships, ...rest];
   }, [rows]);
 
   if (loading) {
@@ -126,14 +133,30 @@ export function VendorTable({
             </div>
 
             {/* Price area */}
-            {row.hasPrice && !unavailable ? (
+            {unavailable ? (
+              <div className="flex items-center gap-3 ml-auto">
+                <span className="text-xs text-gray-400">
+                  {!row.vk.inStock ? "Out of stock" : `Doesn't ship to ${userRegion}`}
+                </span>
+                {(row.vk.gbUrl || row.vk.productUrl) && (
+                  <a
+                    href={(row.vk.gbUrl || row.vk.productUrl)!}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 border border-gray-200 text-gray-500 text-xs font-medium rounded-lg hover:border-indigo-300 hover:text-indigo-600 transition-colors whitespace-nowrap flex-shrink-0"
+                  >
+                    View site →
+                  </a>
+                )}
+              </div>
+            ) : row.hasPrice ? (
               <>
                 <div className="text-right hidden sm:block">
                   <p className="text-xs text-gray-400">Kit</p>
                   <p className="text-sm text-gray-700">{formatCurrency(row.kitPriceLocal!, userCurrency)}</p>
                 </div>
                 <div className="text-right hidden sm:block">
-                  <p className="text-xs text-gray-400">Shipping</p>
+                  <p className="text-xs text-gray-400">Ship (DHL est.)</p>
                   <p className="text-sm text-gray-700">
                     {row.shippingLocal === 0
                       ? "Free"
@@ -165,29 +188,42 @@ export function VendorTable({
                 )}
               </>
             ) : (
-              <div className="flex items-center gap-3 ml-auto">
-                <span className="text-xs text-gray-400 text-right">
-                  {!row.vk.inStock
-                    ? "Out of stock"
-                    : !row.shipsToRegion
-                      ? `Doesn't ship to ${userRegion}`
-                      : "Price not available"}
-                </span>
+              /* Ships here but price not yet scraped — show DHL shipping estimate + link */
+              <>
+                <div className="text-right hidden sm:block">
+                  <p className="text-xs text-gray-400">Kit price</p>
+                  <p className="text-xs text-amber-600 font-medium">Check on site</p>
+                </div>
+                <div className="text-right hidden sm:block">
+                  <p className="text-xs text-gray-400">Ship (DHL est.)</p>
+                  <p className="text-sm text-gray-700">
+                    {row.shippingLocal != null
+                      ? formatCurrency(row.shippingLocal, userCurrency)
+                      : "—"}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-400">Kit + ship</p>
+                  <p className="text-xs text-gray-500 italic">Price on site</p>
+                </div>
                 {(row.vk.gbUrl || row.vk.productUrl) && (
                   <a
                     href={(row.vk.gbUrl || row.vk.productUrl)!}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-3 py-1.5 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:border-indigo-300 hover:text-indigo-600 transition-colors whitespace-nowrap flex-shrink-0"
+                    className="ml-1 px-3 py-1.5 border border-indigo-200 text-indigo-600 text-xs font-semibold rounded-lg hover:bg-indigo-50 transition-colors whitespace-nowrap flex-shrink-0"
                   >
-                    View on vendor site →
+                    View price →
                   </a>
                 )}
-              </div>
+              </>
             )}
           </div>
         );
       })}
+      <p className="text-[11px] text-gray-400 pt-2 px-1">
+        Shipping is a DHL Express estimate (~1 kg parcel) to {userRegion}. Actual cost is set at checkout on the vendor&apos;s site.
+      </p>
     </div>
   );
 }
