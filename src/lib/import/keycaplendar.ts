@@ -107,7 +107,12 @@ export interface ImportResult {
 export async function importGmkSets(): Promise<ImportResult> {
   const now = new Date();
   const all = await fetchAllKeysets();
-  const gmk = all.filter((k) => (k.profile ?? "").toUpperCase() === "GMK" && k.colorway);
+  // Only import sets with a confirmed group-buy launch date. KeycapLendar's
+  // date-less "interest check" entries (e.g. GMK Strawberry) are speculative and
+  // rarely listed by real vendors — skip them.
+  const gmk = all.filter(
+    (k) => (k.profile ?? "").toUpperCase() === "GMK" && k.colorway && parseDate(k.gbLaunch)
+  );
 
   const result: ImportResult = { sets: 0, vendors: 0, vendorKits: 0 };
   const vendorCache = new Map<string, string>(); // slug -> vendorId
