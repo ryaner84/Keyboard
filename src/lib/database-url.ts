@@ -27,9 +27,9 @@ export function resolveDatabaseUrl(): string {
           "DATABASE_URL contains the __PASSWORD__ placeholder but DATABASE_PASSWORD is not set"
         );
       }
-      return url.replace("__PASSWORD__", encodeURIComponent(password));
+      return ensureTransactionPooler(url.replace("__PASSWORD__", encodeURIComponent(password)));
     }
-    return url;
+    return ensureTransactionPooler(url);
   }
 
   // C) assemble from Supabase components.
@@ -44,10 +44,18 @@ export function resolveDatabaseUrl(): string {
     const host =
       process.env.SUPABASE_DB_HOST || `aws-0-${region}.pooler.supabase.com`;
     const pw = encodeURIComponent(password);
-    return `postgresql://postgres.${ref}:${pw}@${host}:5432/postgres`;
+    // Port 6543 = Supabase transaction pooler (no per-client cap).
+    return `postgresql://postgres.${ref}:${pw}@${host}:6543/postgres`;
   }
 
   throw new Error(
     "No database configuration found. Set DATABASE_URL, or SUPABASE_PROJECT_REF + SUPABASE_REGION + DATABASE_PASSWORD."
   );
+}
+
+// Supabase's session pooler (port 5432) caps at 15 concurrent clients, which
+// serverless functions saturate instantly (EMAXCONNSESSION). The transaction
+// pooler (port 6543) has no per-client cap, so always redirect 5432 -> 6543.
+function ensureTransactionPooler(url: string): string {
+  return url.replace(/:5432(\/|$|\?)/, ":6543$1");
 }

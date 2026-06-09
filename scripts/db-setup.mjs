@@ -23,18 +23,24 @@ function resolveDatabaseUrl() {
   if (url) {
     if (url.includes("__PASSWORD__")) {
       if (!password) throw new Error("DATABASE_URL has __PASSWORD__ but DATABASE_PASSWORD is not set");
-      return url.replace("__PASSWORD__", encodeURIComponent(password));
+      return ensureTransactionPooler(url.replace("__PASSWORD__", encodeURIComponent(password)));
     }
-    return url;
+    return ensureTransactionPooler(url);
   }
   const ref = process.env.SUPABASE_PROJECT_REF;
   const region = process.env.SUPABASE_REGION;
   if (ref && region) {
     if (!password) throw new Error("DATABASE_PASSWORD is required with SUPABASE_PROJECT_REF + SUPABASE_REGION");
     const host = process.env.SUPABASE_DB_HOST || `aws-0-${region}.pooler.supabase.com`;
-    return `postgresql://postgres.${ref}:${encodeURIComponent(password)}@${host}:5432/postgres`;
+    return `postgresql://postgres.${ref}:${encodeURIComponent(password)}@${host}:6543/postgres`;
   }
   throw new Error("No database configuration found (DATABASE_URL or SUPABASE_PROJECT_REF + SUPABASE_REGION + DATABASE_PASSWORD)");
+}
+
+// Session pooler (5432) caps at 15 clients; transaction pooler (6543) does not.
+// Always redirect so the build connects the same way runtime does.
+function ensureTransactionPooler(url) {
+  return url.replace(/:5432(\/|$|\?)/, ":6543$1");
 }
 
 // Correct known-mislabelled vendors and (re)seed DHL-estimate shipping zones.

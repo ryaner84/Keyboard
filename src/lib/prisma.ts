@@ -12,7 +12,9 @@ function createPrismaClient() {
   // Supabase requires SSL. Skip it for local Postgres (no SSL support).
   const isLocal = /localhost|127\.0\.0\.1/.test(connectionString);
   const ssl = isLocal ? undefined : { rejectUnauthorized: false };
-  const adapter = new PrismaPg({ connectionString, ssl });
+  // max:1 — each serverless invocation is its own process and only ever needs
+  // one connection; keeps us well under the pooler's client budget.
+  const adapter = new PrismaPg({ connectionString, ssl, max: 1 });
   return new PrismaClient({
     adapter,
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
