@@ -383,7 +383,7 @@ def fetch_image_candidates(conn, limit: int = 200) -> list[dict]:
                   FROM "VendorKit" vk
                   JOIN "Kit" k ON k.id = vk."kitId"
                  WHERE k."groupBuyId" = gb.id
-                   AND vk."productUrl" ILIKE '%gmk.net%'
+                   AND vk."productUrl" ILIKE '%%gmk.net%%'
                  LIMIT 1) AS gmk_url
           FROM "GroupBuy" gb
          WHERE COALESCE(cardinality(gb.images), 0) <= 1
@@ -391,7 +391,7 @@ def fetch_image_candidates(conn, limit: int = 200) -> list[dict]:
                 SELECT 1 FROM "VendorKit" vk
                   JOIN "Kit" k ON k.id = vk."kitId"
                  WHERE k."groupBuyId" = gb.id
-                   AND vk."productUrl" ILIKE '%gmk.net%')
+                   AND vk."productUrl" ILIKE '%%gmk.net%%')
          LIMIT %s
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
