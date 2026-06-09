@@ -8,12 +8,13 @@ REM  On later runs it just git-pulls the latest code and runs.
 REM
 REM  Each run it:
 REM    0. (bootstrap) if not already inside a clone, clone the repo and re-launch
-REM    1. git-pulls the latest scrape.py from GitHub
-REM    2. ensures Python + a venv + Playwright Chromium are installed
-REM    3. (first run) asks for the Supabase DB password, validates it, saves it
-REM    4. registers the nightly 00:00 GMT+8 schedule (re-registers every run so
+REM    1. terminates any leftover scraper instances (frees DB slot + profile lock)
+REM    2. git-pulls the latest scrape.py from GitHub
+REM    3. ensures Python + a venv + Playwright Chromium are installed
+REM    4. (first run) asks for the Supabase connection + password, validates, saves
+REM    5. registers the nightly 00:00 GMT+8 schedule (re-registers every run so
 REM       it self-corrects across DST changes)
-REM    5. runs the scraper, logging to scraper\logs\
+REM    6. runs the scraper, logging to scraper\logs\
 REM ===========================================================================
 setlocal EnableDelayedExpansion
 
@@ -94,7 +95,20 @@ echo  GMK Scraper  -  %DATE% %TIME%
 echo  Repo: %REPO%
 echo ============================================================
 
-REM --- 1. Pull the latest scraper from GitHub --------------------------------
+REM --- 1. Terminate any leftover scraper instances ----------------------------
+REM Kills only python/chrome processes whose command line points inside THIS
+REM scraper folder (its venv python running scrape.py, and its Chromium using
+REM .scraper-profile). Filtering by process name means this script's own
+REM cmd.exe/powershell.exe can never match, and your other Python apps are
+REM untouched (different path). This frees the DB pooler slot and the browser
+REM profile lock left behind by a force-closed run.
+echo [run] Step 1: closing any previous scraper instances ...
+set "KILL_MATCH=%SCRAPER%"
+powershell -NoProfile -Command "$root=$env:KILL_MATCH; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine -like ('*'+$root+'*')) -and ($_.Name -in @('python.exe','pythonw.exe','chrome.exe','headless_shell.exe')) } | ForEach-Object { Write-Host ('  closing PID '+$_.ProcessId+' ('+$_.Name+')'); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" 2>nul
+REM Give killed connections a moment to drop so the DB pooler frees the slot.
+timeout /t 3 /nobreak >nul 2>&1
+
+REM --- 2. Pull the latest scraper from GitHub --------------------------------
 where git >nul 2>&1
 if !ERRORLEVEL!==0 (
     echo [run] git pull origin main ...
@@ -125,7 +139,7 @@ if not exist "%SCRAPER%\schedule_time.py" (
     exit /b 1
 )
 
-REM --- 2. Locate Python -------------------------------------------------------
+REM --- 3. Locate Python -------------------------------------------------------
 set "PY="
 where python >nul 2>&1 && set "PY=python"
 if not defined PY ( where py >nul 2>&1 && set "PY=py" )
@@ -147,7 +161,7 @@ if not defined PY (
 )
 echo [run] Using Python: !PY!
 
-REM --- 3. Virtual env + dependencies ------------------------------------------
+REM --- 4. Virtual env + dependencies ------------------------------------------
 if not exist "%SCRAPER%\.venv\Scripts\python.exe" (
     echo [run] Creating virtual environment ...
     "!PY!" -m venv "%SCRAPER%\.venv"
@@ -169,7 +183,7 @@ if !ERRORLEVEL! neq 0 (
 )
 "%VENV_PY%" -m playwright install chromium
 
-REM --- 4. Register the nightly 00:00 GMT+8 schedule ---------------------------
+REM --- 5. Register the nightly 00:00 GMT+8 schedule ---------------------------
 REM Compute the local time via schedule_time.py, writing to a temp file. The
 REM for /f "usebackq" form chokes when the command starts with a quoted path
 REM ("filename syntax incorrect"), so we use a temp file instead - bulletproof.
@@ -192,7 +206,7 @@ if defined LOCALTIME (
     echo [run] WARNING: Could not determine GMT+8 time - schedule not registered.
 )
 
-REM --- 5. Run the scraper -----------------------------------------------------
+REM --- 6. Run the scraper -----------------------------------------------------
 echo [run] Launching scraper ^(logs in %SCRAPER%\logs^) ...
 "%VENV_PY%" "%SCRAPER%\scrape.py"
 set "RC=!ERRORLEVEL!"
