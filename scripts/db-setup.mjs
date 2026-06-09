@@ -146,6 +146,7 @@ async function main() {
 
       if (alreadyPopulated) {
         await backfillShipping(client);
+        await cleanupInterestChecks(client);
       }
     }
 
@@ -160,11 +161,31 @@ async function main() {
 
     const { rows } = await client.query('SELECT count(*)::int AS n FROM public."GroupBuy"');
     console.log(`[db-setup] Done. Loaded ${rows[0].n} group buys.`);
+
+    await backfillShipping(client);
+    await cleanupInterestChecks(client);
   } catch (err) {
     console.warn(`[db-setup] Setup failed: ${err.message}`);
     console.warn("[db-setup] The app will still deploy; you can re-run by redeploying once the DB is reachable.");
   } finally {
     await client.end().catch(() => {});
+  }
+}
+
+// Remove speculative, date-less interest-check sets from KeycapLendar
+// (e.g. GMK Strawberry) — no confirmed GB date, no real vendor listings.
+// Cascade deletes child Kit/VendorKit rows automatically.
+async function cleanupInterestChecks(client) {
+  try {
+    const { rowCount } = await client.query(
+      `DELETE FROM public."GroupBuy"
+       WHERE status = 'INTEREST_CHECK' AND "gbStart" IS NULL`
+    );
+    if (rowCount > 0) {
+      console.log(`[db-setup] Removed ${rowCount} date-less interest-check sets.`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Interest-check cleanup skipped: ${err.message}`);
   }
 }
 
