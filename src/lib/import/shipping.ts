@@ -21,21 +21,25 @@ export const DESTINATION_REGIONS: Region[] = [
   "OTHER",
 ];
 
-// Approximate DHL Express rates (USD) for a ~1 kg parcel, origin → destination.
-// Singapore lanes are tuned most carefully since SG is the primary market.
+// Approximate DHL Express rates (USD) for a small, light keycap parcel
+// (a GMK base-kit box is compact, ~0.8–1 kg actual weight — its volumetric
+// weight is well under that). Vendors get heavily discounted courier rates, so
+// these reflect the *discounted* price a store actually charges, not the retail
+// counter rate. Calibrated against a real proto[Typist] checkout: UK → SG was
+// GBP 19.76 (~USD 25). Singapore lanes are tuned most carefully (primary market).
 const DHL_USD: Partial<Record<Region, Partial<Record<Region, number>>>> = {
-  US: { US: 9, CA: 18, EU: 38, UK: 38, AU: 42, SG: 48, ASIA: 45, OTHER: 50 },
-  CA: { CA: 9, US: 18, EU: 40, UK: 40, AU: 45, SG: 50, ASIA: 48, OTHER: 52 },
-  EU: { EU: 10, UK: 16, US: 38, CA: 40, AU: 45, SG: 42, ASIA: 42, OTHER: 48 },
-  UK: { UK: 9, EU: 16, US: 38, CA: 40, AU: 45, SG: 42, ASIA: 42, OTHER: 48 },
-  AU: { AU: 10, SG: 30, ASIA: 32, US: 42, CA: 45, EU: 45, UK: 45, OTHER: 48 },
-  SG: { SG: 6, ASIA: 18, AU: 30, US: 48, CA: 50, EU: 42, UK: 42, OTHER: 45 },
-  ASIA: { ASIA: 10, SG: 18, AU: 32, US: 45, CA: 48, EU: 42, UK: 42, OTHER: 45 },
-  OTHER: { OTHER: 12, SG: 45, ASIA: 45, US: 50, CA: 52, EU: 48, UK: 48, AU: 48 },
+  US: { US: 8, CA: 12, EU: 18, UK: 18, AU: 26, SG: 26, ASIA: 26, OTHER: 30 },
+  CA: { CA: 8, US: 12, EU: 20, UK: 20, AU: 28, SG: 28, ASIA: 28, OTHER: 32 },
+  EU: { EU: 8, UK: 10, US: 18, CA: 20, AU: 26, SG: 24, ASIA: 24, OTHER: 30 },
+  UK: { UK: 7, EU: 10, US: 18, CA: 20, AU: 26, SG: 24, ASIA: 24, OTHER: 30 },
+  AU: { AU: 8, SG: 18, ASIA: 20, US: 26, CA: 28, EU: 26, UK: 26, OTHER: 30 },
+  SG: { SG: 5, ASIA: 12, AU: 18, US: 26, CA: 28, EU: 24, UK: 24, OTHER: 28 },
+  ASIA: { ASIA: 8, SG: 12, AU: 20, US: 26, CA: 28, EU: 24, UK: 24, OTHER: 28 },
+  OTHER: { OTHER: 10, SG: 28, ASIA: 26, US: 30, CA: 32, EU: 30, UK: 30, AU: 30 },
 };
 
-const DEFAULT_INTL_USD = 45;
-const DEFAULT_DOMESTIC_USD = 10;
+const DEFAULT_INTL_USD = 28;
+const DEFAULT_DOMESTIC_USD = 8;
 
 export function dhlShippingUsd(from: Region, to: Region): number {
   const v = DHL_USD[from]?.[to];
@@ -43,9 +47,10 @@ export function dhlShippingUsd(from: Region, to: Region): number {
   return from === to ? DEFAULT_DOMESTIC_USD : DEFAULT_INTL_USD;
 }
 
-// DHL Express transit estimate. Customs clearance pads international lanes.
+// DHL Express transit estimate. Express courier is fast (the proto[Typist]
+// quote read "DHL Worldwide 2–3 Days"); customs clearance pads it slightly.
 export function dhlEstimatedDays(from: Region, to: Region): [number, number] {
-  return from === to ? [2, 5] : [4, 10];
+  return from === to ? [1, 3] : [2, 5];
 }
 
 export interface ShippingZoneSeed {

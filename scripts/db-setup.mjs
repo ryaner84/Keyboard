@@ -37,25 +37,41 @@ function resolveDatabaseUrl() {
   throw new Error("No database configuration found (DATABASE_URL or SUPABASE_PROJECT_REF + SUPABASE_REGION + DATABASE_PASSWORD)");
 }
 
-// Correct known-mislabelled vendors and seed DHL-estimate shipping zones for any
-// vendor that has none. Runs every deploy; idempotent (ON CONFLICT DO NOTHING).
-// Without this, computeCheapest()/VendorTable filter out every vendor as
-// "doesn't ship here", so the live site shows no prices at all.
+// Correct known-mislabelled vendors and (re)seed DHL-estimate shipping zones.
+// Runs every deploy. The cost CASE is recalibrated to discounted small-parcel
+// DHL rates (a GMK base kit is compact/light, ~1kg) — anchored to a real
+// proto[Typist] checkout where UK→SG was GBP 19.76 (~USD 25). The upsert uses
+// DO UPDATE so EXISTING zones get recalibrated, not just newly-inserted ones.
 async function backfillShipping(client) {
-  // 1. Fix Singapore vendors KeycapLendar mislabels (e.g. Ktech shown as US).
-  const fixRegions = await client.query(
+  // 1a. Fix Singapore vendors KeycapLendar mislabels (e.g. Ktech shown as US).
+  const fixSG = await client.query(
     `UPDATE public."Vendor"
      SET region = 'SG', country = 'SG', currency = 'SGD'
      WHERE slug IN ('ilumkb','ktechs','ktech','ashkeebs','monokei',
                     'zion-studios','zionstudios','zion-studios-sg')
        AND region <> 'SG'`
   );
-  if (fixRegions.rowCount > 0) {
-    console.log(`[db-setup] Corrected ${fixRegions.rowCount} SG vendor region(s).`);
-  }
+  // 1b. Fix other commonly-mislabelled vendors (wrong origin inflates shipping).
+  const fixIntl = await client.query(
+    `UPDATE public."Vendor" AS v SET
+       region   = c.region::public."Region",
+       country  = c.country,
+       currency = c.currency
+     FROM (VALUES
+       ('prototypist',         'UK',   'GB', 'GBP'),
+       ('gmk',                 'EU',   'DE', 'EUR'),
+       ('oblotzky',            'EU',   'DE', 'EUR'),
+       ('oblotzky-industries', 'EU',   'DE', 'EUR'),
+       ('geonworks',           'ASIA', 'KR', 'USD'),
+       ('kbdfans',             'ASIA', 'CN', 'USD'),
+       ('zfrontier',           'ASIA', 'CN', 'USD')
+     ) AS c(slug, region, country, currency)
+     WHERE v.slug = c.slug AND v.region::text <> c.region`
+  );
+  const fixed = (fixSG.rowCount || 0) + (fixIntl.rowCount || 0);
+  if (fixed > 0) console.log(`[db-setup] Corrected ${fixed} vendor region(s).`);
 
-  // 2. Insert any missing vendor × destination-region shipping zones.
-  //    Cost is a DHL Express estimate (USD, ~1kg parcel); SG lanes tuned.
+  // 2. Upsert vendor × destination shipping zones with recalibrated DHL rates.
   const seed = await client.query(
     `INSERT INTO public."ShippingZone"
        (id, "vendorId", "destinationRegion", "baseShippingCost", currency,
@@ -67,27 +83,35 @@ async function backfillShipping(client) {
        CASE
          WHEN d.region = 'SG' THEN
            CASE v.region::text
-             WHEN 'SG' THEN 6 WHEN 'ASIA' THEN 18 WHEN 'AU' THEN 30
-             WHEN 'EU' THEN 42 WHEN 'UK' THEN 42 WHEN 'US' THEN 48
-             WHEN 'CA' THEN 50 ELSE 45 END
+             WHEN 'SG' THEN 5 WHEN 'ASIA' THEN 12 WHEN 'AU' THEN 18
+             WHEN 'EU' THEN 24 WHEN 'UK' THEN 24 WHEN 'US' THEN 26
+             WHEN 'CA' THEN 28 ELSE 28 END
          WHEN d.region = 'ASIA' THEN
            CASE v.region::text
-             WHEN 'ASIA' THEN 10 WHEN 'SG' THEN 18 WHEN 'AU' THEN 32 ELSE 44 END
-         WHEN d.region = v.region::text THEN 10
-         WHEN d.region IN ('US','CA') AND v.region::text IN ('US','CA') THEN 18
-         WHEN d.region IN ('EU','UK') AND v.region::text IN ('EU','UK') THEN 16
-         ELSE 45
+             WHEN 'ASIA' THEN 8 WHEN 'SG' THEN 12 WHEN 'AU' THEN 20
+             WHEN 'EU' THEN 24 WHEN 'UK' THEN 24 WHEN 'US' THEN 26
+             WHEN 'CA' THEN 28 ELSE 28 END
+         WHEN d.region = v.region::text THEN 8
+         WHEN d.region IN ('US','CA') AND v.region::text IN ('US','CA') THEN 12
+         WHEN d.region IN ('EU','UK') AND v.region::text IN ('EU','UK') THEN 10
+         WHEN (d.region IN ('US','CA') AND v.region::text IN ('EU','UK'))
+           OR (d.region IN ('EU','UK') AND v.region::text IN ('US','CA')) THEN 18
+         ELSE 26
        END,
        'USD',
-       CASE WHEN d.region = v.region::text THEN 2 ELSE 4 END,
-       CASE WHEN d.region = v.region::text THEN 5 ELSE 10 END,
+       CASE WHEN d.region = v.region::text THEN 1 ELSE 2 END,
+       CASE WHEN d.region = v.region::text THEN 3 ELSE 5 END,
        true
      FROM public."Vendor" v
      CROSS JOIN (VALUES ('US'),('CA'),('EU'),('UK'),('AU'),('SG'),('ASIA'),('OTHER')) AS d(region)
-     ON CONFLICT ("vendorId","destinationRegion") DO NOTHING`
+     ON CONFLICT ("vendorId","destinationRegion") DO UPDATE SET
+       "baseShippingCost" = EXCLUDED."baseShippingCost",
+       "estimatedDaysMin" = EXCLUDED."estimatedDaysMin",
+       "estimatedDaysMax" = EXCLUDED."estimatedDaysMax",
+       "shipsToRegion"    = EXCLUDED."shipsToRegion"`
   );
   if (seed.rowCount > 0) {
-    console.log(`[db-setup] Seeded ${seed.rowCount} DHL shipping zones.`);
+    console.log(`[db-setup] Seeded/updated ${seed.rowCount} DHL shipping zones.`);
   }
 }
 

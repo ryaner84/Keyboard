@@ -27,6 +27,13 @@ export const VENDOR_OVERRIDES: Record<string, VendorOverride> = {
   zfrontier: { region: "ASIA", country: "CN", currency: "USD" },
   swagkeys: { region: "ASIA", country: "KR", currency: "USD" },
   "swagkeys-kr": { region: "ASIA", country: "KR", currency: "USD" },
+  geonworks: { region: "ASIA", country: "KR", currency: "USD" },
+
+  // Europe / UK (KeycapLendar tags some of these as "America")
+  prototypist: { region: "UK", country: "GB", currency: "GBP" },
+  gmk: { region: "EU", country: "DE", currency: "EUR" },
+  oblotzky: { region: "EU", country: "DE", currency: "EUR" },
+  "oblotzky-industries": { region: "EU", country: "DE", currency: "EUR" },
 };
 
 export function applyVendorOverride(
