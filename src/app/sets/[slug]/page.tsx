@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { SetImageCarousel } from "@/components/set-detail/SetImageCarousel";
 import { prisma } from "@/lib/prisma";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { COUNTRY_BY_CODE, DEFAULT_COUNTRY } from "@/data/countries";
 import { formatDateRange, normalizeImageUrl } from "@/lib/utils";
 import { SetDetailClient } from "./SetDetailClient";
 import type { Metadata } from "next";
@@ -21,6 +22,12 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://gmktracker.com";
   const url = `${siteUrl}/sets/${slug}?country=${country}`;
 
+  // og:image points at the generated poster (keyboard photo + top-3 cheapest
+  // prices + QR code), so pasting the link into WhatsApp/Discord shows the
+  // rich price card automatically — no manual upload needed.
+  const countryInfo = COUNTRY_BY_CODE[country.toUpperCase()] ?? DEFAULT_COUNTRY;
+  const posterUrl = `${siteUrl}/api/poster/${slug}?country=${countryInfo.code}&currency=${countryInfo.currency}`;
+
   return {
     title: `${groupBuy.name} — GMK Tracker`,
     description: groupBuy.subtitle ?? groupBuy.description ?? `Compare prices for ${groupBuy.name} from vendors worldwide.`,
@@ -28,15 +35,13 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
       title: groupBuy.name,
       description: groupBuy.subtitle ?? `${groupBuy.name} by ${groupBuy.designer}`,
       url,
-      images: normalizeImageUrl(groupBuy.imageUrl)
-        ? [{ url: normalizeImageUrl(groupBuy.imageUrl)!, width: 1200, height: 630, alt: groupBuy.name }]
-        : [],
+      images: [{ url: posterUrl, width: 900, height: 1020, alt: groupBuy.name }],
     },
     twitter: {
       card: "summary_large_image",
       title: groupBuy.name,
       description: groupBuy.subtitle ?? `Compare prices for ${groupBuy.name}`,
-      images: normalizeImageUrl(groupBuy.imageUrl) ? [normalizeImageUrl(groupBuy.imageUrl)!] : [],
+      images: [posterUrl],
     },
   };
 }

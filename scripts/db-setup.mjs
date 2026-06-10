@@ -176,6 +176,7 @@ async function main() {
 
       if (alreadyPopulated) {
         await ensureImagesColumn(client);
+        await ensureVendorSuggestionTable(client);
         await resetPollutedGalleries(client);
         await backfillShipping(client);
         await cleanupInterestChecks(client);
@@ -200,6 +201,7 @@ async function main() {
 
     await ensureImagesColumn(client);
     await ensureVariantsColumn(client);
+    await ensureVendorSuggestionTable(client);
     await resetPollutedGalleries(client);
     await backfillShipping(client);
     await cleanupInterestChecks(client);
@@ -336,8 +338,9 @@ async function requeueCurrencyMismatches(client) {
 // The old price scraper took the CHEAPEST Shopify variant, which on group-buy
 // listings is often a cheap add-on (deskmat, sample, deposit) — producing
 // absurd kit prices like $22. The scraper now picks the real BASE kit variant
-// and bounds prices to a plausible range (30–500 in western currencies), so any
-// stored SCRAPED price outside that range is garbage: null it out and clear
+// and bounds prices to a plausible per-currency window (mirrors KIT_BOUNDS in
+// src/lib/import/prices.ts — calibrated as SGD 95–310 FX-converted), so any
+// stored SCRAPED price outside that window is garbage: null it out and clear
 // priceUpdatedAt so the nightly refresh re-scrapes those rows first.
 // Idempotent — the fixed scraper never writes such prices again, and MANUAL
 // prices are never touched.
@@ -347,14 +350,40 @@ async function purgeImplausibleScrapedPrices(client) {
       `UPDATE public."VendorKit"
        SET price = NULL, "priceUpdatedAt" = NULL
        WHERE "priceSource" = 'SCRAPED'
-         AND price IS NOT NULL AND (price < 30 OR price > 500)
-         AND currency IN ('USD','EUR','GBP','AUD','CAD','SGD')`
+         AND price IS NOT NULL
+         AND (
+              (currency = 'USD' AND (price < 70  OR price > 225))
+           OR (currency = 'EUR' AND (price < 65  OR price > 210))
+           OR (currency = 'GBP' AND (price < 55  OR price > 180))
+           OR (currency = 'AUD' AND (price < 100 OR price > 345))
+           OR (currency = 'CAD' AND (price < 95  OR price > 310))
+           OR (currency = 'SGD' AND (price < 95  OR price > 310))
+         )`
     );
     if (rowCount > 0) {
       console.log(`[db-setup] Purged ${rowCount} implausible scraped prices (re-scrape queued).`);
     }
   } catch (err) {
     console.warn(`[db-setup] Price purge skipped: ${err.message}`);
+  }
+}
+
+// Crowd-sourced vendor links: users submit a product URL via the "Add vendor
+// link" panel; the nightly refresh turns them into scrapeable VendorKits.
+async function ensureVendorSuggestionTable(client) {
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."VendorSuggestion" (
+         id            text NOT NULL PRIMARY KEY,
+         slug          text NOT NULL,
+         "productUrl"  text NOT NULL,
+         "vendorName"  text,
+         "submittedAt" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         processed     boolean NOT NULL DEFAULT false
+       )`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] VendorSuggestion table setup skipped: ${err.message}`);
   }
 }
 

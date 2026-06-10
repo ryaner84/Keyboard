@@ -124,3 +124,14 @@ model Currency {
   exchangeRateToUSD Float
   lastUpdated       DateTime @default(now())
 }
+
+// Crowd-sourced vendor product URLs submitted via the "Add vendor link" panel.
+// The nightly refresh turns unprocessed rows into scrapeable VendorKits.
+model VendorSuggestion {
+  id          String   @id @default(cuid())
+  slug        String
+  productUrl  String
+  vendorName  String?
+  submittedAt DateTime @default(now())
+  processed   Boolean  @default(false)
+}

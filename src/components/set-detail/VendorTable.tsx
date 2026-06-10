@@ -12,15 +12,14 @@ interface VendorTableProps {
   userCurrency: string;
   rates: ExchangeRates;
   loading: boolean;
+  onSuggestVendor?: () => void;
 }
 
 interface RowData {
   vk: VendorKitWithDetails;
-  hasPrice: boolean;
-  kitPriceLocal: number | null;
-  shippingLocal: number | null;
-  totalLocal: number | null;
-  shipsToRegion: boolean;
+  kitPriceLocal: number;
+  shippingLocal: number;
+  totalLocal: number;
   estimatedDays: string;
 }
 
@@ -30,47 +29,57 @@ export function VendorTable({
   userCurrency,
   rates,
   loading,
+  onSuggestVendor,
 }: VendorTableProps) {
   const rows: RowData[] = useMemo(() => {
-    return vendorKits.map((vk) => {
-      // Pick the shipping zone for the *user's* region (was incorrectly using
-      // the first zone, so SG users saw another region's rate or "doesn't ship").
+    const out: RowData[] = [];
+    for (const vk of vendorKits) {
+      // Vendors without a scraped/manual kit price are not shown at all —
+      // a row with no price is noise, not information.
+      if (vk.price == null || !vk.currency) continue;
+
+      // Pick the shipping zone for the *user's* region.
       const zone = vk.vendor.shippingZones?.find(
         (z) => z.destinationRegion === userRegion
       );
-      const shipsToRegion = zone?.shipsToRegion ?? false;
+      if (!zone?.shipsToRegion || !vk.inStock) continue;
 
-      const hasPrice = vk.price != null && vk.currency != null;
-      const kitPriceLocal = hasPrice
-        ? convertCurrency(vk.price as number, vk.currency as string, userCurrency, rates)
-        : null;
-
-      const shippingLocal =
-        zone && shipsToRegion
-          ? convertCurrency(zone.baseShippingCost, zone.currency, userCurrency, rates)
-          : null;
-
-      const totalLocal =
-        kitPriceLocal != null ? kitPriceLocal + (shippingLocal ?? 0) : null;
-
+      const kitPriceLocal = convertCurrency(
+        vk.price as number,
+        vk.currency as string,
+        userCurrency,
+        rates
+      );
+      const shippingLocal = convertCurrency(
+        zone.baseShippingCost,
+        zone.currency,
+        userCurrency,
+        rates
+      );
       const estimatedDays =
-        zone && shipsToRegion && zone.estimatedDaysMin > 0
+        zone.estimatedDaysMin > 0
           ? `${zone.estimatedDaysMin}–${zone.estimatedDaysMax} days`
-          : shipsToRegion
-            ? "Free/standard shipping"
-            : "—";
+          : "Standard shipping";
 
-      return { vk, hasPrice, kitPriceLocal, shippingLocal, totalLocal, shipsToRegion, estimatedDays };
-    });
+      out.push({
+        vk,
+        kitPriceLocal,
+        shippingLocal,
+        totalLocal: kitPriceLocal + shippingLocal,
+        estimatedDays,
+      });
+    }
+    // Cheapest total first.
+    out.sort((a, b) => a.totalLocal - b.totalLocal);
+    return out;
   }, [vendorKits, userRegion, userCurrency, rates]);
 
-  const sorted = useMemo(() => {
-    // Priced + ships-here rows first (cheapest first), then the rest.
-    const priced = rows.filter((r) => r.totalLocal != null && r.shipsToRegion && r.vk.inStock);
-    const rest = rows.filter((r) => !(r.totalLocal != null && r.shipsToRegion && r.vk.inStock));
-    priced.sort((a, b) => (a.totalLocal! - b.totalLocal!));
-    return [...priced, ...rest];
-  }, [rows]);
+  // Vendors that exist but aren't shown (no price yet) — surfaced only as a
+  // nudge to contribute a product link.
+  const hiddenCount = useMemo(
+    () => vendorKits.length - rows.length,
+    [vendorKits, rows]
+  );
 
   if (loading) {
     return (
@@ -82,19 +91,26 @@ export function VendorTable({
     );
   }
 
-  if (sorted.length === 0) {
+  if (rows.length === 0) {
     return (
-      <div className="text-center py-10 text-gray-400">
-        No vendors listed for this set yet.
+      <div className="text-center py-10">
+        <p className="text-gray-400 mb-3">No pricing data available for this region yet.</p>
+        {onSuggestVendor && (
+          <button
+            onClick={onSuggestVendor}
+            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium underline underline-offset-2"
+          >
+            Know a vendor? Add a link →
+          </button>
+        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-2">
-      {sorted.map((row, idx) => {
-        const isBest = idx === 0 && row.totalLocal != null && row.shipsToRegion && row.vk.inStock;
-        const unavailable = !row.shipsToRegion || !row.vk.inStock;
+      {rows.map((row, idx) => {
+        const isBest = idx === 0;
 
         return (
           <div
@@ -102,9 +118,7 @@ export function VendorTable({
             className={`flex items-center gap-3 p-4 rounded-xl border transition-colors ${
               isBest
                 ? "bg-green-50 border-green-200"
-                : unavailable
-                  ? "bg-gray-50 border-gray-100 opacity-70"
-                  : "bg-white border-gray-100 hover:border-indigo-100 hover:bg-indigo-50/30"
+                : "bg-white border-gray-100 hover:border-indigo-100 hover:bg-indigo-50/30"
             }`}
           >
             {/* Vendor info */}
@@ -115,7 +129,7 @@ export function VendorTable({
                 </span>
               </div>
               <div className="min-w-0">
-                <p className={`text-sm font-semibold truncate ${unavailable ? "text-gray-400" : "text-gray-900"}`}>
+                <p className="text-sm font-semibold truncate text-gray-900">
                   {row.vk.vendor.name}
                   {isBest && (
                     <span className="ml-2 px-1.5 py-0.5 bg-green-600 text-white text-xs rounded-full font-medium">
@@ -129,94 +143,65 @@ export function VendorTable({
               </div>
             </div>
 
-            {/* Price + shipping area */}
-            {!unavailable ? (
-              <>
-                {/* Kit price (hidden on the smallest screens) */}
-                <div className="text-right hidden sm:block w-20">
-                  <p className="text-xs text-gray-400">Kit</p>
-                  <p className="text-sm text-gray-700">
-                    {row.hasPrice ? formatCurrency(row.kitPriceLocal!, userCurrency) : "—"}
-                  </p>
-                </div>
-                {/* Shipping — always shown (DHL estimate) */}
-                <div className="text-right w-24">
-                  <p className="text-xs text-gray-400">
-                    Ship <span className="text-gray-300">· DHL est.</span>
-                  </p>
-                  <p className="text-sm text-gray-700">
-                    {row.shippingLocal != null
-                      ? formatCurrency(row.shippingLocal, userCurrency)
-                      : "—"}
-                  </p>
-                </div>
-                {/* Total + buy/view action */}
-                {row.hasPrice ? (
-                  <>
-                    <div className="text-right w-24">
-                      <p className="text-xs text-gray-400">Total</p>
-                      <p className={`text-base font-bold ${isBest ? "text-green-700" : "text-gray-900"}`}>
-                        {formatCurrency(row.totalLocal!, userCurrency)}
-                      </p>
-                      {row.vk.priceUpdatedAt && (
-                        <p className="text-[10px] text-gray-400 mt-0.5">
-                          Updated {formatRelativeDate(row.vk.priceUpdatedAt)}
-                        </p>
-                      )}
-                    </div>
-                    {(row.vk.gbUrl || row.vk.productUrl) && (
-                      <a
-                        href={(row.vk.gbUrl || row.vk.productUrl)!}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="ml-1 px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 transition-colors whitespace-nowrap flex-shrink-0"
-                      >
-                        Buy →
-                      </a>
-                    )}
-                  </>
-                ) : (
-                  <div className="text-right flex flex-col items-end gap-1">
-                    <span className="text-[11px] text-gray-400">Kit price on site</span>
-                    {(row.vk.gbUrl || row.vk.productUrl) && (
-                      <a
-                        href={(row.vk.gbUrl || row.vk.productUrl)!}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1.5 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:border-indigo-300 hover:text-indigo-600 transition-colors whitespace-nowrap flex-shrink-0"
-                      >
-                        View on vendor site →
-                      </a>
-                    )}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="flex items-center gap-3 ml-auto">
-                <span className="text-xs text-gray-400 text-right">
-                  {!row.vk.inStock ? "Not in stock yet" : `Doesn't ship to ${userRegion}`}
-                </span>
-                {(row.vk.gbUrl || row.vk.productUrl) && (
-                  <a
-                    href={(row.vk.gbUrl || row.vk.productUrl)!}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1.5 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:border-indigo-300 hover:text-indigo-600 transition-colors whitespace-nowrap flex-shrink-0"
-                  >
-                    View on vendor site →
-                  </a>
-                )}
-              </div>
+            {/* Kit price (hidden on the smallest screens) */}
+            <div className="text-right hidden sm:block w-20">
+              <p className="text-xs text-gray-400">Kit</p>
+              <p className="text-sm text-gray-700">{formatCurrency(row.kitPriceLocal, userCurrency)}</p>
+            </div>
+
+            {/* Shipping — DHL estimate */}
+            <div className="text-right w-24">
+              <p className="text-xs text-gray-400">
+                Ship <span className="text-gray-300">· DHL est.</span>
+              </p>
+              <p className="text-sm text-gray-700">
+                {row.shippingLocal === 0 ? "Free" : formatCurrency(row.shippingLocal, userCurrency)}
+              </p>
+            </div>
+
+            {/* Total */}
+            <div className="text-right w-24">
+              <p className="text-xs text-gray-400">Total</p>
+              <p className={`text-base font-bold ${isBest ? "text-green-700" : "text-gray-900"}`}>
+                {formatCurrency(row.totalLocal, userCurrency)}
+              </p>
+              {row.vk.priceUpdatedAt && (
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  Updated {formatRelativeDate(row.vk.priceUpdatedAt)}
+                </p>
+              )}
+            </div>
+
+            {/* Buy button */}
+            {(row.vk.gbUrl || row.vk.productUrl) && (
+              <a
+                href={(row.vk.gbUrl || row.vk.productUrl)!}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ml-1 px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 transition-colors whitespace-nowrap flex-shrink-0"
+              >
+                Buy →
+              </a>
             )}
           </div>
         );
       })}
 
-      {/* DHL shipping disclaimer */}
-      <p className="text-xs text-gray-400 pt-2">
-        Shipping is an estimate via DHL Express (~1&nbsp;kg parcel) to {userRegion}. The
-        final shipping cost is set at checkout on the vendor&apos;s own site.
-      </p>
+      {/* Footer: DHL disclaimer + vendor-link nudge */}
+      <div className="flex items-start justify-between gap-4 pt-2">
+        <p className="text-xs text-gray-400 flex-1">
+          Shipping is an estimate via DHL Express (~1&nbsp;kg parcel) to {userRegion}. The
+          final shipping cost is set at checkout on the vendor&apos;s own site.
+        </p>
+        {hiddenCount > 0 && onSuggestVendor && (
+          <button
+            onClick={onSuggestVendor}
+            className="text-xs text-indigo-500 hover:text-indigo-700 whitespace-nowrap font-medium shrink-0"
+          >
+            + Add vendor link
+          </button>
+        )}
+      </div>
     </div>
   );
 }

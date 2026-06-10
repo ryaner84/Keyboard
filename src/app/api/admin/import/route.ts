@@ -4,6 +4,7 @@ import { verifyAdminToken } from "@/lib/auth";
 import { importGmkSets } from "@/lib/import/keycaplendar";
 import { refreshPrices } from "@/lib/import/prices";
 import { enrichImagesFromGmk } from "@/lib/import/enrich-images";
+import { applyVendorLinkOverrides, processVendorSuggestions } from "@/lib/import/vendor-overrides";
 
 // Vercel Hobby caps serverless functions at 60s. The price scrape is time-boxed
 // against the remaining budget below so the request always returns gracefully.
@@ -32,6 +33,11 @@ export async function POST(req: NextRequest) {
       ? null
       : await importGmkSets({ maxRuntimeMs: REQUEST_BUDGET_MS * 0.6 });
 
+    // Hand-curated vendor links + user-submitted suggestions become scrapeable
+    // VendorKits before the price run (cheap DB-only work, a handful of rows).
+    const overrides = await applyVendorLinkOverrides();
+    const suggestions = await processVendorSuggestions();
+
     // Give the price scrape whatever time is left after the import so the two
     // together stay within the function limit.
     const remaining = REQUEST_BUDGET_MS - (Date.now() - start);
@@ -49,6 +55,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       import: importResult,
+      overrides,
+      suggestions,
       prices: priceResult,
       images: imageResult,
       ranAt: new Date().toISOString(),

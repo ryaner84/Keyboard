@@ -48,21 +48,35 @@ async function fetchWithTimeout(url: string): Promise<Response> {
 const ADDON_VARIANT_RE =
   /(desk\s?mat|mouse\s?pad|wrist\s?rest|cable|artisan|sticker|sample|keychain|coin|tray|deposit|shipping|insurance|add[\s-]?on|extra)/i;
 
-// A GMK base kit never sells this low in any western currency — a price under
-// this is an add-on variant or parse error, not the kit. The ceiling catches
-// the opposite failure: bundle/full-collection variants or parse errors that
-// would show an absurdly high "base kit" price.
-const MIN_PLAUSIBLE_KIT_PRICE = 30;
-const MAX_PLAUSIBLE_KIT_PRICE = 500;
-const SANITY_CURRENCIES = new Set(["USD", "EUR", "GBP", "AUD", "CAD", "SGD"]);
+// Per-currency plausibility bounds for a GMK BASE kit. Real base kits run
+// roughly USD 90–180; the bounds leave headroom for sales and premium sets but
+// reject add-on variants and bundle/parse errors. Calibrated in SGD first
+// (primary market): anything below S$95 or above S$310 is definitely not a
+// base kit price; other currencies are that same window FX-converted.
+const KIT_BOUNDS: Record<string, { min: number; max: number }> = {
+  USD: { min: 70, max: 225 },
+  EUR: { min: 65, max: 210 },
+  GBP: { min: 55, max: 180 },
+  AUD: { min: 100, max: 345 },
+  CAD: { min: 95, max: 310 },
+  SGD: { min: 95, max: 310 },
+};
 
-// Plausibility check for a BASE kit price. Currencies outside the sanity set
+// Plausibility check for a BASE kit price. Currencies without bounds
 // (e.g. JPY, KRW) have very different magnitudes, so we don't bound them.
-// `currency === null` means the store's currency is unknown — still bound it,
-// since the fallback is always one of the western vendor currencies.
+// `currency === null` means the store's currency is unknown — bound it as
+// USD, since the fallback is always one of the western vendor currencies.
 export function isPlausibleBaseKitPrice(price: number, currency: string | null): boolean {
-  if (currency !== null && !SANITY_CURRENCIES.has(currency)) return true;
-  return price >= MIN_PLAUSIBLE_KIT_PRICE && price <= MAX_PLAUSIBLE_KIT_PRICE;
+  const b = KIT_BOUNDS[currency ?? "USD"];
+  if (!b) return true;
+  return price >= b.min && price <= b.max;
+}
+
+// Some stores link products through a collection path
+// (e.g. ktechs.store/collections/group-buy/products/X); the .json endpoint
+// lives on the canonical /products/X path.
+function normalizeShopifyUrl(url: string): string {
+  return url.replace(/\/collections\/[^/]+\/products\//, "/products/");
 }
 
 // Shopify exposes a product's data at {productUrl}.json — used by most
@@ -71,7 +85,7 @@ async function fetchShopifyPrice(productUrl: string): Promise<PriceResult | null
   if (!productUrl.includes("/products/")) return null;
 
   // Strip query/hash, then request the .json variant.
-  const clean = productUrl.split("?")[0].split("#")[0].replace(/\/$/, "");
+  const clean = normalizeShopifyUrl(productUrl).split("?")[0].split("#")[0].replace(/\/$/, "");
   const jsonUrl = `${clean}.json`;
 
   try {

@@ -6287,3 +6287,18 @@ ALTER TABLE ONLY public."VendorKit"
 --
 
 
+
+
+--
+-- VendorSuggestion (added 2026-06-10): crowd-sourced vendor product URLs
+-- submitted via the "Add vendor link" panel. Idempotent.
+--
+
+CREATE TABLE IF NOT EXISTS public."VendorSuggestion" (
+    id text NOT NULL PRIMARY KEY,
+    slug text NOT NULL,
+    "productUrl" text NOT NULL,
+    "vendorName" text,
+    "submittedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    processed boolean DEFAULT false NOT NULL
+);

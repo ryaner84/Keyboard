@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
+import { useState, useMemo } from "react";
 import { VendorTable } from "@/components/set-detail/VendorTable";
 import { SharePosterButton } from "@/components/set-detail/SharePosterButton";
+import { SuggestVendorPanel } from "@/components/set-detail/SuggestVendorPanel";
 import { useLocation } from "@/context/LocationContext";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
@@ -31,6 +32,7 @@ export function SetDetailClient({ groupBuy }: Props) {
   const { region, currency, countryCode } = useLocation();
   const { rates, loading } = useCurrency(currency);
   const { isTracked, toggle } = useTrackedSets();
+  const [suggestOpen, setSuggestOpen] = useState(false);
 
   // Only the base kit is ever shown — buyers use base kit price as the decision
   // factor; add-ons are secondary and researched separately.
@@ -90,10 +92,8 @@ export function SetDetailClient({ groupBuy }: Props) {
 
         <SharePosterButton
           slug={groupBuy.slug}
-
           countryCode={countryCode}
           currency={currency}
-          bestPrice={bestPrice ?? undefined}
         />
       </div>
 
@@ -127,8 +127,29 @@ export function SetDetailClient({ groupBuy }: Props) {
           userCurrency={currency}
           rates={rates}
           loading={loading}
+          onSuggestVendor={() => setSuggestOpen(true)}
         />
       </div>
+
+      {/* "Add vendor link" — fixed right-side tab, below the location tab */}
+      <button
+        onClick={() => setSuggestOpen(true)}
+        className="fixed z-30 right-0 flex items-center gap-2 px-2 py-3 rounded-l-xl shadow-lg text-xs font-semibold tracking-wide bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+        style={{ top: "calc(50% + 80px)", writingMode: "vertical-rl" }}
+        aria-label="Suggest a vendor link"
+      >
+        <svg className="w-4 h-4 rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+        </svg>
+        Add vendor link
+      </button>
+
+      {/* Slide-out suggest panel */}
+      <SuggestVendorPanel
+        slug={groupBuy.slug}
+        isOpen={suggestOpen}
+        onClose={() => setSuggestOpen(false)}
+      />
     </div>
   );
 }
