@@ -6,9 +6,13 @@ import { refreshPrices } from "../lib/import/prices";
 
 async function main() {
   console.log("Importing GMK sets from KeycapLendar...");
-  const importResult = await importGmkSets();
+  // Local run: no serverless limit, so give it plenty of time to finish.
+  const importResult = await importGmkSets({ maxRuntimeMs: 30 * 60_000 });
   console.log(
-    `Imported ${importResult.sets} sets, ${importResult.vendors} vendors, ${importResult.vendorKits} vendor listings.`
+    `Imported ${importResult.sets} sets (${importResult.unchanged} unchanged), ` +
+      `${importResult.vendors} vendors, ${importResult.vendorKits} vendor listings` +
+      (importResult.stoppedEarly ? " (stopped early — time budget hit)" : "") +
+      "."
   );
 
   const limit = Number(process.env.PRICE_LIMIT ?? "5000");

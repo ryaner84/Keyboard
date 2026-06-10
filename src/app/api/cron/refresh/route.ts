@@ -27,7 +27,12 @@ export async function GET(req: NextRequest) {
 
   try {
     const start = Date.now();
-    const importResult = skipImport ? null : await importGmkSets();
+    // The import is diff-based (bulk reads + writes only for changed rows), so
+    // it normally finishes in seconds; the budget is a safety net for first
+    // runs or KeycapLendar slowness.
+    const importResult = skipImport
+      ? null
+      : await importGmkSets({ maxRuntimeMs: REQUEST_BUDGET_MS * 0.6 });
 
     // Give the price scrape whatever time is left in the budget after the import,
     // so import + scrape together never exceed the function limit.

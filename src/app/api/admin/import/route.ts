@@ -28,7 +28,9 @@ export async function POST(req: NextRequest) {
 
   try {
     const start = Date.now();
-    const importResult = skipImport ? null : await importGmkSets();
+    const importResult = skipImport
+      ? null
+      : await importGmkSets({ maxRuntimeMs: REQUEST_BUDGET_MS * 0.6 });
 
     // Give the price scrape whatever time is left after the import so the two
     // together stay within the function limit.
