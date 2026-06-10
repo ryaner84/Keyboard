@@ -37,6 +37,16 @@ async function fetchWithTimeout(url: string): Promise<Response> {
   }
 }
 
+// Variant titles that are clearly NOT the keycap kit itself — GB listings
+// often bundle add-ons (deskmats, samples, deposits...) as cheap variants.
+const ADDON_VARIANT_RE =
+  /(desk\s?mat|mouse\s?pad|wrist\s?rest|cable|artisan|sticker|sample|keychain|coin|tray|deposit|shipping|insurance|add[\s-]?on|extra)/i;
+
+// A GMK base kit never sells this low in any western currency — a price under
+// this is an add-on variant or parse error, not the kit.
+const MIN_PLAUSIBLE_KIT_PRICE = 30;
+const SANITY_CURRENCIES = new Set(["USD", "EUR", "GBP", "AUD", "CAD", "SGD"]);
+
 // Shopify exposes a product's data at {productUrl}.json — used by most
 // keyboard vendors (CannonKeys, NovelKeys, KBDfans, Deskhero, Daily Clack...).
 async function fetchShopifyPrice(productUrl: string): Promise<PriceResult | null> {
@@ -50,20 +60,32 @@ async function fetchShopifyPrice(productUrl: string): Promise<PriceResult | null
     const res = await fetchWithTimeout(jsonUrl);
     if (!res.ok) return null;
     const data = (await res.json()) as {
-      product?: { variants?: Array<{ price?: string | number; available?: boolean }> };
+      product?: {
+        variants?: Array<{ title?: string; price?: string | number; available?: boolean }>;
+      };
     };
-    const variants = data.product?.variants ?? [];
+    const variants = (data.product?.variants ?? [])
+      .map((v) => ({ title: String(v.title ?? ""), price: Number(v.price) }))
+      .filter((v) => !isNaN(v.price) && v.price > 0);
     if (variants.length === 0) return null;
 
-    // Use the cheapest available variant (usually the base kit).
-    const prices = variants
-      .map((v) => Number(v.price))
-      .filter((p) => !isNaN(p) && p > 0);
-    if (prices.length === 0) return null;
-    const price = Math.min(...prices);
+    // Pick the variant that is actually the kit, NOT the cheapest one — GB
+    // listings carry cheap add-on variants (deskmats, samples, deposits) that
+    // used to win a Math.min and produce absurd prices like $22 for a base kit.
+    // Preference: a variant titled "base" > first non-add-on variant (Shopify
+    // returns variants in display order; the primary kit comes first).
+    const nonAddon = variants.filter((v) => !ADDON_VARIANT_RE.test(v.title));
+    const pool = nonAddon.length > 0 ? nonAddon : variants;
+    const chosen = pool.find((v) => /base/i.test(v.title)) ?? pool[0];
 
-    const currency = await fetchShopifyCurrency(clean);
-    return { price, currency: currency ?? "USD" };
+    const currency = (await fetchShopifyCurrency(clean)) ?? "USD";
+
+    // Sanity floor: refuse implausibly low kit prices rather than store garbage.
+    if (SANITY_CURRENCIES.has(currency) && chosen.price < MIN_PLAUSIBLE_KIT_PRICE) {
+      return null;
+    }
+
+    return { price: chosen.price, currency };
   } catch {
     return null;
   }

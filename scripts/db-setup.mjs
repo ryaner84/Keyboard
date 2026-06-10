@@ -179,6 +179,7 @@ async function main() {
         await resetPollutedGalleries(client);
         await backfillShipping(client);
         await cleanupInterestChecks(client);
+        await purgeImplausibleScrapedPrices(client);
       }
     }
 
@@ -266,6 +267,30 @@ async function resetPollutedGalleries(client) {
     }
   } catch (err) {
     console.warn(`[db-setup] Gallery cleanup skipped: ${err.message}`);
+  }
+}
+
+// The old price scraper took the CHEAPEST Shopify variant, which on group-buy
+// listings is often a cheap add-on (deskmat, sample, deposit) — producing
+// absurd kit prices like $22. The scraper now picks the real kit variant and
+// refuses prices under 30 in western currencies, so any stored SCRAPED price
+// below that floor is garbage: null it out and clear priceUpdatedAt so the
+// nightly refresh re-scrapes those rows first. Idempotent — the fixed scraper
+// never writes such prices again, and MANUAL prices are never touched.
+async function purgeImplausibleScrapedPrices(client) {
+  try {
+    const { rowCount } = await client.query(
+      `UPDATE public."VendorKit"
+       SET price = NULL, "priceUpdatedAt" = NULL
+       WHERE "priceSource" = 'SCRAPED'
+         AND price IS NOT NULL AND price < 30
+         AND currency IN ('USD','EUR','GBP','AUD','CAD','SGD')`
+    );
+    if (rowCount > 0) {
+      console.log(`[db-setup] Purged ${rowCount} implausibly low scraped prices (re-scrape queued).`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Price purge skipped: ${err.message}`);
   }
 }
 
