@@ -185,7 +185,7 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
     const colorway = ks.colorway ?? null;
 
     let setChanged = false;
-    let existing = setBySlug.get(slug);
+    const existing = setBySlug.get(slug);
     let groupBuyId: string;
 
     if (!existing) {
