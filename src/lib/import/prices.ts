@@ -24,7 +24,12 @@ const DEFAULT_MAX_RUNTIME_MS = 50_000;
 
 export interface PriceResult {
   price: number;
-  currency: string;
+  // null when the store's /meta.json is blocked — caller must fall back to the
+  // vendor's own currency, never assume USD.
+  currency: string | null;
+  // Every variant on the product page, in display order: feeds the
+  // Base / Alpha / Novelties / Spacebars / Others filter on the set page.
+  variants: Array<{ title: string; price: number }>;
 }
 
 async function fetchWithTimeout(url: string): Promise<Response> {
@@ -78,14 +83,17 @@ async function fetchShopifyPrice(productUrl: string): Promise<PriceResult | null
     const pool = nonAddon.length > 0 ? nonAddon : variants;
     const chosen = pool.find((v) => /base/i.test(v.title)) ?? pool[0];
 
-    const currency = (await fetchShopifyCurrency(clean)) ?? "USD";
+    // May be null when the store blocks /meta.json — the caller falls back to
+    // the vendor's own currency (e.g. Deskhero = CAD), NOT a blind USD default
+    // which previously inflated CA$88 into US$88.
+    const currency = await fetchShopifyCurrency(clean);
 
     // Sanity floor: refuse implausibly low kit prices rather than store garbage.
-    if (SANITY_CURRENCIES.has(currency) && chosen.price < MIN_PLAUSIBLE_KIT_PRICE) {
+    if ((currency === null || SANITY_CURRENCIES.has(currency)) && chosen.price < MIN_PLAUSIBLE_KIT_PRICE) {
       return null;
     }
 
-    return { price: chosen.price, currency };
+    return { price: chosen.price, currency, variants };
   } catch {
     return null;
   }
@@ -141,7 +149,7 @@ export interface RefreshResult {
 
 // Refresh one VendorKit's cached price: fetch, then write the outcome.
 async function refreshOne(
-  vk: { id: string; productUrl: string | null },
+  vk: { id: string; productUrl: string | null; vendor: { currency: string } },
   result: RefreshResult
 ): Promise<void> {
   if (!vk.productUrl) return;
@@ -152,9 +160,12 @@ async function refreshOne(
       where: { id: vk.id },
       data: {
         price: priceData.price,
-        currency: priceData.currency,
+        // Store currency (meta.json) when reachable; otherwise the vendor's
+        // own currency — e.g. Deskhero prices are CAD even when meta is blocked.
+        currency: priceData.currency ?? vk.vendor.currency,
         priceUpdatedAt: new Date(),
         priceSource: "SCRAPED",
+        variants: priceData.variants,
       },
     });
     result.updated++;
@@ -201,7 +212,7 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
     },
     orderBy: [{ priceUpdatedAt: { sort: "asc", nulls: "first" } }],
     take: limit,
-    select: { id: true, productUrl: true },
+    select: { id: true, productUrl: true, vendor: { select: { currency: true } } },
   });
 
   const result: RefreshResult = { attempted: 0, updated: 0, failed: 0, stoppedEarly: false };

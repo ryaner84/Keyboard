@@ -91,6 +91,9 @@ model VendorKit {
   productUrl     String?
   priceUpdatedAt DateTime?
   priceSource    String? // "LIVE" | "SCRAPED" | "MANUAL"
+  // All Shopify variants scraped from the product page: [{ title, price }].
+  // Powers the kit-category filter (Base / Alpha / Novelties / Spacebars / Others).
+  variants       Json?
   notes          String?
   updatedAt      DateTime  @updatedAt
 

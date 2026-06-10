@@ -70,6 +70,9 @@ export interface VendorKitWithDetails {
   productUrl?: string | null;
   priceUpdatedAt?: Date | string | null;
   priceSource?: string | null;
+  // Raw scraped Shopify variants ([{ title, price }]) — parse with
+  // parseVariants() from "@/lib/kit-variants".
+  variants?: unknown;
   notes: string | null;
   vendor: VendorWithZones;
 }

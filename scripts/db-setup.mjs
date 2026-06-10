@@ -179,7 +179,9 @@ async function main() {
         await resetPollutedGalleries(client);
         await backfillShipping(client);
         await cleanupInterestChecks(client);
+        await ensureVariantsColumn(client);
         await purgeImplausibleScrapedPrices(client);
+        await requeueCurrencyMismatches(client);
       }
     }
 
@@ -196,6 +198,7 @@ async function main() {
     console.log(`[db-setup] Done. Loaded ${rows[0].n} group buys.`);
 
     await ensureImagesColumn(client);
+    await ensureVariantsColumn(client);
     await resetPollutedGalleries(client);
     await backfillShipping(client);
     await cleanupInterestChecks(client);
@@ -267,6 +270,59 @@ async function resetPollutedGalleries(client) {
     }
   } catch (err) {
     console.warn(`[db-setup] Gallery cleanup skipped: ${err.message}`);
+  }
+}
+
+// Ensure the VendorKit.variants jsonb column exists (added for the kit-category
+// price filter — stores every scraped Shopify variant as [{ title, price }]).
+async function ensureVariantsColumn(client) {
+  try {
+    await client.query(
+      `ALTER TABLE public."VendorKit" ADD COLUMN IF NOT EXISTS variants jsonb`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] variants column setup skipped: ${err.message}`);
+  }
+}
+
+// ONE-TIME: scraped rows whose currency defaulted to USD while the vendor's
+// own currency differs (e.g. Deskhero CAD prices stored as USD, inflating
+// CA$88 to US$88). Clear priceUpdatedAt so the nightly refresh re-scrapes them
+// first with the fixed fallback. Sentinel-guarded — a store may legitimately
+// sell in USD from a non-USD country, so this must not loop every deploy.
+async function requeueCurrencyMismatches(client) {
+  const KEY = "requeue_usd_mismatch_v1";
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."_AppMigrations" (
+         key text PRIMARY KEY,
+         applied_at timestamptz NOT NULL DEFAULT now()
+       )`
+    );
+    const done = await client.query(
+      `SELECT 1 FROM public."_AppMigrations" WHERE key = $1`,
+      [KEY]
+    );
+    if (done.rowCount > 0) return;
+
+    const { rowCount } = await client.query(
+      `UPDATE public."VendorKit" vk
+       SET "priceUpdatedAt" = NULL
+       FROM public."Vendor" v
+       WHERE vk."vendorId" = v.id
+         AND vk."priceSource" = 'SCRAPED'
+         AND vk.currency = 'USD'
+         AND v.currency <> 'USD'`
+    );
+    await client.query(
+      `INSERT INTO public."_AppMigrations" (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
+      [KEY]
+    );
+    if (rowCount > 0) {
+      console.log(`[db-setup] Re-queued ${rowCount} possibly mis-currencied prices for re-scrape (one-time).`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Currency mismatch requeue skipped: ${err.message}`);
   }
 }
 

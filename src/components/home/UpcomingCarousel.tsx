@@ -147,9 +147,11 @@ export function UpcomingCarousel({ sets }: UpcomingCarouselProps) {
               {sets.slice(0, 5).map((set, i) => {
                 const label = getCountdownLabel(set.status, set.gbStart, set.gbEnd);
                 return (
-                  <button
+                  // Click navigates to the set page; hovering previews it in the
+                  // big image on the left.
+                  <Link
                     key={set.id}
-                    onClick={() => go(i)}
+                    href={href(set.slug)}
                     onMouseEnter={() => go(i)}
                     className={`flex items-center gap-3 p-2 rounded-xl text-left transition-colors ${
                       i === active ? "bg-indigo-50" : "hover:bg-gray-50"
@@ -166,7 +168,7 @@ export function UpcomingCarousel({ sets }: UpcomingCarouselProps) {
                       <p className="text-sm font-medium text-gray-900 truncate">{set.name}</p>
                       <p className="text-xs text-gray-400">{label ?? set.designer}</p>
                     </div>
-                  </button>
+                  </Link>
                 );
               })}
             </div>
