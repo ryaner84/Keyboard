@@ -202,6 +202,9 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
   const candidates = await prisma.vendorKit.findMany({
     where: {
       productUrl: { not: null },
+      // Buyers decide on the base kit first — only base kit prices are shown
+      // on the site, so scraping is limited to BASE kits only.
+      kit: { type: "BASE" },
       // Never touch manually-entered prices. NULL priceSource (freshly imported,
       // never scraped) must be included — `not: "MANUAL"` alone would exclude
       // NULLs because `NULL <> 'MANUAL'` is NULL (not true) in SQL.

@@ -49,6 +49,7 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
     where: { slug },
     include: {
       kits: {
+        where: { type: "BASE" },
         include: {
           vendorKits: {
             include: {

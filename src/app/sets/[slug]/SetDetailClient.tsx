@@ -1,15 +1,12 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { KitSelector } from "@/components/set-detail/KitSelector";
+import { useMemo } from "react";
 import { VendorTable } from "@/components/set-detail/VendorTable";
-import { OtherItemsTable } from "@/components/set-detail/OtherItemsTable";
 import { SharePosterButton } from "@/components/set-detail/SharePosterButton";
 import { useLocation } from "@/context/LocationContext";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
 import { formatCurrency, convertCurrency } from "@/lib/currency-utils";
-import { VARIANT_CATEGORIES, categoryPrice, parseVariants, type VariantCategory } from "@/lib/kit-variants";
 import type { VendorKitWithDetails, Region } from "@/types";
 
 interface Kit {
@@ -35,19 +32,13 @@ export function SetDetailClient({ groupBuy }: Props) {
   const { rates, loading } = useCurrency(currency);
   const { isTracked, toggle } = useTrackedSets();
 
-  const [selectedKitId, setSelectedKitId] = useState<string>(
-    groupBuy.kits[0]?.id ?? ""
-  );
-  const [category, setCategory] = useState<VariantCategory>("BASE");
-
-  const selectedKit = useMemo(
-    () => groupBuy.kits.find((k) => k.id === selectedKitId) ?? groupBuy.kits[0],
-    [groupBuy.kits, selectedKitId]
-  );
+  // Only the base kit is ever shown — buyers use base kit price as the decision
+  // factor; add-ons are secondary and researched separately.
+  const baseKit = groupBuy.kits[0];
 
   const vendorKitsForRegion = useMemo(() => {
-    if (!selectedKit) return [];
-    return selectedKit.vendorKits.map((vk) => ({
+    if (!baseKit) return [];
+    return baseKit.vendorKits.map((vk) => ({
       ...vk,
       vendor: {
         ...vk.vendor,
@@ -56,30 +47,11 @@ export function SetDetailClient({ groupBuy }: Props) {
         ),
       },
     }));
-  }, [selectedKit, region]);
-
-  // Apply the kit-category filter. For each standard category the vendor's
-  // price comes from its scraped variants; vendors whose catalog shows they
-  // don't carry that kit are dropped, while vendors not yet scanned keep a
-  // null price ("view on vendor site"). BASE falls back to the stored price.
-  const vendorKitsForCategory = useMemo(() => {
-    if (category === "OTHERS") return vendorKitsForRegion;
-    return vendorKitsForRegion
-      .map((vk) => {
-        const fromVariants = categoryPrice(vk.variants, category);
-        if (fromVariants != null) return { ...vk, price: fromVariants };
-        if (category === "BASE") return vk; // stored price IS the base price
-        // No scanned variants at all → keep with unknown price; scanned but
-        // missing this category → vendor doesn't sell it, drop the row.
-        return parseVariants(vk.variants).length === 0 ? { ...vk, price: null } : null;
-      })
-      .filter((vk): vk is NonNullable<typeof vk> => vk !== null);
-  }, [vendorKitsForRegion, category]);
+  }, [baseKit, region]);
 
   const bestPrice = useMemo(() => {
     if (!rates || Object.keys(rates).length === 0) return null;
-    if (category === "OTHERS") return null;
-    const available = vendorKitsForCategory.filter((vk) => {
+    const available = vendorKitsForRegion.filter((vk) => {
       const zone = vk.vendor.shippingZones[0];
       return vk.inStock && zone?.shipsToRegion && vk.price != null && vk.currency != null;
     });
@@ -94,7 +66,7 @@ export function SetDetailClient({ groupBuy }: Props) {
       if (total < min) min = total;
     }
     return min < Infinity ? formatCurrency(min, currency) : null;
-  }, [vendorKitsForCategory, category, rates, currency]);
+  }, [vendorKitsForRegion, rates, currency]);
 
   const tracked = isTracked(groupBuy.slug);
 
@@ -140,61 +112,22 @@ export function SetDetailClient({ groupBuy }: Props) {
         </div>
       )}
 
-      {/* Kit selector */}
-      {groupBuy.kits.length > 1 && (
-        <div className="mb-4">
-          <p className="text-sm font-medium text-gray-500 mb-2">Select kit</p>
-          <KitSelector
-            kits={groupBuy.kits}
-            selectedKitId={selectedKitId}
-            onChange={setSelectedKitId}
-          />
-        </div>
-      )}
-
-      {/* Vendor price table */}
+      {/* Vendor price table — base kit only */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-gray-900">
-            Prices to {countryCode} in {currency}
+            Base kit prices to {countryCode} in {currency}
           </h2>
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-xs text-gray-500">
-              Kit
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value as VariantCategory)}
-                className="px-2.5 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-400"
-              >
-                {VARIANT_CATEGORIES.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {category !== "OTHERS" && (
-              <span className="text-xs text-gray-400 hidden sm:inline">sorted by total cost</span>
-            )}
-          </div>
+          <span className="text-xs text-gray-400 hidden sm:inline">sorted by total cost</span>
         </div>
 
-        {category === "OTHERS" ? (
-          <OtherItemsTable
-            vendorKits={vendorKitsForCategory as never}
-            userCurrency={currency}
-            rates={rates}
-            loading={loading}
-          />
-        ) : (
-          <VendorTable
-            vendorKits={vendorKitsForCategory as never}
-            userRegion={region as Region}
-            userCurrency={currency}
-            rates={rates}
-            loading={loading}
-          />
-        )}
+        <VendorTable
+          vendorKits={vendorKitsForRegion as never}
+          userRegion={region as Region}
+          userCurrency={currency}
+          rates={rates}
+          loading={loading}
+        />
       </div>
     </div>
   );
