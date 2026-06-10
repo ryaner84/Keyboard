@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { classifyVariant } from "@/lib/kit-variants";
 
 const BROWSER_HEADERS = {
   "User-Agent":
@@ -48,9 +49,21 @@ const ADDON_VARIANT_RE =
   /(desk\s?mat|mouse\s?pad|wrist\s?rest|cable|artisan|sticker|sample|keychain|coin|tray|deposit|shipping|insurance|add[\s-]?on|extra)/i;
 
 // A GMK base kit never sells this low in any western currency — a price under
-// this is an add-on variant or parse error, not the kit.
+// this is an add-on variant or parse error, not the kit. The ceiling catches
+// the opposite failure: bundle/full-collection variants or parse errors that
+// would show an absurdly high "base kit" price.
 const MIN_PLAUSIBLE_KIT_PRICE = 30;
+const MAX_PLAUSIBLE_KIT_PRICE = 500;
 const SANITY_CURRENCIES = new Set(["USD", "EUR", "GBP", "AUD", "CAD", "SGD"]);
+
+// Plausibility check for a BASE kit price. Currencies outside the sanity set
+// (e.g. JPY, KRW) have very different magnitudes, so we don't bound them.
+// `currency === null` means the store's currency is unknown — still bound it,
+// since the fallback is always one of the western vendor currencies.
+export function isPlausibleBaseKitPrice(price: number, currency: string | null): boolean {
+  if (currency !== null && !SANITY_CURRENCIES.has(currency)) return true;
+  return price >= MIN_PLAUSIBLE_KIT_PRICE && price <= MAX_PLAUSIBLE_KIT_PRICE;
+}
 
 // Shopify exposes a product's data at {productUrl}.json — used by most
 // keyboard vendors (CannonKeys, NovelKeys, KBDfans, Deskhero, Daily Clack...).
@@ -74,22 +87,24 @@ async function fetchShopifyPrice(productUrl: string): Promise<PriceResult | null
       .filter((v) => !isNaN(v.price) && v.price > 0);
     if (variants.length === 0) return null;
 
-    // Pick the variant that is actually the kit, NOT the cheapest one — GB
+    // Pick the variant that is actually the BASE kit, NOT the cheapest one — GB
     // listings carry cheap add-on variants (deskmats, samples, deposits) that
     // used to win a Math.min and produce absurd prices like $22 for a base kit.
-    // Preference: a variant titled "base" > first non-add-on variant (Shopify
-    // returns variants in display order; the primary kit comes first).
+    // Preference: the variant classified BASE (same classifier the set-page
+    // filter uses, so the stored price always matches what's displayed) > first
+    // non-add-on variant (Shopify returns variants in display order; the
+    // primary kit comes first on single-kit listings titled "Default Title").
     const nonAddon = variants.filter((v) => !ADDON_VARIANT_RE.test(v.title));
     const pool = nonAddon.length > 0 ? nonAddon : variants;
-    const chosen = pool.find((v) => /base/i.test(v.title)) ?? pool[0];
+    const chosen = pool.find((v) => classifyVariant(v.title) === "BASE") ?? pool[0];
 
     // May be null when the store blocks /meta.json — the caller falls back to
     // the vendor's own currency (e.g. Deskhero = CAD), NOT a blind USD default
     // which previously inflated CA$88 into US$88.
     const currency = await fetchShopifyCurrency(clean);
 
-    // Sanity floor: refuse implausibly low kit prices rather than store garbage.
-    if ((currency === null || SANITY_CURRENCIES.has(currency)) && chosen.price < MIN_PLAUSIBLE_KIT_PRICE) {
+    // Refuse implausible kit prices rather than store garbage.
+    if (!isPlausibleBaseKitPrice(chosen.price, currency)) {
       return null;
     }
 

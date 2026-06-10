@@ -9,8 +9,13 @@ where the serverless scraper fails.
 
 It writes directly into the SAME Supabase Postgres DB the Vercel site reads,
 so updates appear live with no deploy:
-  - GroupBuy.images[]  (+ imageUrl = images[0])   from gmk.net galleries
-  - VendorKit.price/currency/priceUpdatedAt/priceSource='SCRAPED'  from vendors
+  - GroupBuy.images[]  (+ imageUrl = images[0])   from gmk.net galleries,
+    trimmed to the MAIN product gallery (related-products carousels excluded)
+    and REBUILT on every visit so polluted galleries self-heal
+  - VendorKit.price/currency/variants/priceUpdatedAt/priceSource='SCRAPED'
+    for BASE kits only — the price stored is the BASE kit variant (never the
+    cheapest add-on), bounded to a plausible range (30–500 in western
+    currencies)
 
 It NEVER overwrites a price whose priceSource = 'MANUAL'.
 
@@ -22,6 +27,7 @@ from __future__ import annotations
 import configparser
 import csv
 import getpass
+import json
 import os
 import re
 import sys
@@ -269,7 +275,9 @@ def get_connection(cfg: dict):
 
 
 # ----------------------------------------------------------------------------
-# Image extraction — ported verbatim from src/lib/import/gmk-images.ts
+# Image extraction — ported from src/lib/import/gmk-images.ts (incl. the
+# main-gallery trim; without it, related-products carousels leak OTHER sets'
+# images into this set's gallery).
 # ----------------------------------------------------------------------------
 _IMG_RE = re.compile(
     r"""(?:src|data-src|data-zoom-image|content)\s*=\s*["']([^"']+\.(?:jpe?g|png|webp)[^"']*)["']""",
@@ -277,10 +285,37 @@ _IMG_RE = re.compile(
 )
 _DROP_RE = re.compile(r"(logo|icon|sprite|payment|flag|placeholder)", re.IGNORECASE)
 
+# Shopware renders "related products" / "customers also bought" carousels at the
+# bottom of a product page, each carrying its own /media/ images. Those belong
+# to OTHER sets and must not leak into this set's gallery. Cut the HTML at the
+# first cross-selling marker so only the main product gallery remains.
+_TRIM_MARKERS = [
+    "cross-selling",
+    "cross-sell",
+    "cms-element-product-slider",
+    "product-slider",
+    "js-cross-selling",
+    "related products",
+    "customers also",
+    "you may also",
+]
+
+
+def trim_to_main_gallery(html: str) -> str:
+    low = html.lower()
+    cut = len(html)
+    for marker in _TRIM_MARKERS:
+        idx = low.find(marker)
+        if idx != -1 and idx < cut:
+            cut = idx
+    return html[:cut]
+
 
 def extract_gmk_images(html: str) -> list[str]:
+    # Only scan the main product gallery, not the related-products carousels.
+    scope = trim_to_main_gallery(html)
     seen: list[str] = []
-    for m in _IMG_RE.finditer(html):
+    for m in _IMG_RE.finditer(scope):
         u = m.group(1)
         if u.startswith("//"):
             u = "https:" + u
@@ -293,6 +328,12 @@ def extract_gmk_images(html: str) -> list[str]:
         if u not in seen:
             seen.append(u)
     return seen
+
+
+def is_gmk_media(url: str) -> bool:
+    """True for images scraped from gmk.net — the only ones a gallery rebuild
+    may replace. KeycapLendar renders / admin-entered images are kept."""
+    return "gmk.net" in url.lower()
 
 
 def dedupe_keep_order(items) -> list[str]:
@@ -320,7 +361,59 @@ def gmk_gallery(page: Page, url: str) -> list[str]:
         return []
 
 
-def shopify_price(page: Page, product_url: str) -> dict | None:
+# ---- Price variant selection — ported from src/lib/import/prices.ts and
+# src/lib/kit-variants.ts so BOTH scrapers store the same (BASE kit) price. ----
+
+# Variant titles that are clearly NOT the keycap kit itself — GB listings often
+# bundle add-ons (deskmats, samples, deposits...) as cheap variants.
+_ADDON_VARIANT_RE = re.compile(
+    r"(desk\s?mat|mouse\s?pad|wrist\s?rest|cable|artisan|sticker|sample|keychain"
+    r"|coin|tray|deposit|shipping|insurance|add[\s-]?on|extra)",
+    re.IGNORECASE,
+)
+
+# Plausibility bounds for a GMK base kit in western currencies. Outside this
+# range the value is an add-on, a bundle, or a parse error — refuse to store it.
+_MIN_PLAUSIBLE_KIT_PRICE = 30
+_MAX_PLAUSIBLE_KIT_PRICE = 500
+_SANITY_CURRENCIES = {"USD", "EUR", "GBP", "AUD", "CAD", "SGD"}
+
+
+def classify_variant(title: str) -> str:
+    """Mirror of classifyVariant in src/lib/kit-variants.ts — order matters."""
+    if re.search(r"novelt", title, re.IGNORECASE):
+        return "NOVELTIES"
+    if re.search(r"space\s*bar", title, re.IGNORECASE):
+        return "SPACEBARS"
+    if re.search(r"alpha", title, re.IGNORECASE):
+        return "ALPHA"
+    if re.search(r"base", title, re.IGNORECASE):
+        return "BASE"
+    return "OTHERS"
+
+
+def is_plausible_base_price(price: float, currency: str | None) -> bool:
+    if currency is not None and currency not in _SANITY_CURRENCIES:
+        return True
+    return _MIN_PLAUSIBLE_KIT_PRICE <= price <= _MAX_PLAUSIBLE_KIT_PRICE
+
+
+def choose_kit_variant(variants: list[dict]) -> dict | None:
+    """Pick the variant that is actually the BASE kit, NOT the cheapest one.
+    Preference: BASE-classified variant > first non-add-on variant (Shopify
+    returns variants in display order; single-kit listings have one 'Default
+    Title' variant)."""
+    if not variants:
+        return None
+    non_addon = [v for v in variants if not _ADDON_VARIANT_RE.search(v["title"])]
+    pool = non_addon if non_addon else variants
+    for v in pool:
+        if classify_variant(v["title"]) == "BASE":
+            return v
+    return pool[0]
+
+
+def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> dict | None:
     """Navigate to the product (acquires cf_clearance) then fetch its .json from
     inside the page context so the request carries the clearance cookies."""
     if "/products/" not in product_url:
@@ -343,18 +436,19 @@ def shopify_price(page: Page, product_url: str) -> dict | None:
         )
         if not data or "product" not in data:
             return None
-        variants = data["product"].get("variants") or []
-        prices = []
-        for v in variants:
+        raw_variants = data["product"].get("variants") or []
+        variants: list[dict] = []
+        for v in raw_variants:
             try:
                 p = float(v.get("price"))
             except (TypeError, ValueError):
                 continue
             if p > 0:
-                prices.append(p)
-        if not prices:
+                variants.append({"title": str(v.get("title") or ""), "price": p})
+
+        chosen = choose_kit_variant(variants)
+        if chosen is None:
             return None
-        price = min(prices)
 
         currency = page.evaluate(
             """async (o) => {
@@ -367,7 +461,15 @@ def shopify_price(page: Page, product_url: str) -> dict | None:
             }""",
             origin_url,
         )
-        return {"price": price, "currency": currency or "USD"}
+        # Fall back to the vendor's own currency (e.g. Deskhero = CAD), never a
+        # blind USD default that inflates CA$88 into US$88.
+        currency = currency or vendor_currency
+
+        if not is_plausible_base_price(chosen["price"], currency):
+            log(f"  implausible kit price {chosen['price']} {currency} — skipped ({product_url})")
+            return None
+
+        return {"price": chosen["price"], "currency": currency, "variants": variants}
     except Exception as e:  # noqa: BLE001
         log(f"  price fetch failed for {product_url}: {e}")
         return None
@@ -376,6 +478,14 @@ def shopify_price(page: Page, product_url: str) -> dict | None:
 # ----------------------------------------------------------------------------
 # DB candidate queries (mirror enrich-images.ts and prices.ts)
 # ----------------------------------------------------------------------------
+# Galleries are revisited (and rebuilt) once they're older than this, so a
+# polluted gallery self-heals on its next visit instead of being skipped forever.
+GALLERY_MAX_AGE_DAYS = 7
+
+# Prices fresher than this are skipped — the nightly run shouldn't redo work.
+PRICE_MAX_AGE_HOURS = 20
+
+
 def fetch_image_candidates(conn, limit: int = 200) -> list[dict]:
     sql = """
         SELECT gb.id, gb.slug, gb."imageUrl", gb.images,
@@ -386,30 +496,40 @@ def fetch_image_candidates(conn, limit: int = 200) -> list[dict]:
                    AND vk."productUrl" ILIKE '%%gmk.net%%'
                  LIMIT 1) AS gmk_url
           FROM "GroupBuy" gb
-         WHERE COALESCE(cardinality(gb.images), 0) <= 1
+         WHERE (gb."imagesUpdatedAt" IS NULL
+                OR gb."imagesUpdatedAt" < now() - make_interval(days => %s))
            AND EXISTS (
                 SELECT 1 FROM "VendorKit" vk
                   JOIN "Kit" k ON k.id = vk."kitId"
                  WHERE k."groupBuyId" = gb.id
                    AND vk."productUrl" ILIKE '%%gmk.net%%')
+         ORDER BY gb."imagesUpdatedAt" ASC NULLS FIRST
          LIMIT %s
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute(sql, (limit,))
+        cur.execute(sql, (GALLERY_MAX_AGE_DAYS, limit))
         return cur.fetchall()
 
 
 def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
+    # BASE kits only — buyers decide on the base kit and only base kit prices
+    # are shown on the site. The vendor's currency rides along as the fallback
+    # when a store blocks /meta.json.
     sql = """
-        SELECT id, "productUrl"
-          FROM "VendorKit"
-         WHERE "productUrl" IS NOT NULL
-           AND ("priceSource" IS NULL OR "priceSource" <> 'MANUAL')
-         ORDER BY "priceUpdatedAt" ASC NULLS FIRST
+        SELECT vk.id, vk."productUrl", v.currency AS vendor_currency
+          FROM "VendorKit" vk
+          JOIN "Kit" k ON k.id = vk."kitId"
+          JOIN "Vendor" v ON v.id = vk."vendorId"
+         WHERE vk."productUrl" IS NOT NULL
+           AND k.type = 'BASE'
+           AND (vk."priceSource" IS NULL OR vk."priceSource" <> 'MANUAL')
+           AND (vk."priceUpdatedAt" IS NULL
+                OR vk."priceUpdatedAt" < now() - make_interval(hours => %s))
+         ORDER BY vk."priceUpdatedAt" ASC NULLS FIRST
          LIMIT %s
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute(sql, (limit,))
+        cur.execute(sql, (PRICE_MAX_AGE_HOURS, limit))
         return cur.fetchall()
 
 
@@ -432,21 +552,38 @@ def run_images(conn, context: BrowserContext, deadline: float) -> dict:
             stats["attempted"] += 1
             gallery = gmk_gallery(page, gmk_url)
             if not gallery:
-                stats["failed"] += 1
-                continue
-            base = gb["images"] or ([gb["imageUrl"]] if gb["imageUrl"] else [])
-            merged = dedupe_keep_order(list(base) + gallery)
-            if len(merged) > len(base):
+                # Record the attempt so the rotation moves to the next set.
                 with conn.cursor() as cur:
                     cur.execute(
-                        'UPDATE "GroupBuy" SET images = %s, "imageUrl" = %s WHERE id = %s',
-                        (merged, merged[0], gb["id"]),
+                        'UPDATE "GroupBuy" SET "imagesUpdatedAt" = now() WHERE id = %s',
+                        (gb["id"],),
                     )
-                conn.commit()
-                stats["enriched"] += 1
-                log(f"  {gb['slug']}: {len(base)} -> {len(merged)} images")
-            else:
                 stats["failed"] += 1
+                continue
+
+            # REBUILD the gallery instead of merging: keep non-gmk images
+            # (KeycapLendar render, manual entries) in order, then append the
+            # freshly-scraped trimmed gmk gallery. Replacing the gmk images
+            # wholesale means a previously polluted gallery self-heals here.
+            existing = list(gb["images"] or ([gb["imageUrl"]] if gb["imageUrl"] else []))
+            kept = [u for u in existing if not is_gmk_media(u)]
+            rebuilt = dedupe_keep_order(kept + gallery)
+
+            if rebuilt != existing:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        'UPDATE "GroupBuy" SET images = %s, "imageUrl" = %s, '
+                        '"imagesUpdatedAt" = now() WHERE id = %s',
+                        (rebuilt, rebuilt[0], gb["id"]),
+                    )
+                stats["enriched"] += 1
+                log(f"  {gb['slug']}: {len(existing)} -> {len(rebuilt)} images (rebuilt)")
+            else:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        'UPDATE "GroupBuy" SET "imagesUpdatedAt" = now() WHERE id = %s',
+                        (gb["id"],),
+                    )
     finally:
         page.close()
     return stats
@@ -463,13 +600,19 @@ def run_prices(conn, context: BrowserContext, deadline: float) -> dict:
                 log("Price pass: time budget reached — stopping.")
                 break
             stats["attempted"] += 1
-            result = shopify_price(page, vk["productUrl"])
+            result = shopify_price(page, vk["productUrl"], vk.get("vendor_currency"))
             if result:
                 with conn.cursor() as cur:
                     cur.execute(
                         'UPDATE "VendorKit" SET price = %s, currency = %s, '
+                        'variants = %s::jsonb, '
                         '"priceUpdatedAt" = now(), "priceSource" = \'SCRAPED\' WHERE id = %s',
-                        (result["price"], result["currency"], vk["id"]),
+                        (
+                            result["price"],
+                            result["currency"],
+                            json.dumps(result["variants"]),
+                            vk["id"],
+                        ),
                     )
                 conn.commit()
                 stats["updated"] += 1

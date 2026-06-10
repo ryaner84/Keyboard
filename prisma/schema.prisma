@@ -49,6 +49,9 @@ model GroupBuy {
   gbEnd       DateTime?
   imageUrl    String?
   images      String[]  @default([])
+  // When the gmk.net gallery was last (re)checked — rotates scraper attention
+  // oldest-first and lets previously-scraped galleries self-heal over time.
+  imagesUpdatedAt DateTime?
   description String?
   featured    Boolean   @default(false)
   createdAt   DateTime  @default(now())

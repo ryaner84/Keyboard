@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { importGmkSets } from "@/lib/import/keycaplendar";
 import { refreshPrices } from "@/lib/import/prices";
+import { auditPrices } from "@/lib/import/price-audit";
 import { enrichImagesFromGmk } from "@/lib/import/enrich-images";
 
 // Vercel Hobby caps serverless functions at 60s. We stay safely under that and
@@ -44,6 +45,12 @@ export async function GET(req: NextRequest) {
       maxRuntimeMs: Math.max(5_000, remaining * 0.7),
     });
 
+    // Accuracy check on everything stored (DB-only, fast): fixes prices that
+    // don't match the BASE variant and purges implausible ones for re-scrape.
+    const auditResult = await auditPrices({
+      maxRuntimeMs: Math.max(2_000, (REQUEST_BUDGET_MS - (Date.now() - start)) * 0.4),
+    });
+
     const imgBudget = REQUEST_BUDGET_MS - (Date.now() - start);
     const imageResult = await enrichImagesFromGmk({
       maxRuntimeMs: Math.max(3_000, imgBudget),
@@ -53,6 +60,7 @@ export async function GET(req: NextRequest) {
       ok: true,
       import: importResult,
       prices: priceResult,
+      audit: auditResult,
       images: imageResult,
       ranAt: new Date().toISOString(),
     });

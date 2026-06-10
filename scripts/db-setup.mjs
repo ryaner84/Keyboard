@@ -182,6 +182,7 @@ async function main() {
         await ensureVariantsColumn(client);
         await purgeImplausibleScrapedPrices(client);
         await requeueCurrencyMismatches(client);
+        await requeueLegacyScrapedPrices(client);
       }
     }
 
@@ -218,6 +219,12 @@ async function ensureImagesColumn(client) {
       `ALTER TABLE public."GroupBuy"
        ADD COLUMN IF NOT EXISTS images text[] DEFAULT ARRAY[]::text[] NOT NULL`
     );
+    // Gallery-rotation timestamp: the scraper revisits oldest-checked galleries
+    // first, so polluted ones self-heal and fresh ones aren't hammered nightly.
+    await client.query(
+      `ALTER TABLE public."GroupBuy"
+       ADD COLUMN IF NOT EXISTS "imagesUpdatedAt" timestamp(3) without time zone`
+    );
     const { rowCount } = await client.query(
       `UPDATE public."GroupBuy"
        SET images = ARRAY["imageUrl"]
@@ -231,17 +238,17 @@ async function ensureImagesColumn(client) {
   }
 }
 
-// ONE-TIME cleanup: earlier gallery scraping pulled gmk.net "related products"
-// images into sets' images[] arrays, so set pages showed unrelated keycaps after
-// the real renders. The scraper is now scoped to the main product gallery, but
-// the already-polluted rows won't self-heal (enrichment skips sets that already
-// have >1 image). Reset every multi-image gallery back to the single trusted
-// KeycapLendar render so the fixed scraper can repopulate it correctly.
+// ONE-TIME cleanup (v2): the v1 reset cleared related-products pollution, but
+// the WorkSpace Python scraper still lacked the main-gallery trim and merged
+// the polluted gallery right back in on its next nightly run. Now that BOTH
+// scrapers trim AND rebuild galleries (replacing gmk.net images instead of
+// merging), reset multi-image galleries once more to the single trusted
+// KeycapLendar render; the fixed scrapers repopulate them correctly.
 //
 // Guarded by a sentinel table so it runs EXACTLY ONCE — it must not wipe good
 // galleries on every future deploy.
 async function resetPollutedGalleries(client) {
-  const KEY = "reset_polluted_galleries_v1";
+  const KEY = "reset_polluted_galleries_v2";
   try {
     await client.query(
       `CREATE TABLE IF NOT EXISTS public."_AppMigrations" (
@@ -257,7 +264,7 @@ async function resetPollutedGalleries(client) {
 
     const reset = await client.query(
       `UPDATE public."GroupBuy"
-       SET images = ARRAY["imageUrl"]
+       SET images = ARRAY["imageUrl"], "imagesUpdatedAt" = NULL
        WHERE cardinality(images) > 1 AND "imageUrl" IS NOT NULL`
     );
     await client.query(
@@ -328,25 +335,63 @@ async function requeueCurrencyMismatches(client) {
 
 // The old price scraper took the CHEAPEST Shopify variant, which on group-buy
 // listings is often a cheap add-on (deskmat, sample, deposit) — producing
-// absurd kit prices like $22. The scraper now picks the real kit variant and
-// refuses prices under 30 in western currencies, so any stored SCRAPED price
-// below that floor is garbage: null it out and clear priceUpdatedAt so the
-// nightly refresh re-scrapes those rows first. Idempotent — the fixed scraper
-// never writes such prices again, and MANUAL prices are never touched.
+// absurd kit prices like $22. The scraper now picks the real BASE kit variant
+// and bounds prices to a plausible range (30–500 in western currencies), so any
+// stored SCRAPED price outside that range is garbage: null it out and clear
+// priceUpdatedAt so the nightly refresh re-scrapes those rows first.
+// Idempotent — the fixed scraper never writes such prices again, and MANUAL
+// prices are never touched.
 async function purgeImplausibleScrapedPrices(client) {
   try {
     const { rowCount } = await client.query(
       `UPDATE public."VendorKit"
        SET price = NULL, "priceUpdatedAt" = NULL
        WHERE "priceSource" = 'SCRAPED'
-         AND price IS NOT NULL AND price < 30
+         AND price IS NOT NULL AND (price < 30 OR price > 500)
          AND currency IN ('USD','EUR','GBP','AUD','CAD','SGD')`
     );
     if (rowCount > 0) {
-      console.log(`[db-setup] Purged ${rowCount} implausibly low scraped prices (re-scrape queued).`);
+      console.log(`[db-setup] Purged ${rowCount} implausible scraped prices (re-scrape queued).`);
     }
   } catch (err) {
     console.warn(`[db-setup] Price purge skipped: ${err.message}`);
+  }
+}
+
+// ONE-TIME: prices written by the old WorkSpace Python scraper used the
+// cheapest-variant logic AND never stored the variants list, so there's no way
+// to verify (or fix) which variant they captured. Re-queue them all for a
+// fresh scrape with the corrected BASE-variant selection. Rows WITH variants
+// are verified in place by the nightly price audit instead. Sentinel-guarded.
+async function requeueLegacyScrapedPrices(client) {
+  const KEY = "requeue_legacy_scraped_prices_v1";
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."_AppMigrations" (
+         key text PRIMARY KEY,
+         applied_at timestamptz NOT NULL DEFAULT now()
+       )`
+    );
+    const done = await client.query(
+      `SELECT 1 FROM public."_AppMigrations" WHERE key = $1`,
+      [KEY]
+    );
+    if (done.rowCount > 0) return;
+
+    const { rowCount } = await client.query(
+      `UPDATE public."VendorKit"
+       SET "priceUpdatedAt" = NULL
+       WHERE "priceSource" = 'SCRAPED' AND variants IS NULL`
+    );
+    await client.query(
+      `INSERT INTO public."_AppMigrations" (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
+      [KEY]
+    );
+    if (rowCount > 0) {
+      console.log(`[db-setup] Re-queued ${rowCount} unverifiable legacy scraped prices (one-time).`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Legacy price requeue skipped: ${err.message}`);
   }
 }
 
