@@ -825,7 +825,7 @@ def upsert_gmk_set(conn, data: dict, gmk_vendor_id: str) -> tuple:
                   data.get("description") or "", slug))
         created = False
     else:
-        images_json = json.dumps(data.get("images") or [])
+        images_list = data.get("images") or []
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
                 INSERT INTO "GroupBuy"
@@ -833,13 +833,13 @@ def upsert_gmk_set(conn, data: dict, gmk_vendor_id: str) -> tuple:
                      "imageUrl", images, description, featured, "createdAt", "updatedAt")
                 VALUES
                     (gen_random_uuid()::text, %s, %s, %s, %s, %s,
-                     %s, %s::jsonb, %s, %s, now(), now())
+                     %s, %s, %s, %s, now(), now())
                 ON CONFLICT (slug) DO NOTHING
                 RETURNING id
             """, (
                 slug, data["name"], data.get("colorway") or "",
                 data.get("designer") or "", data["status"],
-                data.get("imageUrl"), images_json,
+                data.get("imageUrl"), images_list,
                 data.get("description") or "",
                 data["status"] == "ACTIVE_GB",
             ))
