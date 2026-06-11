@@ -90,6 +90,7 @@ export interface VendorKitPreview {
     name: string;
     region: Region;
     country: string;
+    currency: string;
     shippingZones: ShippingZoneSummary[];
   };
 }

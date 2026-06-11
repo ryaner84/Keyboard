@@ -207,6 +207,7 @@ async function main() {
         await cleanupInterestChecks(client);
         await ensureVariantsColumn(client);
         await purgeImplausibleScrapedPrices(client);
+        await requeuePurgedClearancePrices(client);
         await requeueCurrencyMismatches(client);
         await requeueLegacyScrapedPrices(client);
         await requeuePinnedVariantPrices(client);
@@ -370,11 +371,16 @@ async function requeueCurrencyMismatches(client) {
 // listings is often a cheap add-on (deskmat, sample, deposit) — producing
 // absurd kit prices like $22. The scraper now picks the real BASE kit variant
 // and bounds prices to a plausible per-currency window (mirrors KIT_BOUNDS in
-// src/lib/import/prices.ts — calibrated as SGD 95–310 FX-converted), so any
-// stored SCRAPED price outside that window is garbage: null it out and clear
-// priceUpdatedAt so the nightly refresh re-scrapes those rows first.
-// Idempotent — the fixed scraper never writes such prices again, and MANUAL
-// prices are never touched.
+// src/lib/import/prices.ts), so any stored SCRAPED price outside that window
+// is garbage: null it out and clear priceUpdatedAt so the nightly refresh
+// re-scrapes those rows first.
+//
+// CALIBRATION: the lower bound admits CLEARANCE prices. Released GMK sets are
+// routinely sold off at USD 40–70, and the old tighter window (USD ≥ 70)
+// wiped those legitimate prices on every deploy — which is why released sets
+// showed "no pricing available" while full-MSRP group buys kept theirs. The
+// window must never be tighter than what scrape.py / prices.ts will store.
+// Idempotent — MANUAL prices are never touched.
 async function purgeImplausibleScrapedPrices(client) {
   try {
     const { rowCount } = await client.query(
@@ -383,18 +389,18 @@ async function purgeImplausibleScrapedPrices(client) {
        WHERE "priceSource" = 'SCRAPED'
          AND price IS NOT NULL
          AND (
-              (currency = 'USD' AND (price < 70  OR price > 225))
-           OR (currency = 'EUR' AND (price < 65  OR price > 210))
-           OR (currency = 'GBP' AND (price < 55  OR price > 180))
-           OR (currency = 'AUD' AND (price < 100 OR price > 345))
-           OR (currency = 'CAD' AND (price < 95  OR price > 310))
-           OR (currency = 'SGD' AND (price < 95  OR price > 310))
-           OR (currency = 'JPY' AND (price < 10000 OR price > 34000))
-           OR (currency = 'KRW' AND (price < 90000 OR price > 320000))
-           OR (currency = 'CNY' AND (price < 480 OR price > 1650))
-           OR (currency = 'HKD' AND (price < 530 OR price > 1800))
-           OR (currency = 'THB' AND (price < 2200 OR price > 8100))
-           OR (currency = 'TWD' AND (price < 2100 OR price > 7300))
+              (currency = 'USD' AND (price < 30  OR price > 225))
+           OR (currency = 'EUR' AND (price < 28  OR price > 210))
+           OR (currency = 'GBP' AND (price < 24  OR price > 180))
+           OR (currency = 'AUD' AND (price < 45  OR price > 345))
+           OR (currency = 'CAD' AND (price < 41  OR price > 310))
+           OR (currency = 'SGD' AND (price < 40  OR price > 310))
+           OR (currency = 'JPY' AND (price < 4500 OR price > 34000))
+           OR (currency = 'KRW' AND (price < 40000 OR price > 320000))
+           OR (currency = 'CNY' AND (price < 215 OR price > 1650))
+           OR (currency = 'HKD' AND (price < 235 OR price > 1800))
+           OR (currency = 'THB' AND (price < 1075 OR price > 8100))
+           OR (currency = 'TWD' AND (price < 965 OR price > 7300))
          )`
     );
     if (rowCount > 0) {
@@ -402,6 +408,45 @@ async function purgeImplausibleScrapedPrices(client) {
     }
   } catch (err) {
     console.warn(`[db-setup] Price purge skipped: ${err.message}`);
+  }
+}
+
+// ONE-TIME: rows whose price the old over-tight purge wiped (clearance prices
+// below the old USD-70-equivalent floor) sit at price NULL with
+// priceUpdatedAt NULL — already first in the scrape queue. Bump them again
+// explicitly in case a later failed scrape attempt stamped priceUpdatedAt,
+// so tonight's WorkSpace run re-prices every released set immediately.
+async function requeuePurgedClearancePrices(client) {
+  const KEY = "requeue_purged_clearance_v1";
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."_AppMigrations" (
+         key text PRIMARY KEY,
+         applied_at timestamptz NOT NULL DEFAULT now()
+       )`
+    );
+    const done = await client.query(
+      `SELECT 1 FROM public."_AppMigrations" WHERE key = $1`,
+      [KEY]
+    );
+    if (done.rowCount > 0) return;
+
+    const { rowCount } = await client.query(
+      `UPDATE public."VendorKit"
+       SET "priceUpdatedAt" = NULL
+       WHERE price IS NULL
+         AND "productUrl" IS NOT NULL
+         AND ("priceSource" IS NULL OR "priceSource" <> 'MANUAL')`
+    );
+    await client.query(
+      `INSERT INTO public."_AppMigrations" (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
+      [KEY]
+    );
+    if (rowCount > 0) {
+      console.log(`[db-setup] Re-queued ${rowCount} unpriced vendor links for immediate re-scrape (one-time).`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Clearance requeue skipped: ${err.message}`);
   }
 }
 

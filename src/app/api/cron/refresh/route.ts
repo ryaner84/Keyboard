@@ -4,7 +4,11 @@ import { importGmkSets } from "@/lib/import/keycaplendar";
 import { refreshPrices } from "@/lib/import/prices";
 import { auditPrices } from "@/lib/import/price-audit";
 import { enrichImagesFromGmk } from "@/lib/import/enrich-images";
-import { applyVendorLinkOverrides, processVendorSuggestions } from "@/lib/import/vendor-overrides";
+import {
+  applyVendorLinkOverrides,
+  processVendorSuggestions,
+  ensureShippingZonesForAllVendors,
+} from "@/lib/import/vendor-overrides";
 import { discoverGmkProducts } from "@/lib/import/discovery";
 
 // Vercel Hobby caps serverless functions at 60s. We stay safely under that.
@@ -58,6 +62,9 @@ export async function GET(req: NextRequest) {
     // ── 3. Hand-curated vendor links + user suggestions ───────────────────────
     const overrides = await applyVendorLinkOverrides();
     const suggestions = await processVendorSuggestions();
+    // Self-heal: vendors created outside the deploy-time backfill (e.g. by the
+    // WorkSpace scraper) get their DHL shipping zones here, daily.
+    const zonesSeeded = await ensureShippingZonesForAllVendors();
 
     // ── 4. Catalog discovery: walk vendor Shopify stores ─────────────────────
     const discovery = await discoverGmkProducts({
@@ -90,6 +97,7 @@ export async function GET(req: NextRequest) {
       supplement: supplementResult,
       overrides,
       suggestions,
+      zonesSeeded,
       discovery,
       prices: priceResult,
       audit: auditResult,

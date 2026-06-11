@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { convertCurrency, formatCurrency } from "@/lib/currency-utils";
+import { dhlShippingUsd, dhlEstimatedDays } from "@/lib/import/shipping";
 import { formatRelativeDate } from "@/lib/utils";
 import type { VendorKitWithDetails, ExchangeRates } from "@/types";
 import type { Region } from "@/types";
@@ -36,30 +37,38 @@ export function VendorTable({
     for (const vk of vendorKits) {
       // Vendors without a scraped/manual kit price are not shown at all —
       // a row with no price is noise, not information.
-      if (vk.price == null || !vk.currency) continue;
+      if (vk.price == null || !vk.inStock) continue;
+      // No stored currency → the price is in the vendor's own store currency.
+      const kitCurrency = vk.currency ?? vk.vendor.currency ?? "USD";
 
-      // Pick the shipping zone for the *user's* region.
+      // Pick the shipping zone for the *user's* region. Only an explicit
+      // "doesn't ship here" excludes the vendor; a missing zone row (vendor
+      // created between deploy-time backfills) falls back to the DHL lane
+      // estimate instead of hiding a priced listing.
       const zone = vk.vendor.shippingZones?.find(
         (z) => z.destinationRegion === userRegion
       );
-      if (!zone?.shipsToRegion || !vk.inStock) continue;
+      if (zone && !zone.shipsToRegion) continue;
 
       const kitPriceLocal = convertCurrency(
         vk.price as number,
-        vk.currency as string,
+        kitCurrency,
         userCurrency,
         rates
       );
-      const shippingLocal = convertCurrency(
-        zone.baseShippingCost,
-        zone.currency,
-        userCurrency,
-        rates
-      );
+      const shippingLocal = zone
+        ? convertCurrency(zone.baseShippingCost, zone.currency, userCurrency, rates)
+        : convertCurrency(
+            dhlShippingUsd(vk.vendor.region, userRegion),
+            "USD",
+            userCurrency,
+            rates
+          );
+      const [daysMin, daysMax] = zone
+        ? [zone.estimatedDaysMin, zone.estimatedDaysMax]
+        : dhlEstimatedDays(vk.vendor.region, userRegion);
       const estimatedDays =
-        zone.estimatedDaysMin > 0
-          ? `${zone.estimatedDaysMin}–${zone.estimatedDaysMax} days`
-          : "Standard shipping";
+        daysMin > 0 ? `${daysMin}–${daysMax} days` : "Standard shipping";
 
       out.push({
         vk,
@@ -81,7 +90,8 @@ export function VendorTable({
     return vendorKits.filter((vk) => {
       if (pricedIds.has(vk.id)) return false;
       const zone = vk.vendor.shippingZones?.find((z) => z.destinationRegion === userRegion);
-      return !!(vk.gbUrl || vk.productUrl) && !!zone?.shipsToRegion;
+      // A missing zone row means "no data", not "doesn't ship" — keep the link.
+      return !!(vk.gbUrl || vk.productUrl) && !(zone && !zone.shipsToRegion);
     });
   }, [vendorKits, rows, userRegion]);
 

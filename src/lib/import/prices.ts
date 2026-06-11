@@ -58,24 +58,28 @@ const CURRENCY_HOME_COUNTRY: Record<string, string> = {
 const ADDON_VARIANT_RE =
   /(desk\s?mat|mouse\s?pad|wrist\s?rest|cable|artisan|sticker|sample|keychain|coin|tray|deposit|shipping|insurance|add[\s-]?on|extra)/i;
 
-// Per-currency plausibility bounds for a GMK BASE kit. Real base kits run
-// roughly USD 90–180; the bounds leave headroom for sales and premium sets but
-// reject add-on variants and bundle/parse errors. Calibrated in SGD first
-// (primary market): anything below S$95 or above S$310 is definitely not a
-// base kit price; other currencies are that same window FX-converted.
+// Per-currency plausibility bounds for a GMK BASE kit. New base kits run
+// roughly USD 90–180, but RELEASED sets are routinely cleared out at USD
+// 40–70 (NovelKeys/CannonKeys clearance sales), so the lower bound must
+// admit clearance prices — the BASE-variant classifier is the primary guard
+// against add-ons; this window is only a backstop for parse errors.
+// IMPORTANT: this window must stay in sync with the purge in
+// scripts/db-setup.mjs and the bounds in scraper/scrape.py — a purge window
+// tighter than the producers' window silently wipes legitimate prices on
+// every deploy (this is exactly what blanked released-set pricing).
 const KIT_BOUNDS: Record<string, { min: number; max: number }> = {
-  USD: { min: 70, max: 225 },
-  EUR: { min: 65, max: 210 },
-  GBP: { min: 55, max: 180 },
-  AUD: { min: 100, max: 345 },
-  CAD: { min: 95, max: 310 },
-  SGD: { min: 95, max: 310 },
-  JPY: { min: 10000, max: 34000 },
-  KRW: { min: 90000, max: 320000 },
-  CNY: { min: 480, max: 1650 },
-  HKD: { min: 530, max: 1800 },
-  THB: { min: 2200, max: 8100 },
-  TWD: { min: 2100, max: 7300 },
+  USD: { min: 30, max: 225 },
+  EUR: { min: 28, max: 210 },
+  GBP: { min: 24, max: 180 },
+  AUD: { min: 45, max: 345 },
+  CAD: { min: 41, max: 310 },
+  SGD: { min: 40, max: 310 },
+  JPY: { min: 4500, max: 34000 },
+  KRW: { min: 40000, max: 320000 },
+  CNY: { min: 215, max: 1650 },
+  HKD: { min: 235, max: 1800 },
+  THB: { min: 1075, max: 8100 },
+  TWD: { min: 965, max: 7300 },
 };
 
 // Plausibility check for a BASE kit price. Currencies without bounds

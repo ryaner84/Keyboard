@@ -1,6 +1,7 @@
 // Client-safe helpers to compute the cheapest vendor prices for a set,
 // given exchange rates, the user's region and currency. No Prisma imports.
 import { convertCurrency } from "./currency-utils";
+import { dhlShippingUsd } from "./import/shipping";
 import type {
   KitWithVendors,
   GroupBuyWithPricing,
@@ -26,12 +27,21 @@ export function computeCheapest(
 
   const results: ComputedVendorPrice[] = [];
   for (const vk of kit.vendorKits ?? []) {
-    if (!vk.inStock || vk.price == null || vk.currency == null) continue;
+    if (!vk.inStock || vk.price == null) continue;
+    // A scraped price without a stored currency is still priced in the
+    // vendor's own store currency — don't drop it.
+    const kitCurrency = vk.currency ?? vk.vendor.currency ?? "USD";
+    // Only an EXPLICIT "doesn't ship here" zone excludes a vendor. A missing
+    // zone row (vendor created between deploy-time backfills) falls back to
+    // the DHL lane estimate — otherwise every priced kit of that vendor
+    // silently disappears and the card reads "no prices yet".
     const zone = vk.vendor.shippingZones.find((z) => z.destinationRegion === region);
-    if (!zone || !zone.shipsToRegion) continue;
+    if (zone && !zone.shipsToRegion) continue;
 
-    const kitLocal = convertCurrency(vk.price, vk.currency, currency, rates);
-    const shipLocal = convertCurrency(zone.baseShippingCost, zone.currency, currency, rates);
+    const kitLocal = convertCurrency(vk.price, kitCurrency, currency, rates);
+    const shipLocal = zone
+      ? convertCurrency(zone.baseShippingCost, zone.currency, currency, rates)
+      : convertCurrency(dhlShippingUsd(vk.vendor.region, region), "USD", currency, rates);
     results.push({
       vendorName: vk.vendor.name,
       totalLocal: kitLocal + shipLocal,

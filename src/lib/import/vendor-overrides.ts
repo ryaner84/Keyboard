@@ -109,6 +109,26 @@ const LINK_OVERRIDES: LinkOverride[] = [
   },
 ];
 
+// Daily self-heal: any vendor missing shipping-zone rows (created by the
+// WorkSpace scraper between deploys, or by an older importer) gets the full
+// DHL-estimate zone set. Without a zone for the viewer's region the UI used
+// to hide every priced listing of that vendor.
+export async function ensureShippingZonesForAllVendors(): Promise<number> {
+  const vendors = await prisma.vendor.findMany({
+    select: { id: true, region: true, _count: { select: { shippingZones: true } } },
+  });
+  let seeded = 0;
+  for (const v of vendors) {
+    if (v._count.shippingZones >= 8) continue;
+    const res = await prisma.shippingZone.createMany({
+      data: buildShippingZones(v.region).map((z) => ({ vendorId: v.id, ...z })),
+      skipDuplicates: true,
+    });
+    seeded += res.count;
+  }
+  return seeded;
+}
+
 // Find or create a vendor; new vendors get DHL-estimate shipping zones so
 // their rows can actually render in the price table.
 async function ensureVendor(def: VendorDef): Promise<string> {

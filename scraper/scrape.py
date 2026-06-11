@@ -372,11 +372,25 @@ _ADDON_VARIANT_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Plausibility bounds for a GMK base kit in western currencies. Outside this
-# range the value is an add-on, a bundle, or a parse error — refuse to store it.
-_MIN_PLAUSIBLE_KIT_PRICE = 30
-_MAX_PLAUSIBLE_KIT_PRICE = 500
-_SANITY_CURRENCIES = {"USD", "EUR", "GBP", "AUD", "CAD", "SGD"}
+# Per-currency plausibility bounds for a GMK base kit. The lower bound admits
+# CLEARANCE prices (released sets routinely sell off at USD 40-70); the upper
+# bound rejects bundles/parse errors. MUST stay in sync with KIT_BOUNDS in
+# src/lib/import/prices.ts and the purge window in scripts/db-setup.mjs — if
+# this stores a price the deploy purge rejects, it gets wiped on every deploy.
+_KIT_BOUNDS = {
+    "USD": (30, 225),
+    "EUR": (28, 210),
+    "GBP": (24, 180),
+    "AUD": (45, 345),
+    "CAD": (41, 310),
+    "SGD": (40, 310),
+    "JPY": (4500, 34000),
+    "KRW": (40000, 320000),
+    "CNY": (215, 1650),
+    "HKD": (235, 1800),
+    "THB": (1075, 8100),
+    "TWD": (965, 7300),
+}
 
 
 def classify_variant(title: str) -> str:
@@ -393,9 +407,12 @@ def classify_variant(title: str) -> str:
 
 
 def is_plausible_base_price(price: float, currency: str | None) -> bool:
-    if currency is not None and currency not in _SANITY_CURRENCIES:
+    # Unknown currency → bound as USD (the fallback is always a western
+    # vendor currency); currencies without bounds are not bounded.
+    bounds = _KIT_BOUNDS.get(currency or "USD")
+    if bounds is None:
         return True
-    return _MIN_PLAUSIBLE_KIT_PRICE <= price <= _MAX_PLAUSIBLE_KIT_PRICE
+    return bounds[0] <= price <= bounds[1]
 
 
 def choose_kit_variant(variants: list[dict]) -> dict | None:
@@ -746,21 +763,42 @@ def scrape_gmk_product_metadata(page: Page, url: str) -> dict | None:
 
 
 def ensure_gmk_vendor(conn) -> str:
-    """Return the GMK vendor id, creating it if needed."""
+    """Return the GMK vendor id, creating it (with shipping zones) if needed."""
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute('SELECT id FROM "Vendor" WHERE slug = %s', (GMK_VENDOR_SLUG,))
         row = cur.fetchone()
         if row:
-            return row["id"]
+            vendor_id = row["id"]
+        else:
+            cur.execute("""
+                INSERT INTO "Vendor"
+                    (id, slug, name, region, country, currency, "websiteUrl", "logoUrl", "createdAt", "updatedAt")
+                VALUES
+                    (gen_random_uuid()::text, %s, 'GMK', 'EU', 'DE', 'EUR', %s, NULL, now(), now())
+                ON CONFLICT (slug) DO UPDATE SET "websiteUrl" = EXCLUDED."websiteUrl"
+                RETURNING id
+            """, (GMK_VENDOR_SLUG, GMK_NET_ORIGIN))
+            vendor_id = cur.fetchone()["id"]
+
+        # Without a ShippingZone row for the viewer's region the site hides
+        # every priced listing of this vendor, so seed all destinations
+        # (mirrors backfillShipping in scripts/db-setup.mjs; EU-origin rates).
         cur.execute("""
-            INSERT INTO "Vendor"
-                (id, slug, name, region, country, currency, "websiteUrl", "logoUrl", "createdAt", "updatedAt")
-            VALUES
-                (gen_random_uuid()::text, %s, 'GMK', 'EU', 'DE', 'EUR', %s, NULL, now(), now())
-            ON CONFLICT (slug) DO UPDATE SET "websiteUrl" = EXCLUDED."websiteUrl"
-            RETURNING id
-        """, (GMK_VENDOR_SLUG, GMK_NET_ORIGIN))
-        return cur.fetchone()["id"]
+            INSERT INTO "ShippingZone"
+                (id, "vendorId", "destinationRegion", "baseShippingCost", currency,
+                 "estimatedDaysMin", "estimatedDaysMax", "shipsToRegion")
+            SELECT gen_random_uuid()::text, %s, d.region::"Region",
+                   d.cost, 'USD',
+                   CASE WHEN d.region = 'EU' THEN 1 ELSE 2 END,
+                   CASE WHEN d.region = 'EU' THEN 3 ELSE 5 END,
+                   true
+            FROM (VALUES
+                ('EU', 8), ('UK', 10), ('US', 18), ('CA', 20),
+                ('AU', 26), ('SG', 24), ('ASIA', 24), ('OTHER', 30)
+            ) AS d(region, cost)
+            ON CONFLICT ("vendorId", "destinationRegion") DO NOTHING
+        """, (vendor_id,))
+        return vendor_id
 
 
 def upsert_gmk_set(conn, data: dict, gmk_vendor_id: str) -> tuple:
