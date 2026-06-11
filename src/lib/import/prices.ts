@@ -316,6 +316,9 @@ async function refreshOne(
         priceUpdatedAt: new Date(),
         priceSource: "SCRAPED",
         variants: priceData.variants,
+        // A live price means the vendor currently carries this set — mark it
+        // available. (DELIVERED/SHIPPING GBs are often sold as clearance stock.)
+        inStock: true,
       },
     });
     result.updated++;

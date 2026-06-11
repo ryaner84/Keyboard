@@ -1014,7 +1014,7 @@ def run_prices(conn, context: BrowserContext, deadline: float) -> dict:
                 with conn.cursor() as cur:
                     cur.execute(
                         'UPDATE "VendorKit" SET price = %s, currency = %s, '
-                        'variants = %s::jsonb, '
+                        'variants = %s::jsonb, "inStock" = true, '
                         '"priceUpdatedAt" = now(), "priceSource" = \'SCRAPED\' WHERE id = %s',
                         (
                             result["price"],
