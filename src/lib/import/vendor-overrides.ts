@@ -32,8 +32,10 @@ export const VENDOR_OVERRIDES: Record<string, VendorOverride> = {
   "swagkeys-kr": { region: "ASIA", country: "KR", currency: "USD" },
   geonworks: { region: "ASIA", country: "KR", currency: "USD" },
 
+  // Canada
+  prototypist: { region: "CA", country: "CA", currency: "CAD" },
+
   // Europe / UK (KeycapLendar tags some of these as "America")
-  prototypist: { region: "UK", country: "GB", currency: "GBP" },
   gmk: { region: "EU", country: "DE", currency: "EUR" },
   oblotzky: { region: "EU", country: "DE", currency: "EUR" },
   "oblotzky-industries": { region: "EU", country: "DE", currency: "EUR" },
@@ -67,6 +69,7 @@ const LINK_VENDORS: VendorDef[] = [
   // Guaranteed-present so the catalog discovery crawler always scans their
   // group-buy AND pre-order collections (e.g. ilumkb.com/collections/pre-order-keycaps).
   { name: "iLumKB", slug: "ilumkb", region: "SG", country: "SG", currency: "SGD", websiteUrl: "https://ilumkb.com" },
+  { name: "proto[Typist]", slug: "prototypist", region: "CA", country: "CA", currency: "CAD", websiteUrl: "https://prototypist.net" },
 ];
 
 interface LinkOverride {
@@ -98,6 +101,11 @@ const LINK_OVERRIDES: LinkOverride[] = [
     setSlugs: ["gmk-british-racing-green-r3", "gmk-british-racing-green"],
     vendorSlug: "ktechs",
     productUrl: "https://ktechs.store/collections/group-buy/products/gmk-british-racing-green",
+  },
+  {
+    setSlugs: ["gmk-cyl-ramune", "gmk-ramune"],
+    vendorSlug: "prototypist",
+    productUrl: "https://prototypist.net/products/group-buy-gmk-cyl-ramune",
   },
 ];
 
@@ -209,7 +217,7 @@ const KNOWN_HOSTS: Record<string, Omit<VendorDef, "websiteUrl">> = {
   "novelkeys.com": { name: "NovelKeys", slug: "novelkeys", region: "US", country: "US", currency: "USD" },
   "cannonkeys.com": { name: "Cannon Keys", slug: "cannon-keys", region: "US", country: "US", currency: "USD" },
   "www.deskhero.ca": { name: "DeskHero", slug: "deskhero", region: "CA", country: "CA", currency: "CAD" },
-  "prototypist.net": { name: "proto[Typist]", slug: "prototypist", region: "UK", country: "GB", currency: "GBP" },
+  "prototypist.net": { name: "proto[Typist]", slug: "prototypist", region: "CA", country: "CA", currency: "CAD" },
 };
 
 export interface SuggestionResult {
