@@ -1,4 +1,4 @@
-import { ImageResponse } from "@vercel/og";
+import { ImageResponse } from "next/og";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { STATUS_LABELS, normalizeImageUrl } from "@/lib/utils";
@@ -7,6 +7,24 @@ import type { GBStatus } from "@/generated/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
+
+async function fetchImageDataUri(url: string): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const contentType = res.headers.get("content-type") ?? "image/png";
+    if (!contentType.startsWith("image/")) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > 4_000_000) return null;
+    return `data:${contentType};base64,${buf.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
 
 // Status badge colors (dark-theme versions)
 const STATUS_BG: Record<GBStatus, string> = {
@@ -169,7 +187,8 @@ export async function GET(
     color: { dark: "#0f172a", light: "#ffffff" },
   });
 
-  const heroImage = normalizeImageUrl(groupBuy.imageUrl);
+  const rawImageUrl = normalizeImageUrl(groupBuy.imageUrl);
+  const heroImage = rawImageUrl ? await fetchImageDataUri(rawImageUrl) : null;
   const statusLabel = STATUS_LABELS[groupBuy.status].toUpperCase();
   const statusBg = STATUS_BG[groupBuy.status];
   const statusFg = STATUS_FG[groupBuy.status];
