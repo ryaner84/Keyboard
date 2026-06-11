@@ -64,6 +64,9 @@ const LINK_VENDORS: VendorDef[] = [
   { name: "Ktechs", slug: "ktechs", region: "SG", country: "SG", currency: "SGD", websiteUrl: "https://ktechs.store" },
   { name: "KBDfans", slug: "kbdfans", region: "ASIA", country: "CN", currency: "USD", websiteUrl: "https://kbdfans.com" },
   { name: "Oblotzky Industries", slug: "oblotzky-industries", region: "EU", country: "DE", currency: "EUR", websiteUrl: "https://oblotzky.industries" },
+  // Guaranteed-present so the catalog discovery crawler always scans their
+  // group-buy AND pre-order collections (e.g. ilumkb.com/collections/pre-order-keycaps).
+  { name: "iLumKB", slug: "ilumkb", region: "SG", country: "SG", currency: "SGD", websiteUrl: "https://ilumkb.com" },
 ];
 
 interface LinkOverride {

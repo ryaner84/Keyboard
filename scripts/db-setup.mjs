@@ -199,6 +199,7 @@ async function main() {
       if (alreadyPopulated) {
         await ensureImagesColumn(client);
         await ensureVendorSuggestionTable(client);
+        await ensureFeedbackTable(client);
         await ensureDiscoveryColumn(client);
         await ensureCurrencies(client);
         await resetPollutedGalleries(client);
@@ -210,6 +211,7 @@ async function main() {
         await requeueLegacyScrapedPrices(client);
         await requeuePinnedVariantPrices(client);
         await requeueGeoCurrencyPrices(client);
+        await prioritizePreorderVendors(client);
       }
     }
 
@@ -228,6 +230,7 @@ async function main() {
     await ensureImagesColumn(client);
     await ensureVariantsColumn(client);
     await ensureVendorSuggestionTable(client);
+    await ensureFeedbackTable(client);
     await ensureDiscoveryColumn(client);
     await ensureCurrencies(client);
     await resetPollutedGalleries(client);
@@ -450,6 +453,63 @@ async function ensureCurrencies(client) {
     }
   } catch (err) {
     console.warn(`[db-setup] Currency backfill skipped: ${err.message}`);
+  }
+}
+
+// Visitor feedback (header "Feedback" panel): email + subject only, viewed
+// directly in Supabase — the site never reads it back.
+async function ensureFeedbackTable(client) {
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."Feedback" (
+         id            text NOT NULL PRIMARY KEY,
+         email         text NOT NULL,
+         subject       text NOT NULL,
+         "submittedAt" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] Feedback table setup skipped: ${err.message}`);
+  }
+}
+
+// ONE-TIME: push the major pre-order vendors (iLumKB etc.) to the FRONT of the
+// catalog-discovery queue so their pre-order GMK listings are linked on the
+// very next cron run instead of waiting for the rotation to reach them.
+async function prioritizePreorderVendors(client) {
+  const KEY = "prioritize_preorder_vendors_v1";
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."_AppMigrations" (
+         key text PRIMARY KEY,
+         applied_at timestamptz NOT NULL DEFAULT now()
+       )`
+    );
+    const done = await client.query(
+      `SELECT 1 FROM public."_AppMigrations" WHERE key = $1`,
+      [KEY]
+    );
+    if (done.rowCount > 0) return;
+
+    const { rowCount } = await client.query(
+      `UPDATE public."Vendor"
+       SET "lastDiscoveredAt" = NULL
+       WHERE slug IN ('ilumkb','ktechs','kbdfans','novelkeys','cannon-keys',
+                      'cannonkeys','prototypist','oblotzky-industries','oblotzky',
+                      'deskhero','dailyclack','daily-clack','swagkeys','monokei',
+                      'ashkeebs','zion-studios','vala-supply','keebsforall',
+                      'kono','kono-store','divinikey','omnitype','mykeyboard',
+                      'mykeyboard-eu','candykeys','keygem','keygem-store')`
+    );
+    await client.query(
+      `INSERT INTO public."_AppMigrations" (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
+      [KEY]
+    );
+    if (rowCount > 0) {
+      console.log(`[db-setup] Bumped ${rowCount} pre-order vendors to the front of the discovery queue (one-time).`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Pre-order vendor priority skipped: ${err.message}`);
   }
 }
 

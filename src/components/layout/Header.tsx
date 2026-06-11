@@ -5,6 +5,7 @@ import { useLocation } from "@/context/LocationContext";
 import { usePathname } from "next/navigation";
 import { CurrencySelector } from "./CurrencySelector";
 import { ThemeToggle } from "./ThemeToggle";
+import { FeedbackButton } from "./FeedbackButton";
 
 export function Header() {
   const { country, setShowModal } = useLocation();
@@ -48,8 +49,11 @@ export function Header() {
             ))}
           </nav>
 
-          {/* Controls: location · currency · theme */}
+          {/* Controls: feedback · location · currency · theme */}
           <div className="flex items-center gap-2">
+            {/* Feedback */}
+            <FeedbackButton />
+
             {/* Shipping location */}
             <button
               onClick={() => setShowModal(true)}

@@ -138,3 +138,12 @@ model VendorSuggestion {
   submittedAt DateTime @default(now())
   processed   Boolean  @default(false)
 }
+
+// Visitor feedback from the header "Feedback" panel. Write-only from the site
+// (no public read API) — view the rows directly in Supabase.
+model Feedback {
+  id          String   @id @default(cuid())
+  email       String
+  subject     String
+  submittedAt DateTime @default(now())
+}
