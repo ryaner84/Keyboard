@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { UpcomingCarousel } from "@/components/home/UpcomingCarousel";
+import { ReleasedCarousel } from "@/components/home/ReleasedCarousel";
 import { SetCard } from "@/components/browse/SetCard";
 import { LocationReminder } from "@/components/home/LocationReminder";
 import type { GroupBuyWithKits, GroupBuyWithPricing } from "@/types";
@@ -96,80 +97,27 @@ async function getStats() {
   }
 }
 
-// Post-GB sets a vendor still stocks with a live price — the aftermarket is
-// where real price differences appear (GB pricing is MSRP everywhere), so the
-// homepage showcases it with live proof.
-const RELEASED_STATUSES = ["SHIPPING", "DELIVERED", "IN_STOCK"] as const;
-const AVAILABLE_FILTER = {
-  kits: {
-    some: {
-      type: "BASE" as const,
-      vendorKits: { some: { price: { not: null }, inStock: true } },
-    },
-  },
-};
-
-async function getAftermarket(): Promise<{
-  highlights: GroupBuyWithPricing[];
-  releasedCount: number;
-  availableCount: number;
-}> {
+async function getReleasedForCarousel(): Promise<GroupBuyWithKits[]> {
   try {
-    const [available, releasedCount, availableCount, rateRows] = await Promise.all([
-      prisma.groupBuy.findMany({
-        where: { status: { in: [...RELEASED_STATUSES] }, ...AVAILABLE_FILTER },
-        include: PRICING_INCLUDE,
-        orderBy: { gbEnd: { sort: "desc", nulls: "last" } },
-        take: 100,
-      }),
-      prisma.groupBuy.count({ where: { status: { in: [...RELEASED_STATUSES] } } }),
-      prisma.groupBuy.count({
-        where: { status: { in: [...RELEASED_STATUSES] }, ...AVAILABLE_FILTER },
-      }),
-      prisma.currency.findMany({ select: { code: true, exchangeRateToUSD: true } }),
-    ]);
-
-    // Showcase the sets with the widest vendor price spread (the bargain
-    // hunter's proof), topped up with the most recent releases.
-    const rates: Record<string, number> = {};
-    for (const r of rateRows) rates[r.code] = r.exchangeRateToUSD;
-    const spreadOf = (set: (typeof available)[number]): number => {
-      const base = set.kits.find((k) => k.type === "BASE") ?? set.kits[0];
-      if (!base) return 0;
-      let min = Infinity;
-      let max = 0;
-      let count = 0;
-      for (const vk of base.vendorKits) {
-        if (vk.price == null || !vk.inStock) continue;
-        const usd = vk.price / (rates[vk.currency ?? "USD"] ?? 1);
-        count++;
-        if (usd < min) min = usd;
-        if (usd > max) max = usd;
-      }
-      return count >= 2 && max > 0 ? (max - min) / max : 0;
-    };
-    const bySpread = [...available].sort((a, b) => spreadOf(b) - spreadOf(a));
-    const top = bySpread.filter((s) => spreadOf(s) >= 0.05).slice(0, 3);
-    const seen = new Set(top.map((s) => s.id));
-    const highlights = [
-      ...top,
-      ...available.filter((s) => !seen.has(s.id)).slice(0, 3 - top.length),
-    ] as unknown as GroupBuyWithPricing[];
-
-    return { highlights, releasedCount, availableCount };
+    return (await prisma.groupBuy.findMany({
+      where: { status: { in: ["SHIPPING", "DELIVERED", "IN_STOCK"] } },
+      include: { kits: { select: { id: true, name: true, type: true } } },
+      orderBy: { gbEnd: { sort: "desc", nulls: "last" } },
+      take: 5,
+    })) as GroupBuyWithKits[];
   } catch {
-    return { highlights: [], releasedCount: 0, availableCount: 0 };
+    return [];
   }
 }
 
 export default async function HomePage() {
-  const [featured, stats, upcoming, finishingSoon, newGBs, aftermarket] = await Promise.all([
+  const [featured, stats, upcoming, finishingSoon, newGBs, released] = await Promise.all([
     getFeaturedSets(),
     getStats(),
     getUpcomingSets(),
     getFinishingSoon(),
     getNewGroupBuys(),
-    getAftermarket(),
+    getReleasedForCarousel(),
   ]);
 
   return (
@@ -233,69 +181,8 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* ── Aftermarket: the real price-comparison play ─────────────────────
-          During a group buy every vendor charges the same MSRP. AFTER release
-          the spread opens up — leftover stock, regional sales, FX swings — so
-          this is the service's sharpest value. Sell it hard, with live proof. */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-emerald-700 via-teal-700 to-cyan-800">
-        <div
-          className="absolute inset-0 opacity-10"
-          style={{
-            backgroundImage:
-              "radial-gradient(circle at 85% 15%, white 0%, transparent 40%), radial-gradient(circle at 5% 95%, white 0%, transparent 35%)",
-          }}
-        />
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">
-          <div className="grid lg:grid-cols-[1fr_auto] gap-8 items-center mb-8">
-            <div>
-              <p className="inline-flex items-center gap-2 px-3 py-1 bg-white/15 text-emerald-50 rounded-full text-xs font-semibold uppercase tracking-wide mb-4">
-                <span className="w-1.5 h-1.5 bg-emerald-300 rounded-full" />
-                The aftermarket advantage
-              </p>
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-white leading-tight max-w-2xl">
-                Group buy prices are the same everywhere.
-                <span className="text-emerald-200"> Released sets aren&apos;t.</span>
-              </h2>
-              <p className="mt-3 text-emerald-50/90 text-sm sm:text-base max-w-2xl">
-                During a group buy every vendor charges MSRP — there&apos;s nothing to
-                compare. The real differences appear <strong>after release</strong>:
-                leftover stock, regional sales, and currency swings can put the same
-                set at very different prices across vendors. We track who still
-                stocks every released GMK set and rank the true cost to your door.
-              </p>
-            </div>
-
-            <div className="flex lg:flex-col gap-3">
-              <div className="bg-white/15 backdrop-blur-sm rounded-xl px-5 py-3 text-center">
-                <p className="text-2xl font-bold text-white leading-tight">{aftermarket.releasedCount}</p>
-                <p className="text-[11px] text-emerald-100 uppercase tracking-wide">released sets</p>
-              </div>
-              <div className="bg-white/15 backdrop-blur-sm rounded-xl px-5 py-3 text-center">
-                <p className="text-2xl font-bold text-white leading-tight">{aftermarket.availableCount}</p>
-                <p className="text-[11px] text-emerald-100 uppercase tracking-wide">buyable right now</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Live proof: released sets you can buy today, with real vendor prices */}
-          {aftermarket.highlights.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-8">
-              {aftermarket.highlights.map((set) => (
-                <SetCard key={set.id} set={set} />
-              ))}
-            </div>
-          )}
-
-          <div className="flex justify-center">
-            <Link
-              href="/released?availability=available"
-              className="px-7 py-3 bg-white text-emerald-700 rounded-xl font-semibold hover:bg-emerald-50 transition-colors shadow-sm"
-            >
-              Explore released sets →
-            </Link>
-          </div>
-        </div>
-      </section>
+      {/* Released sets carousel — mirrors the upcoming GB carousel above */}
+      {released.length > 0 && <ReleasedCarousel sets={released} />}
 
       {/* Finishing Soon */}
       {finishingSoon.length > 0 && (

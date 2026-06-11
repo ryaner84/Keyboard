@@ -74,11 +74,20 @@ export function VendorTable({
     return out;
   }, [vendorKits, userRegion, userCurrency, rates]);
 
-  // Vendors that exist but aren't shown (no price yet) — surfaced only as a
-  // nudge to contribute a product link.
+  // Vendors with a URL but no live price yet — shown below priced rows as
+  // direct store links so users can still buy even if we can't scrape the price.
+  const unpricedRows = useMemo(() => {
+    const pricedIds = new Set(rows.map((r) => r.vk.id));
+    return vendorKits.filter((vk) => {
+      if (pricedIds.has(vk.id)) return false;
+      const zone = vk.vendor.shippingZones?.find((z) => z.destinationRegion === userRegion);
+      return !!(vk.gbUrl || vk.productUrl) && !!zone?.shipsToRegion;
+    });
+  }, [vendorKits, rows, userRegion]);
+
   const hiddenCount = useMemo(
-    () => vendorKits.length - rows.length,
-    [vendorKits, rows]
+    () => vendorKits.length - rows.length - unpricedRows.length,
+    [vendorKits, rows, unpricedRows]
   );
 
   if (loading) {
@@ -186,6 +195,35 @@ export function VendorTable({
           </div>
         );
       })}
+
+      {/* Vendors with no live price yet — show as direct store links */}
+      {unpricedRows.length > 0 && (
+        <div className="mt-1 pt-3 border-t border-gray-100">
+          <p className="text-xs text-gray-400 mb-2">No live price yet — check vendor site directly:</p>
+          <div className="space-y-1.5">
+            {unpricedRows.map((vk) => (
+              <a
+                key={vk.id}
+                href={(vk.gbUrl || vk.productUrl)!}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-dashed border-gray-200 hover:border-indigo-200 hover:bg-indigo-50/30 transition-colors"
+              >
+                <div className="w-7 h-7 rounded-md bg-gray-100 flex items-center justify-center flex-shrink-0">
+                  <span className="text-xs font-bold text-gray-500">
+                    {vk.vendor.name.slice(0, 2).toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-700 truncate">{vk.vendor.name}</p>
+                  <p className="text-xs text-gray-400">{vk.vendor.country}</p>
+                </div>
+                <span className="text-xs text-indigo-500 font-medium flex-shrink-0">Visit store →</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Footer: DHL disclaimer + vendor-link nudge */}
       <div className="flex items-start justify-between gap-4 pt-2">
