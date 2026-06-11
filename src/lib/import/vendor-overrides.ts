@@ -91,7 +91,8 @@ const LINK_OVERRIDES: LinkOverride[] = [
     productUrl: "https://oblotzky.industries/products/gmk-cyl-thunder-god",
   },
   {
-    setSlugs: ["gmk-british-racing-green"],
+    // Ktechs' group-buy page is the CURRENT round (R3) — never the 2020 R1 set.
+    setSlugs: ["gmk-british-racing-green-r3", "gmk-british-racing-green"],
     vendorSlug: "ktechs",
     productUrl: "https://ktechs.store/collections/group-buy/products/gmk-british-racing-green",
   },
@@ -112,13 +113,14 @@ async function ensureVendor(def: VendorDef): Promise<string> {
 
 // Link a vendor's product page to a set's BASE kit. Never clobbers a
 // manually-entered price; clears priceUpdatedAt when the URL changes so the
-// scraper re-fetches it on the next run.
+// scraper re-fetches it on the next run. Returns the VendorKit id so callers
+// can immediately price it.
 async function linkVendorKit(
   groupBuyId: string,
   vendorId: string,
   productUrl: string,
   currency: string
-): Promise<void> {
+): Promise<string> {
   let baseKit = await prisma.kit.findFirst({ where: { groupBuyId, type: "BASE" } });
   if (!baseKit) {
     baseKit = await prisma.kit.create({ data: { name: "Base Kit", type: "BASE", groupBuyId } });
@@ -140,18 +142,20 @@ async function linkVendorKit(
           : {}),
       },
     });
-  } else {
-    await prisma.vendorKit.create({
-      data: {
-        kitId: baseKit.id,
-        vendorId,
-        productUrl,
-        gbUrl: productUrl,
-        inStock: true,
-        currency,
-      },
-    });
+    return existing.id;
   }
+
+  const created = await prisma.vendorKit.create({
+    data: {
+      kitId: baseKit.id,
+      vendorId,
+      productUrl,
+      gbUrl: productUrl,
+      inStock: true,
+      currency,
+    },
+  });
+  return created.id;
 }
 
 export interface LinkOverrideResult {
@@ -170,9 +174,13 @@ export async function applyVendorLinkOverrides(): Promise<LinkOverrideResult> {
   }
 
   for (const link of LINK_OVERRIDES) {
-    const groupBuy = await prisma.groupBuy.findFirst({
-      where: { slug: { in: link.setSlugs } },
-    });
+    // setSlugs is a priority list — `findFirst({ slug: { in } })` returns an
+    // arbitrary match, so resolve in order explicitly.
+    let groupBuy = null;
+    for (const slug of link.setSlugs) {
+      groupBuy = await prisma.groupBuy.findUnique({ where: { slug } });
+      if (groupBuy) break;
+    }
     if (!groupBuy) {
       result.skipped++;
       continue;
@@ -204,13 +212,15 @@ const KNOWN_HOSTS: Record<string, Omit<VendorDef, "websiteUrl">> = {
 export interface SuggestionResult {
   processed: number;
   linked: number;
+  // VendorKits created/updated this run — callers can price them right away.
+  vendorKitIds: string[];
 }
 
 // Turn user-submitted vendor suggestions into VendorKits the scraper can
 // price. Each suggestion is processed once; bad URLs or unknown sets are
 // marked processed and dropped.
 export async function processVendorSuggestions(): Promise<SuggestionResult> {
-  const result: SuggestionResult = { processed: 0, linked: 0 };
+  const result: SuggestionResult = { processed: 0, linked: 0, vendorKitIds: [] };
 
   const pending = await prisma.vendorSuggestion.findMany({
     where: { processed: false },
@@ -258,9 +268,10 @@ export async function processVendorSuggestions(): Promise<SuggestionResult> {
     }
 
     const vendorId = await ensureVendor(def);
-    await linkVendorKit(groupBuy.id, vendorId, s.productUrl, def.currency);
+    const vendorKitId = await linkVendorKit(groupBuy.id, vendorId, s.productUrl, def.currency);
     await markDone();
     result.linked++;
+    result.vendorKitIds.push(vendorKitId);
   }
 
   return result;

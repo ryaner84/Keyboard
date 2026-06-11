@@ -283,6 +283,7 @@ export interface RefreshOptions {
   maxAgeHours?: number; // only refresh entries older than this
   concurrency?: number; // how many URLs to fetch in parallel
   maxRuntimeMs?: number; // wall-clock budget; stop starting new fetches past this
+  ids?: string[]; // refresh exactly these VendorKits (skips the age cutoff)
 }
 
 export interface RefreshResult {
@@ -341,11 +342,13 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
     maxAgeHours = 20,
     concurrency = DEFAULT_CONCURRENCY,
     maxRuntimeMs = DEFAULT_MAX_RUNTIME_MS,
+    ids,
   } = opts;
   const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
 
   const candidates = await prisma.vendorKit.findMany({
     where: {
+      ...(ids && ids.length > 0 && { id: { in: ids } }),
       productUrl: { not: null },
       // Buyers decide on the base kit first — only base kit prices are shown
       // on the site, so scraping is limited to BASE kits only.
@@ -354,9 +357,12 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
       // never scraped) must be included — `not: "MANUAL"` alone would exclude
       // NULLs because `NULL <> 'MANUAL'` is NULL (not true) in SQL.
       OR: [{ priceSource: null }, { priceSource: { not: "MANUAL" } }],
-      AND: {
-        OR: [{ priceUpdatedAt: null }, { priceUpdatedAt: { lt: cutoff } }],
-      },
+      // An explicit id list means "price these NOW" — skip the staleness gate.
+      ...(!ids?.length && {
+        AND: {
+          OR: [{ priceUpdatedAt: null }, { priceUpdatedAt: { lt: cutoff } }],
+        },
+      }),
     },
     orderBy: [{ priceUpdatedAt: { sort: "asc", nulls: "first" } }],
     take: limit,

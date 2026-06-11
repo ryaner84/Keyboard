@@ -12,6 +12,7 @@ export function Header() {
 
   const navLinks = [
     { href: "/browse", label: "Browse" },
+    { href: "/released", label: "Released" },
     { href: "/timeline", label: "Timeline" },
     { href: "/tracker", label: "My Tracker" },
   ];

@@ -171,7 +171,8 @@ export function SuggestVendorPanel({ slug, isOpen, onClose }: Props) {
             </button>
 
             <p className="text-[11px] text-gray-400 text-center leading-relaxed">
-              Submitted links are reviewed and pricing usually appears within 24 hours.
+              Most links go live within a minute — refresh the page to see the
+              vendor. A few stores can take up to 24 hours.
             </p>
           </div>
         )}
