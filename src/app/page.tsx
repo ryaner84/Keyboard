@@ -112,7 +112,7 @@ async function getBestReleasedDeals(): Promise<GroupBuyWithPricing[]> {
           kits: {
             some: {
               type: "BASE",
-              vendorKits: { some: { price: { not: null }, inStock: true } },
+              vendorKits: { some: { price: { not: null } } },
             },
           },
         },
@@ -131,7 +131,7 @@ async function getBestReleasedDeals(): Promise<GroupBuyWithPricing[]> {
       if (!base) return 0;
       let min = Infinity, max = 0, count = 0;
       for (const vk of base.vendorKits) {
-        if (vk.price == null || !vk.inStock) continue;
+        if (vk.price == null) continue;
         const usd = vk.price / (rates[vk.currency ?? "USD"] ?? 1);
         count++;
         if (usd < min) min = usd;
@@ -158,7 +158,7 @@ async function getReleasedForCarousel(): Promise<GroupBuyWithPricing[]> {
           kits: {
             some: {
               type: "BASE",
-              vendorKits: { some: { price: { not: null }, inStock: true } },
+              vendorKits: { some: { price: { not: null } } },
             },
           },
         },
@@ -178,7 +178,7 @@ async function getReleasedForCarousel(): Promise<GroupBuyWithPricing[]> {
       let max = 0;
       let count = 0;
       for (const vk of base.vendorKits) {
-        if (vk.price == null || !vk.inStock) continue;
+        if (vk.price == null) continue;
         const usd = vk.price / (rates[vk.currency ?? "USD"] ?? 1);
         count++;
         if (usd < min) min = usd;

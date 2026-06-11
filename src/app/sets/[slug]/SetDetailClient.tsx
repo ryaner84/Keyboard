@@ -55,7 +55,7 @@ export function SetDetailClient({ groupBuy }: Props) {
     if (!rates || Object.keys(rates).length === 0) return null;
     const available = vendorKitsForRegion.filter((vk) => {
       const zone = vk.vendor.shippingZones[0];
-      return vk.inStock && zone?.shipsToRegion && vk.price != null && vk.currency != null;
+      return zone?.shipsToRegion && vk.price != null && vk.currency != null;
     });
     if (available.length === 0) return null;
 

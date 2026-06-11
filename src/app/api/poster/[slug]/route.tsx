@@ -138,7 +138,7 @@ export async function GET(
         take: 1,
         include: {
           vendorKits: {
-            where: { price: { not: null }, inStock: true },
+            where: { price: { not: null } },
             include: {
               vendor: {
                 include: {

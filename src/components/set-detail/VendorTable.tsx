@@ -37,7 +37,7 @@ export function VendorTable({
     for (const vk of vendorKits) {
       // Vendors without a scraped/manual kit price are not shown at all —
       // a row with no price is noise, not information.
-      if (vk.price == null || !vk.inStock) continue;
+      if (vk.price == null) continue; // price is the availability signal; inStock reflects GB status not vendor stock
       // No stored currency → the price is in the vendor's own store currency.
       const kitCurrency = vk.currency ?? vk.vendor.currency ?? "USD";
 

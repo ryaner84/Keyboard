@@ -3,11 +3,14 @@ import { prisma } from "@/lib/prisma";
 
 const RELEASED_STATUSES = ["SHIPPING", "DELIVERED", "IN_STOCK"] as const;
 
+// "Available" means at least one vendor has a current price — the inStock flag
+// is set by the GB-lifecycle importer (false for DELIVERED/SHIPPING) and is
+// unreliable for released sets. A non-null scraped price is the real signal.
 const AVAILABLE_FILTER = {
   kits: {
     some: {
       type: "BASE" as const,
-      vendorKits: { some: { price: { not: null }, inStock: true } },
+      vendorKits: { some: { price: { not: null } } },
     },
   },
 };
@@ -41,7 +44,7 @@ function priceStats(
   let max = 0;
   let count = 0;
   for (const vk of base.vendorKits) {
-    if (vk.price == null || !vk.inStock) continue;
+    if (vk.price == null) continue;
     const rate = usdRates[vk.currency ?? "USD"] ?? 1;
     const usd = vk.price / rate;
     count++;

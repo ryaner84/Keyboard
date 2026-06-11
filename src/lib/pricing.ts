@@ -27,7 +27,10 @@ export function computeCheapest(
 
   const results: ComputedVendorPrice[] = [];
   for (const vk of kit.vendorKits ?? []) {
-    if (!vk.inStock || vk.price == null) continue;
+    // Use price as the availability signal. inStock is set by the GB-lifecycle
+    // importer (false for DELIVERED/SHIPPING sets) and is not a reliable
+    // vendor-stock indicator for released sets — a current price is.
+    if (vk.price == null) continue;
     // A scraped price without a stored currency is still priced in the
     // vendor's own store currency — don't drop it.
     const kitCurrency = vk.currency ?? vk.vendor.currency ?? "USD";
