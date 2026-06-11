@@ -5,13 +5,9 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { SetCard } from "@/components/browse/SetCard";
 import type { GroupBuyWithPricing } from "@/types";
 
-// Post-group-buy section. The whole page is organised around one question —
-// "I missed the group buy: can I still buy this set?" — so availability is
-// the primary control, with year and search refining from there.
-
 const PAGE_SIZE = 24;
 const CURRENT_YEAR = new Date().getFullYear();
-const OLDEST_YEAR = 2015; // first GMK rounds KeycapLendar tracks
+const OLDEST_YEAR = 2015;
 
 const AVAILABILITY_TABS = [
   { value: "", label: "All" },
@@ -26,10 +22,12 @@ export default function ReleasedContent() {
   const search = searchParams.get("search") ?? "";
   const availability = searchParams.get("availability") ?? "";
   const year = searchParams.get("year") ?? "";
+  const designer = searchParams.get("designer") ?? "";
   const sortBy = searchParams.get("sort") ?? "released-desc";
 
   const [sets, setSets] = useState<GroupBuyWithPricing[]>([]);
   const [deals, setDeals] = useState<GroupBuyWithPricing[]>([]);
+  const [topDesigners, setTopDesigners] = useState<string[]>([]);
   const [total, setTotal] = useState(0);
   const [totalReleased, setTotalReleased] = useState<number | null>(null);
   const [totalAvailable, setTotalAvailable] = useState<number | null>(null);
@@ -37,7 +35,6 @@ export default function ReleasedContent() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  // Debounce the search box so we don't refetch per keystroke.
   const [searchDraft, setSearchDraft] = useState(search);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -67,6 +64,7 @@ export default function ReleasedContent() {
       if (search) params.set("search", search);
       if (availability) params.set("availability", availability);
       if (year) params.set("year", year);
+      if (designer) params.set("designer", designer);
       params.set("sort", sortBy);
       params.set("page", String(pageNum));
       params.set("limit", String(PAGE_SIZE));
@@ -75,7 +73,10 @@ export default function ReleasedContent() {
         const res = await fetch(`/api/released?${params}`);
         const data = await res.json();
         setSets((prev) => (append ? [...prev, ...(data.data ?? [])] : (data.data ?? [])));
-        if (!append) setDeals(data.deals ?? []);
+        if (!append) {
+          setDeals(data.deals ?? []);
+          if (data.topDesigners?.length) setTopDesigners(data.topDesigners);
+        }
         setTotal(data.total ?? 0);
         setTotalReleased(data.totalReleased ?? null);
         setTotalAvailable(data.totalAvailable ?? null);
@@ -87,7 +88,7 @@ export default function ReleasedContent() {
         setLoadingMore(false);
       }
     },
-    [search, availability, year, sortBy]
+    [search, availability, year, designer, sortBy]
   );
 
   useEffect(() => {
@@ -95,10 +96,11 @@ export default function ReleasedContent() {
   }, [fetchPage]);
 
   const hasMore = sets.length < total;
+  const hasFilters = !!(search || year || designer || availability);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* ── Hero: what this section is, with live aftermarket stats ───────── */}
+      {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-700 px-6 py-8 sm:px-10 sm:py-10 mb-8">
         <div
           className="absolute inset-0 opacity-10"
@@ -112,8 +114,12 @@ export default function ReleasedContent() {
             Released Sets
           </h1>
           <p className="mt-2 text-emerald-50 text-sm sm:text-base max-w-2xl">
-            Missed the group buy? These sets have finished their run — here&apos;s
-            which ones vendors still stock, and where they&apos;re cheapest to you.
+            Missed the group buy? These sets have finished their run —
+            here&apos;s which ones vendors still stock, and where they&apos;re
+            cheapest to you.{" "}
+            <span className="font-semibold text-white">
+              Prices differ across stores — we find you the lowest.
+            </span>
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
             <div className="bg-white/15 backdrop-blur-sm rounded-xl px-4 py-2">
@@ -136,10 +142,10 @@ export default function ReleasedContent() {
         </div>
       </div>
 
-      {/* ── Controls ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-col lg:flex-row lg:items-center gap-3 mb-6">
-        {/* Availability — the primary filter of this section */}
-        <div className="inline-flex rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-1">
+      {/* ── Controls ─────────────────────────────────────────────────────── */}
+      {/* Row 1: availability + search */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-3">
+        <div className="inline-flex rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-1 flex-shrink-0">
           {AVAILABILITY_TABS.map((tab) => (
             <button
               key={tab.value}
@@ -159,7 +165,6 @@ export default function ReleasedContent() {
           ))}
         </div>
 
-        {/* Search */}
         <div className="relative flex-1 max-w-md">
           <svg
             className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
@@ -173,12 +178,27 @@ export default function ReleasedContent() {
             type="text"
             value={searchDraft}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search sets, designers, colorways…"
+            placeholder="Search sets, colorways…"
             className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-900 transition-colors"
           />
         </div>
+      </div>
 
-        {/* Year released */}
+      {/* Row 2: designer + year + sort + clear */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <select
+          value={designer}
+          onChange={(e) => updateParams({ designer: e.target.value })}
+          className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-700 dark:text-gray-200 focus:outline-none focus:border-indigo-400"
+        >
+          <option value="">Any designer</option>
+          {topDesigners.map((d) => (
+            <option key={d} value={d}>
+              {d}
+            </option>
+          ))}
+        </select>
+
         <select
           value={year}
           onChange={(e) => updateParams({ year: e.target.value })}
@@ -194,7 +214,6 @@ export default function ReleasedContent() {
           )}
         </select>
 
-        {/* Sort */}
         <select
           value={sortBy}
           onChange={(e) => updateParams({ sort: e.target.value })}
@@ -205,10 +224,45 @@ export default function ReleasedContent() {
           <option value="released-asc">Oldest first</option>
           <option value="name">Name A–Z</option>
         </select>
+
+        {hasFilters && (
+          <button
+            onClick={() => {
+              setSearchDraft("");
+              router.replace("/released");
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-600 text-sm font-medium hover:bg-red-100 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            Clear filters
+          </button>
+        )}
       </div>
 
-      {/* ── Deals rail: biggest vendor price spreads right now ────────────── */}
-      {!loading && deals.length > 0 && !search && !year && availability !== "soldout" && (
+      {/* Designer quick-chips: top 12 most prolific designers as clickable pills */}
+      {topDesigners.length > 0 && !search && (
+        <div className="flex flex-wrap gap-2 mb-6">
+          <span className="text-xs text-gray-400 self-center mr-1">Designer:</span>
+          {topDesigners.slice(0, 12).map((d) => (
+            <button
+              key={d}
+              onClick={() => updateParams({ designer: designer === d ? "" : d })}
+              className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                designer === d
+                  ? "bg-indigo-600 text-white border-indigo-600"
+                  : "bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-indigo-300 hover:text-indigo-600"
+              }`}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── Deals rail ───────────────────────────────────────────────────── */}
+      {!loading && deals.length > 0 && !search && !year && !designer && availability !== "soldout" && (
         <div className="mb-10 rounded-2xl border-2 border-amber-200 dark:border-amber-900 bg-gradient-to-br from-amber-50 via-orange-50 to-amber-50 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-amber-950/40 p-5 sm:p-6">
           <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -230,11 +284,11 @@ export default function ReleasedContent() {
         </div>
       )}
 
-      {/* ── Result count ──────────────────────────────────────────────────── */}
+      {/* ── Result count ─────────────────────────────────────────────────── */}
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
         {loading
           ? "Loading…"
-          : `${total} set${total !== 1 ? "s" : ""}${
+          : `${total} set${total !== 1 ? "s" : ""}${designer ? ` by ${designer}` : ""}${
               availability === "available"
                 ? " you can buy right now"
                 : availability === "soldout"
@@ -243,7 +297,7 @@ export default function ReleasedContent() {
             }`}
       </p>
 
-      {/* ── Grid ──────────────────────────────────────────────────────────── */}
+      {/* ── Grid ─────────────────────────────────────────────────────────── */}
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
           {[1, 2, 3, 4, 5, 6].map((i) => (
@@ -265,6 +319,14 @@ export default function ReleasedContent() {
               ? "Nothing matching your filters is in stock right now — try widening the year or clearing the search."
               : "Try adjusting your filters"}
           </p>
+          {hasFilters && (
+            <button
+              onClick={() => { setSearchDraft(""); router.replace("/released"); }}
+              className="mt-4 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors"
+            >
+              Clear all filters
+            </button>
+          )}
         </div>
       ) : (
         <>

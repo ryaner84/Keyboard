@@ -23,13 +23,19 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
   const siteUrl = getSiteUrl();
   const url = `${siteUrl}/sets/${slug}?country=${country}`;
 
-  // og:image points at the generated poster (keyboard photo + top-3 cheapest
-  // prices + QR code), so pasting the link into WhatsApp/Discord shows the
-  // rich price card automatically — no manual upload needed. The raw set photo
-  // is listed second as a fallback for crawlers that can't load the poster.
+  // WhatsApp / iMessage bots have a ~3s timeout — the dynamic poster API
+  // can take longer on cold start (DB query + Firebase image fetch + Satori
+  // render), so the actual set photo goes FIRST as og:image (fast CDN URL,
+  // always loads). The poster follows as a second image: Discord and
+  // dedicated preview apps have longer timeouts and can render the rich card.
   const countryInfo = COUNTRY_BY_CODE[country.toUpperCase()] ?? DEFAULT_COUNTRY;
   const posterUrl = `${siteUrl}/api/poster/${slug}?country=${countryInfo.code}&currency=${countryInfo.currency}`;
   const photoUrl = normalizeImageUrl(groupBuy.imageUrl);
+
+  const ogImages = [
+    ...(photoUrl ? [{ url: photoUrl, width: 1200, height: 630, alt: groupBuy.name }] : []),
+    { url: posterUrl, width: 900, height: 1020, type: "image/png" as const, alt: groupBuy.name },
+  ];
 
   return {
     title: `${groupBuy.name} — GMK Tracker`,
@@ -38,16 +44,13 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
       title: groupBuy.name,
       description: groupBuy.subtitle ?? `${groupBuy.name} by ${groupBuy.designer}`,
       url,
-      images: [
-        { url: posterUrl, width: 900, height: 1020, type: "image/png", alt: groupBuy.name },
-        ...(photoUrl ? [{ url: photoUrl, alt: groupBuy.name }] : []),
-      ],
+      images: ogImages,
     },
     twitter: {
       card: "summary_large_image",
       title: groupBuy.name,
       description: groupBuy.subtitle ?? `Compare prices for ${groupBuy.name}`,
-      images: [posterUrl],
+      images: [photoUrl ?? posterUrl],
     },
   };
 }

@@ -64,6 +64,7 @@ export function ReleasedCarousel({ sets }: ReleasedCarouselProps) {
           <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">
             Released Sets — Still available to buy
           </p>
+          <span className="text-[11px] text-gray-400 hidden sm:block">· Discount different across stores</span>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">

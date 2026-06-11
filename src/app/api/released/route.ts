@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-// Post-group-buy catalog: sets whose run has finished (shipping, delivered,
-// or sitting in stock at vendors). The defining question for this section is
-// "can I still buy it?", so rows can be filtered by live availability — a set
-// counts as available when at least one vendor has a scraped/manual price on
-// the BASE kit and stock. For bargain hunters the API also supports
-// lowest-price sorting and a "biggest savings" deals ranking, both normalized
-// to USD server-side (the client re-renders amounts in the user's currency).
 const RELEASED_STATUSES = ["SHIPPING", "DELIVERED", "IN_STOCK"] as const;
 
 const AVAILABLE_FILTER = {
@@ -29,8 +22,6 @@ const PRICING_INCLUDE = {
   },
 } as const;
 
-// Cap for the in-memory price ranking — available released sets are a small
-// subset (vendors only stock so much), so this covers everything in practice.
 const RANKING_CAP = 400;
 
 interface PricedSet {
@@ -64,8 +55,9 @@ function priceStats(
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const search = searchParams.get("search") ?? "";
-  const availability = searchParams.get("availability") ?? ""; // "" | "available" | "soldout"
+  const availability = searchParams.get("availability") ?? "";
   const year = searchParams.get("year") ?? "";
+  const designer = searchParams.get("designer") ?? "";
   const sortBy = searchParams.get("sort") ?? "released-desc";
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
   const limit = Math.min(48, Math.max(1, parseInt(searchParams.get("limit") ?? "24")));
@@ -80,7 +72,6 @@ export async function GET(req: NextRequest) {
     };
   }
 
-  // Price sorting only makes sense over sets that HAVE a price.
   const priceSort = sortBy === "price-asc";
   const effectiveAvailability = priceSort ? "available" : availability;
 
@@ -89,6 +80,7 @@ export async function GET(req: NextRequest) {
     ...yearFilter,
     ...(effectiveAvailability === "available" && AVAILABLE_FILTER),
     ...(effectiveAvailability === "soldout" && { NOT: AVAILABLE_FILTER }),
+    ...(designer && { designer: { equals: designer, mode: "insensitive" as const } }),
     ...(search && {
       OR: [
         { name: { contains: search, mode: "insensitive" as const } },
@@ -107,7 +99,6 @@ export async function GET(req: NextRequest) {
 
   const releasedWhere = { status: { in: [...RELEASED_STATUSES] } };
 
-  // USD rates for server-side ranking (stored as "1 USD = X local").
   const needRates = priceSort || page === 1;
   const usdRates: Record<string, number> = {};
   if (needRates) {
@@ -121,8 +112,6 @@ export async function GET(req: NextRequest) {
   let total: number;
 
   if (priceSort) {
-    // In-memory ranking: fetch every matching available set (small, capped),
-    // rank by the cheapest vendor's kit price in USD, then paginate.
     const all = await prisma.groupBuy.findMany({
       where,
       include: PRICING_INCLUDE,
@@ -147,17 +136,28 @@ export async function GET(req: NextRequest) {
     ]);
   }
 
-  // Section-wide stats for the hero, independent of active filters.
   const [totalReleased, totalAvailable] = await Promise.all([
     prisma.groupBuy.count({ where: releasedWhere }),
     prisma.groupBuy.count({ where: { ...releasedWhere, ...AVAILABLE_FILTER } }),
   ]);
 
-  // "Biggest savings" deals rail: available released sets where 2+ vendors
-  // disagree on price, ranked by the relative spread. Only computed for the
-  // unfiltered first page — the rail is a discovery surface, not a result set.
+  // Top designers for the filter dropdown — only returned on page 1 with no
+  // active designer filter, so the list reflects the full catalog.
+  let topDesigners: string[] = [];
+  if (page === 1 && !designer) {
+    const rows = await prisma.groupBuy.groupBy({
+      by: ["designer"],
+      where: releasedWhere,
+      _count: { designer: true },
+      orderBy: { _count: { designer: "desc" } },
+      take: 30,
+    });
+    topDesigners = rows.map((r) => r.designer).filter(Boolean);
+  }
+
+  // "Biggest savings" deals rail
   let deals: unknown[] = [];
-  if (page === 1 && !search && !year && availability !== "soldout") {
+  if (page === 1 && !search && !year && !designer && availability !== "soldout") {
     const available = await prisma.groupBuy.findMany({
       where: { ...releasedWhere, ...AVAILABLE_FILTER },
       include: PRICING_INCLUDE,
@@ -179,5 +179,5 @@ export async function GET(req: NextRequest) {
       .map((r) => r.set);
   }
 
-  return NextResponse.json({ data, total, page, limit, totalReleased, totalAvailable, deals });
+  return NextResponse.json({ data, total, page, limit, totalReleased, totalAvailable, deals, topDesigners });
 }

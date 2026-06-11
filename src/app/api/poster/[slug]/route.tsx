@@ -384,6 +384,38 @@ export async function GET(
           <div style={{ color: "#475569", fontSize: 13, marginBottom: 4 }}>
             {`by ${groupBuy.designer ?? "unknown"}`}
           </div>
+          {/* GB end / release date so recipients know when to act */}
+          {(groupBuy.gbEnd ?? groupBuy.gbStart) && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                marginTop: 6,
+              }}
+            >
+              <span
+                style={{
+                  background: "rgba(99,102,241,0.15)",
+                  border: "1px solid rgba(99,102,241,0.30)",
+                  color: "#a5b4fc",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: "3px 10px",
+                  borderRadius: 20,
+                  letterSpacing: 0.5,
+                }}
+              >
+                {groupBuy.status === "ACTIVE_GB" && groupBuy.gbEnd
+                  ? `GB ends ${new Date(groupBuy.gbEnd).toLocaleDateString("en-SG", { day: "numeric", month: "short", year: "numeric" })}`
+                  : groupBuy.status === "INTEREST_CHECK" && groupBuy.gbStart
+                  ? `Starts ${new Date(groupBuy.gbStart).toLocaleDateString("en-SG", { day: "numeric", month: "short", year: "numeric" })}`
+                  : groupBuy.gbEnd
+                  ? `Released ${new Date(groupBuy.gbEnd).toLocaleDateString("en-SG", { month: "short", year: "numeric" })}`
+                  : ""}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* ── Divider ──────────────────────────────────────── */}
