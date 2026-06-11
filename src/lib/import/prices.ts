@@ -33,15 +33,25 @@ export interface PriceResult {
   variants: Array<{ title: string; price: number }>;
 }
 
-async function fetchWithTimeout(url: string): Promise<Response> {
+async function fetchWithTimeout(url: string, extraHeaders?: Record<string, string>): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    return await fetch(url, { headers: BROWSER_HEADERS, signal: controller.signal });
+    return await fetch(url, {
+      headers: { ...BROWSER_HEADERS, ...extraHeaders },
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(timer);
   }
 }
+
+// Home country per currency, for pinning Shopify's localization context.
+const CURRENCY_HOME_COUNTRY: Record<string, string> = {
+  USD: "US", SGD: "SG", EUR: "DE", GBP: "GB", CAD: "CA", AUD: "AU",
+  JPY: "JP", KRW: "KR", CNY: "CN", HKD: "HK", THB: "TH", TWD: "TW",
+  MYR: "MY", NZD: "NZ", SEK: "SE", NOK: "NO", DKK: "DK", CHF: "CH", PLN: "PL",
+};
 
 // Variant titles that are clearly NOT the keycap kit itself — GB listings
 // often bundle add-ons (deskmats, samples, deposits...) as cheap variants.
@@ -64,6 +74,8 @@ const KIT_BOUNDS: Record<string, { min: number; max: number }> = {
   KRW: { min: 90000, max: 320000 },
   CNY: { min: 480, max: 1650 },
   HKD: { min: 530, max: 1800 },
+  THB: { min: 2200, max: 8100 },
+  TWD: { min: 2100, max: 7300 },
 };
 
 // Plausibility check for a BASE kit price. Currencies without bounds
@@ -105,7 +117,23 @@ async function fetchShopifyPrice(productUrl: string): Promise<PriceResult | null
   const jsonUrl = `${clean}.json`;
 
   try {
-    const res = await fetchWithTimeout(jsonUrl);
+    // Shop currency FIRST (cached per origin) — needed to pin the price
+    // context below. May be null when the store blocks /meta.json; the caller
+    // then falls back to the vendor's own currency (e.g. Deskhero = CAD),
+    // NOT a blind USD default which previously inflated CA$88 into US$88.
+    const currency = await fetchShopifyCurrency(clean);
+
+    // Shopify Markets geo-localizes prices to the REQUESTER's country — a
+    // scrape from a Singapore datacenter gets SGD numbers while the shop's
+    // base currency label stays USD, silently double-converting on display
+    // (CannonKeys S$104 was stored as "USD 104" and shown as S$140). Pin the
+    // storefront localization to the shop's home market so the numbers always
+    // match the currency label. Stores without Markets ignore the cookies.
+    const cookie = currency
+      ? `cart_currency=${currency}; localization=${CURRENCY_HOME_COUNTRY[currency] ?? "US"}`
+      : undefined;
+
+    const res = await fetchWithTimeout(jsonUrl, cookie ? { Cookie: cookie } : undefined);
     if (!res.ok) return null;
     const data = (await res.json()) as {
       product?: {
@@ -130,11 +158,6 @@ async function fetchShopifyPrice(productUrl: string): Promise<PriceResult | null
     const nonAddon = variants.filter((v) => !ADDON_VARIANT_RE.test(v.title));
     const pool = nonAddon.length > 0 ? nonAddon : variants;
     const chosen = pinned ?? pool.find((v) => classifyVariant(v.title) === "BASE") ?? pool[0];
-
-    // May be null when the store blocks /meta.json — the caller falls back to
-    // the vendor's own currency (e.g. Deskhero = CAD), NOT a blind USD default
-    // which previously inflated CA$88 into US$88.
-    const currency = await fetchShopifyCurrency(clean);
 
     // Refuse implausible kit prices rather than store garbage.
     if (!isPlausibleBaseKitPrice(chosen.price, currency)) {

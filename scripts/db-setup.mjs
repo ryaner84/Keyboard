@@ -56,10 +56,14 @@ async function backfillShipping(client) {
     `UPDATE public."Vendor"
      SET region = 'SG', country = 'SG', currency = 'SGD'
      WHERE slug IN ('ilumkb','ktechs','ktech','ashkeebs','monokei',
-                    'zion-studios','zionstudios','zion-studios-sg')
-       AND region <> 'SG'`
+                    'zion-studios','zionstudios','zion-studios-sg',
+                    'pantheonkeys','pantheon-keys')
+       AND region <> 'SG'
+     RETURNING id`
   );
-  // 1b. Fix other commonly-mislabelled vendors (wrong origin inflates shipping).
+  // 1b. Fix other commonly-mislabelled vendors (wrong origin inflates shipping,
+  // wrong currency corrupts every scraped price — e.g. Aiglatson Studio is a
+  // Thai store (฿/THB) that KeycapLendar lists as US/USD).
   const fixIntl = await client.query(
     `UPDATE public."Vendor" AS v SET
        region   = c.region::public."Region",
@@ -72,12 +76,28 @@ async function backfillShipping(client) {
        ('oblotzky-industries', 'EU',   'DE', 'EUR'),
        ('geonworks',           'ASIA', 'KR', 'USD'),
        ('kbdfans',             'ASIA', 'CN', 'USD'),
-       ('zfrontier',           'ASIA', 'CN', 'USD')
+       ('zfrontier',           'ASIA', 'CN', 'USD'),
+       ('aiglatson-studio',    'ASIA', 'TH', 'THB'),
+       ('aiglatson',           'ASIA', 'TH', 'THB')
      ) AS c(slug, region, country, currency)
-     WHERE v.slug = c.slug AND v.region::text <> c.region`
+     WHERE v.slug = c.slug AND (v.region::text <> c.region OR v.currency <> c.currency)
+     RETURNING v.id`
   );
-  const fixed = (fixSG.rowCount || 0) + (fixIntl.rowCount || 0);
-  if (fixed > 0) console.log(`[db-setup] Corrected ${fixed} vendor region(s).`);
+  const correctedIds = [...fixSG.rows, ...fixIntl.rows].map((r) => r.id);
+  if (correctedIds.length > 0) {
+    console.log(`[db-setup] Corrected ${correctedIds.length} vendor region(s).`);
+    // Their scraped prices were stored under the wrong currency — wipe them so
+    // the nightly refresh re-scrapes with the corrected store currency.
+    const requeue = await client.query(
+      `UPDATE public."VendorKit"
+       SET price = NULL, "priceUpdatedAt" = NULL
+       WHERE "priceSource" = 'SCRAPED' AND "vendorId" = ANY($1)`,
+      [correctedIds]
+    );
+    if (requeue.rowCount > 0) {
+      console.log(`[db-setup] Re-queued ${requeue.rowCount} prices from corrected vendors.`);
+    }
+  }
 
   // 2. Upsert vendor × destination shipping zones with recalibrated DHL rates.
   const seed = await client.query(
@@ -179,6 +199,7 @@ async function main() {
       if (alreadyPopulated) {
         await ensureImagesColumn(client);
         await ensureVendorSuggestionTable(client);
+        await ensureCurrencies(client);
         await resetPollutedGalleries(client);
         await backfillShipping(client);
         await cleanupInterestChecks(client);
@@ -187,6 +208,7 @@ async function main() {
         await requeueCurrencyMismatches(client);
         await requeueLegacyScrapedPrices(client);
         await requeuePinnedVariantPrices(client);
+        await requeueGeoCurrencyPrices(client);
       }
     }
 
@@ -205,6 +227,7 @@ async function main() {
     await ensureImagesColumn(client);
     await ensureVariantsColumn(client);
     await ensureVendorSuggestionTable(client);
+    await ensureCurrencies(client);
     await resetPollutedGalleries(client);
     await backfillShipping(client);
     await cleanupInterestChecks(client);
@@ -365,6 +388,8 @@ async function purgeImplausibleScrapedPrices(client) {
            OR (currency = 'KRW' AND (price < 90000 OR price > 320000))
            OR (currency = 'CNY' AND (price < 480 OR price > 1650))
            OR (currency = 'HKD' AND (price < 530 OR price > 1800))
+           OR (currency = 'THB' AND (price < 2200 OR price > 8100))
+           OR (currency = 'TWD' AND (price < 2100 OR price > 7300))
          )`
     );
     if (rowCount > 0) {
@@ -372,6 +397,45 @@ async function purgeImplausibleScrapedPrices(client) {
     }
   } catch (err) {
     console.warn(`[db-setup] Price purge skipped: ${err.message}`);
+  }
+}
+
+// Make sure every currency a vendor store can price in exists in the Currency
+// table — a missing row makes convertCurrency silently fall back to rate 1,
+// displaying e.g. a ฿4,000 Thai price as if it were $4,000 (~32x inflation).
+// Static rates are placeholders at the right magnitude; lastUpdated is epoch 0
+// so the next exchange-rate refresh overwrites them immediately.
+async function ensureCurrencies(client) {
+  try {
+    const { rowCount } = await client.query(
+      `INSERT INTO public."Currency" (code, name, symbol, "exchangeRateToUSD", "lastUpdated")
+       VALUES
+         ('USD', 'US Dollar',          '$',   1.0,   to_timestamp(0)),
+         ('SGD', 'Singapore Dollar',   'S$',  1.35,  to_timestamp(0)),
+         ('EUR', 'Euro',               '€',   0.92,  to_timestamp(0)),
+         ('GBP', 'British Pound',      '£',   0.79,  to_timestamp(0)),
+         ('CAD', 'Canadian Dollar',    'CA$', 1.37,  to_timestamp(0)),
+         ('AUD', 'Australian Dollar',  'A$',  1.54,  to_timestamp(0)),
+         ('JPY', 'Japanese Yen',       '¥',   150.5, to_timestamp(0)),
+         ('CNY', 'Chinese Yuan',       '¥',   7.24,  to_timestamp(0)),
+         ('KRW', 'South Korean Won',   '₩',   1340,  to_timestamp(0)),
+         ('MYR', 'Malaysian Ringgit',  'RM',  4.71,  to_timestamp(0)),
+         ('THB', 'Thai Baht',          '฿',   35.8,  to_timestamp(0)),
+         ('NZD', 'New Zealand Dollar', 'NZ$', 1.64,  to_timestamp(0)),
+         ('HKD', 'Hong Kong Dollar',   'HK$', 7.82,  to_timestamp(0)),
+         ('TWD', 'New Taiwan Dollar',  'NT$', 32.1,  to_timestamp(0)),
+         ('SEK', 'Swedish Krona',      'kr',  10.5,  to_timestamp(0)),
+         ('NOK', 'Norwegian Krone',    'kr',  10.8,  to_timestamp(0)),
+         ('DKK', 'Danish Krone',       'kr',  6.89,  to_timestamp(0)),
+         ('CHF', 'Swiss Franc',        'CHF', 0.89,  to_timestamp(0)),
+         ('PLN', 'Polish Zloty',       'zł',  4.02,  to_timestamp(0))
+       ON CONFLICT (code) DO NOTHING`
+    );
+    if (rowCount > 0) {
+      console.log(`[db-setup] Added ${rowCount} missing currencies.`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Currency backfill skipped: ${err.message}`);
   }
 }
 
@@ -466,6 +530,53 @@ async function requeuePinnedVariantPrices(client) {
     }
   } catch (err) {
     console.warn(`[db-setup] Pinned-variant requeue skipped: ${err.message}`);
+  }
+}
+
+// ONE-TIME: Shopify Markets geo-localizes product .json prices to the
+// requester's country, so scrapes picked up SGD-converted numbers that were
+// then labeled with the shop's base currency (CannonKeys S$104 stored as
+// "USD 104", displayed as S$140 — a double conversion). The scraper now pins
+// the storefront context to the shop's home market. CannonKeys prices are
+// confirmed wrong — wipe them now; every other scraped price is re-queued
+// (kept on display) so the nightly refresh re-verifies it. Sentinel-guarded.
+async function requeueGeoCurrencyPrices(client) {
+  const KEY = "requeue_geo_currency_v1";
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."_AppMigrations" (
+         key text PRIMARY KEY,
+         applied_at timestamptz NOT NULL DEFAULT now()
+       )`
+    );
+    const done = await client.query(
+      `SELECT 1 FROM public."_AppMigrations" WHERE key = $1`,
+      [KEY]
+    );
+    if (done.rowCount > 0) return;
+
+    const wiped = await client.query(
+      `UPDATE public."VendorKit" vk
+       SET price = NULL, "priceUpdatedAt" = NULL
+       FROM public."Vendor" v
+       WHERE vk."vendorId" = v.id
+         AND vk."priceSource" = 'SCRAPED'
+         AND v.slug IN ('cannon-keys','cannonkeys')`
+    );
+    const requeued = await client.query(
+      `UPDATE public."VendorKit"
+       SET "priceUpdatedAt" = NULL
+       WHERE "priceSource" = 'SCRAPED' AND price IS NOT NULL`
+    );
+    await client.query(
+      `INSERT INTO public."_AppMigrations" (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
+      [KEY]
+    );
+    console.log(
+      `[db-setup] Geo-currency fix: wiped ${wiped.rowCount} CannonKeys prices, re-queued ${requeued.rowCount} for re-verification (one-time).`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] Geo-currency requeue skipped: ${err.message}`);
   }
 }
 
