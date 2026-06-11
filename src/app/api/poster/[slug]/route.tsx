@@ -1,4 +1,4 @@
-import { ImageResponse } from "@vercel/og";
+import { ImageResponse } from "next/og";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { STATUS_LABELS } from "@/lib/utils";
@@ -6,6 +6,8 @@ import QRCode from "qrcode";
 import type { GBStatus } from "@/generated/prisma";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
 const STATUS_BG: Record<GBStatus, string> = {
   INTEREST_CHECK: "#e2e8f0",
@@ -25,6 +27,23 @@ const STATUS_FG: Record<GBStatus, string> = {
   CANCELLED: "#b91c1c",
 };
 
+async function fetchImageDataUri(url: string): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const contentType = res.headers.get("content-type") ?? "image/png";
+    if (!contentType.startsWith("image/")) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > 4_000_000) return null;
+    return `data:${contentType};base64,${buf.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ slug: string }> }
@@ -41,6 +60,11 @@ export async function GET(
 
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://gmktracker.com";
   const setUrl = `${siteUrl}/sets/${slug}?country=${country}`;
+
+  // Pre-fetch keyboard image as base64 data URI so Satori doesn't hit Firebase host allowlist
+  const heroImageData = groupBuy.imageUrl
+    ? await fetchImageDataUri(groupBuy.imageUrl)
+    : null;
 
   // Generate QR code as data URL
   const qrDataUrl = await QRCode.toDataURL(setUrl, {
@@ -110,11 +134,11 @@ export async function GET(
         </div>
 
         {/* Set image */}
-        {groupBuy.imageUrl && (
+        {heroImageData && (
           <div style={{ display: "flex", padding: "0" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={groupBuy.imageUrl}
+              src={heroImageData}
               alt={groupBuy.name}
               style={{
                 width: "100%",
