@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { SetCard } from "@/components/browse/SetCard";
 import type { GroupBuyWithPricing } from "@/types";
 
-const PAGE_SIZE = 24;
+const PAGE_SIZE = 12;
 const CURRENT_YEAR = new Date().getFullYear();
 const OLDEST_YEAR = 2015;
 

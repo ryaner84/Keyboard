@@ -100,6 +100,55 @@ async function getStats() {
 // price (the discount is different across stores), so the carousel leads with
 // real savings. Topped up with the most recent releases when fewer than 5
 // sets have a meaningful spread.
+// Best deals: released sets where vendors disagree on price the most.
+// Sorted by USD-normalised spread descending (biggest savings first) and
+// filtered to ≥5% spread so only meaningful deals appear.
+async function getBestReleasedDeals(): Promise<GroupBuyWithPricing[]> {
+  try {
+    const [available, rateRows] = await Promise.all([
+      prisma.groupBuy.findMany({
+        where: {
+          status: { in: ["IN_STOCK", "SHIPPING", "DELIVERED"] },
+          kits: {
+            some: {
+              type: "BASE",
+              vendorKits: { some: { price: { not: null }, inStock: true } },
+            },
+          },
+        },
+        include: PRICING_INCLUDE,
+        orderBy: { updatedAt: "desc" },
+        take: 80,
+      }),
+      prisma.currency.findMany({ select: { code: true, exchangeRateToUSD: true } }),
+    ]);
+
+    const rates: Record<string, number> = {};
+    for (const r of rateRows) rates[r.code] = r.exchangeRateToUSD;
+
+    const spreadOf = (set: (typeof available)[number]): number => {
+      const base = set.kits.find((k) => k.type === "BASE") ?? set.kits[0];
+      if (!base) return 0;
+      let min = Infinity, max = 0, count = 0;
+      for (const vk of base.vendorKits) {
+        if (vk.price == null || !vk.inStock) continue;
+        const usd = vk.price / (rates[vk.currency ?? "USD"] ?? 1);
+        count++;
+        if (usd < min) min = usd;
+        if (usd > max) max = usd;
+      }
+      return count >= 2 && max > 0 ? (max - min) / max : 0;
+    };
+
+    return available
+      .filter((s) => spreadOf(s) >= 0.05)
+      .sort((a, b) => spreadOf(b) - spreadOf(a))
+      .slice(0, 5) as unknown as GroupBuyWithPricing[];
+  } catch {
+    return [];
+  }
+}
+
 async function getReleasedForCarousel(): Promise<GroupBuyWithPricing[]> {
   try {
     const [available, rateRows] = await Promise.all([
@@ -161,13 +210,14 @@ async function getReleasedForCarousel(): Promise<GroupBuyWithPricing[]> {
 }
 
 export default async function HomePage() {
-  const [featured, stats, upcoming, finishingSoon, newGBs, released] = await Promise.all([
+  const [featured, stats, upcoming, finishingSoon, newGBs, released, bestDeals] = await Promise.all([
     getFeaturedSets(),
     getStats(),
     getUpcomingSets(),
     getFinishingSoon(),
     getNewGroupBuys(),
     getReleasedForCarousel(),
+    getBestReleasedDeals(),
   ]);
 
   return (
@@ -250,6 +300,33 @@ export default async function HomePage() {
             {finishingSoon.map((set) => (
               <SetCard key={set.id} set={set} />
             ))}
+          </div>
+        </section>
+      )}
+
+      {/* Best Released Deals */}
+      {bestDeals.length > 0 && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12">
+          <div className="rounded-2xl border-2 border-amber-200 dark:border-amber-900 bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-amber-950/40 p-5 sm:p-6">
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <span>🔥</span> Best Released Deals
+                <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-400 text-xs font-semibold border border-amber-200 dark:border-amber-800">
+                  Widest price gap
+                </span>
+              </h2>
+              <Link href="/released?sort=savings" className="flex items-center gap-1 text-sm text-amber-700 dark:text-amber-400 hover:text-amber-800 font-medium">
+                See all released →
+              </Link>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-5">
+              In-stock sets where vendor prices vary the most — buy from the cheapest and keep the difference.
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+              {bestDeals.map((set) => (
+                <SetCard key={set.id} set={set} />
+              ))}
+            </div>
           </div>
         </section>
       )}
