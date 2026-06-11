@@ -36,9 +36,9 @@ export function UpcomingCarousel({ sets }: UpcomingCarouselProps) {
   const current = sets[active];
   const href = (slug: string) => `/sets/${slug}?country=${countryCode}`;
 
+  // Rendered inside the HomeCarousel tab switcher — no outer section/container.
   return (
-    <section className="bg-white border-b border-gray-100">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <div>
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
           {/* Main feature */}
           <div className="relative rounded-2xl overflow-hidden bg-gray-100 group">
@@ -62,11 +62,12 @@ export function UpcomingCarousel({ sets }: UpcomingCarouselProps) {
                 {/* Gradient for text legibility */}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
 
-                {/* Countdown pill — bottom-left */}
+                {/* Countdown pill — raised above the caption text so the two
+                    never overlap */}
                 {(() => {
                   const label = getCountdownLabel(current.status, current.gbStart, current.gbEnd);
                   return label ? (
-                    <div className="absolute bottom-3 left-3 flex items-center gap-1.5 bg-black/70 text-white text-xs font-semibold px-3 py-1.5 rounded-full backdrop-blur-sm">
+                    <div className="absolute bottom-[76px] sm:bottom-[84px] left-3 flex items-center gap-1.5 bg-black/70 text-white text-xs font-semibold px-3 py-1.5 rounded-full backdrop-blur-sm">
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
@@ -196,7 +197,6 @@ export function UpcomingCarousel({ sets }: UpcomingCarouselProps) {
             </svg>
           </Link>
         </div>
-      </div>
-    </section>
+    </div>
   );
 }

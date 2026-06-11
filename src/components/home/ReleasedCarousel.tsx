@@ -56,17 +56,9 @@ export function ReleasedCarousel({ sets }: ReleasedCarouselProps) {
   const currentDeal = savingsOf(current);
   const href = (slug: string) => `/sets/${slug}?country=${countryCode}`;
 
+  // Rendered inside the HomeCarousel tab switcher — no outer section/container.
   return (
-    <section className="bg-white border-b border-gray-100">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="flex items-center gap-2 mb-3">
-          <span className="w-2 h-2 bg-emerald-500 rounded-full" />
-          <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">
-            Released Sets — Still available to buy
-          </p>
-          <span className="text-[11px] text-gray-400 hidden sm:block">· Discount different across stores</span>
-        </div>
-
+    <div>
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
           {/* Main feature image */}
           <div className="relative rounded-2xl overflow-hidden bg-gray-100 group">
@@ -236,7 +228,6 @@ export function ReleasedCarousel({ sets }: ReleasedCarouselProps) {
             </svg>
           </Link>
         </div>
-      </div>
-    </section>
+    </div>
   );
 }

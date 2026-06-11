@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { UpcomingCarousel } from "@/components/home/UpcomingCarousel";
-import { ReleasedCarousel } from "@/components/home/ReleasedCarousel";
+import { HomeCarousel } from "@/components/home/HomeCarousel";
 import { SetCard } from "@/components/browse/SetCard";
 import { LocationReminder } from "@/components/home/LocationReminder";
 import type { GroupBuyWithKits, GroupBuyWithPricing } from "@/types";
@@ -173,8 +172,8 @@ export default async function HomePage() {
 
   return (
     <div>
-      {/* Upcoming GB carousel */}
-      {upcoming.length > 0 && <UpcomingCarousel sets={upcoming} />}
+      {/* Hero carousel — tab between live group buys and released deals */}
+      <HomeCarousel upcoming={upcoming} released={released} />
 
       {/* Hero */}
       <section className="bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800">
@@ -231,9 +230,6 @@ export default async function HomePage() {
           </div>
         </div>
       </section>
-
-      {/* Released sets carousel — mirrors the upcoming GB carousel above */}
-      {released.length > 0 && <ReleasedCarousel sets={released} />}
 
       {/* Finishing Soon */}
       {finishingSoon.length > 0 && (

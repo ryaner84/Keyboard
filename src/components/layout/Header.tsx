@@ -12,7 +12,7 @@ export function Header() {
   const pathname = usePathname();
 
   const navLinks = [
-    { href: "/browse", label: "Browse" },
+    { href: "/browse", label: "Group Buys" },
     { href: "/released", label: "Released" },
     { href: "/timeline", label: "Timeline" },
     { href: "/tracker", label: "My Tracker" },
