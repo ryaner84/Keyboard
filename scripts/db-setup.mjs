@@ -199,6 +199,7 @@ async function main() {
       if (alreadyPopulated) {
         await ensureImagesColumn(client);
         await ensureVendorSuggestionTable(client);
+        await ensureDiscoveryColumn(client);
         await ensureCurrencies(client);
         await resetPollutedGalleries(client);
         await backfillShipping(client);
@@ -227,6 +228,7 @@ async function main() {
     await ensureImagesColumn(client);
     await ensureVariantsColumn(client);
     await ensureVendorSuggestionTable(client);
+    await ensureDiscoveryColumn(client);
     await ensureCurrencies(client);
     await resetPollutedGalleries(client);
     await backfillShipping(client);
@@ -397,6 +399,18 @@ async function purgeImplausibleScrapedPrices(client) {
     }
   } catch (err) {
     console.warn(`[db-setup] Price purge skipped: ${err.message}`);
+  }
+}
+
+// Column for the catalog discovery crawler's oldest-first vendor rotation.
+async function ensureDiscoveryColumn(client) {
+  try {
+    await client.query(
+      `ALTER TABLE public."Vendor"
+       ADD COLUMN IF NOT EXISTS "lastDiscoveredAt" timestamp(3) without time zone`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] lastDiscoveredAt column setup skipped: ${err.message}`);
   }
 }
 

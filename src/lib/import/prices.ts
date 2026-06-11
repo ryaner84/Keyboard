@@ -198,10 +198,84 @@ async function fetchShopifyCurrency(productUrl: string): Promise<string | null> 
   return null;
 }
 
-// Attempt to fetch a live price for a single product URL.
+// Non-Shopify stores (custom platforms, WooCommerce, Magento, BigCommerce…)
+// don't expose a product JSON API, but virtually every e-commerce platform
+// embeds schema.org Product markup as JSON-LD for SEO — price + priceCurrency
+// live in the `offers` node. OpenGraph product:price:* meta tags are the
+// second fallback. No variant breakdown is available from either, so the
+// variants list stays empty (the UI handles that like legacy rows).
+async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null> {
+  try {
+    const res = await fetchWithTimeout(productUrl);
+    if (!res.ok) return null;
+    const html = await res.text();
+
+    const blocks = Array.from(
+      html.matchAll(
+        /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+      )
+    ).map((m) => m[1]);
+
+    for (const block of blocks) {
+      let data: unknown;
+      try {
+        data = JSON.parse(block.trim());
+      } catch {
+        continue; // malformed block — try the next one
+      }
+      type LdNode = {
+        "@type"?: string | string[];
+        "@graph"?: LdNode[];
+        offers?: LdOffer | LdOffer[];
+      };
+      type LdOffer = { price?: string | number; lowPrice?: string | number; priceCurrency?: string };
+      const root = data as LdNode | LdNode[];
+      const nodes: LdNode[] = Array.isArray(root)
+        ? root
+        : root["@graph"]
+          ? root["@graph"]
+          : [root];
+
+      for (const node of nodes) {
+        const type = node["@type"];
+        const isProduct = type === "Product" || (Array.isArray(type) && type.includes("Product"));
+        if (!isProduct || !node.offers) continue;
+        const offer = Array.isArray(node.offers) ? node.offers[0] : node.offers;
+        const price = Number(offer?.price ?? offer?.lowPrice);
+        const currency = offer?.priceCurrency ?? null;
+        if (!isNaN(price) && price > 0 && isPlausibleBaseKitPrice(price, currency)) {
+          return { price, currency, variants: [] };
+        }
+      }
+    }
+
+    // OpenGraph product meta tags (attribute order varies by platform).
+    const amount =
+      html.match(/property=["']product:price:amount["'][^>]*content=["']([\d.,]+)["']/i) ??
+      html.match(/content=["']([\d.,]+)["'][^>]*property=["']product:price:amount["']/i);
+    const cur =
+      html.match(/property=["']product:price:currency["'][^>]*content=["']([A-Z]{3})["']/i) ??
+      html.match(/content=["']([A-Z]{3})["'][^>]*property=["']product:price:currency["']/i);
+    if (amount) {
+      const price = Number(amount[1].replace(/,/g, ""));
+      const currency = cur ? cur[1] : null;
+      if (!isNaN(price) && price > 0 && isPlausibleBaseKitPrice(price, currency)) {
+        return { price, currency, variants: [] };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Attempt to fetch a live price for a single product URL: Shopify product
+// JSON first (rich variant data), generic JSON-LD/OpenGraph markup otherwise.
 export async function fetchVendorPrice(productUrl: string): Promise<PriceResult | null> {
   if (!productUrl) return null;
-  return fetchShopifyPrice(productUrl);
+  const shopify = await fetchShopifyPrice(productUrl);
+  if (shopify) return shopify;
+  return fetchJsonLdPrice(productUrl);
 }
 
 export interface RefreshOptions {

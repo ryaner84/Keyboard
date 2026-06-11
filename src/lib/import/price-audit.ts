@@ -37,7 +37,7 @@ export async function auditPrices(opts: AuditOptions = {}): Promise<AuditResult>
       price: { not: null },
       kit: { type: "BASE" },
     },
-    select: { id: true, price: true, currency: true, variants: true },
+    select: { id: true, price: true, currency: true, variants: true, productUrl: true },
   });
 
   const result: AuditResult = {
@@ -55,8 +55,11 @@ export async function auditPrices(opts: AuditOptions = {}): Promise<AuditResult>
 
     // What the price SHOULD be: the cheapest BASE-classified variant if the
     // listing has one, otherwise whatever is stored (single-kit listings have
-    // a lone "Default Title" variant that classifies as OTHERS).
-    const basePrice = categoryPrice(row.variants, "BASE");
+    // a lone "Default Title" variant that classifies as OTHERS). Vendor links
+    // that pin an exact variant (?variant=<id>) are ground truth — the scraper
+    // already stored that variant's price, so don't second-guess it here.
+    const isPinned = !!row.productUrl && /[?&]variant=/.test(row.productUrl);
+    const basePrice = isPinned ? null : categoryPrice(row.variants, "BASE");
     const target = basePrice ?? (row.price as number);
 
     if (!isPlausibleBaseKitPrice(target, row.currency)) {

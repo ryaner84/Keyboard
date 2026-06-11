@@ -69,16 +69,19 @@ model Kit {
 }
 
 model Vendor {
-  id            String         @id @default(cuid())
-  name          String
-  slug          String         @unique
-  region        Region
-  country       String
-  currency      String
-  websiteUrl    String
-  logoUrl       String?
-  vendorKits    VendorKit[]
-  shippingZones ShippingZone[]
+  id               String         @id @default(cuid())
+  name             String
+  slug             String         @unique
+  region           Region
+  country          String
+  currency         String
+  websiteUrl       String
+  logoUrl          String?
+  // When the catalog discovery crawler last scanned this store for GMK
+  // listings — rotates crawler attention oldest-first across nightly runs.
+  lastDiscoveredAt DateTime?
+  vendorKits       VendorKit[]
+  shippingZones    ShippingZone[]
 }
 
 model VendorKit {

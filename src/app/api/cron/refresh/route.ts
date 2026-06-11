@@ -4,6 +4,7 @@ import { refreshPrices } from "@/lib/import/prices";
 import { auditPrices } from "@/lib/import/price-audit";
 import { enrichImagesFromGmk } from "@/lib/import/enrich-images";
 import { applyVendorLinkOverrides, processVendorSuggestions } from "@/lib/import/vendor-overrides";
+import { discoverGmkProducts } from "@/lib/import/discovery";
 
 // Vercel Hobby caps serverless functions at 60s. We stay safely under that and
 // let refreshPrices() time-box itself, so the run always returns gracefully.
@@ -41,6 +42,14 @@ export async function GET(req: NextRequest) {
     const overrides = await applyVendorLinkOverrides();
     const suggestions = await processVendorSuggestions();
 
+    // Catalog discovery: walk a few vendors' own group-buy/catalog pages for
+    // GMK listings and (re)link them to tracked sets. Oldest-scanned first, so
+    // the whole roster is re-crawled every few days.
+    const discovery = await discoverGmkProducts({
+      vendorLimit: 6,
+      maxRuntimeMs: Math.max(5_000, (REQUEST_BUDGET_MS - (Date.now() - start)) * 0.25),
+    });
+
     // Give the price scrape whatever time is left in the budget after the import,
     // so import + scrape together never exceed the function limit.
     const remaining = REQUEST_BUDGET_MS - (Date.now() - start);
@@ -67,6 +76,7 @@ export async function GET(req: NextRequest) {
       import: importResult,
       overrides,
       suggestions,
+      discovery,
       prices: priceResult,
       audit: auditResult,
       images: imageResult,
