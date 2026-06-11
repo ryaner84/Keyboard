@@ -7,6 +7,13 @@ name: Verify live released pricing
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/app/api/released/**"
+      - "src/lib/pricing.ts"
+      - "src/components/set-detail/VendorTable.tsx"
+      - "scripts/verify-released-pricing.mjs"
 
 jobs:
   verify:
@@ -17,14 +24,19 @@ jobs:
         with:
           node-version: 22
 
+      # Give Vercel time to finish deploying before we hit the live API.
+      - name: Wait for Vercel deploy (push-triggered only)
+        if: github.event_name == 'push'
+        run: sleep 120
+
       - name: Raw API snapshot (available / all)
         run: |
           echo "=== availability=available ==="
           curl -sf "https://keyboard-six-tau.vercel.app/api/released?availability=available&page=1&limit=12" \
-            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);console.log('totalReleased:',j.totalReleased,'totalAvailable:',j.totalAvailable,'returned:',j.data.length);for(const g of j.data){const base=g.kits.find(k=>k.type==='BASE')??g.kits[0];const priced=(base?.vendorKits??[]).filter(v=>v.price!=null&&v.inStock);console.log(' -',g.slug,'| priced vendorKits:',priced.length,priced.map(v=>v.price+' '+(v.currency??'(vendor:'+v.vendor.currency+')')).join(', '))}})"
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);console.log('totalReleased:',j.totalReleased,'totalAvailable:',j.totalAvailable,'returned:',j.data.length);for(const g of j.data){const base=g.kits.find(k=>k.type==='BASE')??g.kits[0];const priced=(base?.vendorKits??[]).filter(v=>v.price!=null);console.log(' -',g.slug,'| priced vendorKits:',priced.length,priced.map(v=>v.price+' '+(v.currency??'(vendor:'+v.vendor.currency+')')).join(', '))}})"
           echo "=== availability=(all) first page ==="
           curl -sf "https://keyboard-six-tau.vercel.app/api/released?page=1&limit=12" \
-            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);console.log('total:',j.total,'returned:',j.data.length);let priced=0;for(const g of j.data){const base=g.kits.find(k=>k.type==='BASE')??g.kits[0];if((base?.vendorKits??[]).some(v=>v.price!=null&&v.inStock))priced++}console.log('sets with a live price on first page:',priced,'/',j.data.length)})"
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);console.log('total:',j.total,'returned:',j.data.length);let priced=0;for(const g of j.data){const base=g.kits.find(k=>k.type==='BASE')??g.kits[0];if((base?.vendorKits??[]).some(v=>v.price!=null))priced++}console.log('sets with a live price on first page:',priced,'/',j.data.length)})"
 
       - name: Card-render check (computeCheapest, SG viewer)
         run: BASE_URL=https://keyboard-six-tau.vercel.app npx --yes tsx scripts/verify-released-pricing.mjs
