@@ -207,6 +207,7 @@ async function main() {
         await cleanupInterestChecks(client);
         await ensureVariantsColumn(client);
         await purgeImplausibleScrapedPrices(client);
+        await restorePurgedPricesFromVariants(client);
         await requeuePurgedClearancePrices(client);
         await requeueCurrencyMismatches(client);
         await requeueLegacyScrapedPrices(client);
@@ -408,6 +409,65 @@ async function purgeImplausibleScrapedPrices(client) {
     }
   } catch (err) {
     console.warn(`[db-setup] Price purge skipped: ${err.message}`);
+  }
+}
+
+// Recover prices the old over-tight purge wiped. The purge nulled `price`
+// but kept the scraped `variants` JSON, which still holds every variant's
+// title and price — so the BASE-kit price can be restored offline, without
+// waiting for the next scraper run. Mirrors the variant selection in
+// scraper/scrape.py / src/lib/import/prices.ts: skip add-on variants, prefer
+// a "base"-titled variant, else the first non-add-on. Only prices inside the
+// new plausibility window are restored, and priceUpdatedAt stays NULL so the
+// row remains first in the re-scrape queue for live verification.
+// Idempotent: only touches price-NULL rows; restore window ⊆ purge window,
+// so a restored price is never re-purged.
+const ADDON_VARIANT_RE =
+  /(desk\s?mat|mouse\s?pad|wrist\s?rest|cable|artisan|sticker|sample|keychain|coin|tray|deposit|shipping|insurance|add[\s-]?on|extra)/i;
+const RESTORE_BOUNDS = {
+  USD: [30, 225], EUR: [28, 210], GBP: [24, 180], AUD: [45, 345],
+  CAD: [41, 310], SGD: [40, 310], JPY: [4500, 34000], KRW: [40000, 320000],
+  CNY: [215, 1650], HKD: [235, 1800], THB: [1075, 8100], TWD: [965, 7300],
+};
+
+async function restorePurgedPricesFromVariants(client) {
+  try {
+    const { rows } = await client.query(
+      `SELECT vk.id, vk.currency, vk.variants, v.currency AS vendor_currency
+       FROM public."VendorKit" vk
+       JOIN public."Vendor" v ON v.id = vk."vendorId"
+       WHERE vk.price IS NULL
+         AND vk."priceSource" = 'SCRAPED'
+         AND vk.variants IS NOT NULL`
+    );
+    let restored = 0;
+    for (const row of rows) {
+      let variants = row.variants;
+      if (typeof variants === "string") {
+        try { variants = JSON.parse(variants); } catch { continue; }
+      }
+      if (!Array.isArray(variants) || variants.length === 0) continue;
+      const usable = variants.filter(
+        (v) => v && typeof v.price === "number" && typeof v.title === "string"
+      );
+      const nonAddon = usable.filter((v) => !ADDON_VARIANT_RE.test(v.title));
+      const pool = nonAddon.length > 0 ? nonAddon : usable;
+      const chosen = pool.find((v) => /base/i.test(v.title)) ?? pool[0];
+      if (!chosen) continue;
+      const cur = row.currency ?? row.vendor_currency ?? "USD";
+      const bounds = RESTORE_BOUNDS[cur];
+      if (bounds && (chosen.price < bounds[0] || chosen.price > bounds[1])) continue;
+      await client.query(
+        `UPDATE public."VendorKit" SET price = $1 WHERE id = $2 AND price IS NULL`,
+        [chosen.price, row.id]
+      );
+      restored++;
+    }
+    if (restored > 0) {
+      console.log(`[db-setup] Restored ${restored} purged prices from stored variants.`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Variant price restore skipped: ${err.message}`);
   }
 }
 
