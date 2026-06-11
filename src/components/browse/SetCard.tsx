@@ -5,7 +5,7 @@ import Image from "next/image";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { formatRelativeDate, getCountdownLabel, normalizeImageUrl } from "@/lib/utils";
 import { formatCurrency } from "@/lib/currency-utils";
-import { computeCheapest, latestUpdate } from "@/lib/pricing";
+import { computeCheapest, computeSavings, latestUpdate } from "@/lib/pricing";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
 import { useLocation } from "@/context/LocationContext";
 import { useCurrency } from "@/hooks/useCurrency";
@@ -22,7 +22,9 @@ export function SetCard({ set }: SetCardProps) {
   const tracked = isTracked(set.slug);
   const countdown = getCountdownLabel(set.status, set.gbStart, set.gbEnd);
 
-  const cheapest = computeCheapest(set, region as Region, currency, rates).slice(0, 3);
+  const allPrices = computeCheapest(set, region as Region, currency, rates);
+  const cheapest = allPrices.slice(0, 3);
+  const savings = computeSavings(allPrices);
   const updated = latestUpdate(cheapest);
   const href = `/sets/${set.slug}?country=${countryCode}`;
 
@@ -46,6 +48,14 @@ export function SetCard({ set }: SetCardProps) {
           <div className="absolute top-3 left-3">
             <StatusBadge status={set.status} size="sm" />
           </div>
+          {savings && (
+            <div
+              className="absolute top-3 right-3 flex items-center gap-1 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-lg"
+              title={`${formatCurrency(savings.amount, currency)} cheaper than ${savings.vsVendor}`}
+            >
+              💸 Save {savings.percent}%
+            </div>
+          )}
           {countdown && (
             <div className="absolute bottom-2 left-2 flex items-center gap-1 bg-black/70 text-white text-[11px] font-semibold px-2 py-1 rounded-full backdrop-blur-sm">
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -110,8 +120,13 @@ export function SetCard({ set }: SetCardProps) {
                   </li>
                 ))}
               </ul>
+              {savings && (
+                <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 mt-2">
+                  {formatCurrency(savings.amount, currency)} cheaper than {savings.vsVendor}
+                </p>
+              )}
               {updated && (
-                <p className="text-[10px] text-gray-400 mt-2">
+                <p className="text-[10px] text-gray-400 mt-1">
                   Prices updated {formatRelativeDate(updated)} · incl. shipping
                 </p>
               )}

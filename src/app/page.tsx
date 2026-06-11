@@ -115,18 +115,47 @@ async function getAftermarket(): Promise<{
   availableCount: number;
 }> {
   try {
-    const [highlights, releasedCount, availableCount] = await Promise.all([
+    const [available, releasedCount, availableCount, rateRows] = await Promise.all([
       prisma.groupBuy.findMany({
         where: { status: { in: [...RELEASED_STATUSES] }, ...AVAILABLE_FILTER },
         include: PRICING_INCLUDE,
         orderBy: { gbEnd: { sort: "desc", nulls: "last" } },
-        take: 3,
-      }) as unknown as GroupBuyWithPricing[],
+        take: 100,
+      }),
       prisma.groupBuy.count({ where: { status: { in: [...RELEASED_STATUSES] } } }),
       prisma.groupBuy.count({
         where: { status: { in: [...RELEASED_STATUSES] }, ...AVAILABLE_FILTER },
       }),
+      prisma.currency.findMany({ select: { code: true, exchangeRateToUSD: true } }),
     ]);
+
+    // Showcase the sets with the widest vendor price spread (the bargain
+    // hunter's proof), topped up with the most recent releases.
+    const rates: Record<string, number> = {};
+    for (const r of rateRows) rates[r.code] = r.exchangeRateToUSD;
+    const spreadOf = (set: (typeof available)[number]): number => {
+      const base = set.kits.find((k) => k.type === "BASE") ?? set.kits[0];
+      if (!base) return 0;
+      let min = Infinity;
+      let max = 0;
+      let count = 0;
+      for (const vk of base.vendorKits) {
+        if (vk.price == null || !vk.inStock) continue;
+        const usd = vk.price / (rates[vk.currency ?? "USD"] ?? 1);
+        count++;
+        if (usd < min) min = usd;
+        if (usd > max) max = usd;
+      }
+      return count >= 2 && max > 0 ? (max - min) / max : 0;
+    };
+    const bySpread = [...available].sort((a, b) => spreadOf(b) - spreadOf(a));
+    const top = bySpread.filter((s) => spreadOf(s) >= 0.05).slice(0, 3);
+    const seen = new Set(top.map((s) => s.id));
+    const highlights = [
+      ...top,
+      ...available.filter((s) => !seen.has(s.id)).slice(0, 3 - top.length),
+    ] as unknown as GroupBuyWithPricing[];
+
     return { highlights, releasedCount, availableCount };
   } catch {
     return { highlights: [], releasedCount: 0, availableCount: 0 };

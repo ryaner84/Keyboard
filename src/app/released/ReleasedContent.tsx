@@ -29,6 +29,7 @@ export default function ReleasedContent() {
   const sortBy = searchParams.get("sort") ?? "released-desc";
 
   const [sets, setSets] = useState<GroupBuyWithPricing[]>([]);
+  const [deals, setDeals] = useState<GroupBuyWithPricing[]>([]);
   const [total, setTotal] = useState(0);
   const [totalReleased, setTotalReleased] = useState<number | null>(null);
   const [totalAvailable, setTotalAvailable] = useState<number | null>(null);
@@ -74,6 +75,7 @@ export default function ReleasedContent() {
         const res = await fetch(`/api/released?${params}`);
         const data = await res.json();
         setSets((prev) => (append ? [...prev, ...(data.data ?? [])] : (data.data ?? [])));
+        if (!append) setDeals(data.deals ?? []);
         setTotal(data.total ?? 0);
         setTotalReleased(data.totalReleased ?? null);
         setTotalAvailable(data.totalAvailable ?? null);
@@ -199,10 +201,34 @@ export default function ReleasedContent() {
           className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-700 dark:text-gray-200 focus:outline-none focus:border-indigo-400"
         >
           <option value="released-desc">Recently released</option>
+          <option value="price-asc">Lowest kit price</option>
           <option value="released-asc">Oldest first</option>
           <option value="name">Name A–Z</option>
         </select>
       </div>
+
+      {/* ── Deals rail: biggest vendor price spreads right now ────────────── */}
+      {!loading && deals.length > 0 && !search && !year && availability !== "soldout" && (
+        <div className="mb-10 rounded-2xl border-2 border-amber-200 dark:border-amber-900 bg-gradient-to-br from-amber-50 via-orange-50 to-amber-50 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-amber-950/40 p-5 sm:p-6">
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <span className="text-xl">🔥</span> Biggest savings right now
+            </h2>
+            <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide bg-amber-100 dark:bg-amber-900/60 px-2.5 py-1 rounded-full">
+              Live price gaps
+            </span>
+          </div>
+          <p className="text-sm text-gray-600 dark:text-gray-300 mb-5">
+            Same set, very different prices — these have the widest gap between
+            the cheapest and priciest vendor today.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {deals.map((set) => (
+              <SetCard key={set.id} set={set} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Result count ──────────────────────────────────────────────────── */}
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">

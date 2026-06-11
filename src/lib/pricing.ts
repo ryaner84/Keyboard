@@ -44,6 +44,26 @@ export function computeCheapest(
   return results;
 }
 
+// The bargain-hunter signal: how much buying from the cheapest vendor saves
+// versus the priciest one carrying the same set. Spreads under 5% are noise
+// (FX rounding, near-identical MSRP) — only meaningful gaps get surfaced.
+export interface Savings {
+  amount: number; // saved in the user's currency, cheapest vs priciest
+  percent: number; // 0–100
+  vsVendor: string; // the priciest vendor's name
+}
+
+export function computeSavings(allPrices: ComputedVendorPrice[]): Savings | null {
+  if (allPrices.length < 2) return null;
+  const cheapest = allPrices[0];
+  const priciest = allPrices[allPrices.length - 1];
+  const amount = priciest.totalLocal - cheapest.totalLocal;
+  if (priciest.totalLocal <= 0) return null;
+  const percent = Math.round((amount / priciest.totalLocal) * 100);
+  if (percent < 5) return null;
+  return { amount, percent, vsVendor: priciest.vendorName };
+}
+
 // Most recent priceUpdatedAt across a set's vendor prices.
 export function latestUpdate(prices: ComputedVendorPrice[]): Date | null {
   let latest: number | null = null;
