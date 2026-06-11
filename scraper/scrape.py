@@ -534,6 +534,377 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
 
 
 # ----------------------------------------------------------------------------
+# GMK.net catalog scraping
+# GMK Electronic Maschinen (https://www.gmk.net/shop/en/) is the manufacturer
+# of every GMK keycap set. Their Shopware webshop is the authoritative catalog.
+# Two category URLs list all sets:
+#   /shop/en/keycaps/      — all sets (in production, in stock, delivered)
+#   /shop/en/group-buys/   — currently active / recent group buys
+#
+# Product URL pattern: https://www.gmk.net/shop/en/{slug}/{product-id}
+# e.g. https://www.gmk.net/shop/en/gmk-cyl-ramune/gmk10108
+# The slug matches our DB slug format exactly.
+# ----------------------------------------------------------------------------
+
+GMK_NET_ORIGIN = "https://www.gmk.net"
+GMK_NET_CATALOG_URLS = [
+    "https://www.gmk.net/shop/en/keycaps/",
+    "https://www.gmk.net/shop/en/group-buys/",
+]
+GMK_VENDOR_SLUG = "gmk"
+
+# Map URL path segment / breadcrumb keywords to GBStatus
+_STATUS_MAP = [
+    (re.compile(r"group[\s-]?buys?|active\s*gb", re.IGNORECASE), "ACTIVE_GB"),
+    (re.compile(r"interest[\s-]?check", re.IGNORECASE), "INTEREST_CHECK"),
+    (re.compile(r"in[\s-]?stock|extras?|available", re.IGNORECASE), "IN_STOCK"),
+    (re.compile(r"in[\s-]?production|shipping|fulfil", re.IGNORECASE), "SHIPPING"),
+]
+
+
+def infer_status_from_text(text: str) -> str:
+    for pattern, status in _STATUS_MAP:
+        if pattern.search(text):
+            return status
+    return "DELIVERED"
+
+
+def extract_gmk_slug_from_url(url: str) -> str | None:
+    """Extract the set slug from a GMK.net product URL.
+
+    URL pattern: https://www.gmk.net/shop/en/{slug}/{product-id}
+    Returns the slug segment (e.g. 'gmk-cyl-ramune').
+    """
+    try:
+        path = urllib.parse.urlsplit(url).path.rstrip("/")
+        parts = [p for p in path.split("/") if p]
+        # Find the slug: it follows 'en' and precedes the product-id (gmkXXXXX)
+        for i, part in enumerate(parts):
+            if part == "en" and i + 1 < len(parts):
+                candidate = parts[i + 1]
+                # The product id (gmk10108 pattern) is the NEXT segment
+                if re.match(r"^gmk[\d]+$", candidate, re.IGNORECASE):
+                    # The URL only has the product id after /en/ — unusual, skip
+                    continue
+                return candidate
+    except Exception:
+        pass
+    return None
+
+
+def scrape_catalog_page_urls(page: Page, catalog_url: str) -> list[str]:
+    """Navigate a GMK.net catalog page (Shopware) and return all product URLs.
+
+    Handles pagination via the 'Next page' button.
+    """
+    product_urls: list[str] = []
+    visited: set[str] = set()
+    current = catalog_url
+
+    for page_num in range(1, 25):  # max 25 pages per category
+        if current in visited:
+            break
+        visited.add(current)
+
+        try:
+            page.goto(current, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+            try:
+                page.wait_for_selector("a[href]", timeout=8_000)
+            except Exception:
+                pass
+        except Exception as e:
+            log(f"  Catalog page {page_num} ({current}): {e}")
+            break
+
+        # Extract all same-origin links that look like product URLs
+        links = page.evaluate(f"""() => {{
+            const origin = '{GMK_NET_ORIGIN}';
+            const links = new Set();
+            for (const a of document.querySelectorAll('a[href]')) {{
+                const href = a.href;
+                if (href.startsWith(origin + '/shop/en/') && !href.includes('?') && !href.includes('#')) {{
+                    links.add(href.replace(/\\/$/, ''));
+                }}
+            }}
+            return [...links];
+        }}""")
+
+        for link in links:
+            clean = str(link).rstrip("/")
+            # Product URLs have a slug + product-id segment: /shop/en/{slug}/{gmkXXXXX}
+            # Category pages don't have the product-id segment.
+            parts = clean.rstrip("/").split("/")
+            # Must have at least /shop/en/{slug}/{product-id}
+            if len(parts) >= 6 and re.match(r"gmk\d+$", parts[-1], re.IGNORECASE):
+                if clean not in product_urls:
+                    product_urls.append(clean)
+
+        # Next page (Shopware pagination)
+        next_url = page.evaluate("""() => {
+            const candidates = [
+                document.querySelector('a[rel="next"]'),
+                document.querySelector('[aria-label="Next page"]'),
+                document.querySelector('.pagination-nav-next a'),
+                document.querySelector('.page-item.next a'),
+                document.querySelector('link[rel="next"]'),
+            ];
+            for (const el of candidates) {
+                if (el && el.href) return el.href;
+            }
+            return null;
+        }""")
+
+        if not next_url or str(next_url).split("?")[0].rstrip("/") in visited:
+            break
+        current = str(next_url)
+
+    return product_urls
+
+
+def scrape_gmk_product_metadata(page: Page, url: str) -> dict | None:
+    """Scrape a single GMK.net product page and return set metadata."""
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+        try:
+            page.wait_for_selector("h1", timeout=5_000)
+        except Exception:
+            pass
+
+        content = page.content()
+
+        # Try JSON-LD structured data (Shopware 6 often emits this)
+        name = None
+        description = ""
+        jld_blocks = re.findall(
+            r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+            content, re.DOTALL | re.IGNORECASE
+        )
+        for block in jld_blocks:
+            try:
+                obj = json.loads(block.strip())
+                if isinstance(obj, dict) and obj.get("@type") in ("Product", "ItemPage"):
+                    name = (obj.get("name") or "").strip()
+                    description = (obj.get("description") or "").strip()
+                    break
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # Fallback: parse <h1> from HTML
+        if not name:
+            m = re.search(r"<h1[^>]*>(.*?)</h1>", content, re.DOTALL)
+            if m:
+                name = re.sub(r"<[^>]+>", "", m.group(1)).strip()
+
+        if not name or not re.match(r"gmk\b", name, re.IGNORECASE):
+            return None
+
+        # Breadcrumb / category text for status inference
+        breadcrumb = ""
+        bc = re.search(
+            r"(?:breadcrumb|navigation)[^>]*?>(.*?)</(?:nav|ol|ul)>",
+            content, re.DOTALL | re.IGNORECASE
+        )
+        if bc:
+            breadcrumb = re.sub(r"<[^>]+>", " ", bc.group(1)).strip()
+
+        status = infer_status_from_text(url + " " + breadcrumb)
+
+        # Extract slug from the URL (authoritative — GMK chose it)
+        slug = extract_gmk_slug_from_url(url)
+        if not slug:
+            slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+        # Colorway: strip "GMK " (and optional "CYL ") prefix
+        colorway = re.sub(r"^gmk\s+(?:cyl\s+)?", "", name, flags=re.IGNORECASE).strip()
+
+        # Designer: look for "designed by X" in description
+        designer = ""
+        dm = re.search(
+            r"(?:designed\s+by|designer\s*[:/])\s*([^\n<.,]{2,60})",
+            description, re.IGNORECASE
+        )
+        if dm:
+            designer = dm.group(1).strip()
+
+        # Images from main gallery (reuse existing function)
+        images = extract_gmk_images(content)
+
+        return {
+            "slug": slug,
+            "name": name,
+            "colorway": colorway,
+            "designer": designer,
+            "status": status,
+            "description": description[:2000],
+            "imageUrl": images[0] if images else None,
+            "images": images[:10],
+            "productUrl": url,
+        }
+    except Exception as e:
+        log(f"  GMK.net product scrape failed ({url}): {e}")
+        return None
+
+
+def ensure_gmk_vendor(conn) -> str:
+    """Return the GMK vendor id, creating it if needed."""
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute('SELECT id FROM "Vendor" WHERE slug = %s', (GMK_VENDOR_SLUG,))
+        row = cur.fetchone()
+        if row:
+            return row["id"]
+        cur.execute("""
+            INSERT INTO "Vendor"
+                (id, slug, name, region, country, currency, "websiteUrl", "logoUrl", "createdAt", "updatedAt")
+            VALUES
+                (gen_random_uuid()::text, %s, 'GMK', 'EU', 'DE', 'EUR', %s, NULL, now(), now())
+            ON CONFLICT (slug) DO UPDATE SET "websiteUrl" = EXCLUDED."websiteUrl"
+            RETURNING id
+        """, (GMK_VENDOR_SLUG, GMK_NET_ORIGIN))
+        return cur.fetchone()["id"]
+
+
+def upsert_gmk_set(conn, data: dict, gmk_vendor_id: str) -> tuple:
+    """Upsert a GroupBuy + BASE Kit + GMK VendorKit. Returns (gb_id, created)."""
+    slug = data["slug"]
+
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute('SELECT id FROM "GroupBuy" WHERE slug = %s', (slug,))
+        existing = cur.fetchone()
+
+    if existing:
+        gb_id = existing["id"]
+        # Update status and supplement blank fields; don't clobber manual edits.
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE "GroupBuy" SET
+                    status = %s,
+                    name = CASE WHEN (name IS NULL OR name = '') THEN %s ELSE name END,
+                    designer = CASE WHEN (designer IS NULL OR designer = '') THEN %s ELSE designer END,
+                    description = CASE WHEN (description IS NULL OR description = '') THEN %s ELSE description END,
+                    "updatedAt" = now()
+                WHERE slug = %s
+            """, (data["status"], data["name"], data.get("designer") or "",
+                  data.get("description") or "", slug))
+        created = False
+    else:
+        images_json = json.dumps(data.get("images") or [])
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                INSERT INTO "GroupBuy"
+                    (id, slug, name, colorway, designer, status,
+                     "imageUrl", images, description, featured, "createdAt", "updatedAt")
+                VALUES
+                    (gen_random_uuid()::text, %s, %s, %s, %s, %s,
+                     %s, %s::jsonb, %s, %s, now(), now())
+                ON CONFLICT (slug) DO NOTHING
+                RETURNING id
+            """, (
+                slug, data["name"], data.get("colorway") or "",
+                data.get("designer") or "", data["status"],
+                data.get("imageUrl"), images_json,
+                data.get("description") or "",
+                data["status"] == "ACTIVE_GB",
+            ))
+            row = cur.fetchone()
+            if not row:
+                cur.execute('SELECT id FROM "GroupBuy" WHERE slug = %s', (slug,))
+                row = cur.fetchone()
+            gb_id = row["id"]
+
+        # Create BASE kit
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO "Kit" (id, name, type, "groupBuyId")
+                VALUES (gen_random_uuid()::text, 'Base Kit', 'BASE', %s)
+                ON CONFLICT DO NOTHING
+            """, (gb_id,))
+        created = True
+
+    # Link GMK.net as a vendor for this set (productUrl = the manufacturer page)
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            'SELECT id FROM "Kit" WHERE "groupBuyId" = %s AND type = \'BASE\' LIMIT 1',
+            (gb_id,)
+        )
+        kit = cur.fetchone()
+    if kit:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO "VendorKit"
+                    (id, "kitId", "vendorId", "productUrl", "gbUrl", "inStock", currency, "updatedAt")
+                VALUES
+                    (gen_random_uuid()::text, %s, %s, %s, %s, true, 'EUR', now())
+                ON CONFLICT ("kitId", "vendorId") DO UPDATE SET
+                    "productUrl" = EXCLUDED."productUrl",
+                    "gbUrl" = EXCLUDED."gbUrl",
+                    "updatedAt" = now()
+            """, (kit["id"], gmk_vendor_id, data["productUrl"], data["productUrl"]))
+
+    return gb_id, created
+
+
+def run_catalog(conn, context: BrowserContext, deadline: float) -> dict:
+    """Discover all GMK sets from gmk.net and upsert them to the DB.
+
+    Walks /shop/en/keycaps/ and /shop/en/group-buys/, scrapes each product
+    page for metadata, and links the GMK vendor. Runs FIRST so that image and
+    price passes have complete set coverage.
+    """
+    stats = {"urls_found": 0, "sets_scraped": 0, "created": 0, "updated": 0, "failed": 0}
+    log("Catalog pass: discovering GMK sets from gmk.net ...")
+
+    gmk_vendor_id = ensure_gmk_vendor(conn)
+    catalog_page = context.new_page()
+    detail_page = context.new_page()
+
+    try:
+        # Collect product URLs from both catalog categories
+        all_urls: list[str] = []
+        seen_urls: set[str] = set()
+        for cat_url in GMK_NET_CATALOG_URLS:
+            if now_ms() > deadline:
+                log("Catalog pass: deadline reached during URL discovery.")
+                stats["urls_found"] = len(all_urls)
+                return stats
+            urls = scrape_catalog_page_urls(catalog_page, cat_url)
+            for u in urls:
+                if u not in seen_urls:
+                    seen_urls.add(u)
+                    all_urls.append(u)
+
+        stats["urls_found"] = len(all_urls)
+        log(f"  Found {len(all_urls)} product URL(s) across {len(GMK_NET_CATALOG_URLS)} categories.")
+
+        for url in all_urls:
+            if now_ms() > deadline:
+                log("Catalog pass: deadline reached during product scraping.")
+                break
+
+            metadata = scrape_gmk_product_metadata(detail_page, url)
+            if not metadata:
+                stats["failed"] += 1
+                continue
+
+            stats["sets_scraped"] += 1
+            _, created = upsert_gmk_set(conn, metadata, gmk_vendor_id)
+            if created:
+                stats["created"] += 1
+                log(f"  + {metadata['name']} ({metadata['status']})")
+            else:
+                stats["updated"] += 1
+
+    finally:
+        catalog_page.close()
+        detail_page.close()
+
+    log(
+        f"Catalog pass: urls={stats['urls_found']} scraped={stats['sets_scraped']} "
+        f"created={stats['created']} updated={stats['updated']} failed={stats['failed']}"
+    )
+    return stats
+
+
+# ----------------------------------------------------------------------------
 # Passes
 # ----------------------------------------------------------------------------
 def run_images(conn, context: BrowserContext, deadline: float) -> dict:
@@ -660,12 +1031,17 @@ def main() -> int:
             args=["--start-maximized"],
         )
         try:
+            # Catalog first so image + price passes have full set coverage
+            catalog_stats = run_catalog(conn, context, deadline)
             img_stats = run_images(conn, context, deadline)
             price_stats = run_prices(conn, context, deadline)
         finally:
             context.close()
 
     conn.close()
+    log(f"Catalog -> urls={catalog_stats['urls_found']} "
+        f"created={catalog_stats['created']} updated={catalog_stats['updated']} "
+        f"failed={catalog_stats['failed']}")
     log(f"Images  -> attempted={img_stats['attempted']} "
         f"enriched={img_stats['enriched']} failed={img_stats['failed']}")
     log(f"Prices  -> attempted={price_stats['attempted']} "

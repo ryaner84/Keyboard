@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { importFromMatrixzj } from "@/lib/import/matrixzj";
 import { importGmkSets } from "@/lib/import/keycaplendar";
 import { refreshPrices } from "@/lib/import/prices";
 import { auditPrices } from "@/lib/import/price-audit";
@@ -6,17 +7,15 @@ import { enrichImagesFromGmk } from "@/lib/import/enrich-images";
 import { applyVendorLinkOverrides, processVendorSuggestions } from "@/lib/import/vendor-overrides";
 import { discoverGmkProducts } from "@/lib/import/discovery";
 
-// Vercel Hobby caps serverless functions at 60s. We stay safely under that and
-// let refreshPrices() time-box itself, so the run always returns gracefully.
+// Vercel Hobby caps serverless functions at 60s. We stay safely under that.
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-// Wall-clock ceiling for the whole request, with a small margin under maxDuration.
 const REQUEST_BUDGET_MS = 55_000;
 
 function isAuthorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
-  if (!secret) return process.env.NODE_ENV !== "production"; // allow in dev only
+  if (!secret) return process.env.NODE_ENV !== "production";
   const auth = req.headers.get("authorization");
   return auth === `Bearer ${secret}`;
 }
@@ -26,54 +25,69 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const skipImport = req.nextUrl.searchParams.get("skipImport") === "true";
+  const params = req.nextUrl.searchParams;
+  // skipImport=true → skip both catalog imports (useful for price-only runs)
+  const skipImport = params.get("skipImport") === "true";
+  // supplement=keycaplendar → also run KeycapLendar after matrixzj to fill in
+  // GB dates and designers. Enabled by default; pass supplement=none to skip.
+  const supplement = params.get("supplement") ?? "keycaplendar";
 
   try {
     const start = Date.now();
-    // The import is diff-based (bulk reads + writes only for changed rows), so
-    // it normally finishes in seconds; the budget is a safety net for first
-    // runs or KeycapLendar slowness.
-    const importResult = skipImport
-      ? null
-      : await importGmkSets({ maxRuntimeMs: REQUEST_BUDGET_MS * 0.6 });
 
-    // Hand-curated vendor links + user-submitted suggestions become scrapeable
-    // VendorKits before the price run (cheap DB-only work, a handful of rows).
+    // ── 1. Primary set catalog: matrixzj.github.io ──────────────────────────
+    // Static GitHub Pages site — no bot protection, fetchable from serverless.
+    // Discovers ALL GMK sets (authoritative community index) and adds order
+    // statistics images (units sold + GB period) where available.
+    const matrixzjResult = skipImport
+      ? null
+      : await importFromMatrixzj({
+          maxRuntimeMs: Math.min(20_000, REQUEST_BUDGET_MS * 0.35),
+        });
+
+    // ── 2. Date/designer supplement: KeycapLendar ────────────────────────────
+    // matrixzj doesn't expose GB start/end dates. KeycapLendar has those, so we
+    // run it as a supplement (UPDATE only for sets matrixzj already created).
+    const supplementResult =
+      !skipImport && supplement === "keycaplendar"
+        ? await importGmkSets({
+            maxRuntimeMs: Math.min(15_000, REQUEST_BUDGET_MS * 0.25),
+          })
+        : null;
+
+    // ── 3. Hand-curated vendor links + user suggestions ───────────────────────
     const overrides = await applyVendorLinkOverrides();
     const suggestions = await processVendorSuggestions();
 
-    // Catalog discovery: walk a few vendors' own group-buy/catalog pages for
-    // GMK listings and (re)link them to tracked sets. Oldest-scanned first, so
-    // the whole roster is re-crawled every few days.
+    // ── 4. Catalog discovery: walk vendor Shopify stores ─────────────────────
     const discovery = await discoverGmkProducts({
       vendorLimit: 6,
       maxRuntimeMs: Math.max(5_000, (REQUEST_BUDGET_MS - (Date.now() - start)) * 0.25),
     });
 
-    // Give the price scrape whatever time is left in the budget after the import,
-    // so import + scrape together never exceed the function limit.
+    // ── 5. Price scrape (time-boxed, oldest-checked-first) ───────────────────
     const remaining = REQUEST_BUDGET_MS - (Date.now() - start);
-    const limitParam = req.nextUrl.searchParams.get("limit");
-    // Split the remaining budget: most to prices, a slice to image enrichment.
+    const limitParam = params.get("limit");
     const priceResult = await refreshPrices({
       limit: limitParam ? Number(limitParam) : 1000,
       maxRuntimeMs: Math.max(5_000, remaining * 0.7),
     });
 
-    // Accuracy check on everything stored (DB-only, fast): fixes prices that
-    // don't match the BASE variant and purges implausible ones for re-scrape.
+    // ── 6. Accuracy audit (DB-only, fast) ────────────────────────────────────
     const auditResult = await auditPrices({
       maxRuntimeMs: Math.max(2_000, (REQUEST_BUDGET_MS - (Date.now() - start)) * 0.4),
     });
 
-    const imgBudget = REQUEST_BUDGET_MS - (Date.now() - start);
+    // ── 7. GMK.net gallery images (best-effort; gmk.net blocks serverless IPs,
+    //       so real work happens in the WorkSpace Python scraper) ──────────────
     const imageResult = await enrichImagesFromGmk({
-      maxRuntimeMs: Math.max(3_000, imgBudget),
+      maxRuntimeMs: Math.max(3_000, REQUEST_BUDGET_MS - (Date.now() - start)),
     });
 
     return NextResponse.json({
       ok: true,
-      import: importResult,
+      matrixzj: matrixzjResult,
+      supplement: supplementResult,
       overrides,
       suggestions,
       discovery,
