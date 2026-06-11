@@ -22,11 +22,13 @@ export const VARIANT_CATEGORIES: Array<{ value: VariantCategory; label: string }
 
 // Order matters: more specific names first so e.g. "Alpha Kit" never falls
 // through to BASE via a stray word, and "Simple Base Kit" still lands on BASE.
+// Japanese keywords cover JP vendors (e.g. Yushakobo) whose variant titles
+// are ベースキット / ノベルティ / スペースバー / アルファ.
 export function classifyVariant(title: string): VariantCategory {
-  if (/novelt/i.test(title)) return "NOVELTIES";
-  if (/space\s*bar/i.test(title)) return "SPACEBARS";
-  if (/alpha/i.test(title)) return "ALPHA";
-  if (/base/i.test(title)) return "BASE";
+  if (/novelt|ノベルティ/i.test(title)) return "NOVELTIES";
+  if (/space\s*bar|スペースバー/i.test(title)) return "SPACEBARS";
+  if (/alpha|アルファ/i.test(title)) return "ALPHA";
+  if (/base|ベース/i.test(title)) return "BASE";
   return "OTHERS";
 }
 

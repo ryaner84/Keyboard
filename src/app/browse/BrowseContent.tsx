@@ -22,7 +22,13 @@ export default function BrowseContent() {
   const newDays = searchParams.get("new") ?? "";
   const rawStatuses = searchParams.getAll("status") as GBStatus[];
   const statuses: GBStatus[] = useMemo(
-    () => (rawStatuses.length > 0 ? rawStatuses : DEFAULT_STATUSES),
+    () => {
+      // "all" is an explicit marker meaning the user deselected every status
+      // pill — show everything. Distinct from a fresh visit (no status params
+      // at all), which gets the default selection.
+      if (rawStatuses.includes("all" as GBStatus)) return [];
+      return rawStatuses.length > 0 ? rawStatuses : DEFAULT_STATUSES;
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [searchParams.toString()]
   );
@@ -73,7 +79,9 @@ export default function BrowseContent() {
     const next = statuses.includes(status)
       ? statuses.filter((s) => s !== status)
       : [...statuses, status];
-    updateParams({ status: next });
+    // Empty selection = show all sets. Keep the explicit "all" marker in the
+    // URL so it isn't mistaken for a fresh visit (which re-applies defaults).
+    updateParams({ status: next.length > 0 ? next : ["all"] });
   };
 
   // Finishing-soon and new-arrivals are mutually exclusive quick filters.

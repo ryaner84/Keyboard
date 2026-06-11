@@ -56,6 +56,8 @@ export function resolveDatabaseUrl(): string {
 // Supabase's session pooler (port 5432) caps at 15 concurrent clients, which
 // serverless functions saturate instantly (EMAXCONNSESSION). The transaction
 // pooler (port 6543) has no per-client cap, so always redirect 5432 -> 6543.
+// Local Postgres has no pooler — leave localhost URLs untouched.
 function ensureTransactionPooler(url: string): string {
+  if (/localhost|127\.0\.0\.1/.test(url)) return url;
   return url.replace(/:5432(\/|$|\?)/, ":6543$1");
 }

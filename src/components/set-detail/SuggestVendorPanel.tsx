@@ -87,9 +87,10 @@ export function SuggestVendorPanel({ slug, isOpen, onClose }: Props) {
               </svg>
             </div>
             <div>
-              <p className="font-semibold text-gray-900">Link submitted!</p>
+              <p className="font-semibold text-gray-900">Thanks for helping to boost the website!</p>
               <p className="text-sm text-gray-500 mt-1 leading-relaxed">
-                We&apos;ll scrape it and add pricing within 24 hours.
+                We strongly suggest supporting your local store if the set is
+                available locally.
               </p>
             </div>
             <button
@@ -170,7 +171,7 @@ export function SuggestVendorPanel({ slug, isOpen, onClose }: Props) {
             </button>
 
             <p className="text-[11px] text-gray-400 text-center leading-relaxed">
-              Prices are scraped automatically. MANUAL prices set by admins are never overwritten.
+              Submitted links are reviewed and pricing usually appears within 24 hours.
             </p>
           </div>
         )}

@@ -39,7 +39,9 @@ function resolveDatabaseUrl() {
 
 // Session pooler (5432) caps at 15 clients; transaction pooler (6543) does not.
 // Always redirect so the build connects the same way runtime does.
+// Local Postgres has no pooler — leave localhost URLs untouched.
 function ensureTransactionPooler(url) {
+  if (/localhost|127\.0\.0\.1/.test(url)) return url;
   return url.replace(/:5432(\/|$|\?)/, ":6543$1");
 }
 
@@ -184,6 +186,7 @@ async function main() {
         await purgeImplausibleScrapedPrices(client);
         await requeueCurrencyMismatches(client);
         await requeueLegacyScrapedPrices(client);
+        await requeuePinnedVariantPrices(client);
       }
     }
 
@@ -358,6 +361,10 @@ async function purgeImplausibleScrapedPrices(client) {
            OR (currency = 'AUD' AND (price < 100 OR price > 345))
            OR (currency = 'CAD' AND (price < 95  OR price > 310))
            OR (currency = 'SGD' AND (price < 95  OR price > 310))
+           OR (currency = 'JPY' AND (price < 10000 OR price > 34000))
+           OR (currency = 'KRW' AND (price < 90000 OR price > 320000))
+           OR (currency = 'CNY' AND (price < 480 OR price > 1650))
+           OR (currency = 'HKD' AND (price < 530 OR price > 1800))
          )`
     );
     if (rowCount > 0) {
@@ -421,6 +428,44 @@ async function requeueLegacyScrapedPrices(client) {
     }
   } catch (err) {
     console.warn(`[db-setup] Legacy price requeue skipped: ${err.message}`);
+  }
+}
+
+// ONE-TIME: vendor links that pin an exact variant (?variant=<id>) used to be
+// scraped with title heuristics that mis-pick on non-English stores (e.g.
+// Yushakobo's GMK Prussian Alert showed the most expensive bundle instead of
+// the ¥23,200 base kit). The scraper now trusts the pinned variant id, so
+// re-queue those rows for a fresh scrape. Sentinel-guarded.
+async function requeuePinnedVariantPrices(client) {
+  const KEY = "requeue_pinned_variant_prices_v1";
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."_AppMigrations" (
+         key text PRIMARY KEY,
+         applied_at timestamptz NOT NULL DEFAULT now()
+       )`
+    );
+    const done = await client.query(
+      `SELECT 1 FROM public."_AppMigrations" WHERE key = $1`,
+      [KEY]
+    );
+    if (done.rowCount > 0) return;
+
+    const { rowCount } = await client.query(
+      `UPDATE public."VendorKit"
+       SET "priceUpdatedAt" = NULL
+       WHERE "priceSource" = 'SCRAPED'
+         AND "productUrl" LIKE '%variant=%'`
+    );
+    await client.query(
+      `INSERT INTO public."_AppMigrations" (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
+      [KEY]
+    );
+    if (rowCount > 0) {
+      console.log(`[db-setup] Re-queued ${rowCount} pinned-variant prices for re-scrape (one-time).`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Pinned-variant requeue skipped: ${err.message}`);
   }
 }
 

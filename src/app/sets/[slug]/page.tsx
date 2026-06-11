@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { COUNTRY_BY_CODE, DEFAULT_COUNTRY } from "@/data/countries";
 import { formatDateRange, normalizeImageUrl } from "@/lib/utils";
+import { getSiteUrl } from "@/lib/site-url";
 import { SetDetailClient } from "./SetDetailClient";
 import type { Metadata } from "next";
 
@@ -19,14 +20,16 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
   const groupBuy = await prisma.groupBuy.findUnique({ where: { slug } });
   if (!groupBuy) return { title: "Not Found" };
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://gmktracker.com";
+  const siteUrl = getSiteUrl();
   const url = `${siteUrl}/sets/${slug}?country=${country}`;
 
   // og:image points at the generated poster (keyboard photo + top-3 cheapest
   // prices + QR code), so pasting the link into WhatsApp/Discord shows the
-  // rich price card automatically — no manual upload needed.
+  // rich price card automatically — no manual upload needed. The raw set photo
+  // is listed second as a fallback for crawlers that can't load the poster.
   const countryInfo = COUNTRY_BY_CODE[country.toUpperCase()] ?? DEFAULT_COUNTRY;
   const posterUrl = `${siteUrl}/api/poster/${slug}?country=${countryInfo.code}&currency=${countryInfo.currency}`;
+  const photoUrl = normalizeImageUrl(groupBuy.imageUrl);
 
   return {
     title: `${groupBuy.name} — GMK Tracker`,
@@ -35,7 +38,10 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
       title: groupBuy.name,
       description: groupBuy.subtitle ?? `${groupBuy.name} by ${groupBuy.designer}`,
       url,
-      images: [{ url: posterUrl, width: 900, height: 1020, alt: groupBuy.name }],
+      images: [
+        { url: posterUrl, width: 900, height: 1020, type: "image/png", alt: groupBuy.name },
+        ...(photoUrl ? [{ url: photoUrl, alt: groupBuy.name }] : []),
+      ],
     },
     twitter: {
       card: "summary_large_image",

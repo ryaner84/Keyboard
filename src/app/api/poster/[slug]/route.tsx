@@ -2,6 +2,7 @@ import { ImageResponse } from "next/og";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { STATUS_LABELS, normalizeImageUrl } from "@/lib/utils";
+import { getSiteUrl } from "@/lib/site-url";
 import QRCode from "qrcode";
 import type { GBStatus } from "@/generated/prisma";
 
@@ -178,7 +179,7 @@ export async function GET(
   }
   const top3 = rows.slice(0, 3);
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://gmktracker.com";
+  const siteUrl = getSiteUrl();
   const setUrl = `${siteUrl}/sets/${slug}?country=${country}`;
 
   const qrDataUrl = await QRCode.toDataURL(setUrl, {
@@ -381,7 +382,7 @@ export async function GET(
           </div>
 
           <div style={{ color: "#475569", fontSize: 13, marginBottom: 4 }}>
-            by {groupBuy.designer}
+            {`by ${groupBuy.designer ?? "unknown"}`}
           </div>
         </div>
 
@@ -407,7 +408,7 @@ export async function GET(
               <span style={{ color: "#34d399", fontSize: 11, fontWeight: 800 }}>$</span>
             </div>
             <span style={{ color: "#64748b", fontSize: 12, fontWeight: 600, letterSpacing: 1 }}>
-              TOP PRICES TO {countryName.toUpperCase()} · BASE KIT + SHIPPING
+              {`TOP PRICES TO ${countryName.toUpperCase()} · BASE KIT + SHIPPING`}
             </span>
           </div>
 
@@ -458,9 +459,7 @@ export async function GET(
                       {row.vendorName.length > 22 ? row.vendorName.slice(0, 21) + "…" : row.vendorName}
                     </span>
                     <span style={{ color: "#334155", fontSize: 11 }}>
-                      Kit {formatCurrency(row.kitLocal, currency)}
-                      {"  +  "}
-                      Ship {formatCurrency(row.shipLocal, currency)}
+                      {`Kit ${formatCurrency(row.kitLocal, currency)}  +  Ship ${formatCurrency(row.shipLocal, currency)}`}
                     </span>
                   </div>
 
@@ -523,7 +522,7 @@ export async function GET(
               {setUrl.replace(/^https?:\/\//, "")}
             </span>
             <span style={{ color: "#334155", fontSize: 11 }}>
-              Shared on {today}
+              {`Shared on ${today}`}
             </span>
           </div>
 
@@ -548,7 +547,7 @@ export async function GET(
               <span style={{ color: "#34d399", fontSize: 20, fontWeight: 800, lineHeight: 1 }}>
                 {formatCurrency(top3[0].totalLocal, currency)}
               </span>
-              <span style={{ color: "#475569", fontSize: 10 }}>to {countryName}</span>
+              <span style={{ color: "#475569", fontSize: 10 }}>{`to ${countryName}`}</span>
             </div>
           )}
         </div>

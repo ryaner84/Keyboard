@@ -60,10 +60,14 @@ const KIT_BOUNDS: Record<string, { min: number; max: number }> = {
   AUD: { min: 100, max: 345 },
   CAD: { min: 95, max: 310 },
   SGD: { min: 95, max: 310 },
+  JPY: { min: 10000, max: 34000 },
+  KRW: { min: 90000, max: 320000 },
+  CNY: { min: 480, max: 1650 },
+  HKD: { min: 530, max: 1800 },
 };
 
 // Plausibility check for a BASE kit price. Currencies without bounds
-// (e.g. JPY, KRW) have very different magnitudes, so we don't bound them.
+// have very different magnitudes, so we don't bound them.
 // `currency === null` means the store's currency is unknown — bound it as
 // USD, since the fallback is always one of the western vendor currencies.
 export function isPlausibleBaseKitPrice(price: number, currency: string | null): boolean {
@@ -79,12 +83,24 @@ function normalizeShopifyUrl(url: string): string {
   return url.replace(/\/collections\/[^/]+\/products\//, "/products/");
 }
 
+// Vendor links often pin the exact kit variant (?variant=<id>) — e.g.
+// shop.yushakobo.jp/products/12656?variant=52066151989479. That id is ground
+// truth for which variant is the base kit, so it beats any title heuristic.
+function pinnedVariantId(productUrl: string): string | null {
+  try {
+    return new URL(productUrl).searchParams.get("variant");
+  } catch {
+    return null;
+  }
+}
+
 // Shopify exposes a product's data at {productUrl}.json — used by most
 // keyboard vendors (CannonKeys, NovelKeys, KBDfans, Deskhero, Daily Clack...).
 async function fetchShopifyPrice(productUrl: string): Promise<PriceResult | null> {
   if (!productUrl.includes("/products/")) return null;
 
   // Strip query/hash, then request the .json variant.
+  const pinnedId = pinnedVariantId(productUrl);
   const clean = normalizeShopifyUrl(productUrl).split("?")[0].split("#")[0].replace(/\/$/, "");
   const jsonUrl = `${clean}.json`;
 
@@ -93,24 +109,27 @@ async function fetchShopifyPrice(productUrl: string): Promise<PriceResult | null
     if (!res.ok) return null;
     const data = (await res.json()) as {
       product?: {
-        variants?: Array<{ title?: string; price?: string | number; available?: boolean }>;
+        variants?: Array<{ id?: number | string; title?: string; price?: string | number; available?: boolean }>;
       };
     };
     const variants = (data.product?.variants ?? [])
-      .map((v) => ({ title: String(v.title ?? ""), price: Number(v.price) }))
+      .map((v) => ({ id: String(v.id ?? ""), title: String(v.title ?? ""), price: Number(v.price) }))
       .filter((v) => !isNaN(v.price) && v.price > 0);
     if (variants.length === 0) return null;
 
     // Pick the variant that is actually the BASE kit, NOT the cheapest one — GB
     // listings carry cheap add-on variants (deskmats, samples, deposits) that
     // used to win a Math.min and produce absurd prices like $22 for a base kit.
-    // Preference: the variant classified BASE (same classifier the set-page
-    // filter uses, so the stored price always matches what's displayed) > first
-    // non-add-on variant (Shopify returns variants in display order; the
-    // primary kit comes first on single-kit listings titled "Default Title").
+    // Preference: the variant the vendor link itself pins (?variant=<id> — exact,
+    // survives non-English titles like Yushakobo's) > the variant classified BASE
+    // (same classifier the set-page filter uses, so the stored price always
+    // matches what's displayed) > first non-add-on variant (Shopify returns
+    // variants in display order; the primary kit comes first on single-kit
+    // listings titled "Default Title").
+    const pinned = pinnedId ? variants.find((v) => v.id === pinnedId) : undefined;
     const nonAddon = variants.filter((v) => !ADDON_VARIANT_RE.test(v.title));
     const pool = nonAddon.length > 0 ? nonAddon : variants;
-    const chosen = pool.find((v) => classifyVariant(v.title) === "BASE") ?? pool[0];
+    const chosen = pinned ?? pool.find((v) => classifyVariant(v.title) === "BASE") ?? pool[0];
 
     // May be null when the store blocks /meta.json — the caller falls back to
     // the vendor's own currency (e.g. Deskhero = CAD), NOT a blind USD default
@@ -122,7 +141,7 @@ async function fetchShopifyPrice(productUrl: string): Promise<PriceResult | null
       return null;
     }
 
-    return { price: chosen.price, currency, variants };
+    return { price: chosen.price, currency, variants: variants.map(({ title, price }) => ({ title, price })) };
   } catch {
     return null;
   }

@@ -131,11 +131,13 @@ export function SetDetailClient({ groupBuy }: Props) {
         />
       </div>
 
-      {/* "Add vendor link" — fixed right-side tab, below the location tab */}
+      {/* "Add vendor link" — fixed right-side tab. Anchored to the viewport
+          bottom so it can never overlap the location tab, which is centered
+          at 50% and grows with the country name. */}
       <button
         onClick={() => setSuggestOpen(true)}
-        className="fixed z-30 right-0 flex items-center gap-2 px-2 py-3 rounded-l-xl shadow-lg text-xs font-semibold tracking-wide bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-        style={{ top: "calc(50% + 80px)", writingMode: "vertical-rl" }}
+        className="fixed z-30 right-0 bottom-6 flex items-center gap-2 px-2 py-3 rounded-l-xl shadow-lg text-xs font-semibold tracking-wide bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+        style={{ writingMode: "vertical-rl" }}
         aria-label="Suggest a vendor link"
       >
         <svg className="w-4 h-4 rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
