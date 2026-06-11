@@ -5,22 +5,26 @@ import Link from "next/link";
 import Image from "next/image";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { normalizeImageUrl } from "@/lib/utils";
+import { formatCurrency } from "@/lib/currency-utils";
+import { computeCheapest, computeSavings, type Savings } from "@/lib/pricing";
 import { useLocation } from "@/context/LocationContext";
-import type { GroupBuyWithKits } from "@/types";
+import { useCurrency } from "@/hooks/useCurrency";
+import type { GroupBuyWithPricing, Region } from "@/types";
 
 interface ReleasedCarouselProps {
-  sets: GroupBuyWithKits[];
+  sets: GroupBuyWithPricing[];
 }
 
 const AUTO_ADVANCE_MS = 6000;
 
-function releaseLabel(set: GroupBuyWithKits): string {
+function releaseLabel(set: GroupBuyWithPricing): string {
   if (set.gbEnd) return `Released ${new Date(set.gbEnd).getFullYear()}`;
   return set.status === "IN_STOCK" ? "In Stock" : "Released";
 }
 
 export function ReleasedCarousel({ sets }: ReleasedCarouselProps) {
-  const { countryCode } = useLocation();
+  const { countryCode, region, currency } = useLocation();
+  const { rates, loading } = useCurrency(currency);
   const [active, setActive] = useState(0);
   const count = sets.length;
 
@@ -37,7 +41,19 @@ export function ReleasedCarousel({ sets }: ReleasedCarouselProps) {
 
   if (count === 0) return null;
 
+  // Per-set savings in the user's currency — the discount differs across
+  // vendors, so this is the carousel's headline number.
+  const savingsOf = (set: GroupBuyWithPricing): { savings: Savings | null; fromPrice: number | null } => {
+    if (loading) return { savings: null, fromPrice: null };
+    const prices = computeCheapest(set, region as Region, currency, rates);
+    return {
+      savings: computeSavings(prices),
+      fromPrice: prices.length > 0 ? prices[0].totalLocal : null,
+    };
+  };
+
   const current = sets[active];
+  const currentDeal = savingsOf(current);
   const href = (slug: string) => `/sets/${slug}?country=${countryCode}`;
 
   return (
@@ -73,18 +89,35 @@ export function ReleasedCarousel({ sets }: ReleasedCarouselProps) {
                 <div className="absolute top-3 left-3">
                   <StatusBadge status={current.status} size="sm" />
                 </div>
+                {/* Discount badge — vendors price this set differently */}
+                {currentDeal.savings && (
+                  <div className="absolute top-3 right-3 flex items-center gap-1 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg">
+                    💸 Save {currentDeal.savings.percent}% vs {currentDeal.savings.vsVendor}
+                  </div>
+                )}
               </div>
             </Link>
 
             {/* Caption */}
             <div className="absolute bottom-0 right-0 left-0 p-4 pointer-events-none">
-              <Link href={href(current.slug)} className="pointer-events-auto">
+              <Link href={href(current.slug)} className="pointer-events-auto inline-block">
                 <h2 className="text-white text-xl sm:text-2xl font-bold drop-shadow">
                   {current.name}
                 </h2>
                 <p className="text-white/80 text-sm">
                   by {current.designer} · {releaseLabel(current)}
+                  {currentDeal.fromPrice != null && (
+                    <span className="text-white font-semibold">
+                      {" "}· from {formatCurrency(currentDeal.fromPrice, currency)}
+                    </span>
+                  )}
                 </p>
+                {currentDeal.savings && (
+                  <p className="text-amber-300 text-sm font-semibold mt-0.5">
+                    {formatCurrency(currentDeal.savings.amount, currency)} cheaper than{" "}
+                    {currentDeal.savings.vsVendor}
+                  </p>
+                )}
               </Link>
             </div>
 
@@ -128,40 +161,55 @@ export function ReleasedCarousel({ sets }: ReleasedCarouselProps) {
           {/* Right rail */}
           <div className="hidden lg:flex flex-col">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold text-gray-700">Recently Released</h3>
+              <h3 className="text-sm font-semibold text-gray-700">Best Released Deals</h3>
               <Link href="/released" className="text-xs text-emerald-600 hover:text-emerald-700">
                 View all →
               </Link>
             </div>
             <div className="flex flex-col gap-1.5 overflow-hidden">
-              {sets.slice(0, 5).map((set, i) => (
-                <Link
-                  key={set.id}
-                  href={href(set.slug)}
-                  onMouseEnter={() => go(i)}
-                  className={`flex items-center gap-3 p-2 rounded-xl text-left transition-colors ${
-                    i === active ? "bg-emerald-50" : "hover:bg-gray-50"
-                  }`}
-                >
-                  <div className="relative w-16 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
-                    {normalizeImageUrl(set.imageUrl) ? (
-                      <Image
-                        src={normalizeImageUrl(set.imageUrl)!}
-                        alt={set.name}
-                        fill
-                        className="object-cover"
-                        unoptimized
-                      />
-                    ) : (
-                      <div className="absolute inset-0 flex items-center justify-center text-lg opacity-30">⌨</div>
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-gray-900 truncate">{set.name}</p>
-                    <p className="text-xs text-gray-400">{releaseLabel(set)}</p>
-                  </div>
-                </Link>
-              ))}
+              {sets.slice(0, 5).map((set, i) => {
+                const deal = savingsOf(set);
+                return (
+                  <Link
+                    key={set.id}
+                    href={href(set.slug)}
+                    onMouseEnter={() => go(i)}
+                    className={`flex items-center gap-3 p-2 rounded-xl text-left transition-colors ${
+                      i === active ? "bg-emerald-50" : "hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="relative w-16 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
+                      {normalizeImageUrl(set.imageUrl) ? (
+                        <Image
+                          src={normalizeImageUrl(set.imageUrl)!}
+                          alt={set.name}
+                          fill
+                          className="object-cover"
+                          unoptimized
+                        />
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center text-lg opacity-30">⌨</div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-900 truncate">{set.name}</p>
+                      <p className="text-xs text-gray-400">
+                        {deal.savings ? (
+                          <span className="text-amber-600 font-semibold">
+                            💸 Save {deal.savings.percent}%
+                            {deal.fromPrice != null &&
+                              ` · from ${formatCurrency(deal.fromPrice, currency)}`}
+                          </span>
+                        ) : deal.fromPrice != null ? (
+                          `from ${formatCurrency(deal.fromPrice, currency)}`
+                        ) : (
+                          releaseLabel(set)
+                        )}
+                      </p>
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
             <Link
               href="/released"

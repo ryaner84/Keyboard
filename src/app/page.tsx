@@ -97,14 +97,65 @@ async function getStats() {
   }
 }
 
-async function getReleasedForCarousel(): Promise<GroupBuyWithKits[]> {
+// Released sets for the carousel — prioritise sets where vendors disagree on
+// price (the discount is different across stores), so the carousel leads with
+// real savings. Topped up with the most recent releases when fewer than 5
+// sets have a meaningful spread.
+async function getReleasedForCarousel(): Promise<GroupBuyWithPricing[]> {
   try {
+    const [available, rateRows] = await Promise.all([
+      prisma.groupBuy.findMany({
+        where: {
+          status: { in: ["SHIPPING", "DELIVERED", "IN_STOCK"] },
+          kits: {
+            some: {
+              type: "BASE",
+              vendorKits: { some: { price: { not: null }, inStock: true } },
+            },
+          },
+        },
+        include: PRICING_INCLUDE,
+        orderBy: { gbEnd: { sort: "desc", nulls: "last" } },
+        take: 100,
+      }),
+      prisma.currency.findMany({ select: { code: true, exchangeRateToUSD: true } }),
+    ]);
+
+    const rates: Record<string, number> = {};
+    for (const r of rateRows) rates[r.code] = r.exchangeRateToUSD;
+    const spreadOf = (set: (typeof available)[number]): number => {
+      const base = set.kits.find((k) => k.type === "BASE") ?? set.kits[0];
+      if (!base) return 0;
+      let min = Infinity;
+      let max = 0;
+      let count = 0;
+      for (const vk of base.vendorKits) {
+        if (vk.price == null || !vk.inStock) continue;
+        const usd = vk.price / (rates[vk.currency ?? "USD"] ?? 1);
+        count++;
+        if (usd < min) min = usd;
+        if (usd > max) max = usd;
+      }
+      return count >= 2 && max > 0 ? (max - min) / max : 0;
+    };
+
+    const bySpread = [...available].sort((a, b) => spreadOf(b) - spreadOf(a));
+    const top = bySpread.filter((s) => spreadOf(s) >= 0.05).slice(0, 5);
+    const seen = new Set(top.map((s) => s.id));
+    const filled = [
+      ...top,
+      ...available.filter((s) => !seen.has(s.id)).slice(0, 5 - top.length),
+    ];
+
+    // Fall back to plain recent releases when nothing is priced yet, so the
+    // carousel never disappears entirely.
+    if (filled.length > 0) return filled as unknown as GroupBuyWithPricing[];
     return (await prisma.groupBuy.findMany({
       where: { status: { in: ["SHIPPING", "DELIVERED", "IN_STOCK"] } },
-      include: { kits: { select: { id: true, name: true, type: true } } },
+      include: PRICING_INCLUDE,
       orderBy: { gbEnd: { sort: "desc", nulls: "last" } },
       take: 5,
-    })) as GroupBuyWithKits[];
+    })) as unknown as GroupBuyWithPricing[];
   } catch {
     return [];
   }
