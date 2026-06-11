@@ -24,7 +24,10 @@ export function SetCard({ set }: SetCardProps) {
 
   const allPrices = computeCheapest(set, region as Region, currency, rates);
   const cheapest = allPrices.slice(0, 3);
-  const savings = computeSavings(allPrices);
+  // Group buy prices are fixed by the manufacturer — no inter-vendor savings.
+  // Only show the savings badge on released/in-stock sets where vendors vary.
+  const isGroupBuy = set.status === "ACTIVE_GB" || set.status === "INTEREST_CHECK";
+  const savings = isGroupBuy ? null : computeSavings(allPrices);
   const updated = latestUpdate(cheapest);
   const href = `/sets/${set.slug}?country=${countryCode}`;
 
