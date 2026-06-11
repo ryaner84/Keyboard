@@ -24,6 +24,13 @@ REM ---------------------------------------------------------------------------
 set "REPO_URL=https://github.com/ryaner84/Keyboard.git"
 set "CLONE_DIR=C:\ryaner84\gmk-tracker"
 
+REM Windows Defender often holds .git pack files open right after a pull, making
+REM git's cleanup ask "Unlink of file ... failed. Should I try again? (y/n)" -
+REM which would hang an unattended scheduled run forever. GIT_ASK_YESNO=false
+REM makes git auto-answer "no" (the stale pack file is harmless and gets cleaned
+REM up on a later run), and gc.auto=0 on pulls skips the repack entirely.
+set "GIT_ASK_YESNO=false"
+
 REM ---------------------------------------------------------------------------
 REM  STEP 0 - Bootstrap. Are we already inside the cloned repo?
 REM  We check whether <this-bat-dir>\..\.git exists (i.e. we live in <repo>\scraper).
@@ -59,7 +66,7 @@ if not !ERRORLEVEL!==0 (
 
 if exist "%CLONE_DIR%\.git" (
     echo [boot] Clone already exists - pulling latest ...
-    git -C "%CLONE_DIR%" pull origin main
+    git -C "%CLONE_DIR%" -c gc.auto=0 pull origin main
 ) else (
     echo [boot] Cloning %REPO_URL% ...
     git clone "%REPO_URL%" "%CLONE_DIR%"
@@ -112,7 +119,7 @@ REM --- 2. Pull the latest scraper from GitHub --------------------------------
 where git >nul 2>&1
 if !ERRORLEVEL!==0 (
     echo [run] git pull origin main ...
-    git -C "%REPO%" pull origin main
+    git -C "%REPO%" -c gc.auto=0 pull origin main
     if !ERRORLEVEL! neq 0 (
         echo [run] WARNING: git pull failed - using local copy.
         echo [run]   If prompted for credentials, run from a Command Prompt:
