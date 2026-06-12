@@ -13,7 +13,11 @@ export function SharePosterButton({ slug, countryCode, currency }: SharePosterBu
   const [downloading, setDownloading] = useState(false);
   const [dlError, setDlError] = useState(false);
 
-  const posterUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/api/poster/${slug}?country=${countryCode}&currency=${currency}`;
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const posterUrl = `${origin}/api/poster/${slug}?country=${countryCode}&currency=${currency}`;
+  // Share URL is the dedicated /share page — an HTML wrapper that WhatsApp
+  // can crawl for og:image so the poster card appears in the link preview.
+  const sharePageUrl = `${origin}/share/${slug}?country=${countryCode}&currency=${currency}`;
 
   // "Save Poster" — fetch the PNG and trigger a browser download.
   const handleDownload = async () => {
@@ -40,11 +44,12 @@ export function SharePosterButton({ slug, countryCode, currency }: SharePosterBu
     }
   };
 
-  // "Share link" — copy the direct poster image URL.
-  // A bare image/png URL is what WhatsApp, iMessage, etc. render as an
-  // inline image preview instead of a generic link card.
+  // "Share link" — copy the /share/[slug] page URL, NOT the poster API URL.
+  // WhatsApp only shows og:image previews from HTML pages; bare .png URLs
+  // never generate a thumbnail. The /share page has og:image = the poster URL
+  // so pasting in WhatsApp shows the generated card as the link preview.
   const copyPosterLink = async () => {
-    await navigator.clipboard.writeText(posterUrl);
+    await navigator.clipboard.writeText(sharePageUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

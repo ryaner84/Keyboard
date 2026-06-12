@@ -478,6 +478,8 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
         if chosen is None:
             return None
 
+        # Step 1: try the Shopify /meta.json endpoint (most reliable — this is
+        # the store's PRIMARY currency that prices are denominated in).
         currency = page.evaluate(
             """async (o) => {
                 try {
@@ -489,8 +491,52 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
             }""",
             origin_url,
         )
-        # Fall back to the vendor's own currency (e.g. Deskhero = CAD), never a
-        # blind USD default that inflates CA$88 into US$88.
+
+        # Step 2: fall back to reading the currency FROM THE PAGE if meta.json
+        # failed or returned nothing. Shopify stores expose the active currency
+        # in several places we can read without JS-heavy interaction:
+        #   a) The cart API (/cart.js) includes a currency field.
+        #   b) Many themes render a visible currency selector whose selected
+        #      option has a 3-letter currency code.
+        #   c) The Shopify global variable window.Shopify.currency.active.
+        # We try all three in order and take the first ISO-4217 match.
+        if not currency:
+            currency = page.evaluate(
+                """async (o) => {
+                    // a) Cart API — most Shopify stores allow this unauthenticated
+                    try {
+                        const r = await fetch(o + '/cart.js', { headers: { 'Accept': 'application/json' } });
+                        if (r.ok) {
+                            const c = await r.json();
+                            if (c && c.currency && /^[A-Z]{3}$/.test(c.currency)) return c.currency;
+                        }
+                    } catch (e) {}
+                    // b) window.Shopify.currency — injected by Shopify themes
+                    try {
+                        const sc = window.Shopify && window.Shopify.currency && window.Shopify.currency.active;
+                        if (sc && /^[A-Z]{3}$/.test(sc)) return sc;
+                    } catch (e) {}
+                    // c) visible currency selector <option selected>
+                    try {
+                        const sel = document.querySelector(
+                            '[data-currency-selector] option[selected], ' +
+                            '.currency-selector option[selected], ' +
+                            'select[name="currency"] option[selected], ' +
+                            '[data-selected-currency]'
+                        );
+                        if (sel) {
+                            const code = (sel.getAttribute('data-currency') ||
+                                          sel.value || sel.textContent || '').trim().toUpperCase();
+                            if (/^[A-Z]{3}$/.test(code)) return code;
+                        }
+                    } catch (e) {}
+                    return null;
+                }""",
+                origin_url,
+            )
+
+        # Step 3: fall back to the vendor's own currency (e.g. DeskHero = CAD),
+        # never a blind USD default that inflates CA$88 into US$88.
         currency = currency or vendor_currency
 
         if not is_plausible_base_price(chosen["price"], currency):
