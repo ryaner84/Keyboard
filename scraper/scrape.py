@@ -836,8 +836,15 @@ def ensure_gmk_vendor(conn) -> str:
         return vendor_id
 
 
-def upsert_gmk_set(conn, data: dict, gmk_vendor_id: str) -> tuple:
-    """Upsert a GroupBuy + BASE Kit + GMK VendorKit. Returns (gb_id, created)."""
+def upsert_gmk_set(conn, data: dict, vendor_id: str, *,
+                   vk_currency: str = "EUR",
+                   protect_terminal: bool = False) -> tuple:
+    """Upsert a GroupBuy + BASE Kit + vendor link. Returns (gb_id, created).
+
+    protect_terminal: don't overwrite a DELIVERED/CANCELLED status — used by
+    sources (zFrontier regional GBs) that may still list a set as active
+    after the worldwide run has shipped.
+    """
     slug = data["slug"]
 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -846,17 +853,24 @@ def upsert_gmk_set(conn, data: dict, gmk_vendor_id: str) -> tuple:
 
     if existing:
         gb_id = existing["id"]
+        if protect_terminal:
+            status_sql = ('CASE WHEN status::text = ANY(%s) THEN status '
+                          'ELSE %s::"GBStatus" END')
+            status_params = (list(TERMINAL_STATUSES), data["status"])
+        else:
+            status_sql = "%s"
+            status_params = (data["status"],)
         # Update status and supplement blank fields; don't clobber manual edits.
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(f"""
                 UPDATE "GroupBuy" SET
-                    status = %s,
+                    status = {status_sql},
                     name = CASE WHEN (name IS NULL OR name = '') THEN %s ELSE name END,
                     designer = CASE WHEN (designer IS NULL OR designer = '') THEN %s ELSE designer END,
                     description = CASE WHEN (description IS NULL OR description = '') THEN %s ELSE description END,
                     "updatedAt" = now()
                 WHERE slug = %s
-            """, (data["status"], data["name"], data.get("designer") or "",
+            """, (*status_params, data["name"], data.get("designer") or "",
                   data.get("description") or "", slug))
         created = False
     else:
@@ -906,12 +920,13 @@ def upsert_gmk_set(conn, data: dict, gmk_vendor_id: str) -> tuple:
                 INSERT INTO "VendorKit"
                     (id, "kitId", "vendorId", "productUrl", "gbUrl", "inStock", currency, "updatedAt")
                 VALUES
-                    (gen_random_uuid()::text, %s, %s, %s, %s, true, 'EUR', now())
+                    (gen_random_uuid()::text, %s, %s, %s, %s, true, %s, now())
                 ON CONFLICT ("kitId", "vendorId") DO UPDATE SET
                     "productUrl" = EXCLUDED."productUrl",
                     "gbUrl" = EXCLUDED."gbUrl",
                     "updatedAt" = now()
-            """, (kit["id"], gmk_vendor_id, data["productUrl"], data["productUrl"]))
+            """, (kit["id"], vendor_id, data["productUrl"], data["productUrl"],
+                  vk_currency))
 
     return gb_id, created
 
@@ -982,6 +997,184 @@ def run_catalog(conn, context: BrowserContext, deadline: float) -> dict:
         f"Catalog pass: urls={stats['urls_found']} scraped={stats['sets_scraped']} "
         f"created={stats['created']} updated={stats['updated']} "
         f"skipped={stats['skipped']} failed={stats['failed']}"
+    )
+    return stats
+
+
+# ----------------------------------------------------------------------------
+# zFrontier group-buy discovery
+# zFrontier (https://www.zfrontier.com) runs the China-region group buys for
+# most GMK sets. Their equipment collection filtered to tag=GMK and
+# status=发车中 ("GB live") lists every GMK group buy currently running there:
+#   /app/collection/keycap?tag=GMK&status=%E5%8F%91%E8%BD%A6%E4%B8%AD
+# The page is a JS app with infinite scroll, so we render it in the browser,
+# scroll until the card count stops growing, and read the cards from the DOM.
+# ----------------------------------------------------------------------------
+
+ZFRONTIER_ORIGIN = "https://www.zfrontier.com"
+ZFRONTIER_GB_URL = (
+    "https://www.zfrontier.com/app/collection/keycap"
+    "?tag=GMK&status=%E5%8F%91%E8%BD%A6%E4%B8%AD"
+)
+ZFRONTIER_VENDOR_SLUG = "zfrontier"
+
+_ZF_CARD_JS = """() => {
+    const items = [];
+    const seen = new Set();
+    for (const a of document.querySelectorAll('a[href]')) {
+        const href = a.href;
+        if (!href.startsWith('%s/app/')) continue;
+        if (href.includes('/app/collection/')) continue;  // the list page itself
+        const text = (a.innerText || '').trim();
+        if (!/gmk/i.test(text)) continue;
+        const clean = href.split('?')[0].replace(/\\/$/, '');
+        if (seen.has(clean)) continue;
+        seen.add(clean);
+        const img = a.querySelector('img');
+        items.push({
+            url: clean,
+            text,
+            image: img ? (img.currentSrc || img.src || null) : null,
+        });
+    }
+    return items;
+}""" % ZFRONTIER_ORIGIN
+
+
+def ensure_zfrontier_vendor(conn) -> str:
+    """Return the zFrontier vendor id, creating it (with shipping zones) if needed."""
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute('SELECT id FROM "Vendor" WHERE slug = %s', (ZFRONTIER_VENDOR_SLUG,))
+        row = cur.fetchone()
+        if row:
+            vendor_id = row["id"]
+        else:
+            # Region/currency mirror vendor-overrides.ts (ASIA / CN / USD).
+            cur.execute("""
+                INSERT INTO "Vendor"
+                    (id, slug, name, region, country, currency, "websiteUrl", "logoUrl", "createdAt", "updatedAt")
+                VALUES
+                    (gen_random_uuid()::text, %s, 'zFrontier', 'ASIA', 'CN', 'USD', %s, NULL, now(), now())
+                ON CONFLICT (slug) DO UPDATE SET "websiteUrl" = EXCLUDED."websiteUrl"
+                RETURNING id
+            """, (ZFRONTIER_VENDOR_SLUG, ZFRONTIER_ORIGIN))
+            vendor_id = cur.fetchone()["id"]
+
+        cur.execute("""
+            INSERT INTO "ShippingZone"
+                (id, "vendorId", "destinationRegion", "baseShippingCost", currency,
+                 "estimatedDaysMin", "estimatedDaysMax", "shipsToRegion")
+            SELECT gen_random_uuid()::text, %s, d.region::"Region",
+                   d.cost, 'USD',
+                   CASE WHEN d.region = 'ASIA' THEN 2 ELSE 5 END,
+                   CASE WHEN d.region = 'ASIA' THEN 5 ELSE 12 END,
+                   true
+            FROM (VALUES
+                ('ASIA', 8), ('SG', 10), ('AU', 18), ('US', 20),
+                ('CA', 22), ('EU', 22), ('UK', 22), ('OTHER', 25)
+            ) AS d(region, cost)
+            ON CONFLICT ("vendorId", "destinationRegion") DO NOTHING
+        """, (vendor_id,))
+        return vendor_id
+
+
+def zfrontier_card_to_set(item: dict) -> dict | None:
+    """Turn a collection card into upsert data, or None if unusable.
+
+    Card text is multi-line (title, price, vendor tag …) — the title is the
+    first line mentioning GMK. The slug comes from the title's ASCII words
+    (CJK characters drop out), so 'GMK 厚乳 Pixel' and 'GMK Pixel' both land
+    on 'gmk-pixel' and dedupe against the gmk.net catalog. Titles with no
+    ASCII beyond 'GMK' can't be deduped reliably — skip those.
+    """
+    title = None
+    for line in (item.get("text") or "").splitlines():
+        line = line.strip()
+        if re.search(r"\bgmk\b", line, re.IGNORECASE):
+            title = line
+            break
+    if not title:
+        return None
+
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", title).strip("-").lower()
+    slug = re.sub(r"^gmk-(?:cyl-|mx-)", "gmk-", slug)
+    if not slug.startswith("gmk"):
+        slug = "gmk-" + slug
+    if slug in ("gmk", "gmk-"):
+        return None
+
+    colorway = re.sub(r"^gmk\s+(?:cyl\s+)?", "", title, flags=re.IGNORECASE).strip()
+    image = item.get("image")
+    return {
+        "slug": slug,
+        "name": title,
+        "colorway": colorway,
+        "designer": "",
+        "status": "ACTIVE_GB",
+        "description": "",
+        "imageUrl": image,
+        "images": [image] if image else [],
+        "productUrl": item["url"],
+    }
+
+
+def run_zfrontier(conn, context: BrowserContext, deadline: float) -> dict:
+    """Discover GMK group buys currently running on zFrontier."""
+    stats = {"cards": 0, "created": 0, "updated": 0, "skipped": 0, "failed": 0}
+    log("zFrontier pass: discovering active GMK group buys ...")
+
+    vendor_id = ensure_zfrontier_vendor(conn)
+    page = context.new_page()
+    try:
+        page.goto(ZFRONTIER_GB_URL, wait_until="domcontentloaded",
+                  timeout=NAV_TIMEOUT_MS)
+        page.wait_for_timeout(3_000)  # let the JS app render the first batch
+
+        # Infinite scroll until the card count stops growing.
+        prev = -1
+        items = []
+        for _ in range(15):
+            if now_ms() > deadline:
+                log("zFrontier pass: deadline reached while scrolling.")
+                break
+            items = page.evaluate(_ZF_CARD_JS)
+            if len(items) == prev:
+                break
+            prev = len(items)
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(1_500)
+
+        stats["cards"] = len(items)
+        log(f"  Found {len(items)} GMK card(s) on the live-GB collection.")
+
+        for item in items:
+            data = zfrontier_card_to_set(item)
+            if not data:
+                stats["skipped"] += 1
+                continue
+            try:
+                _, created = upsert_gmk_set(
+                    conn, data, vendor_id,
+                    vk_currency="CNY", protect_terminal=True,
+                )
+            except Exception as e:
+                log(f"  upsert failed ({data['slug']}): {e}")
+                stats["failed"] += 1
+                continue
+            if created:
+                stats["created"] += 1
+                log(f"  + {data['name']} (ACTIVE_GB via zFrontier)")
+            else:
+                stats["updated"] += 1
+    except Exception as e:
+        log(f"zFrontier pass failed: {e}")
+        stats["failed"] += 1
+    finally:
+        page.close()
+
+    log(
+        f"zFrontier pass: cards={stats['cards']} created={stats['created']} "
+        f"updated={stats['updated']} skipped={stats['skipped']} failed={stats['failed']}"
     )
     return stats
 
@@ -1115,6 +1308,7 @@ def main() -> int:
         try:
             # Catalog first so image + price passes have full set coverage
             catalog_stats = run_catalog(conn, context, deadline)
+            zf_stats = run_zfrontier(conn, context, deadline)
             img_stats = run_images(conn, context, deadline)
             price_stats = run_prices(conn, context, deadline)
         finally:
@@ -1124,6 +1318,9 @@ def main() -> int:
     log(f"Catalog -> urls={catalog_stats['urls_found']} "
         f"created={catalog_stats['created']} updated={catalog_stats['updated']} "
         f"skipped={catalog_stats['skipped']} failed={catalog_stats['failed']}")
+    log(f"zFrontier -> cards={zf_stats['cards']} created={zf_stats['created']} "
+        f"updated={zf_stats['updated']} skipped={zf_stats['skipped']} "
+        f"failed={zf_stats['failed']}")
     log(f"Images  -> attempted={img_stats['attempted']} "
         f"enriched={img_stats['enriched']} failed={img_stats['failed']}")
     log(f"Prices  -> attempted={price_stats['attempted']} "
