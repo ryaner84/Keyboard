@@ -502,6 +502,35 @@ GALLERY_MAX_AGE_DAYS = 7
 # Prices fresher than this are skipped — the nightly run shouldn't redo work.
 PRICE_MAX_AGE_HOURS = 20
 
+# Once a set reaches one of these statuses its gmk.net catalog page is frozen —
+# the name, designer, description, and gallery never change again. The catalog
+# and image passes skip these sets entirely; only prices keep rotating.
+# IN_STOCK and SHIPPING are NOT terminal: extras sell out and shipments arrive,
+# so those still get rechecked for the status transition.
+TERMINAL_STATUSES = ("DELIVERED", "CANCELLED")
+
+
+def fetch_frozen_catalog_slugs(conn) -> set[str]:
+    """Slugs the catalog pass can skip: terminal status + gmk.net link present.
+
+    The second condition matters — upsert_gmk_set is also what links the GMK
+    vendor to imported sets, so a terminal set without that link still needs
+    one visit.
+    """
+    sql = """
+        SELECT gb.slug
+          FROM "GroupBuy" gb
+         WHERE gb.status::text = ANY(%s)
+           AND EXISTS (
+                SELECT 1 FROM "VendorKit" vk
+                  JOIN "Kit" k ON k.id = vk."kitId"
+                 WHERE k."groupBuyId" = gb.id
+                   AND vk."productUrl" ILIKE '%%gmk.net%%')
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (list(TERMINAL_STATUSES),))
+        return {row[0] for row in cur.fetchall()}
+
 
 def fetch_image_candidates(conn, limit: int = 200) -> list[dict]:
     sql = """
@@ -515,6 +544,12 @@ def fetch_image_candidates(conn, limit: int = 200) -> list[dict]:
           FROM "GroupBuy" gb
          WHERE (gb."imagesUpdatedAt" IS NULL
                 OR gb."imagesUpdatedAt" < now() - make_interval(days => %s))
+           -- Released sets keep their gallery forever: once scraped
+           -- successfully (stamped + non-empty), never revisit. Clearing
+           -- imagesUpdatedAt forces a re-scrape if one is ever needed.
+           AND NOT (gb.status::text = ANY(%s)
+                    AND gb."imagesUpdatedAt" IS NOT NULL
+                    AND COALESCE(array_length(gb.images, 1), 0) > 0)
            AND EXISTS (
                 SELECT 1 FROM "VendorKit" vk
                   JOIN "Kit" k ON k.id = vk."kitId"
@@ -524,7 +559,7 @@ def fetch_image_candidates(conn, limit: int = 200) -> list[dict]:
          LIMIT %s
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute(sql, (GALLERY_MAX_AGE_DAYS, limit))
+        cur.execute(sql, (GALLERY_MAX_AGE_DAYS, list(TERMINAL_STATUSES), limit))
         return cur.fetchall()
 
 
@@ -888,10 +923,13 @@ def run_catalog(conn, context: BrowserContext, deadline: float) -> dict:
     page for metadata, and links the GMK vendor. Runs FIRST so that image and
     price passes have complete set coverage.
     """
-    stats = {"urls_found": 0, "sets_scraped": 0, "created": 0, "updated": 0, "failed": 0}
+    stats = {"urls_found": 0, "sets_scraped": 0, "created": 0, "updated": 0,
+             "skipped": 0, "failed": 0}
     log("Catalog pass: discovering GMK sets from gmk.net ...")
 
     gmk_vendor_id = ensure_gmk_vendor(conn)
+    frozen_slugs = fetch_frozen_catalog_slugs(conn)
+    log(f"  {len(frozen_slugs)} released set(s) already final — detail pages skipped.")
     catalog_page = context.new_page()
     detail_page = context.new_page()
 
@@ -918,6 +956,11 @@ def run_catalog(conn, context: BrowserContext, deadline: float) -> dict:
                 log("Catalog pass: deadline reached during product scraping.")
                 break
 
+            slug = extract_gmk_slug_from_url(url)
+            if slug and slug in frozen_slugs:
+                stats["skipped"] += 1
+                continue
+
             metadata = scrape_gmk_product_metadata(detail_page, url)
             if not metadata:
                 stats["failed"] += 1
@@ -937,7 +980,8 @@ def run_catalog(conn, context: BrowserContext, deadline: float) -> dict:
 
     log(
         f"Catalog pass: urls={stats['urls_found']} scraped={stats['sets_scraped']} "
-        f"created={stats['created']} updated={stats['updated']} failed={stats['failed']}"
+        f"created={stats['created']} updated={stats['updated']} "
+        f"skipped={stats['skipped']} failed={stats['failed']}"
     )
     return stats
 
@@ -1079,7 +1123,7 @@ def main() -> int:
     conn.close()
     log(f"Catalog -> urls={catalog_stats['urls_found']} "
         f"created={catalog_stats['created']} updated={catalog_stats['updated']} "
-        f"failed={catalog_stats['failed']}")
+        f"skipped={catalog_stats['skipped']} failed={catalog_stats['failed']}")
     log(f"Images  -> attempted={img_stats['attempted']} "
         f"enriched={img_stats['enriched']} failed={img_stats['failed']}")
     log(f"Prices  -> attempted={price_stats['attempted']} "
