@@ -637,9 +637,24 @@ def gmknet_price(page: Page, product_url: str) -> dict | None:
                     log(f"  GMK.net implausible price {price} {currency} — skipped ({product_url})")
                     continue
 
+                # Keep every named offer as a variant (Base, International,
+                # Hiragana Base, Latin Base, …) so the site can show sets
+                # with more than one base kit.
+                variants = []
+                for o in offer_list:
+                    if not isinstance(o, dict):
+                        continue
+                    try:
+                        vp = float(str(o.get("price")).replace(",", "."))
+                    except (TypeError, ValueError):
+                        continue
+                    title = str(o.get("name") or "").strip()
+                    if title and vp > 0:
+                        variants.append({"title": title, "price": vp})
+
                 chosen_name = chosen.get("name", "?") if isinstance(chosen, dict) else "?"
                 log(f"  GMK.net price: {price} {currency} (variant: {chosen_name}) — {product_url}")
-                return {"price": price, "currency": currency, "variants": []}
+                return {"price": price, "currency": currency, "variants": variants}
 
         return None
     except Exception as e:

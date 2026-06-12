@@ -4,6 +4,7 @@ import { useMemo, useState, useRef, useEffect } from "react";
 import { convertCurrency, formatCurrency } from "@/lib/currency-utils";
 import { dhlShippingUsd, dhlEstimatedDays } from "@/lib/import/shipping";
 import { formatRelativeDate } from "@/lib/utils";
+import { variantsInCategory, type KitVariant } from "@/lib/kit-variants";
 import type { VendorKitWithDetails, ExchangeRates } from "@/types";
 import type { Region } from "@/types";
 
@@ -26,6 +27,9 @@ interface RowData {
   shippingLocal: number;
   totalLocal: number;
   estimatedDays: string;
+  // Some sets sell several base kits (e.g. Hiragana Base / Latin Base) —
+  // when a vendor lists 2+, each is shown as its own line under the row.
+  baseVariants: Array<KitVariant & { priceLocal: number }>;
 }
 
 // Small flag button + inline popover for reporting a wrong price.
@@ -173,12 +177,28 @@ export function VendorTable({
       const estimatedDays =
         daysMin > 0 ? `${daysMin}–${daysMax} days` : "Standard shipping";
 
+      // All BASE-classified variants this vendor carries (Hiragana Base,
+      // Latin Base, …) converted to the viewer's currency. Only meaningful
+      // when there are 2+ — a single base is already the row's Kit price.
+      const baseVariants = variantsInCategory(vk.variants, "BASE").map((v) => ({
+        ...v,
+        priceLocal: convertCurrency(v.price, kitCurrency, userCurrency, rates),
+      }));
+
+      // With 2+ bases the row shows "from <cheapest>" — sort/total on that
+      // same number so the Best badge and the displayed price agree.
+      const effectiveKitLocal =
+        baseVariants.length > 1
+          ? Math.min(...baseVariants.map((v) => v.priceLocal))
+          : kitPriceLocal;
+
       out.push({
         vk,
-        kitPriceLocal,
+        kitPriceLocal: effectiveKitLocal,
         shippingLocal,
-        totalLocal: kitPriceLocal + shippingLocal,
+        totalLocal: effectiveKitLocal + shippingLocal,
         estimatedDays,
+        baseVariants,
       });
     }
     // Cheapest total first.
@@ -233,16 +253,18 @@ export function VendorTable({
     <div className="space-y-2">
       {rows.map((row, idx) => {
         const isBest = idx === 0;
+        const multiBase = row.baseVariants.length > 1;
 
         return (
           <div
             key={row.vk.id}
-            className={`flex items-center gap-3 p-4 rounded-xl border transition-colors ${
+            className={`p-4 rounded-xl border transition-colors ${
               isBest
                 ? "bg-green-50 border-green-200"
                 : "bg-white border-gray-100 hover:border-indigo-100 hover:bg-indigo-50/30"
             }`}
           >
+          <div className="flex items-center gap-3">
             {/* Vendor info */}
             <div className="flex items-center gap-3 flex-1 min-w-0">
               <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
@@ -268,7 +290,10 @@ export function VendorTable({
             {/* Kit price (hidden on the smallest screens) */}
             <div className="text-right hidden sm:block w-20">
               <p className="text-xs text-gray-400">Kit</p>
-              <p className="text-sm text-gray-700">{formatCurrency(row.kitPriceLocal, userCurrency)}</p>
+              <p className="text-sm text-gray-700">
+                {multiBase && <span className="text-xs text-gray-400">from </span>}
+                {formatCurrency(row.kitPriceLocal, userCurrency)}
+              </p>
             </div>
 
             {/* Shipping — DHL estimate */}
@@ -312,6 +337,22 @@ export function VendorTable({
               vendorKitId={row.vk.id}
               vendorName={row.vk.vendor.name}
             />
+          </div>
+
+          {/* Multiple base kits (e.g. Hiragana Base / Latin Base) — list each
+              one so buyers see exactly which base they'd be ordering. */}
+          {multiBase && (
+            <div className="mt-3 pt-2 border-t border-gray-100 flex flex-wrap gap-x-5 gap-y-1">
+              {row.baseVariants.map((v) => (
+                <p key={v.title} className="text-xs text-gray-500">
+                  {v.title}{" "}
+                  <span className="font-semibold text-gray-700">
+                    {formatCurrency(v.priceLocal, userCurrency)}
+                  </span>
+                </p>
+              ))}
+            </div>
+          )}
           </div>
         );
       })}
