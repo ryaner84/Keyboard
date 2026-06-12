@@ -81,6 +81,7 @@ const KIT_BOUNDS: Record<string, { min: number; max: number }> = {
   THB: { min: 1075, max: 8100 },
   TWD: { min: 965, max: 7300 },
   CLP: { min: 27000, max: 210000 },
+  INR: { min: 2500, max: 19000 },
 };
 
 // Plausibility check for a BASE kit price. Currencies without bounds
@@ -113,7 +114,7 @@ function pinnedVariantId(productUrl: string): string | null {
 
 // Shopify exposes a product's data at {productUrl}.json — used by most
 // keyboard vendors (CannonKeys, NovelKeys, KBDfans, Deskhero, Daily Clack...).
-async function fetchShopifyPrice(productUrl: string): Promise<PriceResult | null> {
+async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): Promise<PriceResult | null> {
   if (!productUrl.includes("/products/")) return null;
 
   // Strip query/hash, then request the .json variant.
@@ -126,14 +127,20 @@ async function fetchShopifyPrice(productUrl: string): Promise<PriceResult | null
     // context below. May be null when the store blocks /meta.json; the caller
     // then falls back to the vendor's own currency (e.g. Deskhero = CAD),
     // NOT a blind USD default which previously inflated CA$88 into US$88.
-    const currency = await fetchShopifyCurrency(clean);
+    const detectedCurrency = await fetchShopifyCurrency(clean);
 
     // Shopify Markets geo-localizes prices to the REQUESTER's country — a
-    // scrape from a Singapore datacenter gets SGD numbers while the shop's
-    // base currency label stays USD, silently double-converting on display
-    // (CannonKeys S$104 was stored as "USD 104" and shown as S$140). Pin the
-    // storefront localization to the shop's home market so the numbers always
-    // match the currency label. Stores without Markets ignore the cookies.
+    // GitHub Actions runner IP can be geolocated to the wrong country, causing
+    // the store to serve INR/SGD/etc. prices even for a USD-base store (e.g.
+    // stackskb.com served INR to an Azure West US runner). When we know the
+    // vendor's base currency from the DB and it differs from what geo-detection
+    // returned, trust the DB — it's the ground truth for what the merchant
+    // actually charges. Stores without Markets ignore the localization cookie.
+    const currency =
+      vendorCurrency && detectedCurrency && detectedCurrency !== vendorCurrency
+        ? vendorCurrency
+        : detectedCurrency;
+
     const cookie = currency
       ? `cart_currency=${currency}; localization=${CURRENCY_HOME_COUNTRY[currency] ?? "US"}`
       : undefined;
@@ -228,12 +235,19 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
       } catch {
         continue; // malformed block — try the next one
       }
+      type LdOffer = {
+        "@type"?: string;
+        name?: string;
+        price?: string | number;
+        lowPrice?: string | number;
+        priceCurrency?: string;
+        offers?: LdOffer | LdOffer[];
+      };
       type LdNode = {
         "@type"?: string | string[];
         "@graph"?: LdNode[];
         offers?: LdOffer | LdOffer[];
       };
-      type LdOffer = { price?: string | number; lowPrice?: string | number; priceCurrency?: string };
       const root = data as LdNode | LdNode[];
       const nodes: LdNode[] = Array.isArray(root)
         ? root
@@ -245,9 +259,34 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
         const type = node["@type"];
         const isProduct = type === "Product" || (Array.isArray(type) && type.includes("Product"));
         if (!isProduct || !node.offers) continue;
-        const offer = Array.isArray(node.offers) ? node.offers[0] : node.offers;
-        const price = Number(offer?.price ?? offer?.lowPrice);
-        const currency = offer?.priceCurrency ?? null;
+
+        // Flatten offers into a list. Shopware (GMK.net) emits an AggregateOffer
+        // with nested individual offers (one per variant: "Base", "International",
+        // etc.); Shopify pages may emit a plain array or single Offer.
+        const rawOffers = node.offers;
+        const offerList: LdOffer[] = Array.isArray(rawOffers)
+          ? rawOffers
+          : Array.isArray((rawOffers as LdOffer).offers)
+            ? (rawOffers as any).offers as LdOffer[]
+            : [];
+
+        // Prefer a variant explicitly named "Base" — GMK.net lists the base
+        // keycap kit and International/regional variants as separate named
+        // offers. The International variant may be in stock while Base is not,
+        // but we always want the base keycap kit price regardless of stock.
+        const chosen: LdOffer =
+          offerList.find((o) => /\bbase\b/i.test(String(o?.name ?? ""))) ??
+          offerList[0] ??
+          (Array.isArray(rawOffers) ? rawOffers[0] : rawOffers as LdOffer);
+
+        // Currency: from the chosen offer, then fall back to the parent
+        // AggregateOffer's priceCurrency (Shopware often puts it there).
+        const currency =
+          chosen?.priceCurrency ??
+          (!Array.isArray(rawOffers) ? (rawOffers as LdOffer)?.priceCurrency : null) ??
+          null;
+
+        const price = Number(chosen?.price ?? chosen?.lowPrice);
         if (!isNaN(price) && price > 0 && isPlausibleBaseKitPrice(price, currency)) {
           return { price, currency, variants: [] };
         }
@@ -276,9 +315,11 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
 
 // Attempt to fetch a live price for a single product URL: Shopify product
 // JSON first (rich variant data), generic JSON-LD/OpenGraph markup otherwise.
-export async function fetchVendorPrice(productUrl: string): Promise<PriceResult | null> {
+// Pass vendorCurrency so Shopify geo-localization is pinned to the vendor's
+// base currency rather than whatever the runner's IP geo-detects.
+export async function fetchVendorPrice(productUrl: string, vendorCurrency?: string): Promise<PriceResult | null> {
   if (!productUrl) return null;
-  const shopify = await fetchShopifyPrice(productUrl);
+  const shopify = await fetchShopifyPrice(productUrl, vendorCurrency);
   if (shopify) return shopify;
   return fetchJsonLdPrice(productUrl);
 }
@@ -305,7 +346,7 @@ async function refreshOne(
 ): Promise<void> {
   if (!vk.productUrl) return;
   result.attempted++;
-  const priceData = await fetchVendorPrice(vk.productUrl);
+  const priceData = await fetchVendorPrice(vk.productUrl, vk.vendor.currency);
   if (priceData) {
     await prisma.vendorKit.update({
       where: { id: vk.id },

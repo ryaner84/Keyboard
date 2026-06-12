@@ -392,6 +392,8 @@ _KIT_BOUNDS = {
     "TWD": (965, 7300),
     # Chilean Peso — used by Fancy Customs (CL). 1 USD ≈ 960 CLP as of 2025.
     "CLP": (27_000, 210_000),
+    # Indian Rupee — 1 USD ≈ 84 INR as of 2025. ~$30–$225 USD range.
+    "INR": (2_500, 19_000),
 }
 
 
@@ -539,6 +541,14 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
         # never a blind USD default that inflates CA$88 into US$88.
         currency = currency or vendor_currency
 
+        # Sanity-check: if geo-detection returned a currency that doesn't match
+        # what the vendor's DB record says (e.g. STACKS=USD but runner IP is
+        # geolocated to India → INR), trust the DB. Datacenter IPs can be
+        # misidentified; the vendor's own currency is the ground truth.
+        if vendor_currency and currency and currency != vendor_currency:
+            log(f"  geo-detected {currency} but vendor DB says {vendor_currency} — using {vendor_currency}")
+            currency = vendor_currency
+
         if not is_plausible_base_price(chosen["price"], currency):
             log(f"  implausible kit price {chosen['price']} {currency} — skipped ({product_url})")
             return None
@@ -546,6 +556,94 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
         return {"price": chosen["price"], "currency": currency, "variants": variants}
     except Exception as e:  # noqa: BLE001
         log(f"  price fetch failed for {product_url}: {e}")
+        return None
+
+
+def gmknet_price(page: Page, product_url: str) -> dict | None:
+    """Scrape price from a GMK.net Shopware product page via JSON-LD.
+
+    Shopware 6 emits JSON-LD with an AggregateOffer containing individual
+    named offers (e.g. 'Base', 'International'). We prefer the 'Base' variant
+    — the keycap set itself — over 'International' or regional variants.
+    """
+    if "gmk.net" not in product_url:
+        return None
+    try:
+        page.goto(product_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+        try:
+            page.wait_for_selector("h1", timeout=5_000)
+        except Exception:
+            pass
+        content = page.content()
+
+        jld_blocks = re.findall(
+            r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+            content, re.DOTALL | re.IGNORECASE
+        )
+
+        for block in jld_blocks:
+            try:
+                obj = json.loads(block.strip())
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+            nodes = obj if isinstance(obj, list) else obj.get("@graph", [obj])
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                if node.get("@type") not in ("Product", "ItemPage"):
+                    continue
+                raw_offers = node.get("offers")
+                if not raw_offers:
+                    continue
+
+                # Flatten: array of Offer | AggregateOffer{offers:[...]} | single Offer
+                if isinstance(raw_offers, list):
+                    offer_list = raw_offers
+                elif isinstance(raw_offers, dict) and isinstance(raw_offers.get("offers"), list):
+                    offer_list = raw_offers["offers"]
+                else:
+                    offer_list = [raw_offers] if isinstance(raw_offers, dict) else []
+
+                # Prefer 'Base' variant — GMK.net lists "Base" and "International"
+                # as separate named offers. International may be in stock while
+                # Base is not, but we always want the base keycap kit price.
+                chosen = next(
+                    (o for o in offer_list
+                     if isinstance(o, dict) and re.search(r'\bbase\b', str(o.get("name", "")), re.IGNORECASE)),
+                    offer_list[0] if offer_list else None
+                )
+                if not chosen:
+                    chosen = raw_offers if isinstance(raw_offers, dict) else None
+                if not chosen:
+                    continue
+
+                raw_price = chosen.get("price")
+                if raw_price is None and isinstance(raw_offers, dict):
+                    raw_price = raw_offers.get("lowPrice")
+                currency = chosen.get("priceCurrency") or (
+                    raw_offers.get("priceCurrency") if isinstance(raw_offers, dict) else None
+                ) or "EUR"
+
+                try:
+                    price = float(str(raw_price).replace(",", "."))
+                except (TypeError, ValueError):
+                    continue
+
+                if price <= 0:
+                    continue
+
+                if not is_plausible_base_price(price, currency):
+                    log(f"  GMK.net implausible price {price} {currency} — skipped ({product_url})")
+                    continue
+
+                chosen_name = chosen.get("name", "?") if isinstance(chosen, dict) else "?"
+                log(f"  GMK.net price: {price} {currency} (variant: {chosen_name}) — {product_url}")
+                return {"price": price, "currency": currency, "variants": []}
+
+        return None
+    except Exception as e:
+        log(f"  GMK.net price fetch failed ({product_url}): {e}")
         return None
 
 
@@ -1304,6 +1402,10 @@ def run_prices(conn, context: BrowserContext, deadline: float) -> dict:
                 break
             stats["attempted"] += 1
             result = shopify_price(page, vk["productUrl"], vk.get("vendor_currency"))
+            # GMK.net uses Shopware (no /products/ path) — shopify_price() returns
+            # None for it; try the Shopware JSON-LD scraper instead.
+            if result is None and "gmk.net" in (vk.get("productUrl") or ""):
+                result = gmknet_price(page, vk["productUrl"])
             if result:
                 with conn.cursor() as cur:
                     cur.execute(

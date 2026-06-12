@@ -243,6 +243,7 @@ const KNOWN_HOSTS: Record<string, Omit<VendorDef, "websiteUrl">> = {
   "oblotzky.industries": { name: "Oblotzky Industries", slug: "oblotzky-industries", region: "EU", country: "DE", currency: "EUR" },
   "novelkeys.com": { name: "NovelKeys", slug: "novelkeys", region: "US", country: "US", currency: "USD" },
   "cannonkeys.com": { name: "Cannon Keys", slug: "cannon-keys", region: "US", country: "US", currency: "USD" },
+  "stackskb.com": { name: "STACKS", slug: "stacks", region: "US", country: "US", currency: "USD" },
   "www.deskhero.ca": { name: "DeskHero", slug: "deskhero", region: "CA", country: "CA", currency: "CAD" },
   "prototypist.net": { name: "proto[Typist]", slug: "prototypist", region: "CA", country: "CA", currency: "CAD" },
 };
