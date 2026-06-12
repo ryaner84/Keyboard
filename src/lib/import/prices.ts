@@ -83,6 +83,7 @@ const KIT_BOUNDS: Record<string, { min: number; max: number }> = {
   CLP: { min: 27000, max: 210000 },
   INR: { min: 2500, max: 19000 },
   ARS: { min: 30000, max: 400000 },
+  MYR: { min: 140, max: 1100 },
 };
 
 // Currencies the site can actually convert (the Currency table). A price in

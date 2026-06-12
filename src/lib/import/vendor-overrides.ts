@@ -36,6 +36,13 @@ export const VENDOR_OVERRIDES: Record<string, VendorOverride> = {
   "neo-macro": { region: "ASIA", country: "IN", currency: "INR" },
   neomacro: { region: "ASIA", country: "IN", currency: "INR" },
 
+  // Japan
+  yushakobo: { region: "ASIA", country: "JP", currency: "JPY" },
+
+  // Malaysia
+  mecha: { region: "ASIA", country: "MY", currency: "MYR" },
+  "mecha-my": { region: "ASIA", country: "MY", currency: "MYR" },
+
   // Latin America
   latamkeys: { region: "OTHER", country: "AR", currency: "ARS" },
 
@@ -253,6 +260,9 @@ const KNOWN_HOSTS: Record<string, Omit<VendorDef, "websiteUrl">> = {
   "stackskb.com": { name: "STACKS", slug: "stacks", region: "ASIA", country: "IN", currency: "INR" },
   "neomacro.in": { name: "Neo Macro", slug: "neo-macro", region: "ASIA", country: "IN", currency: "INR" },
   "latamkeys.com": { name: "Latamkeys", slug: "latamkeys", region: "OTHER", country: "AR", currency: "ARS" },
+  "shop.yushakobo.jp": { name: "Yushakobo", slug: "yushakobo", region: "ASIA", country: "JP", currency: "JPY" },
+  "www.mecha.com.my": { name: "Mecha", slug: "mecha", region: "ASIA", country: "MY", currency: "MYR" },
+  "mecha.com.my": { name: "Mecha", slug: "mecha", region: "ASIA", country: "MY", currency: "MYR" },
   "www.deskhero.ca": { name: "DeskHero", slug: "deskhero", region: "CA", country: "CA", currency: "CAD" },
   "prototypist.net": { name: "proto[Typist]", slug: "prototypist", region: "CA", country: "CA", currency: "CAD" },
 };

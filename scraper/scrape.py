@@ -396,6 +396,8 @@ _KIT_BOUNDS = {
     "INR": (2_500, 19_000),
     # Argentine Peso — used by Latamkeys. Volatile; bounds intentionally wide.
     "ARS": (30_000, 400_000),
+    # Malaysian Ringgit — 1 USD ≈ 4.71 MYR as of 2025.
+    "MYR": (140, 1100),
 }
 
 # Currencies the site's Currency table can convert (db-setup ensureCurrencies).

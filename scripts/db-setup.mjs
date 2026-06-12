@@ -132,7 +132,10 @@ async function backfillShipping(client) {
        ('stacks',              'ASIA', 'IN', 'INR'),
        ('neo-macro',           'ASIA', 'IN', 'INR'),
        ('neomacro',            'ASIA', 'IN', 'INR'),
-       ('latamkeys',           'OTHER','AR', 'ARS')
+       ('latamkeys',           'OTHER','AR', 'ARS'),
+       ('yushakobo',           'ASIA', 'JP', 'JPY'),
+       ('mecha',               'ASIA', 'MY', 'MYR'),
+       ('mecha-my',            'ASIA', 'MY', 'MYR')
      ) AS c(slug, region, country, currency)
      WHERE v.slug = c.slug AND (v.region::text <> c.region OR v.currency <> c.currency)
      RETURNING v.id`
@@ -492,6 +495,7 @@ const RESTORE_BOUNDS = {
   USD: [30, 225], EUR: [28, 210], GBP: [24, 180], AUD: [45, 345],
   CAD: [41, 310], SGD: [40, 310], JPY: [4500, 34000], KRW: [40000, 320000],
   CNY: [215, 1650], HKD: [235, 1800], THB: [1075, 8100], TWD: [965, 7300],
+  MYR: [140, 1100],
 };
 
 async function restorePurgedPricesFromVariants(client) {
