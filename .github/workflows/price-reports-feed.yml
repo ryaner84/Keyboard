@@ -1,0 +1,32 @@
+# Prints the live site's pending wrong-price reports (GET /api/price-reports).
+# Manual-dispatch review feed: GitHub runners can reach the production site,
+# so this needs no DB secret. Used by the report-review routine.
+name: Price reports feed
+
+on:
+  workflow_dispatch:
+
+jobs:
+  feed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch pending price reports
+        run: |
+          curl -sf "https://keyboard-six-tau.vercel.app/api/price-reports" \
+            | node -e "
+              let s='';
+              process.stdin.on('data', d => s += d).on('end', () => {
+                const j = JSON.parse(s);
+                const rs = j.reports ?? [];
+                console.log(rs.length + ' report(s):');
+                for (const r of rs) {
+                  const l = r.listing ?? {};
+                  console.log('PRICE_REPORT | ' + r.submittedAt + ' | set=' + r.setSlug +
+                    ' | vendor=' + r.vendorName +
+                    ' | current=' + (l.price ?? 'null') + ' ' + (l.currency ?? '') +
+                    ' | source=' + (l.priceSource ?? '?') +
+                    ' | reason=' + JSON.stringify(r.reason ?? '') +
+                    ' | url=' + (l.productUrl ?? '?'));
+                }
+              });
+            "
