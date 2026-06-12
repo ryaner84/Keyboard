@@ -585,6 +585,17 @@ export async function GET(
         </div>
       </div>
     ),
-    { width: W, height: H }
+    {
+      width: W,
+      height: H,
+      headers: {
+        // 1-hour public cache so WhatsApp / Telegram preview bots get a fast
+        // response on repeated fetches and don't time-out the link preview.
+        "Cache-Control": "public, max-age=3600, s-maxage=3600",
+        // Hint that the response is a downloadable file (used by the Save
+        // Poster button's fetch+blob flow; ignored by preview bots).
+        "Content-Disposition": `inline; filename="gmk-${slug}-poster.png"`,
+      },
+    }
   );
 }
