@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import { LocationProvider } from "@/context/LocationContext";
 import { ThemeProvider } from "@/context/ThemeContext";
@@ -37,6 +38,7 @@ export default function RootLayout({
             <Footer />
           </LocationProvider>
         </ThemeProvider>
+        <Analytics />
       </body>
     </html>
   );
