@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { CurrencySelector } from "./CurrencySelector";
 import { ThemeToggle } from "./ThemeToggle";
 import { FeedbackButton } from "./FeedbackButton";
+import { HeaderSearch } from "./HeaderSearch";
 
 export function Header() {
   const { country, setShowModal } = useLocation();
@@ -49,8 +50,11 @@ export function Header() {
             ))}
           </nav>
 
-          {/* Controls: feedback · location · currency · theme */}
+          {/* Controls: search · feedback · location · currency · theme */}
           <div className="flex items-center gap-2">
+            {/* Global set search */}
+            <HeaderSearch />
+
             {/* Feedback */}
             <FeedbackButton />
 
