@@ -2,12 +2,15 @@
 // Vercel cron uses, but from a runner IP that vendor stores don't blanket-
 // block, and without the 60s serverless budget. Requires DATABASE_URL.
 // Run with: npx tsx scripts/refresh-prices-ci.mjs
-import { refreshPrices } from "../src/lib/import/prices.ts";
 
+// Env check BEFORE the import — importing prices.ts instantiates the Prisma
+// client at module load, which throws without a database URL.
 if (!process.env.DATABASE_URL) {
   console.log("DATABASE_URL not set — skipping price refresh.");
   process.exit(0);
 }
+
+const { refreshPrices } = await import("../src/lib/import/prices.ts");
 
 const result = await refreshPrices({
   limit: 2000,

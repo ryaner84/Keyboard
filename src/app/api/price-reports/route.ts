@@ -15,6 +15,38 @@ export const dynamic = "force-dynamic";
 const CONFIRM_REPORTS = 2;
 const REPORT_WINDOW_DAYS = 7;
 
+// Review feed: recent reports with the listing's current state, so the
+// report-review routine (or a workflow log step) can read them through the
+// live site even when GitHub has no direct DB credentials. Reports contain
+// nothing sensitive — set slug, vendor name, optional reason.
+export async function GET() {
+  const reports = await prisma.priceReport.findMany({
+    orderBy: { submittedAt: "desc" },
+    take: 50,
+  });
+  const vendorKits = await prisma.vendorKit.findMany({
+    where: { id: { in: Array.from(new Set(reports.map((r) => r.vendorKitId))) } },
+    select: {
+      id: true,
+      price: true,
+      currency: true,
+      priceSource: true,
+      priceUpdatedAt: true,
+      productUrl: true,
+    },
+  });
+  const vkById = new Map(vendorKits.map((vk) => [vk.id, vk]));
+  return NextResponse.json({
+    reports: reports.map((r) => ({
+      submittedAt: r.submittedAt,
+      setSlug: r.setSlug,
+      vendorName: r.vendorName,
+      reason: r.reason,
+      listing: vkById.get(r.vendorKitId) ?? null,
+    })),
+  });
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const setSlug = String(body?.setSlug ?? "").trim();
