@@ -506,7 +506,11 @@ async function restorePurgedPricesFromVariants(client) {
        JOIN public."Vendor" v ON v.id = vk."vendorId"
        WHERE vk.price IS NULL
          AND vk."priceSource" = 'SCRAPED'
-         AND vk.variants IS NOT NULL`
+         AND vk.variants IS NOT NULL
+         -- GMK is the manufacturer, not a vendor: never restore a price onto
+         -- its rows (purgeMispricedListings wipes them every deploy).
+         AND v.slug <> 'gmk'
+         AND COALESCE(vk."productUrl", '') NOT ILIKE '%gmk.net%'`
     );
     let restored = 0;
     for (const row of rows) {
@@ -898,19 +902,23 @@ async function requeueGeoCurrencyPricesV2(client) {
 
 // RECURRING (every deploy): defects that re-appear because a scrape or import
 // re-creates them — wiping once isn't enough.
-//  a) GMK.net base kits stored under 60 (JSON-LD lowPrice = cheapest child
-//     kit). The scrapers reject these now, but any regression self-heals here.
+//  a) GMK is the MANUFACTURER, not a vendor — its rows only carry the gmk.net
+//     URL for the image/catalog passes. Wipe ANY price that lands on them
+//     (e.g. a WorkSpace scraper running pre-removal code). priceUpdatedAt is
+//     set to now() — not NULL — so the rows don't jump to the head of the
+//     scrape queue on machines still running old code.
 //  b) Child-kit sets ('-addon', alphas rounds) linked to the MAIN set's
 //     product page — DELETE the link (a price wipe just gets re-priced).
 //  c) Omnitype's GMK ASCII R1 clearance page linked to the ASCII R2 set.
 async function purgeMispricedListings(client) {
   try {
-    const gmkLow = await client.query(
+    const gmkPrices = await client.query(
       `UPDATE public."VendorKit" vk
-       SET price = NULL, "priceUpdatedAt" = NULL
+       SET price = NULL, "priceUpdatedAt" = now()
        FROM public."Vendor" v
-       WHERE vk."vendorId" = v.id AND v.slug = 'gmk'
-         AND vk."priceSource" = 'SCRAPED' AND vk.price < 60`
+       WHERE vk."vendorId" = v.id
+         AND (v.slug = 'gmk' OR vk."productUrl" ILIKE '%gmk.net%')
+         AND vk.price IS NOT NULL`
     );
     const mislinks = await client.query(
       `DELETE FROM public."VendorKit" vk
@@ -932,10 +940,10 @@ async function purgeMispricedListings(client) {
          AND COALESCE(vk."priceSource", '') <> 'MANUAL'
          AND vk."productUrl" ILIKE '%omnitype.com/products/gmk-ascii'`
     );
-    const total = gmkLow.rowCount + mislinks.rowCount + asciiR1.rowCount;
+    const total = gmkPrices.rowCount + mislinks.rowCount + asciiR1.rowCount;
     if (total > 0) {
       console.log(
-        `[db-setup] Mispriced listings: wiped ${gmkLow.rowCount} GMK lowPrice artifacts, ` +
+        `[db-setup] Mispriced listings: wiped ${gmkPrices.rowCount} manufacturer (GMK) prices, ` +
           `deleted ${mislinks.rowCount} child-kit mislinks + ${asciiR1.rowCount} ASCII R1-on-R2 links.`
       );
     }

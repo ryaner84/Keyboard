@@ -67,7 +67,17 @@ export function applyVendorOverride(
 // owner's request. Importers and the suggestion pipeline skip these, and
 // db-setup purges any rows that sneak in.
 export const BLOCKED_VENDOR_SLUGS = new Set(["fancycustoms", "fancy-customs"]);
-export const BLOCKED_VENDOR_HOSTS = new Set(["fancycustoms.com", "www.fancycustoms.com"]);
+// gmk.net is NOT a banned vendor — GMK is the manufacturer (our data source).
+// Its vendor record stays in the DB as the carrier of gmk.net catalog/image
+// URLs, but user suggestions pointing at gmk.net are dropped: the manufacturer
+// page is not a place to buy, and a suggested deep link must never overwrite
+// the canonical product URL the image pass depends on.
+export const BLOCKED_VENDOR_HOSTS = new Set([
+  "fancycustoms.com",
+  "www.fancycustoms.com",
+  "gmk.net",
+  "www.gmk.net",
+]);
 
 // ── Hand-curated vendor product links ────────────────────────────────────────
 // Product pages KeycapLendar doesn't know about (e.g. Ktechs carries GMK GBs

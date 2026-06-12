@@ -67,6 +67,14 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
         where: { type: "BASE" },
         include: {
           vendorKits: {
+            // GMK is the manufacturer, not a vendor — its rows only carry the
+            // gmk.net catalog/image URL and are never shown as a place to buy.
+            // The OR keeps NULL-productUrl rows (manual prices) visible: a bare
+            // NOT-contains would drop them under SQL three-valued logic.
+            where: {
+              vendor: { slug: { not: "gmk" } },
+              OR: [{ productUrl: null }, { NOT: { productUrl: { contains: "gmk.net" } } }],
+            },
             include: {
               vendor: {
                 include: {

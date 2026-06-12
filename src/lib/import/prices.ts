@@ -354,6 +354,9 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
 // base currency rather than whatever the runner's IP geo-detects.
 export async function fetchVendorPrice(productUrl: string, vendorCurrency?: string): Promise<PriceResult | null> {
   if (!productUrl) return null;
+  // GMK is the manufacturer, not a vendor — gmk.net links are catalog/image
+  // references and must never produce a price.
+  if (/gmk\.net/i.test(productUrl)) return null;
   const shopify = await fetchShopifyPrice(productUrl, vendorCurrency);
   if (shopify) return shopify;
   return fetchJsonLdPrice(productUrl);
@@ -434,6 +437,10 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
     where: {
       ...(ids && ids.length > 0 && { id: { in: ids } }),
       productUrl: { not: null },
+      // GMK is the manufacturer, not a vendor — its rows only carry the
+      // gmk.net URL for the image pass and must never enter the price queue.
+      vendor: { slug: { not: "gmk" } },
+      NOT: { productUrl: { contains: "gmk.net" } },
       // Buyers decide on the base kit first — only base kit prices are shown
       // on the site, so scraping is limited to BASE kits only.
       kit: { type: "BASE" },
