@@ -32,9 +32,6 @@ export const VENDOR_OVERRIDES: Record<string, VendorOverride> = {
   "swagkeys-kr": { region: "ASIA", country: "KR", currency: "USD" },
   geonworks: { region: "ASIA", country: "KR", currency: "USD" },
 
-  // Latin America
-  fancycustoms: { region: "OTHER", country: "CL", currency: "CLP" },
-
   // Canada
   prototypist: { region: "CA", country: "CA", currency: "CAD" },
 
@@ -50,6 +47,13 @@ export function applyVendorOverride(
 ): { region: Region; country: string; currency: string } {
   return VENDOR_OVERRIDES[slug] ?? fallback;
 }
+
+// Vendors banned from the site entirely. Fancy Customs (CL) prices in CLP and
+// repeatedly poisoned listings with six-digit "USD" prices — removed at the
+// owner's request. Importers and the suggestion pipeline skip these, and
+// db-setup purges any rows that sneak in.
+export const BLOCKED_VENDOR_SLUGS = new Set(["fancycustoms", "fancy-customs"]);
+export const BLOCKED_VENDOR_HOSTS = new Set(["fancycustoms.com", "www.fancycustoms.com"]);
 
 // ── Hand-curated vendor product links ────────────────────────────────────────
 // Product pages KeycapLendar doesn't know about (e.g. Ktechs carries GMK GBs
@@ -239,7 +243,6 @@ const KNOWN_HOSTS: Record<string, Omit<VendorDef, "websiteUrl">> = {
   "oblotzky.industries": { name: "Oblotzky Industries", slug: "oblotzky-industries", region: "EU", country: "DE", currency: "EUR" },
   "novelkeys.com": { name: "NovelKeys", slug: "novelkeys", region: "US", country: "US", currency: "USD" },
   "cannonkeys.com": { name: "Cannon Keys", slug: "cannon-keys", region: "US", country: "US", currency: "USD" },
-  "fancycustoms.com": { name: "Fancy Customs", slug: "fancycustoms", region: "OTHER", country: "CL", currency: "CLP" },
   "www.deskhero.ca": { name: "DeskHero", slug: "deskhero", region: "CA", country: "CA", currency: "CAD" },
   "prototypist.net": { name: "proto[Typist]", slug: "prototypist", region: "CA", country: "CA", currency: "CAD" },
 };
@@ -279,6 +282,11 @@ export async function processVendorSuggestions(): Promise<SuggestionResult> {
       continue;
     }
 
+    if (BLOCKED_VENDOR_HOSTS.has(host)) {
+      await markDone();
+      continue;
+    }
+
     const groupBuy = await prisma.groupBuy.findUnique({ where: { slug: s.slug } });
     if (!groupBuy) {
       await markDone();
@@ -297,7 +305,7 @@ export async function processVendorSuggestions(): Promise<SuggestionResult> {
           currency: "USD",
           websiteUrl: origin,
         };
-    if (!def.slug) {
+    if (!def.slug || BLOCKED_VENDOR_SLUGS.has(def.slug)) {
       await markDone();
       continue;
     }

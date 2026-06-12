@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/utils";
 import { unwrapFields, type FirestoreDoc } from "./firestore";
-import { applyVendorOverride } from "./vendor-overrides";
+import { applyVendorOverride, BLOCKED_VENDOR_SLUGS } from "./vendor-overrides";
 import { buildShippingZones } from "./shipping";
 import type { GBStatus, Region } from "@/generated/prisma";
 
@@ -239,7 +239,7 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
     for (const v of ks.vendors ?? []) {
       if (!v.name) continue;
       const vSlug = slugify(v.name);
-      if (!vSlug) continue;
+      if (!vSlug || BLOCKED_VENDOR_SLUGS.has(vSlug)) continue;
       // Correct known-mislabelled vendors (e.g. SG stores tagged as "America").
       const { region, currency, country } = applyVendorOverride(vSlug, mapRegion(v.region));
       const websiteUrl = originOf(v.storeLink) || v.storeLink || "";

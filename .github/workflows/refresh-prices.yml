@@ -24,6 +24,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Print pending wrong-price reports (the review feed) and re-queue the
+      # reported listings so the refresh below re-verifies them first.
+      - name: Pending price reports (review + re-queue)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: node scripts/price-reports-ci.mjs
+
       - name: Refresh prices
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

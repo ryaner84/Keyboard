@@ -20,8 +20,13 @@ interface Kit {
 interface GroupBuyData {
   slug: string;
   name: string;
+  status?: string;
   kits: Kit[];
 }
+
+// Sets in these statuses are "released": vendor links without a live price are
+// stale leftovers (dead GB pages), not useful "check the store" pointers.
+const RELEASED_STATUSES = new Set(["SHIPPING", "DELIVERED", "IN_STOCK", "CANCELLED"]);
 
 interface Props {
   groupBuy: GroupBuyData;
@@ -128,6 +133,7 @@ export function SetDetailClient({ groupBuy }: Props) {
           userCurrency={currency}
           rates={rates}
           loading={loading}
+          showUnpriced={!RELEASED_STATUSES.has(groupBuy.status ?? "")}
           onSuggestVendor={() => setSuggestOpen(true)}
         />
       </div>

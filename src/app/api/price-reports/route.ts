@@ -3,6 +3,18 @@ import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
+// A report does not just sit in a triage table — it self-heals:
+//  1. Every report re-queues the listing for re-scraping: clearing
+//     priceUpdatedAt puts it at the FRONT of both scrape queues
+//     (`ORDER BY priceUpdatedAt ASC NULLS FIRST`), so the GitHub Actions
+//     6-hourly refresh or the nightly WorkSpace run re-verifies it next.
+//  2. A second independent report within 7 days nulls the price immediately —
+//     the row disappears from the site until a fresh scrape writes a verified
+//     price. One report alone never hides a price (abuse resistance).
+//  Manual prices are never touched; those are the owner's explicit overrides.
+const CONFIRM_REPORTS = 2;
+const REPORT_WINDOW_DAYS = 7;
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const setSlug = String(body?.setSlug ?? "").trim();
@@ -22,6 +34,32 @@ export async function POST(req: NextRequest) {
       reason: reason ? reason.slice(0, 1000) : null,
     },
   });
+
+  // Auto-repair. Failures here must not fail the report submission.
+  try {
+    const vk = await prisma.vendorKit.findUnique({
+      where: { id: vendorKitId },
+      select: { id: true, priceSource: true },
+    });
+    if (vk && vk.priceSource !== "MANUAL") {
+      const windowStart = new Date(Date.now() - REPORT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+      const recentReports = await prisma.priceReport.count({
+        where: { vendorKitId, submittedAt: { gte: windowStart } },
+      });
+
+      await prisma.vendorKit.update({
+        where: { id: vendorKitId },
+        data: {
+          // Front of the scrape queue on the next run.
+          priceUpdatedAt: null,
+          // Confirmed wrong (2+ reports): hide until a fresh scrape verifies.
+          ...(recentReports >= CONFIRM_REPORTS ? { price: null } : {}),
+        },
+      });
+    }
+  } catch {
+    // report stored; repair will happen via the normal scrape rotation
+  }
 
   return NextResponse.json({ ok: true });
 }

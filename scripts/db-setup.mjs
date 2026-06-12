@@ -45,6 +45,29 @@ function ensureTransactionPooler(url) {
   return url.replace(/:5432(\/|$|\?)/, ":6543$1");
 }
 
+// Vendors banned from the site (mirrors BLOCKED_VENDOR_SLUGS in
+// vendor-overrides.ts). Runs every deploy so a blocked vendor re-imported by
+// any path gets purged again. Fancy Customs prices in CLP and poisoned
+// listings with six-digit "USD" prices — removed at the owner's request.
+async function purgeBlockedVendors(client) {
+  try {
+    const vendors = await client.query(
+      `SELECT id FROM public."Vendor"
+        WHERE slug IN ('fancycustoms','fancy-customs')
+           OR "websiteUrl" ILIKE '%fancycustoms.com%'
+           OR name ILIKE 'fancy customs'`
+    );
+    if (vendors.rowCount === 0) return;
+    const ids = vendors.rows.map((r) => r.id);
+    await client.query(`DELETE FROM public."VendorKit" WHERE "vendorId" = ANY($1)`, [ids]);
+    await client.query(`DELETE FROM public."ShippingZone" WHERE "vendorId" = ANY($1)`, [ids]);
+    await client.query(`DELETE FROM public."Vendor" WHERE id = ANY($1)`, [ids]);
+    console.log(`[db-setup] Purged ${ids.length} blocked vendor(s) (fancycustoms).`);
+  } catch (err) {
+    console.warn(`[db-setup] blocked-vendor purge skipped: ${err.message}`);
+  }
+}
+
 // Correct known-mislabelled vendors and (re)seed DHL-estimate shipping zones.
 // Runs every deploy. The cost CASE is recalibrated to discounted small-parcel
 // DHL rates (a GMK base kit is compact/light, ~1kg) — anchored to a real
@@ -78,8 +101,7 @@ async function backfillShipping(client) {
        ('kbdfans',             'ASIA', 'CN', 'USD'),
        ('zfrontier',           'ASIA', 'CN', 'USD'),
        ('aiglatson-studio',    'ASIA', 'TH', 'THB'),
-       ('aiglatson',           'ASIA', 'TH', 'THB'),
-       ('fancycustoms',        'OTHER','CL', 'CLP')
+       ('aiglatson',           'ASIA', 'TH', 'THB')
      ) AS c(slug, region, country, currency)
      WHERE v.slug = c.slug AND (v.region::text <> c.region OR v.currency <> c.currency)
      RETURNING v.id`
@@ -202,6 +224,7 @@ async function main() {
         await ensureVendorSuggestionTable(client);
         await ensureFeedbackTable(client);
         await ensurePriceReportTable(client);
+        await purgeBlockedVendors(client);
         await ensureDiscoveryColumn(client);
         await ensureCurrencies(client);
         await resetPollutedGalleries(client);
@@ -237,6 +260,7 @@ async function main() {
     await ensureVendorSuggestionTable(client);
     await ensureFeedbackTable(client);
         await ensurePriceReportTable(client);
+        await purgeBlockedVendors(client);
     await ensureDiscoveryColumn(client);
     await ensureCurrencies(client);
     await resetPollutedGalleries(client);

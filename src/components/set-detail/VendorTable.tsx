@@ -14,6 +14,9 @@ interface VendorTableProps {
   userCurrency: string;
   rates: ExchangeRates;
   loading: boolean;
+  // Released sets hide unpriced vendor links entirely (stale GB leftovers);
+  // active GBs keep them — the GB page link is useful before prices exist.
+  showUnpriced?: boolean;
   onSuggestVendor?: () => void;
 }
 
@@ -129,6 +132,7 @@ export function VendorTable({
   userCurrency,
   rates,
   loading,
+  showUnpriced = true,
   onSuggestVendor,
 }: VendorTableProps) {
   const rows: RowData[] = useMemo(() => {
@@ -313,7 +317,7 @@ export function VendorTable({
       })}
 
       {/* Vendors with no live price yet — show as direct store links */}
-      {unpricedRows.length > 0 && (
+      {showUnpriced && unpricedRows.length > 0 && (
         <div className="mt-1 pt-3 border-t border-gray-100">
           <p className="text-xs text-gray-400 mb-2">No live price yet — check vendor site directly:</p>
           <div className="space-y-1.5">
