@@ -15,6 +15,16 @@ const AVAILABILITY_TABS = [
   { value: "soldout", label: "Sold out" },
 ] as const;
 
+// Sorts are visible pills, not a dropdown — "Biggest savings" is a feature,
+// and features hidden behind an unlabeled <select> don't exist to users.
+const SORT_OPTIONS = [
+  { value: "released-desc", label: "Newest" },
+  { value: "price-asc", label: "Lowest price" },
+  { value: "savings-desc", label: "💸 Biggest savings" },
+  { value: "released-asc", label: "Oldest" },
+  { value: "name", label: "A–Z" },
+] as const;
+
 export default function ReleasedContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -231,18 +241,6 @@ export default function ReleasedContent() {
           )}
         </select>
 
-        <select
-          value={sortBy}
-          onChange={(e) => updateParams({ sort: e.target.value })}
-          className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-700 dark:text-gray-200 focus:outline-none focus:border-indigo-400"
-        >
-          <option value="released-desc">Recently released</option>
-          <option value="price-asc">Lowest kit price</option>
-          <option value="savings-desc">Biggest savings %</option>
-          <option value="released-asc">Oldest first</option>
-          <option value="name">Name A–Z</option>
-        </select>
-
         {hasFilters && (
           <button
             onClick={() => {
@@ -257,6 +255,37 @@ export default function ReleasedContent() {
             Clear filters
           </button>
         )}
+      </div>
+
+      {/* Row 3: sort — visible labeled pills so every sort is discoverable */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <span className="flex items-center gap-1 text-xs text-gray-400 mr-1">
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9M3 12h5m8-8v12m0 0l-4-4m4 4l4-4" />
+          </svg>
+          Sort by
+        </span>
+        {SORT_OPTIONS.map((opt) => {
+          const active = sortBy === opt.value;
+          const isSavings = opt.value === "savings-desc";
+          return (
+            <button
+              key={opt.value}
+              onClick={() => updateParams({ sort: opt.value })}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                active
+                  ? isSavings
+                    ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white border-transparent shadow-sm"
+                    : "bg-indigo-600 text-white border-indigo-600"
+                  : isSavings
+                    ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-900 hover:border-amber-400"
+                    : "bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-indigo-300 hover:text-indigo-600"
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Designer quick-chips: top 12 most prolific designers as clickable pills */}
@@ -322,6 +351,10 @@ export default function ReleasedContent() {
                 : availability === "soldout"
                   ? " not currently stocked"
                   : ""
+            }${
+              sortBy === "savings-desc"
+                ? " — biggest vendor price gap first, so the 💸 Save % runs high to low"
+                : ""
             }`}
       </p>
 
