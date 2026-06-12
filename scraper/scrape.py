@@ -394,6 +394,17 @@ _KIT_BOUNDS = {
     "CLP": (27_000, 210_000),
     # Indian Rupee — 1 USD ≈ 84 INR as of 2025. ~$30–$225 USD range.
     "INR": (2_500, 19_000),
+    # Argentine Peso — used by Latamkeys. Volatile; bounds intentionally wide.
+    "ARS": (30_000, 400_000),
+}
+
+# Currencies the site's Currency table can convert (db-setup ensureCurrencies).
+# Prices in anything else render as garbage (missing rate treated as 1, so
+# 82,857 ARS displayed as $82,857 before ARS was supported) — never store them.
+_SUPPORTED_CURRENCIES = {
+    "USD", "SGD", "EUR", "GBP", "CAD", "AUD", "JPY", "CNY", "KRW", "MYR",
+    "THB", "NZD", "HKD", "TWD", "SEK", "NOK", "DKK", "CHF", "PLN",
+    "INR", "ARS", "CLP",
 }
 
 
@@ -455,6 +466,32 @@ def pinned_variant_id(product_url: str) -> str | None:
         return None
 
 
+def _parse_shopify_variants(raw_variants: list) -> list[dict]:
+    """Shopify product.json variants → [{id, title, price}], invalid dropped."""
+    out: list[dict] = []
+    for v in raw_variants:
+        try:
+            p = float(v.get("price"))
+        except (TypeError, ValueError):
+            continue
+        if p > 0:
+            out.append({
+                "id": str(v.get("id") or ""),
+                "title": str(v.get("title") or ""),
+                "price": p,
+            })
+    return out
+
+
+def _pick_variant(variants: list[dict], pinned_id: str | None) -> dict | None:
+    """Pinned ?variant=<id> beats any title heuristic (mirrors prices.ts)."""
+    if pinned_id:
+        for v in variants:
+            if v["id"] == pinned_id:
+                return v
+    return choose_kit_variant(variants)
+
+
 def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> dict | None:
     """Navigate to the product (acquires cf_clearance) then fetch its .json from
     inside the page context so the request carries the clearance cookies."""
@@ -466,21 +503,6 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
     origin = urllib.parse.urlsplit(clean)
     origin_url = f"{origin.scheme}://{origin.netloc}"
     try:
-        # Pin the storefront to the vendor's home market BEFORE loading the
-        # page. Shopify Markets geo-localizes prices to the requester's IP —
-        # a scrape from this machine got SGD numbers from CannonKeys while the
-        # currency label stayed USD (GMK BKRE $150 stored as 224). Stores
-        # without Markets ignore these cookies.
-        if vendor_currency and vendor_currency in _CURRENCY_HOME_COUNTRY:
-            try:
-                page.context.add_cookies([
-                    {"name": "cart_currency", "value": vendor_currency, "url": origin_url},
-                    {"name": "localization",
-                     "value": _CURRENCY_HOME_COUNTRY[vendor_currency], "url": origin_url},
-                ])
-            except Exception:  # noqa: BLE001
-                pass
-
         page.goto(product_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
         data = page.evaluate(
             """async (u) => {
@@ -503,32 +525,10 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
             log(f"  product title is an accessory — skipped ({product_url})")
             return None
 
-        raw_variants = data["product"].get("variants") or []
-        variants: list[dict] = []
-        for v in raw_variants:
-            try:
-                p = float(v.get("price"))
-            except (TypeError, ValueError):
-                continue
-            if p > 0:
-                variants.append({
-                    "id": str(v.get("id") or ""),
-                    "title": str(v.get("title") or ""),
-                    "price": p,
-                })
-
-        # The variant the vendor link itself pins (?variant=<id>) is exact —
-        # it beats any title heuristic (mirrors prices.ts).
-        chosen = None
-        if pinned_id:
-            chosen = next((v for v in variants if v["id"] == pinned_id), None)
-        if chosen is None:
-            chosen = choose_kit_variant(variants)
+        variants = _parse_shopify_variants(data["product"].get("variants") or [])
+        chosen = _pick_variant(variants, pinned_id)
         if chosen is None:
             return None
-
-        # Stored variants carry title+price only (what the UI parses).
-        variants = [{"title": v["title"], "price": v["price"]} for v in variants]
 
         # Step 1: try the Shopify /meta.json endpoint (most reliable — this is
         # the store's PRIMARY currency that prices are denominated in).
@@ -587,22 +587,54 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
                 origin_url,
             )
 
-        # Step 3: fall back to the vendor's own currency (e.g. DeskHero = CAD),
-        # never a blind USD default that inflates CA$88 into US$88.
+        # Pin the storefront to the DETECTED primary currency and re-fetch.
+        # Shopify Markets geo-localizes .json prices to the requester's IP —
+        # CannonKeys served this machine SGD numbers while meta.json said USD
+        # (GMK BKRE $150 stored as 224). Pinning cart_currency + localization
+        # to the store's own market makes the numbers match the label. The
+        # vendor DB record is NOT used here: several records carry the wrong
+        # currency (Yushakobo listed USD, store is JPY) and would relabel
+        # genuine ¥20,000 numbers as "USD".
+        if currency and currency in _CURRENCY_HOME_COUNTRY:
+            try:
+                page.context.add_cookies([
+                    {"name": "cart_currency", "value": currency, "url": origin_url},
+                    {"name": "localization",
+                     "value": _CURRENCY_HOME_COUNTRY[currency], "url": origin_url},
+                ])
+                repin = page.evaluate(
+                    """async (u) => {
+                        try {
+                            const r = await fetch(u, { headers: { 'Accept': 'application/json' } });
+                            if (!r.ok) return null;
+                            return await r.json();
+                        } catch (e) { return null; }
+                    }""",
+                    json_url,
+                )
+                if repin and "product" in repin:
+                    v2 = _parse_shopify_variants(repin["product"].get("variants") or [])
+                    c2 = _pick_variant(v2, pinned_id)
+                    if c2 is not None:
+                        variants, chosen = v2, c2
+            except Exception:  # noqa: BLE001
+                pass
+
+        # Fall back to the vendor's own currency (e.g. DeskHero = CAD), never
+        # a blind USD default that inflates CA$88 into US$88.
         currency = currency or vendor_currency
 
-        # Sanity-check: if geo-detection returned a currency that doesn't match
-        # what the vendor's DB record says (e.g. STACKS=USD but runner IP is
-        # geolocated to India → INR), trust the DB. Datacenter IPs can be
-        # misidentified; the vendor's own currency is the ground truth.
-        if vendor_currency and currency and currency != vendor_currency:
-            log(f"  geo-detected {currency} but vendor DB says {vendor_currency} — using {vendor_currency}")
-            currency = vendor_currency
+        # Refuse currencies the site can't convert — they render as garbage.
+        if currency and currency not in _SUPPORTED_CURRENCIES:
+            log(f"  unsupported currency {currency} — skipped ({product_url})")
+            return None
 
         if not is_plausible_base_price(chosen["price"], currency):
             log(f"  implausible kit price {chosen['price']} {currency} — skipped ({product_url})")
             return None
 
+        # Stored variants carry title+price only (what the UI parses).
+        variants = [{"title": v["title"], "price": v["price"]} for v in variants]
         return {"price": chosen["price"], "currency": currency, "variants": variants}
     except Exception as e:  # noqa: BLE001
         log(f"  price fetch failed for {product_url}: {e}")
@@ -670,10 +702,21 @@ def gmknet_price(page: Page, product_url: str) -> dict | None:
 
                 raw_price = chosen.get("price")
                 if raw_price is None and isinstance(raw_offers, dict):
+                    # AggregateOffer.lowPrice = the CHEAPEST child kit (a
+                    # spacebars/addon kit) — with several kits and no named
+                    # offers the base price is ambiguous; skip, don't guess.
+                    try:
+                        offer_count = float(raw_offers.get("offerCount") or 1)
+                    except (TypeError, ValueError):
+                        offer_count = 1
+                    if offer_count > 1 and not offer_list:
+                        continue
                     raw_price = raw_offers.get("lowPrice")
                 currency = chosen.get("priceCurrency") or (
                     raw_offers.get("priceCurrency") if isinstance(raw_offers, dict) else None
                 ) or "EUR"
+                if currency not in _SUPPORTED_CURRENCIES:
+                    continue
 
                 try:
                     price = float(str(raw_price).replace(",", "."))

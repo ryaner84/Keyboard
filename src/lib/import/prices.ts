@@ -82,7 +82,17 @@ const KIT_BOUNDS: Record<string, { min: number; max: number }> = {
   TWD: { min: 965, max: 7300 },
   CLP: { min: 27000, max: 210000 },
   INR: { min: 2500, max: 19000 },
+  ARS: { min: 30000, max: 400000 },
 };
+
+// Currencies the site can actually convert (the Currency table). A price in
+// any other currency renders as garbage (missing rate falls back to 1, so
+// 82,857 ARS displayed as $82,857) — refuse to store those at all.
+const SUPPORTED_CURRENCIES = new Set([
+  "USD", "SGD", "EUR", "GBP", "CAD", "AUD", "JPY", "CNY", "KRW", "MYR",
+  "THB", "NZD", "HKD", "TWD", "SEK", "NOK", "DKK", "CHF", "PLN",
+  "INR", "ARS", "CLP",
+]);
 
 // Plausibility check for a BASE kit price. Currencies without bounds
 // have very different magnitudes, so we don't bound them.
@@ -124,22 +134,16 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
 
   try {
     // Shop currency FIRST (cached per origin) — needed to pin the price
-    // context below. May be null when the store blocks /meta.json; the caller
-    // then falls back to the vendor's own currency (e.g. Deskhero = CAD),
-    // NOT a blind USD default which previously inflated CA$88 into US$88.
-    const detectedCurrency = await fetchShopifyCurrency(clean);
-
-    // Shopify Markets geo-localizes prices to the REQUESTER's country — a
-    // GitHub Actions runner IP can be geolocated to the wrong country, causing
-    // the store to serve INR/SGD/etc. prices even for a USD-base store (e.g.
-    // stackskb.com served INR to an Azure West US runner). When we know the
-    // vendor's base currency from the DB and it differs from what geo-detection
-    // returned, trust the DB — it's the ground truth for what the merchant
-    // actually charges. Stores without Markets ignore the localization cookie.
-    const currency =
-      vendorCurrency && detectedCurrency && detectedCurrency !== vendorCurrency
-        ? vendorCurrency
-        : detectedCurrency;
+    // context below. /meta.json reports the store's PRIMARY currency (not
+    // geo-localized), so it's the truth about what the merchant charges in.
+    // May be null when the store blocks /meta.json; the caller then falls
+    // back to the vendor's own currency (e.g. Deskhero = CAD), NOT a blind
+    // USD default which previously inflated CA$88 into US$88.
+    // NOTE: do NOT override this with the vendor DB record — several vendor
+    // rows carry a wrong currency (Yushakobo listed as USD, store is JPY),
+    // and relabeling real ¥20,000 numbers as "USD" poisons the listing. Wrong
+    // vendor records are fixed in db-setup, not papered over here.
+    const currency = await fetchShopifyCurrency(clean);
 
     const cookie = currency
       ? `cart_currency=${currency}; localization=${CURRENCY_HOME_COUNTRY[currency] ?? "US"}`
@@ -171,7 +175,12 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     const pool = nonAddon.length > 0 ? nonAddon : variants;
     const chosen = pinned ?? pool.find((v) => classifyVariant(v.title) === "BASE") ?? pool[0];
 
-    // Refuse implausible kit prices rather than store garbage.
+    // Refuse implausible kit prices rather than store garbage, and refuse
+    // currencies the site can't convert.
+    const effectiveCurrency = currency ?? vendorCurrency ?? null;
+    if (effectiveCurrency && !SUPPORTED_CURRENCIES.has(effectiveCurrency)) {
+      return null;
+    }
     if (!isPlausibleBaseKitPrice(chosen.price, currency)) {
       return null;
     }
@@ -241,6 +250,7 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
         price?: string | number;
         lowPrice?: string | number;
         priceCurrency?: string;
+        offerCount?: string | number;
         offers?: LdOffer | LdOffer[];
       };
       type LdNode = {
@@ -274,10 +284,24 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
         // keycap kit and International/regional variants as separate named
         // offers. The International variant may be in stock while Base is not,
         // but we always want the base keycap kit price regardless of stock.
-        const chosen: LdOffer =
+        const chosen: LdOffer | undefined =
           offerList.find((o) => /\bbase\b/i.test(String(o?.name ?? ""))) ??
           offerList[0] ??
-          (Array.isArray(rawOffers) ? rawOffers[0] : rawOffers as LdOffer);
+          (Array.isArray(rawOffers) ? rawOffers[0] : (rawOffers as LdOffer));
+
+        // A bare AggregateOffer covering several kits exposes only lowPrice —
+        // the CHEAPEST child kit (a spacebars/addon kit, not the base; this is
+        // how GMK.net base kits got stored as 49.82). Without named offers to
+        // pick from, the price is ambiguous — skip rather than store garbage.
+        const agg = !Array.isArray(rawOffers) ? (rawOffers as LdOffer) : null;
+        if (
+          offerList.length === 0 &&
+          agg &&
+          chosen?.price == null &&
+          Number(agg.offerCount ?? 1) > 1
+        ) {
+          continue;
+        }
 
         // Currency: from the chosen offer, then fall back to the parent
         // AggregateOffer's priceCurrency (Shopware often puts it there).
@@ -285,6 +309,9 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
           chosen?.priceCurrency ??
           (!Array.isArray(rawOffers) ? (rawOffers as LdOffer)?.priceCurrency : null) ??
           null;
+        // Refuse currencies the site can't convert (e.g. geo-localized INR
+        // from an Indian WooCommerce store before INR was supported).
+        if (currency && !SUPPORTED_CURRENCIES.has(currency)) continue;
 
         const price = Number(chosen?.price ?? chosen?.lowPrice);
         if (!isNaN(price) && price > 0 && isPlausibleBaseKitPrice(price, currency)) {
@@ -303,6 +330,7 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
     if (amount) {
       const price = Number(amount[1].replace(/,/g, ""));
       const currency = cur ? cur[1] : null;
+      if (currency && !SUPPORTED_CURRENCIES.has(currency)) return null;
       if (!isNaN(price) && price > 0 && isPlausibleBaseKitPrice(price, currency)) {
         return { price, currency, variants: [] };
       }

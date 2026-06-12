@@ -128,7 +128,11 @@ async function backfillShipping(client) {
        ('kbdfans',             'ASIA', 'CN', 'USD'),
        ('zfrontier',           'ASIA', 'CN', 'USD'),
        ('aiglatson-studio',    'ASIA', 'TH', 'THB'),
-       ('aiglatson',           'ASIA', 'TH', 'THB')
+       ('aiglatson',           'ASIA', 'TH', 'THB'),
+       ('stacks',              'ASIA', 'IN', 'INR'),
+       ('neo-macro',           'ASIA', 'IN', 'INR'),
+       ('neomacro',            'ASIA', 'IN', 'INR'),
+       ('latamkeys',           'OTHER','AR', 'ARS')
      ) AS c(slug, region, country, currency)
      WHERE v.slug = c.slug AND (v.region::text <> c.region OR v.currency <> c.currency)
      RETURNING v.id`
@@ -267,6 +271,7 @@ async function main() {
         await requeuePinnedVariantPrices(client);
         await requeueGeoCurrencyPrices(client);
         await requeueGeoCurrencyPricesV2(client);
+        await auditCleanupV3(client);
         await prioritizePreorderVendors(client);
         await markPricedVendorKitsInStock(client);
       }
@@ -608,7 +613,10 @@ async function ensureCurrencies(client) {
          ('NOK', 'Norwegian Krone',    'kr',  10.8,  to_timestamp(0)),
          ('DKK', 'Danish Krone',       'kr',  6.89,  to_timestamp(0)),
          ('CHF', 'Swiss Franc',        'CHF', 0.89,  to_timestamp(0)),
-         ('PLN', 'Polish Zloty',       'zł',  4.02,  to_timestamp(0))
+         ('PLN', 'Polish Zloty',       'zł',  4.02,  to_timestamp(0)),
+         ('INR', 'Indian Rupee',       '₹',   84.0,  to_timestamp(0)),
+         ('ARS', 'Argentine Peso',     'AR$', 1200,  to_timestamp(0)),
+         ('CLP', 'Chilean Peso',       'CL$', 960,   to_timestamp(0))
        ON CONFLICT (code) DO NOTHING`
     );
     if (rowCount > 0) {
@@ -880,6 +888,73 @@ async function requeueGeoCurrencyPricesV2(client) {
     );
   } catch (err) {
     console.warn(`[db-setup] Geo-currency v2 requeue skipped: ${err.message}`);
+  }
+}
+
+// ONE-TIME v3 (savings audit, 2026-06-12): three poison patterns found in
+// every >=50% "savings" spread —
+//  a) GMK.net base kits stored at 49.82: JSON-LD AggregateOffer.lowPrice is
+//     the CHEAPEST child kit (spacebars/addon), not the base. Scrapers now
+//     reject ambiguous lowPrice; wipe the stored artifacts.
+//  b) '-addon' sets (GMK Mictlan - NordeUK Addon, …) carrying vendor links
+//     that point at the MAIN set's product — a full base kit price on an
+//     addon set produces a fake 60%+ spread against the real £37 addon kit.
+//  c) Listings whose stored currency differs from the (corrected) vendor
+//     currency (Mino Keys 198 "USD" on a CAD store) — requeue to re-verify
+//     with the localization-pinned scrapers.
+async function auditCleanupV3(client) {
+  const KEY = "savings_audit_cleanup_v3";
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."_AppMigrations" (
+         key text PRIMARY KEY,
+         applied_at timestamptz NOT NULL DEFAULT now()
+       )`
+    );
+    const done = await client.query(
+      `SELECT 1 FROM public."_AppMigrations" WHERE key = $1`,
+      [KEY]
+    );
+    if (done.rowCount > 0) return;
+
+    const gmkLow = await client.query(
+      `UPDATE public."VendorKit" vk
+       SET price = NULL, "priceUpdatedAt" = NULL
+       FROM public."Vendor" v
+       WHERE vk."vendorId" = v.id AND v.slug = 'gmk'
+         AND vk."priceSource" = 'SCRAPED' AND vk.price < 60`
+    );
+    const addonLinks = await client.query(
+      `UPDATE public."VendorKit" vk
+       SET price = NULL, "priceUpdatedAt" = NULL
+       FROM public."Kit" k, public."GroupBuy" gb
+       WHERE vk."kitId" = k.id AND k."groupBuyId" = gb.id
+         AND gb.slug LIKE '%-addon'
+         AND vk."priceSource" = 'SCRAPED'
+         AND vk."productUrl" NOT ILIKE '%addon%'
+         AND vk."productUrl" NOT ILIKE '%nordeuk%'
+         AND vk."productUrl" NOT ILIKE '%grrrr%'`
+    );
+    const mismatch = await client.query(
+      `UPDATE public."VendorKit" vk
+       SET "priceUpdatedAt" = NULL
+       FROM public."Vendor" v
+       WHERE vk."vendorId" = v.id
+         AND vk."priceSource" = 'SCRAPED'
+         AND vk.price IS NOT NULL
+         AND vk.currency IS NOT NULL
+         AND vk.currency <> v.currency`
+    );
+    await client.query(
+      `INSERT INTO public."_AppMigrations" (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
+      [KEY]
+    );
+    console.log(
+      `[db-setup] Audit cleanup v3: wiped ${gmkLow.rowCount} GMK lowPrice artifacts, ` +
+        `${addonLinks.rowCount} addon-set mislinks; re-queued ${mismatch.rowCount} currency-mismatch rows (one-time).`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] Audit cleanup v3 skipped: ${err.message}`);
   }
 }
 
