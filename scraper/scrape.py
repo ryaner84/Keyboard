@@ -434,16 +434,53 @@ def choose_kit_variant(variants: list[dict]) -> dict | None:
     return pool[0]
 
 
+# Home country per currency — pins Shopify Markets' geo-localization to the
+# store's own market so variant prices come back in the store's base currency,
+# not converted to wherever this machine's IP geolocates (mirrors prices.ts).
+_CURRENCY_HOME_COUNTRY = {
+    "USD": "US", "SGD": "SG", "EUR": "DE", "GBP": "GB", "CAD": "CA",
+    "AUD": "AU", "JPY": "JP", "KRW": "KR", "CNY": "CN", "HKD": "HK",
+    "THB": "TH", "TWD": "TW", "MYR": "MY", "NZD": "NZ", "SEK": "SE",
+    "NOK": "NO", "DKK": "DK", "CHF": "CH", "PLN": "PL",
+}
+
+
+def pinned_variant_id(product_url: str) -> str | None:
+    """Vendor links often pin the exact kit variant (?variant=<id>) — that id
+    is ground truth for which variant is the base kit (mirrors prices.ts)."""
+    try:
+        q = urllib.parse.urlsplit(product_url).query
+        return (urllib.parse.parse_qs(q).get("variant") or [None])[0]
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> dict | None:
     """Navigate to the product (acquires cf_clearance) then fetch its .json from
     inside the page context so the request carries the clearance cookies."""
     if "/products/" not in product_url:
         return None
+    pinned_id = pinned_variant_id(product_url)
     clean = product_url.split("?")[0].split("#")[0].rstrip("/")
     json_url = clean + ".json"
     origin = urllib.parse.urlsplit(clean)
     origin_url = f"{origin.scheme}://{origin.netloc}"
     try:
+        # Pin the storefront to the vendor's home market BEFORE loading the
+        # page. Shopify Markets geo-localizes prices to the requester's IP —
+        # a scrape from this machine got SGD numbers from CannonKeys while the
+        # currency label stayed USD (GMK BKRE $150 stored as 224). Stores
+        # without Markets ignore these cookies.
+        if vendor_currency and vendor_currency in _CURRENCY_HOME_COUNTRY:
+            try:
+                page.context.add_cookies([
+                    {"name": "cart_currency", "value": vendor_currency, "url": origin_url},
+                    {"name": "localization",
+                     "value": _CURRENCY_HOME_COUNTRY[vendor_currency], "url": origin_url},
+                ])
+            except Exception:  # noqa: BLE001
+                pass
+
         page.goto(product_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
         data = page.evaluate(
             """async (u) => {
@@ -474,11 +511,24 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
             except (TypeError, ValueError):
                 continue
             if p > 0:
-                variants.append({"title": str(v.get("title") or ""), "price": p})
+                variants.append({
+                    "id": str(v.get("id") or ""),
+                    "title": str(v.get("title") or ""),
+                    "price": p,
+                })
 
-        chosen = choose_kit_variant(variants)
+        # The variant the vendor link itself pins (?variant=<id>) is exact —
+        # it beats any title heuristic (mirrors prices.ts).
+        chosen = None
+        if pinned_id:
+            chosen = next((v for v in variants if v["id"] == pinned_id), None)
+        if chosen is None:
+            chosen = choose_kit_variant(variants)
         if chosen is None:
             return None
+
+        # Stored variants carry title+price only (what the UI parses).
+        variants = [{"title": v["title"], "price": v["price"]} for v in variants]
 
         # Step 1: try the Shopify /meta.json endpoint (most reliable — this is
         # the store's PRIMARY currency that prices are denominated in).

@@ -266,6 +266,7 @@ async function main() {
         await requeueLegacyScrapedPrices(client);
         await requeuePinnedVariantPrices(client);
         await requeueGeoCurrencyPrices(client);
+        await requeueGeoCurrencyPricesV2(client);
         await prioritizePreorderVendors(client);
         await markPricedVendorKitsInStock(client);
       }
@@ -831,6 +832,54 @@ async function requeueGeoCurrencyPrices(client) {
     );
   } catch (err) {
     console.warn(`[db-setup] Geo-currency requeue skipped: ${err.message}`);
+  }
+}
+
+// ONE-TIME v2: the geo-currency fix (v1) only patched the Node refresher —
+// the WorkSpace scraper kept ignoring ?variant= pins and Shopify Markets
+// localization, so CannonKeys prices were re-poisoned by every nightly run
+// (GMK BKRE $150 stored as 224 → shown as S$301). scrape.py now pins both;
+// wipe CannonKeys scraped prices and re-queue all pinned-variant rows so the
+// next scrape (with the fixed code) re-verifies them. Sentinel-guarded.
+async function requeueGeoCurrencyPricesV2(client) {
+  const KEY = "requeue_geo_currency_v2";
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."_AppMigrations" (
+         key text PRIMARY KEY,
+         applied_at timestamptz NOT NULL DEFAULT now()
+       )`
+    );
+    const done = await client.query(
+      `SELECT 1 FROM public."_AppMigrations" WHERE key = $1`,
+      [KEY]
+    );
+    if (done.rowCount > 0) return;
+
+    const wiped = await client.query(
+      `UPDATE public."VendorKit" vk
+       SET price = NULL, "priceUpdatedAt" = NULL
+       FROM public."Vendor" v
+       WHERE vk."vendorId" = v.id
+         AND vk."priceSource" = 'SCRAPED'
+         AND v.slug IN ('cannon-keys','cannonkeys')`
+    );
+    const requeued = await client.query(
+      `UPDATE public."VendorKit"
+       SET "priceUpdatedAt" = NULL
+       WHERE "priceSource" = 'SCRAPED'
+         AND "productUrl" LIKE '%variant=%'
+         AND price IS NOT NULL`
+    );
+    await client.query(
+      `INSERT INTO public."_AppMigrations" (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
+      [KEY]
+    );
+    console.log(
+      `[db-setup] Geo-currency fix v2: wiped ${wiped.rowCount} CannonKeys prices, re-queued ${requeued.rowCount} pinned-variant rows (one-time).`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] Geo-currency v2 requeue skipped: ${err.message}`);
   }
 }
 
