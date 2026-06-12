@@ -9,6 +9,10 @@ if (!process.env.DATABASE_URL) {
   console.log("DATABASE_URL not set — skipping price refresh.");
   process.exit(0);
 }
+if (process.env.DATABASE_URL.includes("__PASSWORD__") && !process.env.DATABASE_PASSWORD) {
+  console.log("DATABASE_URL has __PASSWORD__ but DATABASE_PASSWORD not set — skipping price refresh.");
+  process.exit(0);
+}
 
 const { refreshPrices } = await import("../src/lib/import/prices.ts");
 

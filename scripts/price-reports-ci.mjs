@@ -14,8 +14,26 @@ if (!process.env.DATABASE_URL) {
   process.exit(0);
 }
 
+// Mirror src/lib/database-url.ts (plain-node script, can't import the TS
+// module): splice DATABASE_PASSWORD into the __PASSWORD__ placeholder and
+// redirect the capped session pooler (5432) to the transaction pooler (6543).
+let connectionString = process.env.DATABASE_URL;
+if (connectionString.includes("__PASSWORD__")) {
+  if (!process.env.DATABASE_PASSWORD) {
+    console.log("DATABASE_URL has __PASSWORD__ but DATABASE_PASSWORD not set — skipping.");
+    process.exit(0);
+  }
+  connectionString = connectionString.replace(
+    "__PASSWORD__",
+    encodeURIComponent(process.env.DATABASE_PASSWORD)
+  );
+}
+if (!/localhost|127\.0\.0\.1/.test(connectionString)) {
+  connectionString = connectionString.replace(/:5432(\/|$|\?)/, ":6543$1");
+}
+
 const client = new pg.Client({
-  connectionString: process.env.DATABASE_URL,
+  connectionString,
   ssl: { rejectUnauthorized: false },
   connectionTimeoutMillis: 15000,
 });

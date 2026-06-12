@@ -3,7 +3,9 @@
 # runner IPs fine — this fills the gap between nightly WorkSpace scraper runs.
 #
 # Requires the repository secret DATABASE_URL (Supabase transaction-pooler
-# connection string). Without it the job exits cleanly doing nothing.
+# connection string). If it contains the __PASSWORD__ placeholder, the
+# DATABASE_PASSWORD secret must be set too (same split as the Vercel env).
+# Without DATABASE_URL the job exits cleanly doing nothing.
 name: Refresh vendor prices
 
 on:
@@ -15,8 +17,8 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -29,9 +31,11 @@ jobs:
       - name: Pending price reports (review + re-queue)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
         run: node scripts/price-reports-ci.mjs
 
       - name: Refresh prices
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
         run: npx tsx scripts/refresh-prices-ci.mjs
