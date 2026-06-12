@@ -61,6 +61,7 @@ export async function GET(req: NextRequest) {
   const availability = searchParams.get("availability") ?? "";
   const year = searchParams.get("year") ?? "";
   const designer = searchParams.get("designer") ?? "";
+  const vendor = searchParams.get("vendor") ?? "";
   const sortBy = searchParams.get("sort") ?? "released-desc";
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
   const limit = Math.min(48, Math.max(1, parseInt(searchParams.get("limit") ?? "24")));
@@ -84,6 +85,16 @@ export async function GET(req: NextRequest) {
     ...(effectiveAvailability === "available" && AVAILABLE_FILTER),
     ...(effectiveAvailability === "soldout" && { NOT: AVAILABLE_FILTER }),
     ...(designer && { designer: { equals: designer, mode: "insensitive" as const } }),
+    // Vendor filter = "this vendor stocks it right now": the vendor's listing
+    // must carry a live price (unpriced listings are hidden on released sets).
+    ...(vendor && {
+      kits: {
+        some: {
+          type: "BASE" as const,
+          vendorKits: { some: { price: { not: null }, vendor: { slug: vendor } } },
+        },
+      },
+    }),
     ...(search && {
       OR: [
         { name: { contains: search, mode: "insensitive" as const } },
@@ -158,9 +169,27 @@ export async function GET(req: NextRequest) {
     topDesigners = rows.map((r) => r.designer).filter(Boolean);
   }
 
+  // Vendors that stock at least one released set right now — for the filter
+  // dropdown. Page 1 only, like topDesigners.
+  let topVendors: Array<{ slug: string; name: string }> = [];
+  if (page === 1) {
+    topVendors = await prisma.vendor.findMany({
+      where: {
+        vendorKits: {
+          some: {
+            price: { not: null },
+            kit: { type: "BASE", groupBuy: releasedWhere },
+          },
+        },
+      },
+      select: { slug: true, name: true },
+      orderBy: { name: "asc" },
+    });
+  }
+
   // "Biggest savings" deals rail
   let deals: unknown[] = [];
-  if (page === 1 && !search && !year && !designer && availability !== "soldout") {
+  if (page === 1 && !search && !year && !designer && !vendor && availability !== "soldout") {
     const available = await prisma.groupBuy.findMany({
       where: { ...releasedWhere, ...AVAILABLE_FILTER },
       include: PRICING_INCLUDE,
@@ -182,5 +211,5 @@ export async function GET(req: NextRequest) {
       .map((r) => r.set);
   }
 
-  return NextResponse.json({ data, total, page, limit, totalReleased, totalAvailable, deals, topDesigners });
+  return NextResponse.json({ data, total, page, limit, totalReleased, totalAvailable, deals, topDesigners, topVendors });
 }

@@ -23,11 +23,13 @@ export default function ReleasedContent() {
   const availability = searchParams.get("availability") ?? "";
   const year = searchParams.get("year") ?? "";
   const designer = searchParams.get("designer") ?? "";
+  const vendor = searchParams.get("vendor") ?? "";
   const sortBy = searchParams.get("sort") ?? "released-desc";
 
   const [sets, setSets] = useState<GroupBuyWithPricing[]>([]);
   const [deals, setDeals] = useState<GroupBuyWithPricing[]>([]);
   const [topDesigners, setTopDesigners] = useState<string[]>([]);
+  const [topVendors, setTopVendors] = useState<Array<{ slug: string; name: string }>>([]);
   const [total, setTotal] = useState(0);
   const [totalReleased, setTotalReleased] = useState<number | null>(null);
   const [totalAvailable, setTotalAvailable] = useState<number | null>(null);
@@ -65,6 +67,7 @@ export default function ReleasedContent() {
       if (availability) params.set("availability", availability);
       if (year) params.set("year", year);
       if (designer) params.set("designer", designer);
+      if (vendor) params.set("vendor", vendor);
       params.set("sort", sortBy);
       params.set("page", String(pageNum));
       params.set("limit", String(PAGE_SIZE));
@@ -76,6 +79,7 @@ export default function ReleasedContent() {
         if (!append) {
           setDeals(data.deals ?? []);
           if (data.topDesigners?.length) setTopDesigners(data.topDesigners);
+          if (data.topVendors?.length) setTopVendors(data.topVendors);
         }
         setTotal(data.total ?? 0);
         setTotalReleased(data.totalReleased ?? null);
@@ -88,7 +92,7 @@ export default function ReleasedContent() {
         setLoadingMore(false);
       }
     },
-    [search, availability, year, designer, sortBy]
+    [search, availability, year, designer, vendor, sortBy]
   );
 
   useEffect(() => {
@@ -96,7 +100,7 @@ export default function ReleasedContent() {
   }, [fetchPage]);
 
   const hasMore = sets.length < total;
-  const hasFilters = !!(search || year || designer || availability);
+  const hasFilters = !!(search || year || designer || vendor || availability);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -200,6 +204,19 @@ export default function ReleasedContent() {
         </select>
 
         <select
+          value={vendor}
+          onChange={(e) => updateParams({ vendor: e.target.value })}
+          className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-700 dark:text-gray-200 focus:outline-none focus:border-indigo-400"
+        >
+          <option value="">Any vendor</option>
+          {topVendors.map((v) => (
+            <option key={v.slug} value={v.slug}>
+              {v.name}
+            </option>
+          ))}
+        </select>
+
+        <select
           value={year}
           onChange={(e) => updateParams({ year: e.target.value })}
           className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-700 dark:text-gray-200 focus:outline-none focus:border-indigo-400"
@@ -262,7 +279,7 @@ export default function ReleasedContent() {
       )}
 
       {/* ── Deals rail ───────────────────────────────────────────────────── */}
-      {!loading && deals.length > 0 && !search && !year && !designer && availability !== "soldout" && (
+      {!loading && deals.length > 0 && !search && !year && !designer && !vendor && availability !== "soldout" && (
         <div className="mb-10 rounded-2xl border-2 border-amber-200 dark:border-amber-900 bg-gradient-to-br from-amber-50 via-orange-50 to-amber-50 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-amber-950/40 p-5 sm:p-6">
           <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -289,6 +306,8 @@ export default function ReleasedContent() {
         {loading
           ? "Loading…"
           : `${total} set${total !== 1 ? "s" : ""}${designer ? ` by ${designer}` : ""}${
+              vendor ? ` at ${topVendors.find((v) => v.slug === vendor)?.name ?? vendor}` : ""
+            }${
               availability === "available"
                 ? " you can buy right now"
                 : availability === "soldout"
