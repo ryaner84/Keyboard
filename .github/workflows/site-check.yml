@@ -1,0 +1,33 @@
+# Quick live-site probe: confirms which features are actually deployed by
+# inspecting the production API responses. Dispatch it whenever "I don't see
+# the change" — GitHub runners can reach the site, the dev sandbox cannot.
+name: Site check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Released API feature probe
+        run: |
+          BASE="https://keyboard-six-tau.vercel.app"
+          echo "=== /api/released page=1 (vendor filter -> topVendors) ==="
+          curl -sf "$BASE/api/released?page=1&limit=1" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const j=JSON.parse(s);
+              console.log('keys:', Object.keys(j).join(', '));
+              console.log('topVendors:', Array.isArray(j.topVendors) ? j.topVendors.length + ' vendor(s)' : 'MISSING — vendor filter not deployed');
+              console.log('total:', j.total, '| totalAvailable:', j.totalAvailable);
+            })"
+          echo "=== /api/released sort=savings-desc ==="
+          curl -sf "$BASE/api/released?sort=savings-desc&page=1&limit=3" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const j=JSON.parse(s);
+              console.log('savings sort total:', j.total, '| returned:', (j.data??[]).length);
+              for (const g of (j.data??[])) console.log(' -', g.slug);
+            })"
+          echo "=== /api/search (header search) ==="
+          code=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/search?q=lavender")
+          echo "/api/search status: $code (200 = header search deployed, 404 = not deployed)"
