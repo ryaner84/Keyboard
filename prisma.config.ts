@@ -21,7 +21,11 @@ function resolveDatabaseUrl(): string {
     const host = process.env["SUPABASE_DB_HOST"] || `aws-0-${region}.pooler.supabase.com`;
     return `postgresql://postgres.${ref}:${encodeURIComponent(password)}@${host}:5432/postgres`;
   }
-  throw new Error("No database configuration found (DATABASE_URL or SUPABASE_PROJECT_REF + SUPABASE_REGION + DATABASE_PASSWORD)");
+  // No DB configured. `prisma generate` (postinstall on CI runners without
+  // secrets) never connects — give it a syntactically valid placeholder
+  // instead of failing the whole npm ci. Commands that DO connect
+  // (migrate / db push) fail loudly at connection time, which is correct.
+  return "postgresql://placeholder:placeholder@localhost:5432/placeholder";
 }
 
 export default defineConfig({

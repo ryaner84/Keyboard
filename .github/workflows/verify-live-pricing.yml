@@ -11,9 +11,12 @@ on:
     branches: [main]
     paths:
       - "src/app/api/released/**"
+      - "src/app/api/poster/**"
+      - "src/app/share/**"
       - "src/lib/pricing.ts"
       - "src/components/set-detail/VendorTable.tsx"
       - "scripts/verify-released-pricing.mjs"
+      - ".github/workflows/verify-live-pricing.yml"
 
 jobs:
   verify:
@@ -40,3 +43,23 @@ jobs:
 
       - name: Card-render check (computeCheapest, SG viewer)
         run: BASE_URL=https://keyboard-six-tau.vercel.app npx --yes tsx scripts/verify-released-pricing.mjs
+
+      # WhatsApp/iMessage previews require an HTML page whose og:image points
+      # at the poster PNG. Verifies the /share page serves those tags and the
+      # poster endpoint actually returns an image/png.
+      - name: Share page OG check (WhatsApp preview)
+        run: |
+          SHARE="https://keyboard-six-tau.vercel.app/share/gmk-cherry-love?country=SG&currency=SGD"
+          POSTER="https://keyboard-six-tau.vercel.app/api/poster/gmk-cherry-love?country=SG&currency=SGD"
+          html=$(curl -sf "$SHARE")
+          echo "$html" | grep -o '<meta property="og:title"[^>]*>'
+          echo "$html" | grep -o '<meta property="og:image"[^>]*>' | head -3
+          echo "$html" | grep '<meta property="og:image"' | grep -q "/api/poster/gmk-cherry-love" \
+            || { echo "FAIL: og:image does not point at the poster API"; exit 1; }
+          ct=$(curl -sf -o /dev/null -w "%{content_type}" "$POSTER")
+          t=$(curl -sf -o /dev/null -w "%{time_total}" "$POSTER")
+          echo "poster content-type: $ct (took ${t}s)"
+          case "$ct" in
+            image/png*) echo "OK: poster serves image/png" ;;
+            *) echo "FAIL: poster content-type is $ct"; exit 1 ;;
+          esac
