@@ -267,7 +267,7 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
         const offerList: LdOffer[] = Array.isArray(rawOffers)
           ? rawOffers
           : Array.isArray((rawOffers as LdOffer).offers)
-            ? (rawOffers as any).offers as LdOffer[]
+            ? ((rawOffers as LdOffer).offers as LdOffer[])
             : [];
 
         // Prefer a variant explicitly named "Base" — GMK.net lists the base
