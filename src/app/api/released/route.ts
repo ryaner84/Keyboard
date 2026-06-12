@@ -139,9 +139,16 @@ export async function GET(req: NextRequest) {
       .filter((r) => r.stats !== null);
     if (savingsSort) {
       // Spread % between priciest and cheapest vendor; single-vendor sets
-      // have no spread, so they're excluded from this view.
+      // have no spread, so they're excluded from this view. Child-kit rounds
+      // (NordeUK addons, alphas-only) are too: their £35–55 kits compared
+      // against full base kits produce meaningless 60%+ "savings".
       ranked = ranked
-        .filter((r) => r.stats!.pricedVendors >= 2 && r.stats!.maxUsd > 0)
+        .filter(
+          (r) =>
+            r.stats!.pricedVendors >= 2 &&
+            r.stats!.maxUsd > 0 &&
+            !/-addon$|alphas/.test((r.set as { slug: string }).slug)
+        )
         .sort(
           (a, b) =>
             (b.stats!.maxUsd - b.stats!.minUsd) / b.stats!.maxUsd -
@@ -214,7 +221,10 @@ export async function GET(req: NextRequest) {
       .map((set) => ({ set, stats: priceStats(set as never, usdRates) }))
       .filter(
         (r): r is { set: (typeof available)[number]; stats: NonNullable<ReturnType<typeof priceStats>> } =>
-          r.stats !== null && r.stats.pricedVendors >= 2 && r.stats.maxUsd > 0
+          r.stats !== null &&
+          r.stats.pricedVendors >= 2 &&
+          r.stats.maxUsd > 0 &&
+          !/-addon$|alphas/.test(r.set.slug)
       )
       .map((r) => ({
         set: r.set,

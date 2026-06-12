@@ -690,13 +690,18 @@ def gmknet_price(page: Page, product_url: str) -> dict | None:
                 # Prefer 'Base' variant — GMK.net lists "Base" and "International"
                 # as separate named offers. International may be in stock while
                 # Base is not, but we always want the base keycap kit price.
+                # Several UNNAMED offers = can't tell base from a child kit
+                # (offers[0] is just the cheapest) — skip rather than guess.
                 chosen = next(
                     (o for o in offer_list
                      if isinstance(o, dict) and re.search(r'\bbase\b', str(o.get("name", "")), re.IGNORECASE)),
-                    offer_list[0] if offer_list else None
+                    None
                 )
-                if not chosen:
-                    chosen = raw_offers if isinstance(raw_offers, dict) else None
+                if chosen is None and len(offer_list) > 1:
+                    continue
+                if chosen is None:
+                    chosen = offer_list[0] if offer_list else (
+                        raw_offers if isinstance(raw_offers, dict) else None)
                 if not chosen:
                     continue
 

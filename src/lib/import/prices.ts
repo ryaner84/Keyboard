@@ -284,8 +284,14 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
         // keycap kit and International/regional variants as separate named
         // offers. The International variant may be in stock while Base is not,
         // but we always want the base keycap kit price regardless of stock.
+        // Multiple offers with no "Base"-named one (Shopware emits UNNAMED
+        // offer arrays) means we cannot tell the base kit from a spacebars/
+        // addon child kit — offers[0] is just the cheapest (how GMK.net base
+        // kits got stored as 49.82). Skip rather than guess.
+        const namedBase = offerList.find((o) => /\bbase\b/i.test(String(o?.name ?? "")));
+        if (!namedBase && offerList.length > 1) continue;
         const chosen: LdOffer | undefined =
-          offerList.find((o) => /\bbase\b/i.test(String(o?.name ?? ""))) ??
+          namedBase ??
           offerList[0] ??
           (Array.isArray(rawOffers) ? rawOffers[0] : (rawOffers as LdOffer));
 

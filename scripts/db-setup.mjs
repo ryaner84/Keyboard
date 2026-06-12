@@ -272,6 +272,7 @@ async function main() {
         await requeueGeoCurrencyPrices(client);
         await requeueGeoCurrencyPricesV2(client);
         await auditCleanupV3(client);
+        await purgeMispricedListings(client);
         await prioritizePreorderVendors(client);
         await markPricedVendorKitsInStock(client);
       }
@@ -888,6 +889,54 @@ async function requeueGeoCurrencyPricesV2(client) {
     );
   } catch (err) {
     console.warn(`[db-setup] Geo-currency v2 requeue skipped: ${err.message}`);
+  }
+}
+
+// RECURRING (every deploy): defects that re-appear because a scrape or import
+// re-creates them — wiping once isn't enough.
+//  a) GMK.net base kits stored under 60 (JSON-LD lowPrice = cheapest child
+//     kit). The scrapers reject these now, but any regression self-heals here.
+//  b) Child-kit sets ('-addon', alphas rounds) linked to the MAIN set's
+//     product page — DELETE the link (a price wipe just gets re-priced).
+//  c) Omnitype's GMK ASCII R1 clearance page linked to the ASCII R2 set.
+async function purgeMispricedListings(client) {
+  try {
+    const gmkLow = await client.query(
+      `UPDATE public."VendorKit" vk
+       SET price = NULL, "priceUpdatedAt" = NULL
+       FROM public."Vendor" v
+       WHERE vk."vendorId" = v.id AND v.slug = 'gmk'
+         AND vk."priceSource" = 'SCRAPED' AND vk.price < 60`
+    );
+    const mislinks = await client.query(
+      `DELETE FROM public."VendorKit" vk
+       USING public."Kit" k, public."GroupBuy" gb
+       WHERE vk."kitId" = k.id AND k."groupBuyId" = gb.id
+         AND (gb.slug LIKE '%-addon' OR gb.slug LIKE '%alphas%')
+         AND COALESCE(vk."priceSource", '') <> 'MANUAL'
+         AND vk."productUrl" NOT ILIKE '%addon%'
+         AND vk."productUrl" NOT ILIKE '%nordeuk%'
+         AND vk."productUrl" NOT ILIKE '%hagoromo%'
+         AND vk."productUrl" NOT ILIKE '%alphas%'
+         AND vk."productUrl" NOT ILIKE '%grrrr%'`
+    );
+    const asciiR1 = await client.query(
+      `DELETE FROM public."VendorKit" vk
+       USING public."Kit" k, public."GroupBuy" gb
+       WHERE vk."kitId" = k.id AND k."groupBuyId" = gb.id
+         AND gb.slug = 'gmk-ascii-r2'
+         AND COALESCE(vk."priceSource", '') <> 'MANUAL'
+         AND vk."productUrl" ILIKE '%omnitype.com/products/gmk-ascii'`
+    );
+    const total = gmkLow.rowCount + mislinks.rowCount + asciiR1.rowCount;
+    if (total > 0) {
+      console.log(
+        `[db-setup] Mispriced listings: wiped ${gmkLow.rowCount} GMK lowPrice artifacts, ` +
+          `deleted ${mislinks.rowCount} child-kit mislinks + ${asciiR1.rowCount} ASCII R1-on-R2 links.`
+      );
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Mispriced-listing purge skipped: ${err.message}`);
   }
 }
 
