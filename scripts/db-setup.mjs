@@ -68,6 +68,33 @@ async function purgeBlockedVendors(client) {
   }
 }
 
+// Sets labelled "Canceled"/"Cancelled" (in the name, straight from
+// KeycapLendar) or carrying the CANCELLED status never went to production —
+// there is nothing to price or buy, so they're removed from the site
+// entirely. Runs every deploy so a re-import can't resurrect them.
+async function purgeCancelledSets(client) {
+  try {
+    const sets = await client.query(
+      `SELECT id FROM public."GroupBuy"
+        WHERE name ~* '\\mcancell?ed\\M'
+           OR slug LIKE '%cancel%'
+           OR status = 'CANCELLED'`
+    );
+    if (sets.rowCount === 0) return;
+    const ids = sets.rows.map((r) => r.id);
+    await client.query(
+      `DELETE FROM public."VendorKit"
+        WHERE "kitId" IN (SELECT id FROM public."Kit" WHERE "groupBuyId" = ANY($1))`,
+      [ids]
+    );
+    await client.query(`DELETE FROM public."Kit" WHERE "groupBuyId" = ANY($1)`, [ids]);
+    await client.query(`DELETE FROM public."GroupBuy" WHERE id = ANY($1)`, [ids]);
+    console.log(`[db-setup] Purged ${ids.length} cancelled set(s).`);
+  } catch (err) {
+    console.warn(`[db-setup] cancelled-set purge skipped: ${err.message}`);
+  }
+}
+
 // Correct known-mislabelled vendors and (re)seed DHL-estimate shipping zones.
 // Runs every deploy. The cost CASE is recalibrated to discounted small-parcel
 // DHL rates (a GMK base kit is compact/light, ~1kg) — anchored to a real
@@ -225,6 +252,7 @@ async function main() {
         await ensureFeedbackTable(client);
         await ensurePriceReportTable(client);
         await purgeBlockedVendors(client);
+        await purgeCancelledSets(client);
         await ensureDiscoveryColumn(client);
         await ensureCurrencies(client);
         await resetPollutedGalleries(client);
@@ -259,8 +287,9 @@ async function main() {
     await ensureVariantsColumn(client);
     await ensureVendorSuggestionTable(client);
     await ensureFeedbackTable(client);
-        await ensurePriceReportTable(client);
-        await purgeBlockedVendors(client);
+    await ensurePriceReportTable(client);
+    await purgeBlockedVendors(client);
+    await purgeCancelledSets(client);
     await ensureDiscoveryColumn(client);
     await ensureCurrencies(client);
     await resetPollutedGalleries(client);

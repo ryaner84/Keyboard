@@ -1017,6 +1017,11 @@ def upsert_gmk_set(conn, data: dict, vendor_id: str, *,
     """
     slug = data["slug"]
 
+    # Cancelled sets never went to production — the site removes them entirely
+    # (db-setup purges them on deploy), so don't (re)create them here either.
+    if re.search(r"\bcancell?ed\b", data.get("name") or "", re.IGNORECASE) or "cancel" in slug:
+        return None, False
+
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute('SELECT id FROM "GroupBuy" WHERE slug = %s', (slug,))
         existing = cur.fetchone()

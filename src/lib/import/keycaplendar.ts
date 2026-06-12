@@ -135,9 +135,15 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
   const start = Date.now();
   const now = new Date();
   const all = await fetchAllKeysets();
-  // Only import sets with a confirmed launch date — skip speculative date-less ICs.
+  // Only import sets with a confirmed launch date — skip speculative date-less
+  // ICs. Sets KeycapLendar labels "Canceled"/"Cancelled" in the colorway never
+  // went to production — nothing to price, so they never enter the site.
   const gmk = all.filter(
-    (k) => (k.profile ?? "").toUpperCase() === "GMK" && k.colorway && parseDate(k.gbLaunch)
+    (k) =>
+      (k.profile ?? "").toUpperCase() === "GMK" &&
+      k.colorway &&
+      parseDate(k.gbLaunch) &&
+      !/\bcancell?ed\b/i.test(k.colorway)
   );
 
   const [existingSets, baseKits, existingVendors, existingVendorKits] = await Promise.all([
