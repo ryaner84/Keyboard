@@ -29,12 +29,13 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
   // always loads). The poster follows as a second image: Discord and
   // dedicated preview apps have longer timeouts and can render the rich card.
   const countryInfo = COUNTRY_BY_CODE[country.toUpperCase()] ?? DEFAULT_COUNTRY;
-  const posterUrl = `${siteUrl}/api/poster/${slug}?country=${countryInfo.code}&currency=${countryInfo.currency}`;
+  // layout=og → landscape 800×420, the shape WhatsApp's large card needs.
+  const posterUrl = `${siteUrl}/api/poster/${slug}?country=${countryInfo.code}&currency=${countryInfo.currency}&layout=og`;
   const photoUrl = normalizeImageUrl(groupBuy.imageUrl);
 
   const ogImages = [
     ...(photoUrl ? [{ url: photoUrl, width: 1200, height: 630, alt: groupBuy.name }] : []),
-    { url: posterUrl, width: 900, height: 1020, type: "image/png" as const, alt: groupBuy.name },
+    { url: posterUrl, width: 800, height: 420, type: "image/png" as const, alt: groupBuy.name },
   ];
 
   return {

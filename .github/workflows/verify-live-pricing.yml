@@ -63,3 +63,17 @@ jobs:
             image/png*) echo "OK: poster serves image/png" ;;
             *) echo "FAIL: poster content-type is $ct"; exit 1 ;;
           esac
+          # The og layout must stay under WhatsApp's ~600KB large-preview cap.
+          OG_POSTER="$POSTER&layout=og"
+          sz=$(curl -sf -o /dev/null -w "%{size_download}" "$OG_POSTER")
+          ct2=$(curl -sf -o /dev/null -w "%{content_type}" "$OG_POSTER")
+          echo "og-layout poster: $ct2, ${sz} bytes"
+          case "$ct2" in
+            image/png*) : ;;
+            *) echo "FAIL: og layout content-type is $ct2"; exit 1 ;;
+          esac
+          if [ "$sz" -gt 600000 ]; then
+            echo "FAIL: og layout is ${sz} bytes (> 600KB — WhatsApp will demote to small thumbnail)"
+            exit 1
+          fi
+          echo "OK: og layout fits WhatsApp's large-preview limits"

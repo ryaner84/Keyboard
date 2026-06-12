@@ -197,6 +197,248 @@ export async function GET(
 
   const today = new Date().toLocaleDateString("en-SG", { day: "numeric", month: "short", year: "numeric" });
 
+  // ── layout=og: landscape 800×420 variant for link previews ──────────────
+  // WhatsApp only renders the LARGE preview card when og:image is roughly
+  // 1.91:1 landscape and under ~600KB; the portrait poster gets demoted to a
+  // tiny square thumbnail. This variant is what /share pages point og:image at.
+  if (req.nextUrl.searchParams.get("layout") === "og") {
+    const OW = 800;
+    const OH = 420;
+    return new ImageResponse(
+      (
+        <div
+          style={{
+            width: OW,
+            height: OH,
+            display: "flex",
+            background: "linear-gradient(155deg, #080d16 0%, #0f1825 60%, #080d16 100%)",
+            fontFamily: "sans-serif",
+          }}
+        >
+          {/* Hero image, left */}
+          <div
+            style={{
+              display: "flex",
+              position: "relative",
+              width: 330,
+              height: OH,
+              overflow: "hidden",
+              flexShrink: 0,
+            }}
+          >
+            {heroImage ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={heroImage}
+                alt={groupBuy.name}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  background: "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <span style={{ color: "#334155", fontSize: 64, fontWeight: 900 }}>⌨</span>
+              </div>
+            )}
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                right: 0,
+                bottom: 0,
+                width: 130,
+                background: "linear-gradient(to right, transparent, #080d16)",
+              }}
+            />
+          </div>
+
+          {/* Info column, right */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              flex: 1,
+              padding: "24px 30px 20px 16px",
+            }}
+          >
+            {/* Header: wordmark + region */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 14,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div
+                  style={{
+                    width: 26,
+                    height: 26,
+                    borderRadius: 7,
+                    background: "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <span style={{ color: "#fff", fontSize: 14, fontWeight: 900 }}>K</span>
+                </div>
+                <span style={{ color: "#cbd5e1", fontSize: 12, fontWeight: 800, letterSpacing: 1.5 }}>
+                  GMK TRACKER
+                </span>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                  background: "rgba(99,102,241,0.15)",
+                  border: "1px solid rgba(99,102,241,0.35)",
+                  borderRadius: 16,
+                  padding: "3px 11px",
+                }}
+              >
+                <span style={{ color: "#a5b4fc", fontSize: 11, fontWeight: 700 }}>{country}</span>
+                <span style={{ color: "#475569", fontSize: 11 }}>·</span>
+                <span style={{ color: "#818cf8", fontSize: 11, fontWeight: 600 }}>{currency}</span>
+              </div>
+            </div>
+
+            {/* Status + name */}
+            <div style={{ display: "flex", marginBottom: 6 }}>
+              <span
+                style={{
+                  background: statusBg,
+                  color: statusFg,
+                  border: `1px solid ${statusBorder}`,
+                  fontSize: 9,
+                  fontWeight: 700,
+                  padding: "3px 10px",
+                  borderRadius: 16,
+                  letterSpacing: 1.1,
+                }}
+              >
+                {statusLabel}
+              </span>
+            </div>
+            <div
+              style={{
+                color: "#f8fafc",
+                fontSize: 27,
+                fontWeight: 800,
+                lineHeight: 1.12,
+                marginBottom: 12,
+              }}
+            >
+              {groupBuy.name}
+            </div>
+
+            {/* Top-3 prices, compact */}
+            {top3.length === 0 ? (
+              <div
+                style={{
+                  display: "flex",
+                  padding: "12px 14px",
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.07)",
+                  borderRadius: 10,
+                  color: "#64748b",
+                  fontSize: 13,
+                }}
+              >
+                Prices not yet available — tap to compare vendors
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {top3.map((row, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      background: i === 0 ? "rgba(16,185,129,0.08)" : "rgba(255,255,255,0.03)",
+                      border: i === 0
+                        ? "1px solid rgba(16,185,129,0.22)"
+                        : "1px solid rgba(255,255,255,0.07)",
+                      borderRadius: 10,
+                      padding: "8px 14px",
+                    }}
+                  >
+                    <span
+                      style={{
+                        color: i === 0 ? "#fbbf24" : "#64748b",
+                        fontSize: 12,
+                        fontWeight: 800,
+                        width: 14,
+                      }}
+                    >
+                      {i + 1}
+                    </span>
+                    <span
+                      style={{
+                        color: i === 0 ? "#e2e8f0" : "#94a3b8",
+                        fontSize: 14,
+                        fontWeight: 700,
+                        flex: 1,
+                      }}
+                    >
+                      {row.vendorName.length > 20 ? row.vendorName.slice(0, 19) + "…" : row.vendorName}
+                    </span>
+                    <span
+                      style={{
+                        color: i === 0 ? "#10b981" : "#cbd5e1",
+                        fontSize: 17,
+                        fontWeight: 800,
+                      }}
+                    >
+                      {formatCurrency(row.totalLocal, currency)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Footer */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginTop: "auto",
+                paddingTop: 12,
+              }}
+            >
+              <span style={{ color: "#475569", fontSize: 11 }}>
+                {`Kit + shipping to ${countryName} · ${today}`}
+              </span>
+              {top3.length > 0 && (
+                <span style={{ color: "#34d399", fontSize: 14, fontWeight: 800 }}>
+                  {`From ${formatCurrency(top3[0].totalLocal, currency)}`}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      ),
+      {
+        width: OW,
+        height: OH,
+        headers: {
+          "Cache-Control": "public, max-age=3600, s-maxage=3600",
+        },
+      }
+    );
+  }
+
   // Card: 900 × 1020 portrait
   const W = 900;
   const H = 1020;

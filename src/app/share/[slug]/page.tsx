@@ -31,7 +31,10 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
   if (!gb) return { title: "Not Found" };
 
   const siteUrl = getSiteUrl();
-  const posterUrl = `${siteUrl}/api/poster/${slug}?country=${country}&currency=${currency}`;
+  // Landscape 800×420 variant: WhatsApp only renders the LARGE preview card
+  // for ~1.91:1 images under ~600KB — the portrait poster gets shrunk to a
+  // tiny square thumbnail instead.
+  const ogImageUrl = `${siteUrl}/api/poster/${slug}?country=${country}&currency=${currency}&layout=og`;
   const setUrl = `${siteUrl}/sets/${slug}?country=${country}`;
 
   const title = `${gb.name} — Prices & Comparison`;
@@ -46,15 +49,15 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
       url: setUrl,
       type: "website",
       images: [
-        // The poster is the ONLY og:image — WhatsApp picks the first image.
-        { url: posterUrl, width: 900, height: 1020, type: "image/png", alt: gb.name },
+        // The landscape card is the ONLY og:image — WhatsApp picks the first.
+        { url: ogImageUrl, width: 800, height: 420, type: "image/png", alt: gb.name },
       ],
     },
     twitter: {
       card: "summary_large_image",
       title,
       description,
-      images: [posterUrl],
+      images: [ogImageUrl],
     },
     // Tell crawlers not to index share pages.
     robots: { index: false },
