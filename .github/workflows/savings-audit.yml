@@ -1,0 +1,44 @@
+# Per-vendor pricing dump for every released set whose vendor price spread is
+# >= 50% — implausible "discounts" are almost always one vendor scraped with
+# the wrong currency. Dispatch, read the log, fix the flagged vendor.
+name: Savings audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Audit >=50% spreads
+        run: |
+          BASE="https://keyboard-six-tau.vercel.app"
+          curl -sf "$BASE/api/currencies" > /tmp/cur.json
+          curl -sf "$BASE/api/released?sort=savings-desc&page=1&limit=48" > /tmp/sets.json
+          node -e "
+            const rates = require('/tmp/cur.json').rates;
+            const sets = require('/tmp/sets.json').data ?? [];
+            let flagged = 0;
+            for (const g of sets) {
+              const base = g.kits.find(k => k.type === 'BASE') ?? g.kits[0];
+              const priced = (base?.vendorKits ?? []).filter(v => v.price != null);
+              if (priced.length < 2) continue;
+              const rows = priced.map(v => {
+                const cur = v.currency ?? v.vendor.currency ?? 'USD';
+                const usd = v.price / (rates[cur] ?? 1);
+                return { name: v.vendor.name, vcur: v.vendor.currency, price: v.price, cur, usd,
+                         src: v.priceSource, url: v.productUrl, upd: v.priceUpdatedAt };
+              }).sort((a, b) => a.usd - b.usd);
+              const min = rows[0].usd, max = rows[rows.length - 1].usd;
+              const spread = ((max - min) / max) * 100;
+              if (spread < 50) continue;
+              flagged++;
+              console.log('SET ' + g.slug + ' | spread=' + spread.toFixed(1) + '%');
+              for (const r of rows) {
+                console.log('  VENDOR ' + r.name + ' | listed=' + r.price + ' ' + r.cur +
+                  ' (vendor currency: ' + r.vcur + ') | usd=' + r.usd.toFixed(2) +
+                  ' | src=' + r.src + ' | upd=' + (r.upd ?? '').slice(0, 10) + ' | ' + (r.url ?? '?'));
+              }
+            }
+            console.log(flagged + ' set(s) at >=50% spread.');
+          "
