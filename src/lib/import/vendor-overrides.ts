@@ -32,6 +32,9 @@ export const VENDOR_OVERRIDES: Record<string, VendorOverride> = {
   "swagkeys-kr": { region: "ASIA", country: "KR", currency: "USD" },
   geonworks: { region: "ASIA", country: "KR", currency: "USD" },
 
+  // Latin America
+  fancycustoms: { region: "OTHER", country: "CL", currency: "CLP" },
+
   // Canada
   prototypist: { region: "CA", country: "CA", currency: "CAD" },
 
@@ -236,6 +239,7 @@ const KNOWN_HOSTS: Record<string, Omit<VendorDef, "websiteUrl">> = {
   "oblotzky.industries": { name: "Oblotzky Industries", slug: "oblotzky-industries", region: "EU", country: "DE", currency: "EUR" },
   "novelkeys.com": { name: "NovelKeys", slug: "novelkeys", region: "US", country: "US", currency: "USD" },
   "cannonkeys.com": { name: "Cannon Keys", slug: "cannon-keys", region: "US", country: "US", currency: "USD" },
+  "fancycustoms.com": { name: "Fancy Customs", slug: "fancycustoms", region: "OTHER", country: "CL", currency: "CLP" },
   "www.deskhero.ca": { name: "DeskHero", slug: "deskhero", region: "CA", country: "CA", currency: "CAD" },
   "prototypist.net": { name: "proto[Typist]", slug: "prototypist", region: "CA", country: "CA", currency: "CAD" },
 };

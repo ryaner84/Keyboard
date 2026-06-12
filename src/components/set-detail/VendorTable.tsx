@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { convertCurrency, formatCurrency } from "@/lib/currency-utils";
 import { dhlShippingUsd, dhlEstimatedDays } from "@/lib/import/shipping";
 import { formatRelativeDate } from "@/lib/utils";
@@ -8,6 +8,7 @@ import type { VendorKitWithDetails, ExchangeRates } from "@/types";
 import type { Region } from "@/types";
 
 interface VendorTableProps {
+  slug: string;
   vendorKits: VendorKitWithDetails[];
   userRegion: Region;
   userCurrency: string;
@@ -24,7 +25,105 @@ interface RowData {
   estimatedDays: string;
 }
 
+// Small flag button + inline popover for reporting a wrong price.
+function ReportPriceButton({
+  slug,
+  vendorKitId,
+  vendorName,
+}: {
+  slug: string;
+  vendorKitId: string;
+  vendorName: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [state, setState] = useState<"idle" | "submitting" | "done">("idle");
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close popover when clicking outside.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const submit = async () => {
+    setState("submitting");
+    try {
+      await fetch("/api/price-reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ setSlug: slug, vendorKitId, vendorName, reason }),
+      });
+      setState("done");
+      setTimeout(() => {
+        setOpen(false);
+        setState("idle");
+        setReason("");
+      }, 1500);
+    } catch {
+      setState("idle");
+    }
+  };
+
+  return (
+    <div className="relative flex-shrink-0" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Report wrong price"
+        className="flex items-center gap-0.5 text-[11px] text-gray-300 hover:text-red-400 transition-colors px-1 py-0.5 rounded"
+      >
+        {/* flag icon */}
+        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
+          <path d="M3.5 2a.5.5 0 0 1 .5.5V3h8.146l-1.5 3 1.5 3H4v4.5a.5.5 0 0 1-1 0V2.5a.5.5 0 0 1 .5-.5z" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-6 z-50 w-56 bg-white rounded-xl shadow-xl border border-gray-100 p-3">
+          {state === "done" ? (
+            <p className="text-xs text-green-600 font-medium text-center py-1">Thanks for the report!</p>
+          ) : (
+            <>
+              <p className="text-xs font-semibold text-gray-700 mb-2">Report wrong price</p>
+              <p className="text-[11px] text-gray-400 mb-2">
+                Optional: tell us what&apos;s wrong (e.g. wrong currency, product mismatch)
+              </p>
+              <textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Reason (optional)"
+                rows={2}
+                className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-300 mb-2"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={submit}
+                  disabled={state === "submitting"}
+                  className="flex-1 text-xs bg-red-500 hover:bg-red-600 text-white font-medium rounded-lg py-1.5 transition-colors disabled:opacity-60"
+                >
+                  {state === "submitting" ? "Sending…" : "Report"}
+                </button>
+                <button
+                  onClick={() => setOpen(false)}
+                  className="text-xs text-gray-400 hover:text-gray-600 px-2"
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function VendorTable({
+  slug,
   vendorKits,
   userRegion,
   userCurrency,
@@ -178,7 +277,7 @@ export function VendorTable({
               </p>
             </div>
 
-            {/* Total */}
+            {/* Total + report flag */}
             <div className="text-right w-24">
               <p className="text-xs text-gray-400">Total</p>
               <p className={`text-base font-bold ${isBest ? "text-green-700" : "text-gray-900"}`}>
@@ -202,6 +301,13 @@ export function VendorTable({
                 Buy →
               </a>
             )}
+
+            {/* Report wrong price — small flag, opens popover */}
+            <ReportPriceButton
+              slug={slug}
+              vendorKitId={row.vk.id}
+              vendorName={row.vk.vendor.name}
+            />
           </div>
         );
       })}

@@ -80,6 +80,7 @@ const KIT_BOUNDS: Record<string, { min: number; max: number }> = {
   HKD: { min: 235, max: 1800 },
   THB: { min: 1075, max: 8100 },
   TWD: { min: 965, max: 7300 },
+  CLP: { min: 27000, max: 210000 },
 };
 
 // Plausibility check for a BASE kit price. Currencies without bounds

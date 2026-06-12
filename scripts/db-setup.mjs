@@ -78,7 +78,8 @@ async function backfillShipping(client) {
        ('kbdfans',             'ASIA', 'CN', 'USD'),
        ('zfrontier',           'ASIA', 'CN', 'USD'),
        ('aiglatson-studio',    'ASIA', 'TH', 'THB'),
-       ('aiglatson',           'ASIA', 'TH', 'THB')
+       ('aiglatson',           'ASIA', 'TH', 'THB'),
+       ('fancycustoms',        'OTHER','CL', 'CLP')
      ) AS c(slug, region, country, currency)
      WHERE v.slug = c.slug AND (v.region::text <> c.region OR v.currency <> c.currency)
      RETURNING v.id`
@@ -200,6 +201,7 @@ async function main() {
         await ensureImagesColumn(client);
         await ensureVendorSuggestionTable(client);
         await ensureFeedbackTable(client);
+        await ensurePriceReportTable(client);
         await ensureDiscoveryColumn(client);
         await ensureCurrencies(client);
         await resetPollutedGalleries(client);
@@ -234,6 +236,7 @@ async function main() {
     await ensureVariantsColumn(client);
     await ensureVendorSuggestionTable(client);
     await ensureFeedbackTable(client);
+        await ensurePriceReportTable(client);
     await ensureDiscoveryColumn(client);
     await ensureCurrencies(client);
     await resetPollutedGalleries(client);
@@ -576,6 +579,24 @@ async function ensureFeedbackTable(client) {
     );
   } catch (err) {
     console.warn(`[db-setup] Feedback table setup skipped: ${err.message}`);
+  }
+}
+
+// Wrong-price reports submitted by users on the vendor table.
+async function ensurePriceReportTable(client) {
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."PriceReport" (
+         id             text NOT NULL PRIMARY KEY,
+         "setSlug"      text NOT NULL,
+         "vendorKitId"  text NOT NULL,
+         "vendorName"   text NOT NULL,
+         reason         text,
+         "submittedAt"  timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] PriceReport table setup skipped: ${err.message}`);
   }
 }
 

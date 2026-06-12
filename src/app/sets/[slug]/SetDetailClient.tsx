@@ -122,6 +122,7 @@ export function SetDetailClient({ groupBuy }: Props) {
         </div>
 
         <VendorTable
+          slug={groupBuy.slug}
           vendorKits={vendorKitsForRegion as never}
           userRegion={region as Region}
           userCurrency={currency}

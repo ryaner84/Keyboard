@@ -147,3 +147,14 @@ model Feedback {
   subject     String
   submittedAt DateTime @default(now())
 }
+
+// User-submitted wrong-price reports on a specific vendor row.
+// Write-only from the site — view rows in Supabase to triage data issues.
+model PriceReport {
+  id           String   @id @default(cuid())
+  setSlug      String
+  vendorKitId  String
+  vendorName   String
+  reason       String?
+  submittedAt  DateTime @default(now())
+}

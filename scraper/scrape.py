@@ -390,6 +390,8 @@ _KIT_BOUNDS = {
     "HKD": (235, 1800),
     "THB": (1075, 8100),
     "TWD": (965, 7300),
+    # Chilean Peso — used by Fancy Customs (CL). 1 USD ≈ 960 CLP as of 2025.
+    "CLP": (27_000, 210_000),
 }
 
 
@@ -453,6 +455,15 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
         )
         if not data or "product" not in data:
             return None
+
+        # Reject pages where the product itself is an accessory / artisan —
+        # the URL slug may coincidentally match a set name (e.g. ilumkb lists
+        # a "Lavender x RAMA Artisan Keycap" at /products/gmk-lavender).
+        product_title = str(data["product"].get("title") or "")
+        if _ADDON_VARIANT_RE.search(product_title):
+            log(f"  product title is an accessory — skipped ({product_url})")
+            return None
+
         raw_variants = data["product"].get("variants") or []
         variants: list[dict] = []
         for v in raw_variants:
