@@ -238,6 +238,7 @@ export default function ReleasedContent() {
         >
           <option value="released-desc">Recently released</option>
           <option value="price-asc">Lowest kit price</option>
+          <option value="savings-desc">Biggest savings %</option>
           <option value="released-asc">Oldest first</option>
           <option value="name">Name A–Z</option>
         </select>
@@ -285,9 +286,17 @@ export default function ReleasedContent() {
             <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
               <span className="text-xl">🔥</span> Biggest savings right now
             </h2>
-            <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide bg-amber-100 dark:bg-amber-900/60 px-2.5 py-1 rounded-full">
-              Live price gaps
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide bg-amber-100 dark:bg-amber-900/60 px-2.5 py-1 rounded-full">
+                Live price gaps
+              </span>
+              <button
+                onClick={() => updateParams({ sort: "savings-desc" })}
+                className="text-xs font-semibold text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-colors"
+              >
+                View all →
+              </button>
+            </div>
           </div>
           <p className="text-sm text-gray-600 dark:text-gray-300 mb-5">
             Same set, very different prices — these have the widest gap between

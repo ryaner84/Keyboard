@@ -77,7 +77,10 @@ export async function GET(req: NextRequest) {
   }
 
   const priceSort = sortBy === "price-asc";
-  const effectiveAvailability = priceSort ? "available" : availability;
+  // Savings sort = widest gap between the cheapest and priciest vendor, in %.
+  // Needs 2+ priced vendors per set, so it implies the available filter.
+  const savingsSort = sortBy === "savings-desc";
+  const effectiveAvailability = priceSort || savingsSort ? "available" : availability;
 
   const where = {
     status: { in: [...RELEASED_STATUSES] },
@@ -113,7 +116,7 @@ export async function GET(req: NextRequest) {
 
   const releasedWhere = { status: { in: [...RELEASED_STATUSES] } };
 
-  const needRates = priceSort || page === 1;
+  const needRates = priceSort || savingsSort || page === 1;
   const usdRates: Record<string, number> = {};
   if (needRates) {
     const rateRows = await prisma.currency.findMany({
@@ -125,16 +128,28 @@ export async function GET(req: NextRequest) {
   let data: unknown[];
   let total: number;
 
-  if (priceSort) {
+  if (priceSort || savingsSort) {
     const all = await prisma.groupBuy.findMany({
       where,
       include: PRICING_INCLUDE,
       take: RANKING_CAP,
     });
-    const ranked = all
+    let ranked = all
       .map((set) => ({ set, stats: priceStats(set as never, usdRates) }))
-      .filter((r) => r.stats !== null)
-      .sort((a, b) => a.stats!.minUsd - b.stats!.minUsd);
+      .filter((r) => r.stats !== null);
+    if (savingsSort) {
+      // Spread % between priciest and cheapest vendor; single-vendor sets
+      // have no spread, so they're excluded from this view.
+      ranked = ranked
+        .filter((r) => r.stats!.pricedVendors >= 2 && r.stats!.maxUsd > 0)
+        .sort(
+          (a, b) =>
+            (b.stats!.maxUsd - b.stats!.minUsd) / b.stats!.maxUsd -
+            (a.stats!.maxUsd - a.stats!.minUsd) / a.stats!.maxUsd
+        );
+    } else {
+      ranked = ranked.sort((a, b) => a.stats!.minUsd - b.stats!.minUsd);
+    }
     total = ranked.length;
     data = ranked.slice((page - 1) * limit, page * limit).map((r) => r.set);
   } else {
