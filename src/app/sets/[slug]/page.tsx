@@ -112,6 +112,18 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <StatusBadge status={groupBuy.status} />
+                {/* Product type chip — subtle, tells the user what they're looking at */}
+                {(groupBuy as { productType?: string }).productType === "KEYBOARD" ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-violet-700 bg-violet-50 border border-violet-200 px-2 py-0.5 rounded-full">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect x="2" y="6" width="20" height="12" rx="2" strokeWidth={2}/><line x1="6" y1="10" x2="6" y2="10" strokeWidth={2.5} strokeLinecap="round"/><line x1="10" y1="10" x2="10" y2="10" strokeWidth={2.5} strokeLinecap="round"/><line x1="14" y1="10" x2="14" y2="10" strokeWidth={2.5} strokeLinecap="round"/><line x1="18" y1="10" x2="18" y2="10" strokeWidth={2.5} strokeLinecap="round"/><line x1="8" y1="14" x2="16" y2="14" strokeWidth={2.5} strokeLinecap="round"/></svg>
+                    Keyboard GB
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded-full">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect x="3" y="8" width="18" height="10" rx="1.5" strokeWidth={1.8}/><rect x="6" y="11" width="2" height="2" rx="0.4" fill="currentColor" strokeWidth={0}/><rect x="10" y="11" width="2" height="2" rx="0.4" fill="currentColor" strokeWidth={0}/><rect x="14" y="11" width="2" height="2" rx="0.4" fill="currentColor" strokeWidth={0}/><rect x="8" y="14" width="6" height="1.5" rx="0.4" fill="currentColor" strokeWidth={0}/></svg>
+                    Keycap Set
+                  </span>
+                )}
               </div>
               <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900">{groupBuy.name}</h1>
               {groupBuy.subtitle && (

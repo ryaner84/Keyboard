@@ -266,6 +266,7 @@ async function main() {
         await backfillShipping(client);
         await cleanupInterestChecks(client);
         await ensureVariantsColumn(client);
+        await ensureKeyboardColumns(client);
         await purgeImplausibleScrapedPrices(client);
         await restorePurgedPricesFromVariants(client);
         await requeuePurgedClearancePrices(client);
@@ -295,6 +296,7 @@ async function main() {
 
     await ensureImagesColumn(client);
     await ensureVariantsColumn(client);
+    await ensureKeyboardColumns(client);
     await ensureVendorSuggestionTable(client);
     await ensureFeedbackTable(client);
     await ensurePriceReportTable(client);
@@ -391,6 +393,51 @@ async function ensureVariantsColumn(client) {
     );
   } catch (err) {
     console.warn(`[db-setup] variants column setup skipped: ${err.message}`);
+  }
+}
+
+// Add productType + keyboard-specific spec columns to GroupBuy and create the
+// DevUpdate table for keyboard development changelog entries. All idempotent.
+async function ensureKeyboardColumns(client) {
+  try {
+    // productType distinguishes keycap sets from keyboard group buys.
+    // Backfill all existing rows as 'KEYCAPS' (everything to date is keycaps).
+    await client.query(
+      `ALTER TABLE public."GroupBuy"
+       ADD COLUMN IF NOT EXISTS "productType" text NOT NULL DEFAULT 'KEYCAPS'`
+    );
+    // Keyboard-specific spec fields (NULL on keycap sets).
+    await client.query(
+      `ALTER TABLE public."GroupBuy"
+       ADD COLUMN IF NOT EXISTS layout text`
+    );
+    await client.query(
+      `ALTER TABLE public."GroupBuy"
+       ADD COLUMN IF NOT EXISTS material text`
+    );
+    await client.query(
+      `ALTER TABLE public."GroupBuy"
+       ADD COLUMN IF NOT EXISTS "mountingStyle" text`
+    );
+    // Development changelog table for keyboard GBs.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS public."DevUpdate" (
+        id           text        PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        "groupBuyId" text        NOT NULL REFERENCES public."GroupBuy"(id) ON DELETE CASCADE,
+        title        text        NOT NULL,
+        content      text        NOT NULL,
+        milestone    text,
+        "imageUrls"  text[]      NOT NULL DEFAULT ARRAY[]::text[],
+        "postedAt"   timestamptz NOT NULL DEFAULT now(),
+        "createdAt"  timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS "DevUpdate_groupBuyId_postedAt_idx"
+       ON public."DevUpdate" ("groupBuyId", "postedAt")`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] keyboard columns setup skipped: ${err.message}`);
   }
 }
 

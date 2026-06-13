@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -15,12 +16,46 @@ interface SetCardProps {
   set: GroupBuyWithPricing;
 }
 
+// Pill label that identifies what kind of product this card represents.
+// Stays bottom-right of the image; icon only on very narrow cards.
+function ProductTypePill({ type }: { type?: string | null }) {
+  if (type === "KEYBOARD") {
+    return (
+      <span className="absolute bottom-2 right-2 flex items-center gap-1 bg-violet-600/90 text-white text-[10px] font-semibold px-2 py-0.5 rounded-full backdrop-blur-sm">
+        <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <rect x="2" y="6" width="20" height="12" rx="2" strokeWidth={2} />
+          <line x1="6" y1="10" x2="6" y2="10" strokeWidth={2.5} strokeLinecap="round" />
+          <line x1="10" y1="10" x2="10" y2="10" strokeWidth={2.5} strokeLinecap="round" />
+          <line x1="14" y1="10" x2="14" y2="10" strokeWidth={2.5} strokeLinecap="round" />
+          <line x1="18" y1="10" x2="18" y2="10" strokeWidth={2.5} strokeLinecap="round" />
+          <line x1="8" y1="14" x2="16" y2="14" strokeWidth={2.5} strokeLinecap="round" />
+        </svg>
+        Keyboard
+      </span>
+    );
+  }
+  // Default / KEYCAPS
+  return (
+    <span className="absolute bottom-2 right-2 flex items-center gap-1 bg-black/60 text-white text-[10px] font-semibold px-2 py-0.5 rounded-full backdrop-blur-sm">
+      <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <rect x="3" y="8" width="18" height="10" rx="1.5" strokeWidth={1.8} />
+        <rect x="6" y="11" width="2" height="2" rx="0.4" fill="currentColor" strokeWidth={0} />
+        <rect x="10" y="11" width="2" height="2" rx="0.4" fill="currentColor" strokeWidth={0} />
+        <rect x="14" y="11" width="2" height="2" rx="0.4" fill="currentColor" strokeWidth={0} />
+        <rect x="8" y="14" width="6" height="1.5" rx="0.4" fill="currentColor" strokeWidth={0} />
+      </svg>
+      Keycap Set
+    </span>
+  );
+}
+
 export function SetCard({ set }: SetCardProps) {
   const { isTracked, toggle } = useTrackedSets();
   const { region, currency, countryCode } = useLocation();
   const { rates, loading } = useCurrency(currency);
   const tracked = isTracked(set.slug);
   const countdown = getCountdownLabel(set.status, set.gbStart, set.gbEnd);
+  const [imgError, setImgError] = useState(false);
 
   const allPrices = computeCheapest(set, region as Region, currency, rates);
   const cheapest = allPrices.slice(0, 3);
@@ -30,22 +65,26 @@ export function SetCard({ set }: SetCardProps) {
   const savings = isGroupBuy ? null : computeSavings(allPrices);
   const updated = latestUpdate(cheapest);
   const href = `/sets/${set.slug}?country=${countryCode}`;
+  const imgSrc = normalizeImageUrl(set.imageUrl);
+  const showImage = !!imgSrc && !imgError;
 
   return (
     <div className="group bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden hover:border-indigo-200 dark:hover:border-indigo-600 hover:shadow-md transition-all duration-200 flex flex-col">
       <Link href={href} className="block">
         <div className="relative aspect-video bg-gray-50 overflow-hidden">
-          {normalizeImageUrl(set.imageUrl) ? (
+          {showImage ? (
             <Image
-              src={normalizeImageUrl(set.imageUrl)!}
+              src={imgSrc}
               alt={set.name}
               fill
               className="object-cover group-hover:scale-105 transition-transform duration-300"
               unoptimized
+              onError={() => setImgError(true)}
             />
           ) : (
-            <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-50 to-purple-50">
-              <span className="text-5xl opacity-30">⌨</span>
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-indigo-50 to-purple-50 gap-2">
+              <span className="text-4xl opacity-25">⌨</span>
+              <span className="text-[11px] text-gray-400 font-medium">{set.name}</span>
             </div>
           )}
           <div className="absolute top-3 left-3">
@@ -67,6 +106,7 @@ export function SetCard({ set }: SetCardProps) {
               {countdown}
             </div>
           )}
+          <ProductTypePill type={(set as { productType?: string }).productType} />
         </div>
       </Link>
 

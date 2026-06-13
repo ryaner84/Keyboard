@@ -54,9 +54,17 @@ model GroupBuy {
   imagesUpdatedAt DateTime?
   description String?
   featured    Boolean   @default(false)
+  // "KEYCAPS" (default) or "KEYBOARD". Drives category filter and determines
+  // which set-detail layout to render (price-compare vs dev-tracker).
+  productType String    @default("KEYCAPS")
+  // Keyboard-specific spec fields (null for keycap sets).
+  layout      String?   // e.g. "TKL", "65%", "75%", "60%", "Full-size"
+  material    String?   // e.g. "Aluminum", "Polycarbonate", "PC + Brass"
+  mountingStyle String? // e.g. "Top Mount", "Gasket Mount", "Tray Mount"
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   kits        Kit[]
+  devUpdates  DevUpdate[]
 }
 
 model Kit {
@@ -146,6 +154,25 @@ model Feedback {
   email       String
   subject     String
   submittedAt DateTime @default(now())
+}
+
+// Development update / changelog entry for a keyboard group buy.
+// Designers post updates (tooling confirmation, prototype photos, PCB tests,
+// shipping timelines) between GB close and delivery — this captures those.
+model DevUpdate {
+  id          String    @id @default(cuid())
+  groupBuyId  String
+  groupBuy    GroupBuy  @relation(fields: [groupBuyId], references: [id], onDelete: Cascade)
+  title       String
+  content     String
+  // Short milestone tag shown as a badge: "Tooling", "Prototype", "PCB Testing",
+  // "Shipping", "Delivered", "Announcement", "IC", "GB", "Extra Sale", etc.
+  milestone   String?
+  imageUrls   String[]  @default([])
+  postedAt    DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+
+  @@index([groupBuyId, postedAt])
 }
 
 // User-submitted wrong-price reports on a specific vendor row.
