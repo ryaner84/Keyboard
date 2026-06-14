@@ -163,6 +163,18 @@ model Feedback {
   submittedAt DateTime @default(now())
 }
 
+// Community-contributed tip for the keyboard database.
+// A visitor pastes a URL (vendor page, group buy listing, zFrontier post, etc.)
+// or a free-text description of a keyboard they know about. The site owner
+// reviews and triggers a targeted scrape or manual entry.
+model KeyboardContribution {
+  id          String   @id @default(cuid())
+  content     String   // URL or free-text tip — either format accepted
+  handle      String?  // optional "Discord handle / name to credit"
+  submittedAt DateTime @default(now())
+  processed   Boolean  @default(false)
+}
+
 // Development update / changelog entry for a keyboard group buy.
 // Designers post updates (tooling confirmation, prototype photos, PCB tests,
 // shipping timelines) between GB close and delivery — this captures those.

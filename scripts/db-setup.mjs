@@ -267,6 +267,7 @@ async function main() {
         await cleanupInterestChecks(client);
         await ensureVariantsColumn(client);
         await ensureKeyboardColumns(client);
+        await ensureKeyboardContributionTable(client);
         await purgeImplausibleScrapedPrices(client);
         await restorePurgedPricesFromVariants(client);
         await requeuePurgedClearancePrices(client);
@@ -297,6 +298,7 @@ async function main() {
     await ensureImagesColumn(client);
     await ensureVariantsColumn(client);
     await ensureKeyboardColumns(client);
+    await ensureKeyboardContributionTable(client);
     await ensureVendorSuggestionTable(client);
     await ensureFeedbackTable(client);
     await ensurePriceReportTable(client);
@@ -781,6 +783,22 @@ async function prioritizePreorderVendors(client) {
 
 // Crowd-sourced vendor links: users submit a product URL via the "Add vendor
 // link" panel; the nightly refresh turns them into scrapeable VendorKits.
+async function ensureKeyboardContributionTable(client) {
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."KeyboardContribution" (
+         id          text NOT NULL PRIMARY KEY,
+         content     text NOT NULL,
+         handle      text,
+         "submittedAt" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         processed   boolean NOT NULL DEFAULT false
+       )`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] KeyboardContribution table setup skipped: ${err.message}`);
+  }
+}
+
 async function ensureVendorSuggestionTable(client) {
   try {
     await client.query(

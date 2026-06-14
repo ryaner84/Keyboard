@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { KeyboardFilters } from "@/components/keyboards/KeyboardFilters";
 import { KeyboardStatCards } from "@/components/keyboards/KeyboardStatCards";
 import { KeyboardTable } from "@/components/keyboards/KeyboardTable";
+import { ContributeButton } from "@/components/keyboards/ContributeButton";
 import { useLocation } from "@/context/LocationContext";
 import { useCurrency } from "@/hooks/useCurrency";
 import type { GroupBuyWithPricing, GBStatus } from "@/types";
@@ -215,6 +216,9 @@ export default function KeyboardsContent() {
           )}
         </div>
       </div>
+
+      {/* Floating community contribution button */}
+      <ContributeButton />
     </div>
   );
 }
