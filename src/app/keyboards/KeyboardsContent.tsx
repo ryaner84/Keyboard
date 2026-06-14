@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { KeyboardFilters } from "@/components/keyboards/KeyboardFilters";
 import { KeyboardStatCards } from "@/components/keyboards/KeyboardStatCards";
 import { KeyboardTable } from "@/components/keyboards/KeyboardTable";
-import { ContributeButton } from "@/components/keyboards/ContributeButton";
+import { ContributeModal, ContributeRibbon, ContributeFab } from "@/components/keyboards/ContributeButton";
 import { useLocation } from "@/context/LocationContext";
 import { useCurrency } from "@/hooks/useCurrency";
 import type { GroupBuyWithPricing, GBStatus } from "@/types";
@@ -24,6 +24,7 @@ export default function KeyboardsContent() {
   // cards always reflect the full picture (not the currently-filtered subset).
   const [all, setAll] = useState<GroupBuyWithPricing[]>([]);
   const [loading, setLoading] = useState(true);
+  const [contributeOpen, setContributeOpen] = useState(false);
 
   const search = searchParams.get("search") ?? "";
   const sortBy = searchParams.get("sort") ?? "date-desc";
@@ -157,6 +158,11 @@ export default function KeyboardsContent() {
         />
       )}
 
+      {/* Community contribution ribbon */}
+      <div className="mb-5">
+        <ContributeRibbon onClick={() => setContributeOpen(true)} />
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-6">
         <aside>
           <KeyboardFilters
@@ -217,8 +223,9 @@ export default function KeyboardsContent() {
         </div>
       </div>
 
-      {/* Floating community contribution button */}
-      <ContributeButton />
+      {/* Floating community contribution button (mobile) + shared modal */}
+      <ContributeFab onClick={() => setContributeOpen(true)} />
+      <ContributeModal isOpen={contributeOpen} onClose={() => setContributeOpen(false)} />
     </div>
   );
 }

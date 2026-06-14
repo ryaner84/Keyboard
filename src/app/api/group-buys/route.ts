@@ -6,7 +6,12 @@ import type { GBStatus } from "@/generated/prisma";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
-  const statuses = searchParams.getAll("status") as GBStatus[];
+  // "all" is a client-side sentinel meaning "no status filter" — never a real
+  // enum value, so strip it before it reaches Prisma (otherwise the enum
+  // validation throws and the whole query 500s).
+  const statuses = (searchParams.getAll("status") as string[]).filter(
+    (s) => s !== "all"
+  ) as GBStatus[];
   const search = searchParams.get("search") ?? "";
   const sortBy = searchParams.get("sort") ?? "date-desc";
   const page = parseInt(searchParams.get("page") ?? "1");
