@@ -25,6 +25,14 @@ const BROWSER_HEADERS = {
 // an accessory (cable, artisan, deskmat) in the same collection, not a board.
 const KEYBOARD_MIN_PRICE_USD = 300;
 
+// Mass-produced always-available brands are not limited group buys — skip them.
+const BLOCKED_BRANDS = ["keychron"];
+
+function isBlockedProduct(product: ShopifyProduct): boolean {
+  const text = `${product.title} ${product.tags} ${product.product_type}`.toLowerCase();
+  return BLOCKED_BRANDS.some((brand) => text.includes(brand));
+}
+
 // Collection category hint — overrides auto-detected status for collections
 // where the category is known from the URL (e.g. "extra-drop" → IN_STOCK,
 // "on-going-gb" → ACTIVE_GB). Auto-detection still runs as a fallback.
@@ -126,6 +134,19 @@ export const KEYBOARD_VENDORS: VendorConfig[] = [
     currency: "SGD",
     region: "SG",
   },
+  {
+    id: "ck",
+    displayName: "CannonKeys",
+    // keyboard-group-buys = active GBs; keyboard-extras = extra/leftover stock;
+    // coming-soon = upcoming / interest check stage.
+    collectionUrl: "https://cannonkeys.com/collections/keyboard-group-buys/products.json",
+    extraCollectionUrls: [
+      "https://cannonkeys.com/collections/keyboard-extras/products.json",
+      "https://cannonkeys.com/collections/coming-soon/products.json",
+    ],
+    currency: "USD",
+    region: "US",
+  },
 ];
 
 // ── Shopify product types ────────────────────────────────────────────────────
@@ -163,9 +184,9 @@ interface ShopifyProductsResponse {
 
 // Derive a category hint from a collection URL when it isn't set explicitly.
 function categoryFromUrl(url: string): CollectionCategory | null {
-  if (/extra.?drop/i.test(url)) return "extra-drop";
+  if (/extra.?drop|extras|keyboard.?extras/i.test(url)) return "extra-drop";
   if (/on.?going/i.test(url)) return "ongoing-gb";
-  if (/pre.?order/i.test(url)) return "pre-order";
+  if (/pre.?order|coming.?soon/i.test(url)) return "pre-order";
   if (/group.?buy|live.?gb/i.test(url)) return "group-buy";
   return null;
 }
@@ -383,9 +404,9 @@ export async function importKeyboardVendor(
     }
   }
 
-  // Drop anything priced below the keyboard minimum — accessories,
-  // deskmats, cables etc. often live in the same collection.
+  // Drop accessories (below price floor) and mass-produced always-available brands.
   const products = allProducts.filter((p) => {
+    if (isBlockedProduct(p)) return false;
     const price = lowestPrice(p);
     return price !== null && price >= KEYBOARD_MIN_PRICE_USD;
   });
