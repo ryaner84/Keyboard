@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Please share something — a URL or a short description." }, { status: 400 });
   }
 
-  await (prisma as any).keyboardContribution.create({
+  await prisma.keyboardContribution.create({
     data: {
       content: content.slice(0, 2000),
       handle: handle ? handle.slice(0, 100) : null,

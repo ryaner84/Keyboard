@@ -68,11 +68,6 @@ function getSelect(prop: NotionPropertyValue | undefined): string {
   return "";
 }
 
-function getMultiSelect(prop: NotionPropertyValue | undefined): string[] {
-  if (!prop || prop.type !== "multi_select") return [];
-  return prop.multi_select.map((s) => s.name);
-}
-
 function getDate(prop: NotionPropertyValue | undefined): string | null {
   if (!prop || prop.type !== "date" || !prop.date) return null;
   return prop.date.start ?? null;
