@@ -96,6 +96,36 @@ export const KEYBOARD_VENDORS: VendorConfig[] = [
     currency: "USD",
     region: "US",
   },
+  {
+    id: "kbd",
+    displayName: "KBDfans",
+    collectionUrl: "https://kbdfans.com/collections/group-buy-live/products.json",
+    extraCollectionUrls: [
+      "https://kbdfans.com/collections/group-buy-extra/products.json",
+      "https://kbdfans.com/collections/pre-order/products.json",
+    ],
+    currency: "USD",
+    region: "Global",
+  },
+  {
+    id: "cc",
+    displayName: "ClickClack",
+    collectionUrl: "https://clickclack.io/collections/groupbuy/products.json",
+    currency: "SGD",
+    region: "SG",
+  },
+  {
+    id: "ilu",
+    displayName: "iLumKB",
+    // "live" = ongoing GBs; "pre-order-keycaps" may also carry keyboard pre-orders.
+    // The $300 minimum price filter drops any keycap-only products automatically.
+    collectionUrl: "https://ilumkb.com/collections/live/products.json",
+    extraCollectionUrls: [
+      "https://ilumkb.com/collections/pre-order-keycaps/products.json",
+    ],
+    currency: "SGD",
+    region: "SG",
+  },
 ];
 
 // ── Shopify product types ────────────────────────────────────────────────────
