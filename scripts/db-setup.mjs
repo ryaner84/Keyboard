@@ -419,6 +419,27 @@ async function ensureKeyboardColumns(client) {
       `ALTER TABLE public."GroupBuy"
        ADD COLUMN IF NOT EXISTS "mountingStyle" text`
     );
+    // Keyboard pricing/vendor fields (single-vendor, so price lives on the row).
+    await client.query(
+      `ALTER TABLE public."GroupBuy"
+       ADD COLUMN IF NOT EXISTS "basePrice" double precision`
+    );
+    await client.query(
+      `ALTER TABLE public."GroupBuy"
+       ADD COLUMN IF NOT EXISTS "priceCurrency" text`
+    );
+    await client.query(
+      `ALTER TABLE public."GroupBuy"
+       ADD COLUMN IF NOT EXISTS "productUrl" text`
+    );
+    await client.query(
+      `ALTER TABLE public."GroupBuy"
+       ADD COLUMN IF NOT EXISTS "vendorName" text`
+    );
+    await client.query(
+      `ALTER TABLE public."GroupBuy"
+       ADD COLUMN IF NOT EXISTS "vendorRegion" text`
+    );
     // Development changelog table for keyboard GBs.
     await client.query(`
       CREATE TABLE IF NOT EXISTS public."DevUpdate" (

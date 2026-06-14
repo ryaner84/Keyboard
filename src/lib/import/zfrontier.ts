@@ -313,6 +313,11 @@ export async function importZFrontierKeyboards(): Promise<ZFrontierResult> {
       const status = mapStatus(item.status ?? item.state ?? item.tag);
       const imageUrl = item.cover ?? item.image ?? item.thumb ?? item.images?.[0] ?? null;
       const images = item.images ?? (imageUrl ? [imageUrl] : []);
+      const price = parsePrice(item.price);
+      const rawUrl = item.url ?? item.link ?? (item.slug ? `${BASE}/product/${item.slug}` : null);
+      const productUrl = rawUrl
+        ? (rawUrl.startsWith("http") ? rawUrl : `${BASE}${rawUrl}`)
+        : null;
       const gbStart = item.start_time ?? item.gb_start ?? item.startTime
         ? new Date(item.start_time ?? item.gb_start ?? item.startTime ?? "") : null;
       const gbEnd = item.end_time ?? item.gb_end ?? item.endTime
@@ -322,6 +327,16 @@ export async function importZFrontierKeyboards(): Promise<ZFrontierResult> {
         where: { slug },
         select: { id: true, layout: true, mountingStyle: true, material: true },
       });
+
+      // zFrontier is a Chinese platform — price (when present) is in CNY,
+      // origin region is mainland China (treated as ASIA for shipping).
+      const vendorFields = {
+        basePrice: price ?? undefined,
+        priceCurrency: price !== null ? "CNY" : undefined,
+        productUrl: productUrl ?? undefined,
+        vendorName: "zFrontier",
+        vendorRegion: "ASIA",
+      };
 
       if (!existing) {
         await prisma.groupBuy.create({
@@ -335,6 +350,7 @@ export async function importZFrontierKeyboards(): Promise<ZFrontierResult> {
             images,
             gbStart: gbStart instanceof Date && !isNaN(gbStart.getTime()) ? gbStart : null,
             gbEnd: gbEnd instanceof Date && !isNaN(gbEnd.getTime()) ? gbEnd : null,
+            ...vendorFields,
           },
         });
         result.created++;
@@ -348,6 +364,7 @@ export async function importZFrontierKeyboards(): Promise<ZFrontierResult> {
             images: images.length > 0 ? images : undefined,
             gbStart: gbStart instanceof Date && !isNaN(gbStart.getTime()) ? gbStart : undefined,
             gbEnd: gbEnd instanceof Date && !isNaN(gbEnd.getTime()) ? gbEnd : undefined,
+            ...vendorFields,
           },
         });
         result.updated++;

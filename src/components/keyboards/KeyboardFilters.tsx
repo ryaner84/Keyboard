@@ -44,14 +44,14 @@ const STATUS_OPTIONS: { value: GBStatus; label: string; desc: string; dot: strin
 interface KeyboardFiltersProps {
   search: string;
   statuses: GBStatus[];
-  sortBy: string;
+  sortBy?: string;
   joinableOnly: boolean;
   layouts: string[];
   mounts: string[];
   materials: string[];
   onSearchChange: (v: string) => void;
   onStatusToggle: (s: GBStatus) => void;
-  onSortChange: (v: string) => void;
+  onSortChange?: (v: string) => void;
   onJoinableToggle: () => void;
   onLayoutToggle: (v: string) => void;
   onMountToggle: (v: string) => void;
@@ -107,14 +107,12 @@ function ChipGroup({
 export function KeyboardFilters({
   search,
   statuses,
-  sortBy,
   joinableOnly,
   layouts,
   mounts,
   materials,
   onSearchChange,
   onStatusToggle,
-  onSortChange,
   onJoinableToggle,
   onLayoutToggle,
   onMountToggle,
@@ -204,23 +202,9 @@ export function KeyboardFilters({
         </div>
         {!joinableOnly && (
           <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2">
-            Select none to show all stages
+            Select none to show all stages · click table headers to sort
           </p>
         )}
-      </FilterSection>
-
-      {/* Sort */}
-      <FilterSection label="Sort by">
-        <select
-          value={sortBy}
-          onChange={(e) => onSortChange(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white dark:bg-gray-800 dark:text-white"
-        >
-          <option value="date-desc">Newest first</option>
-          <option value="date-asc">Oldest first</option>
-          <option value="name">Name A–Z</option>
-          <option value="ending-soon">Ending soon</option>
-        </select>
       </FilterSection>
 
     </div>

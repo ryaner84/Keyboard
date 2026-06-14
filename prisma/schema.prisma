@@ -61,6 +61,13 @@ model GroupBuy {
   layout      String?   // e.g. "TKL", "65%", "75%", "60%", "Full-size"
   material    String?   // e.g. "Aluminum", "Polycarbonate", "PC + Brass"
   mountingStyle String? // e.g. "Top Mount", "Gasket Mount", "Tray Mount"
+  // Keyboard pricing/vendor fields. Unlike keycaps (multi-vendor price compare),
+  // a keyboard GB is sold by a single store, so price lives directly on the row.
+  basePrice     Float?  // lowest variant price in the vendor's native currency
+  priceCurrency String? // ISO code of basePrice, e.g. "USD", "SGD", "CNY"
+  productUrl    String? // direct link to the product/GB page to actually buy
+  vendorName    String? // store running the GB, e.g. "NovelKeys", "Prototypist"
+  vendorRegion  String? // origin region for shipping estimate: US/EU/SG/ASIA/...
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   kits        Kit[]

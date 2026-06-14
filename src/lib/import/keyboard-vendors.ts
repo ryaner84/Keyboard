@@ -280,6 +280,15 @@ function lowestPrice(product: ShopifyProduct): number | null {
   return Math.min(...prices);
 }
 
+// "https://novelkeys.com/collections/keyboards/products.json" → "https://novelkeys.com"
+function originFromUrl(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return "";
+  }
+}
+
 // ── Strip HTML for description ────────────────────────────────────────────────
 
 function stripHtml(html: string): string {
@@ -398,6 +407,8 @@ export async function importKeyboardVendor(
       const imageUrl = product.images[0]?.src ?? null;
       const images = product.images.slice(0, 8).map((i) => i.src);
       const description = stripHtml(product.body_html);
+      const basePrice = lowestPrice(product); // already passed the >= $300 filter
+      const productUrl = `${originFromUrl(sourceUrl)}/products/${product.handle}`;
 
       // Check if the record already exists.
       const existing = await prisma.groupBuy.findUnique({
@@ -418,6 +429,15 @@ export async function importKeyboardVendor(
         material: existing?.material ?? specs.material,
       };
 
+      // Pricing/vendor fields — refreshed every run (price moves, vendor fixed).
+      const vendorFields = {
+        basePrice: basePrice ?? undefined,
+        priceCurrency: vendor.currency,
+        productUrl,
+        vendorName: vendor.displayName,
+        vendorRegion: vendor.region,
+      };
+
       if (!existing) {
         await prisma.groupBuy.create({
           data: {
@@ -430,6 +450,7 @@ export async function importKeyboardVendor(
             images,
             description: description || null,
             ...specUpdates,
+            ...vendorFields,
           },
         });
         result.created++;
@@ -448,6 +469,7 @@ export async function importKeyboardVendor(
             images: keepImages ? existing.images : images,
             description: description || undefined,
             ...specUpdates,
+            ...vendorFields,
           },
         });
         result.updated++;

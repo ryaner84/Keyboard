@@ -31,6 +31,16 @@ export interface GroupBuyWithKits {
   images: string[];
   description: string | null;
   featured: boolean;
+  // Keyboard fields (null/default on keycap sets).
+  productType?: string;
+  layout?: string | null;
+  material?: string | null;
+  mountingStyle?: string | null;
+  basePrice?: number | null;
+  priceCurrency?: string | null;
+  productUrl?: string | null;
+  vendorName?: string | null;
+  vendorRegion?: string | null;
   kits: KitSummary[];
 }
 
