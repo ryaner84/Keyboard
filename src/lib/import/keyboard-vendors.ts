@@ -293,12 +293,28 @@ function detectSpecs(product: ShopifyProduct) {
 
 // ── Price extraction ──────────────────────────────────────────────────────────
 
-function lowestPrice(product: ShopifyProduct): number | null {
-  const prices = product.variants
+function variantPrices(product: ShopifyProduct): number[] {
+  return product.variants
     .filter((v) => parseFloat(v.price) > 0)
     .map((v) => parseFloat(v.price));
+}
+
+// A product qualifies as a keyboard if ANY variant meets the price floor.
+// GB listings often bundle cheap add-on variants (deposit, deskmat, extra PCB,
+// daughterboard) that would drag a naive Math.min below the floor and wrongly
+// drop the whole board — so we check for at least one keyboard-priced variant.
+function qualifiesAsKeyboard(product: ShopifyProduct): boolean {
+  return variantPrices(product).some((p) => p >= KEYBOARD_MIN_PRICE_USD);
+}
+
+// Representative base price = cheapest variant that still clears the floor
+// (the base keyboard config), ignoring sub-floor add-on variants. Falls back to
+// the overall minimum if nothing clears the floor (shouldn't happen post-filter).
+function lowestPrice(product: ShopifyProduct): number | null {
+  const prices = variantPrices(product);
   if (prices.length === 0) return null;
-  return Math.min(...prices);
+  const real = prices.filter((p) => p >= KEYBOARD_MIN_PRICE_USD);
+  return real.length > 0 ? Math.min(...real) : Math.min(...prices);
 }
 
 // "https://novelkeys.com/collections/keyboards/products.json" → "https://novelkeys.com"
@@ -404,12 +420,11 @@ export async function importKeyboardVendor(
     }
   }
 
-  // Drop accessories (below price floor) and mass-produced always-available brands.
-  const products = allProducts.filter((p) => {
-    if (isBlockedProduct(p)) return false;
-    const price = lowestPrice(p);
-    return price !== null && price >= KEYBOARD_MIN_PRICE_USD;
-  });
+  // Drop accessories (no variant clears the price floor) and mass-produced
+  // always-available brands.
+  const products = allProducts.filter(
+    (p) => !isBlockedProduct(p) && qualifiesAsKeyboard(p)
+  );
 
   result.fetched = products.length;
   if (allProducts.length !== products.length) {
