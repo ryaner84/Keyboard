@@ -55,7 +55,10 @@ export function SetCard({ set }: SetCardProps) {
   const { rates, loading } = useCurrency(currency);
   const tracked = isTracked(set.slug);
   const countdown = getCountdownLabel(set.status, set.gbStart, set.gbEnd);
-  const [imgError, setImgError] = useState(false);
+  // "thumb" → try normalised thumbnail URL
+  // "original" → thumbnail 404'd, try the raw imageUrl
+  // "failed" → both failed, show placeholder
+  const [imgPhase, setImgPhase] = useState<"thumb" | "original" | "failed">("thumb");
 
   const allPrices = computeCheapest(set, region as Region, currency, rates);
   const cheapest = allPrices.slice(0, 3);
@@ -65,8 +68,22 @@ export function SetCard({ set }: SetCardProps) {
   const savings = isGroupBuy ? null : computeSavings(allPrices);
   const updated = latestUpdate(cheapest);
   const href = `/sets/${set.slug}?country=${countryCode}`;
-  const imgSrc = normalizeImageUrl(set.imageUrl);
-  const showImage = !!imgSrc && !imgError;
+
+  const thumbSrc = normalizeImageUrl(set.imageUrl); // may point to /thumbs/ path
+  const originalSrc = set.imageUrl ?? null;          // raw Firebase URL
+  const imgSrc =
+    imgPhase === "thumb" ? thumbSrc :
+    imgPhase === "original" ? originalSrc :
+    null;
+  const showImage = !!imgSrc && imgPhase !== "failed";
+
+  const handleImgError = () => {
+    if (imgPhase === "thumb" && originalSrc && originalSrc !== thumbSrc) {
+      setImgPhase("original"); // try full-size before giving up
+    } else {
+      setImgPhase("failed");
+    }
+  };
 
   return (
     <div className="group bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden hover:border-indigo-200 dark:hover:border-indigo-600 hover:shadow-md transition-all duration-200 flex flex-col">
@@ -74,12 +91,13 @@ export function SetCard({ set }: SetCardProps) {
         <div className="relative aspect-video bg-gray-50 overflow-hidden">
           {showImage ? (
             <Image
-              src={imgSrc}
+              key={imgSrc}
+              src={imgSrc!}
               alt={set.name}
               fill
               className="object-cover group-hover:scale-105 transition-transform duration-300"
               unoptimized
-              onError={() => setImgError(true)}
+              onError={handleImgError}
             />
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-indigo-50 to-purple-50 gap-2">
