@@ -46,6 +46,7 @@ interface VendorConfig {
   collectionCategory?: CollectionCategory; // status hint derived from collection name
   currency: string;
   region: string;
+  officialUpdatesUrl?: string; // canonical source for dev updates / raffle details
 }
 
 export const KEYBOARD_VENDORS: VendorConfig[] = [
@@ -59,6 +60,10 @@ export const KEYBOARD_VENDORS: VendorConfig[] = [
   {
     id: "ml",
     displayName: "MatrixLab",
+    // Official source for all MatrixLab raffle info, GB dates, and dev updates.
+    // This Notion database is the canonical reference — richer than the Shopify
+    // store (includes raffle status, round details, shipping updates).
+    officialUpdatesUrl: "https://matrixlab.notion.site/?v=b2053c28d1614303a42a91b0a6762a5e",
     collectionUrl: "https://www.matrixlab.store/collections/group-buy/products.json",
     currency: "USD",
     region: "Global",

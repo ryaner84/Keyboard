@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { importAllKeyboardVendors } from "@/lib/import/keyboard-vendors";
 import { importZFrontierKeyboards } from "@/lib/import/zfrontier";
+import { importMatrixLabNotion } from "@/lib/import/matrixlab-notion";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -17,10 +18,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Run Shopify vendors and zFrontier in parallel — they're independent.
-  const [vendorResults, zfResult] = await Promise.all([
+  // Run all three sources in parallel — each is independent.
+  const [vendorResults, zfResult, matrixResult] = await Promise.all([
     importAllKeyboardVendors({ maxRuntimeMs: 45_000 }),
     importZFrontierKeyboards(),
+    importMatrixLabNotion(),
   ]);
 
   const vendorSummary = vendorResults.reduce(
@@ -39,5 +41,6 @@ export async function GET(req: NextRequest) {
     vendors: vendorResults,
     vendorSummary,
     zfrontier: zfResult,
+    matrixlab: matrixResult,
   });
 }
