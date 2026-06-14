@@ -13,6 +13,7 @@ export async function GET(req: NextRequest) {
   const limit = parseInt(searchParams.get("limit") ?? "20");
   const finishing = searchParams.get("finishing"); // days until gbEnd
   const newDays = searchParams.get("new"); // days since gbStart
+  const productType = searchParams.get("type"); // "KEYCAPS" | "KEYBOARD" | null (all)
 
   const now = new Date();
   let dateFilter: Record<string, unknown> = {};
@@ -27,6 +28,7 @@ export async function GET(req: NextRequest) {
   const where = {
     ...(statuses.length > 0 && { status: { in: statuses } }),
     ...dateFilter,
+    ...(productType && { productType }),
     ...(search && {
       OR: [
         { name: { contains: search, mode: "insensitive" as const } },

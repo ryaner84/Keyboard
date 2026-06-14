@@ -8,7 +8,7 @@ import type { GroupBuyWithPricing, GBStatus } from "@/types";
 
 const DEFAULT_STATUSES: GBStatus[] = ["INTEREST_CHECK", "ACTIVE_GB"];
 
-export default function BrowseContent() {
+export default function KeyboardsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -23,9 +23,6 @@ export default function BrowseContent() {
   const rawStatuses = searchParams.getAll("status") as GBStatus[];
   const statuses: GBStatus[] = useMemo(
     () => {
-      // "all" is an explicit marker meaning the user deselected every status
-      // pill — show everything. Distinct from a fresh visit (no status params
-      // at all), which gets the default selection.
       if (rawStatuses.includes("all" as GBStatus)) return [];
       return rawStatuses.length > 0 ? rawStatuses : DEFAULT_STATUSES;
     },
@@ -41,7 +38,7 @@ export default function BrowseContent() {
     if (finishing) params.set("finishing", finishing);
     if (newDays) params.set("new", newDays);
     params.set("limit", "60");
-    params.set("type", "KEYCAPS");
+    params.set("type", "KEYBOARD");
     statuses.forEach((s) => params.append("status", s));
 
     try {
@@ -71,7 +68,7 @@ export default function BrowseContent() {
           params.set(key, value);
         }
       }
-      router.replace(`/browse?${params.toString()}`);
+      router.replace(`/keyboards?${params.toString()}`);
     },
     [searchParams, router]
   );
@@ -80,12 +77,9 @@ export default function BrowseContent() {
     const next = statuses.includes(status)
       ? statuses.filter((s) => s !== status)
       : [...statuses, status];
-    // Empty selection = show all sets. Keep the explicit "all" marker in the
-    // URL so it isn't mistaken for a fresh visit (which re-applies defaults).
     updateParams({ status: next.length > 0 ? next : ["all"] });
   };
 
-  // Finishing-soon and new-arrivals are mutually exclusive quick filters.
   const handleFinishingToggle = () => {
     updateParams({ finishing: finishing ? "" : "7", new: "" });
   };
@@ -96,28 +90,28 @@ export default function BrowseContent() {
   const title = finishing
     ? "Finishing Soon"
     : newDays
-      ? "New Keycap Group Buys"
-      : "Keycap Group Buys";
+      ? "New Keyboard Group Buys"
+      : "Keyboard Group Buys";
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-6">
         <div className="flex items-center gap-2 mb-1">
-          {/* category breadcrumb chip */}
-          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 bg-indigo-50 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700 px-2 py-0.5 rounded-full">
+          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-violet-600 bg-violet-50 dark:bg-violet-950 dark:text-violet-300 border border-violet-200 dark:border-violet-700 px-2 py-0.5 rounded-full">
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <rect x="3" y="8" width="18" height="10" rx="1.5" />
-              <rect x="6" y="11" width="2" height="2" rx="0.5" fill="currentColor" stroke="none" />
-              <rect x="10" y="11" width="2" height="2" rx="0.5" fill="currentColor" stroke="none" />
-              <rect x="14" y="11" width="2" height="2" rx="0.5" fill="currentColor" stroke="none" />
-              <rect x="8" y="14" width="6" height="1.5" rx="0.5" fill="currentColor" stroke="none" />
+              <rect x="2" y="6" width="20" height="12" rx="2" />
+              <line x1="6" y1="10" x2="6.01" y2="10" strokeWidth={2.5} strokeLinecap="round" />
+              <line x1="10" y1="10" x2="10.01" y2="10" strokeWidth={2.5} strokeLinecap="round" />
+              <line x1="14" y1="10" x2="14.01" y2="10" strokeWidth={2.5} strokeLinecap="round" />
+              <line x1="18" y1="10" x2="18.01" y2="10" strokeWidth={2.5} strokeLinecap="round" />
+              <line x1="8" y1="14" x2="16" y2="14" strokeWidth={2.5} strokeLinecap="round" />
             </svg>
-            Keycap Sets
+            Keyboards
           </span>
         </div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{title}</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          {loading ? "Loading..." : `${total} set${total !== 1 ? "s" : ""} found`}
+          {loading ? "Loading..." : `${total} keyboard${total !== 1 ? "s" : ""} found`}
         </p>
       </div>
 
@@ -151,10 +145,21 @@ export default function BrowseContent() {
               ))}
             </div>
           ) : sets.length === 0 ? (
-            <div className="text-center py-16 text-gray-400">
-              <p className="text-4xl mb-3">⌨</p>
-              <p className="font-medium text-gray-500">No sets found</p>
-              <p className="text-sm mt-1">Try adjusting your filters</p>
+            <div className="text-center py-20">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-violet-50 dark:bg-violet-950 mb-4">
+                <svg className="w-8 h-8 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <rect x="2" y="6" width="20" height="12" rx="2" />
+                  <line x1="6" y1="10" x2="6.01" y2="10" strokeWidth={2.5} strokeLinecap="round" />
+                  <line x1="10" y1="10" x2="10.01" y2="10" strokeWidth={2.5} strokeLinecap="round" />
+                  <line x1="14" y1="10" x2="14.01" y2="10" strokeWidth={2.5} strokeLinecap="round" />
+                  <line x1="18" y1="10" x2="18.01" y2="10" strokeWidth={2.5} strokeLinecap="round" />
+                  <line x1="8" y1="14" x2="16" y2="14" strokeWidth={2.5} strokeLinecap="round" />
+                </svg>
+              </div>
+              <p className="font-semibold text-gray-700 dark:text-gray-300 text-lg">No keyboard GBs yet</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500 mt-1 max-w-xs mx-auto">
+                Keyboard group buys will appear here when added. Check back soon.
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
