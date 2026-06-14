@@ -14,6 +14,10 @@ export async function GET(req: NextRequest) {
   const finishing = searchParams.get("finishing"); // days until gbEnd
   const newDays = searchParams.get("new"); // days since gbStart
   const productType = searchParams.get("type"); // "KEYCAPS" | "KEYBOARD" | null (all)
+  // Keyboard-specific spec filters (multi-value, OR within each group)
+  const layouts = searchParams.getAll("layout");
+  const mounts = searchParams.getAll("mount");
+  const materialsParam = searchParams.getAll("material");
 
   const now = new Date();
   let dateFilter: Record<string, unknown> = {};
@@ -29,6 +33,9 @@ export async function GET(req: NextRequest) {
     ...(statuses.length > 0 && { status: { in: statuses } }),
     ...dateFilter,
     ...(productType && { productType }),
+    ...(layouts.length > 0 && { layout: { in: layouts } }),
+    ...(mounts.length > 0 && { mountingStyle: { in: mounts } }),
+    ...(materialsParam.length > 0 && { material: { in: materialsParam } }),
     ...(search && {
       OR: [
         { name: { contains: search, mode: "insensitive" as const } },
@@ -43,7 +50,9 @@ export async function GET(req: NextRequest) {
       ? { name: "asc" as const }
       : sortBy === "date-asc"
         ? { createdAt: "asc" as const }
-        : { createdAt: "desc" as const };
+        : sortBy === "ending-soon"
+          ? { gbEnd: "asc" as const }
+          : { createdAt: "desc" as const };
 
   const [total, data] = await Promise.all([
     prisma.groupBuy.count({ where }),
