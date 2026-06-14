@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { importAllKeyboardVendors } from "@/lib/import/keyboard-vendors";
+import { importZFrontierKeyboards } from "@/lib/import/zfrontier";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -16,9 +17,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const results = await importAllKeyboardVendors({ maxRuntimeMs: 55_000 });
+  // Run Shopify vendors and zFrontier in parallel — they're independent.
+  const [vendorResults, zfResult] = await Promise.all([
+    importAllKeyboardVendors({ maxRuntimeMs: 45_000 }),
+    importZFrontierKeyboards(),
+  ]);
 
-  const summary = results.reduce(
+  const vendorSummary = vendorResults.reduce(
     (acc, r) => ({
       fetched: acc.fetched + r.fetched,
       created: acc.created + r.created,
@@ -29,5 +34,10 @@ export async function GET(req: NextRequest) {
     { fetched: 0, created: 0, updated: 0, skipped: 0, errors: 0 }
   );
 
-  return NextResponse.json({ ok: true, vendors: results, summary });
+  return NextResponse.json({
+    ok: true,
+    vendors: vendorResults,
+    vendorSummary,
+    zfrontier: zfResult,
+  });
 }

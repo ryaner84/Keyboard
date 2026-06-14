@@ -6,8 +6,10 @@ import { SetCard } from "@/components/browse/SetCard";
 import { KeyboardFilters } from "@/components/keyboards/KeyboardFilters";
 import type { GroupBuyWithPricing, GBStatus } from "@/types";
 
-const JOINABLE_STATUSES: GBStatus[] = ["INTEREST_CHECK", "ACTIVE_GB"];
-const DEFAULT_STATUSES: GBStatus[] = JOINABLE_STATUSES;
+// "Joinable" = can actually order right now (Active GB or Extra Drop in stock)
+const JOINABLE_STATUSES: GBStatus[] = ["ACTIVE_GB", "IN_STOCK"];
+// Default view shows everything active — IC + open GB + extra drops
+const DEFAULT_STATUSES: GBStatus[] = ["INTEREST_CHECK", "ACTIVE_GB", "IN_STOCK"];
 
 export default function KeyboardsContent() {
   const searchParams = useSearchParams();
