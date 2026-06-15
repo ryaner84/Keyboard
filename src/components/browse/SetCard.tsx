@@ -11,6 +11,7 @@ import { useTrackedSets } from "@/hooks/useTrackedSets";
 import { useLocation } from "@/context/LocationContext";
 import { useCurrency } from "@/hooks/useCurrency";
 import type { GroupBuyWithPricing, Region } from "@/types";
+import { ReportListingButton } from "@/components/ui/ReportListingButton";
 
 interface SetCardProps {
   set: GroupBuyWithPricing;
@@ -136,17 +137,20 @@ export function SetCard({ set }: SetCardProps) {
             </h3>
             <p className="text-xs text-gray-400 mt-0.5">by {set.designer}</p>
           </Link>
-          <button
-            onClick={() => toggle(set.slug)}
-            title={tracked ? "Remove from tracker" : "Add to tracker"}
-            className={`flex-shrink-0 p-1.5 rounded-lg transition-colors ${
-              tracked ? "text-indigo-600 bg-indigo-50" : "text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
-            }`}
-          >
-            <svg className="w-4 h-4" fill={tracked ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <ReportListingButton slug={set.slug} name={set.name} />
+            <button
+              onClick={() => toggle(set.slug)}
+              title={tracked ? "Remove from tracker" : "Add to tracker"}
+              className={`p-1.5 rounded-lg transition-colors ${
+                tracked ? "text-indigo-600 bg-indigo-50" : "text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
+              }`}
+            >
+              <svg className="w-4 h-4" fill={tracked ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Price comparison preview */}

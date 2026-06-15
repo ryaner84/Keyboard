@@ -194,6 +194,20 @@ model DevUpdate {
   @@index([groupBuyId, postedAt])
 }
 
+// General listing-quality reports submitted by visitors.
+// Covers wrong category, stale GBs, duplicates, wrong vendor, etc.
+// Write-only from the site — query in Supabase for the daily triage routine.
+model ListingReport {
+  id          String   @id @default(cuid())
+  slug        String
+  name        String
+  issueType   String   // "wrong_category" | "wrong_price" | "inactive" | "duplicate" | "wrong_vendor" | "other"
+  notes       String?
+  submittedAt DateTime @default(now())
+
+  @@index([submittedAt])
+}
+
 // User-submitted wrong-price reports on a specific vendor row.
 // Write-only from the site — view rows in Supabase to triage data issues.
 model PriceReport {

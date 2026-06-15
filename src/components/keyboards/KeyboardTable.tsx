@@ -6,6 +6,7 @@ import Image from "next/image";
 import type { GroupBuyWithPricing, GBStatus } from "@/types";
 import { normalizeImageUrl } from "@/lib/utils";
 import { estimateKeyboardShippingUSD } from "@/lib/keyboard-shipping";
+import { ReportListingButton } from "@/components/ui/ReportListingButton";
 
 interface Props {
   rows: GroupBuyWithPricing[];
@@ -178,6 +179,7 @@ export function KeyboardTable({ rows, currency, destRegion, countryCode, convert
               <th className="px-3 py-2.5 text-right">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Link</span>
               </th>
+              <th className="w-8" />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
@@ -272,6 +274,11 @@ export function KeyboardTable({ rows, currency, destRegion, countryCode, convert
                         Details
                       </Link>
                     )}
+                  </td>
+
+                  {/* Report */}
+                  <td className="pr-2 py-2.5">
+                    <ReportListingButton slug={row.slug} name={row.name} />
                   </td>
                 </tr>
               );
