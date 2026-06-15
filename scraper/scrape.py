@@ -1469,7 +1469,7 @@ def now_ms() -> float:
 # vendors via VendorKit. Admin-set layout/mount/material are never overwritten.
 # ----------------------------------------------------------------------------
 KEYBOARD_MIN_PRICE_USD = 300
-KEYBOARD_BLOCKED_BRANDS = ("keychron",)
+KEYBOARD_BLOCKED_BRANDS = ("keychron", "nicepbt")
 
 # (id, displayName, [collection products.json urls], currency, region)
 KEYBOARD_VENDORS = [
@@ -1507,6 +1507,9 @@ KEYBOARD_VENDORS = [
         "https://cannonkeys.com/collections/keyboard-extras/products.json",
         "https://cannonkeys.com/collections/coming-soon/products.json",
     ], "USD", "US"),
+    ("gn", "Geonworks", [
+        "https://geon.works/collections/groupbuys/products.json",
+    ], "USD", "Korea"),
 ]
 
 _KB_LAYOUTS = [
@@ -1676,12 +1679,17 @@ _DATE_PATTERNS: list[tuple] = [
     # "02/28/2024" (US format)
     (re.compile(rf"(0?[1-9]|1[0-2])/(0?[1-9]|[12]\d|3[01])/({_YEAR})"),
      lambda m: (m.group(3), m.group(1), m.group(2))),
+    # "August 2026" / "Aug 2026" — month + year only; treat as 1st of month
+    (re.compile(rf"({_MONTH_NAMES})\s+({_YEAR})", re.I),
+     lambda m: (m.group(2), m.group(1), "1")),
 ]
 
 _END_TRIGGERS = re.compile(
     r"(?:gb|group[\s\-]?buy|order(?:ing)?|pre[\s\-]?order)\s+(?:end[sd]?|clos(?:e[sd]?|ing)|deadline|until)"
     r"|end[sd]?\s+(?:date|on)|clos(?:e[sd]?\s+on|ing\s+(?:date|on))"
-    r"|deadline|order\s+(?:close[sd]?|window\s+close[sd]?)",
+    r"|deadline|order\s+(?:close[sd]?|window\s+close[sd]?)"
+    r"|estim(?:ated)?\s+(?:fulfillment|ship(?:ping)?|deliver(?:y|ies?)|dispatch)"
+    r"|fulfillment\s*(?:date|:)|ships?\s+(?:in|by|around|approx)|ship\s*date",
     re.I,
 )
 
@@ -1907,7 +1915,7 @@ def run_keyboards(conn, context: BrowserContext, deadline: float) -> dict:
 # Keycap profile keywords in thread titles → productType = "KEYCAPS"
 _GH_KEYCAP_PROFILE = re.compile(
     r"\b(GMK|SA|DCS|MTNU|KAT|MT3|CYL|XDA|MDA|DSA|DSS|KAM|OG|SP[-\s]?SA|"
-    r"Signature\s+Plastics|Cherry|PBT|Infinikey|Keyreative|Melgeek)\b",
+    r"Signature\s+Plastics|Cherry|PBT|NICEPBT|Infinikey|Keyreative|Melgeek)\b",
     re.I,
 )
 
