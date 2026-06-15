@@ -301,7 +301,8 @@ function regionLabel(region: string): string {
   const map: Record<string, string> = {
     US: "🇺🇸 US", CA: "🇨🇦 Canada", EU: "🇪🇺 Europe", UK: "🇬🇧 UK",
     AU: "🇦🇺 Australia", SG: "🇸🇬 Singapore", ASIA: "🌏 Asia",
-    CN: "🇨🇳 China", Global: "🌐 Global", GLOBAL: "🌐 Global",
+    CN: "🇨🇳 China", China: "🇨🇳 China", Korea: "🇰🇷 Korea",
+    Global: "🌐 Global", GLOBAL: "🌐 Global",
   };
   return map[region] ?? region;
 }

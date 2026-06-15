@@ -31,6 +31,7 @@ export interface GroupBuyWithKits {
   images: string[];
   description: string | null;
   featured: boolean;
+  updatedAt?: Date | string | null;
   // Keyboard fields (null/default on keycap sets).
   productType?: string;
   layout?: string | null;

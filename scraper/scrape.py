@@ -1643,6 +1643,88 @@ def kb_is_blocked(product: dict) -> bool:
     return any(b in text for b in KEYBOARD_BLOCKED_BRANDS)
 
 
+# ---------------------------------------------------------------------------
+# GB end-date extraction — parses common date formats from product descriptions
+# ---------------------------------------------------------------------------
+
+_MONTH_NAMES = (
+    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?"
+    r"|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+)
+_ORD = r"(?:st|nd|rd|th)?"
+_YEAR = r"20[2-9]\d"
+
+# Each tuple: (compiled regex, group-extraction lambda that returns (year, mon, day) strings)
+_DATE_PATTERNS: list[tuple] = [
+    # "February 28, 2024" / "Feb 28 2024" / "Feb 28th, 2024"
+    (re.compile(rf"({_MONTH_NAMES})\s+(\d{{1,2}}){_ORD}\s*,?\s*({_YEAR})", re.I),
+     lambda m: (m.group(3), m.group(1), m.group(2))),
+    # "28 February 2024" / "28th Feb 2024"
+    (re.compile(rf"(\d{{1,2}}){_ORD}\s+({_MONTH_NAMES})\s+({_YEAR})", re.I),
+     lambda m: (m.group(3), m.group(2), m.group(1))),
+    # "2024-02-28" or "2024/02/28"
+    (re.compile(rf"({_YEAR})[-/](0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])"),
+     lambda m: (m.group(1), m.group(2), m.group(3))),
+    # "02/28/2024" (US format)
+    (re.compile(rf"(0?[1-9]|1[0-2])/(0?[1-9]|[12]\d|3[01])/({_YEAR})"),
+     lambda m: (m.group(3), m.group(1), m.group(2))),
+]
+
+_END_TRIGGERS = re.compile(
+    r"(?:gb|group[\s\-]?buy|order(?:ing)?|pre[\s\-]?order)\s+(?:end[sd]?|clos(?:e[sd]?|ing)|deadline|until)"
+    r"|end[sd]?\s+(?:date|on)|clos(?:e[sd]?\s+on|ing\s+(?:date|on))"
+    r"|deadline|order\s+(?:close[sd]?|window\s+close[sd]?)",
+    re.I,
+)
+
+
+def _try_parse_date(year_s: str, mon_s: str, day_s: str):
+    """Try to build a date from the three string parts. month can be a name or number."""
+    for fmt in ("%Y %B %d", "%Y %b %d", "%Y %m %d"):
+        try:
+            return datetime.strptime(f"{year_s} {mon_s.strip().title()} {day_s.zfill(2)}", fmt).date()
+        except ValueError:
+            pass
+    return None
+
+
+def kb_extract_gb_end_date(product: dict):
+    """Return the GB end date parsed from body_html, or None."""
+    body_raw = product.get("body_html") or ""
+    body = re.sub(r"<[^>]+>", " ", body_raw)
+    text = re.sub(r"\s+", " ", body)
+
+    candidates = []
+
+    # Preferred: dates found near end/close trigger words
+    for tm in _END_TRIGGERS.finditer(text):
+        snippet = text[tm.start(): tm.start() + 250]
+        for rx, extractor in _DATE_PATTERNS:
+            m = rx.search(snippet)
+            if m:
+                d = _try_parse_date(*extractor(m))
+                if d:
+                    candidates.append((0, d))  # priority 0 = high confidence
+                    break
+
+    # Fallback: any recognisable date in the whole description
+    if not candidates:
+        for rx, extractor in _DATE_PATTERNS:
+            m = rx.search(text)
+            if m:
+                d = _try_parse_date(*extractor(m))
+                if d:
+                    candidates.append((1, d))
+                    break
+
+    if not candidates:
+        return None
+
+    # Return the highest-confidence soonest future date, else the nearest overall
+    candidates.sort(key=lambda x: (x[0], abs((x[1] - datetime.now(timezone.utc).date()).days)))
+    return candidates[0][1]
+
+
 def fetch_collection_products(page: Page, products_json_url: str,
                               deadline: float) -> list[dict]:
     """Navigate to the collection page (acquires cf_clearance) then fetch its
@@ -1700,6 +1782,12 @@ def upsert_keyboard(conn, vendor, product: dict, source_url: str) -> tuple:
     origin = urllib.parse.urlsplit(source_url)
     product_url = f"{origin.scheme}://{origin.netloc}/products/{handle}"
     title = product.get("title") or handle
+    gb_end_date = kb_extract_gb_end_date(product)
+    # Convert date → UTC midnight datetime for Postgres timestamptz
+    gb_end_ts = (
+        datetime.combine(gb_end_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+        if gb_end_date else None
+    )
 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute('SELECT id FROM "GroupBuy" WHERE slug = %s', (slug,))
@@ -1721,11 +1809,12 @@ def upsert_keyboard(conn, vendor, product: dict, source_url: str) -> tuple:
                     layout = COALESCE(layout, %s),
                     material = COALESCE(material, %s),
                     "mountingStyle" = COALESCE("mountingStyle", %s),
+                    "gbEnd" = COALESCE(%s, "gbEnd"),
                     "updatedAt" = now()
                 WHERE slug = %s
             """, (title, status, image_url, base_price, currency, product_url,
                   vname, region, specs["layout"], specs["material"],
-                  specs["mountingStyle"], slug))
+                  specs["mountingStyle"], gb_end_ts, slug))
         return existing["id"], False
 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -1735,17 +1824,17 @@ def upsert_keyboard(conn, vendor, product: dict, source_url: str) -> tuple:
                  "imageUrl", images, description, featured,
                  "basePrice", "priceCurrency", "productUrl", "vendorName",
                  "vendorRegion", layout, material, "mountingStyle",
-                 "createdAt", "updatedAt")
+                 "gbEnd", "createdAt", "updatedAt")
             VALUES
                 (gen_random_uuid()::text, %s, %s, '', %s, %s::"GBStatus",
                  'KEYBOARD', %s, %s, %s, false,
-                 %s, %s, %s, %s, %s, %s, %s, %s, now(), now())
+                 %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now())
             ON CONFLICT (slug) DO NOTHING
             RETURNING id
         """, (slug, title, vname, status, image_url, images,
               description or "", base_price, currency, product_url, vname,
               region, specs["layout"], specs["material"],
-              specs["mountingStyle"]))
+              specs["mountingStyle"], gb_end_ts))
         row = cur.fetchone()
     return (row["id"] if row else None), True
 

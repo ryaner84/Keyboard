@@ -5,26 +5,31 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { KeyboardFilters } from "@/components/keyboards/KeyboardFilters";
 import { KeyboardStatCards } from "@/components/keyboards/KeyboardStatCards";
 import { KeyboardTable } from "@/components/keyboards/KeyboardTable";
-import { ContributeModal, ContributeRibbon, ContributeFab } from "@/components/keyboards/ContributeButton";
 import { useLocation } from "@/context/LocationContext";
 import { useCurrency } from "@/hooks/useCurrency";
 import type { GroupBuyWithPricing, GBStatus } from "@/types";
 
 const DAY = 24 * 60 * 60 * 1000;
-// "Joinable" = can order right now: open GB or in-stock extra drop.
 const JOINABLE_STATUSES: GBStatus[] = ["ACTIVE_GB", "IN_STOCK"];
 
-export default function KeyboardsContent() {
+interface Props {
+  defaultStatuses?: GBStatus[];
+  sectionTitle?: string;
+  sectionDescription?: string;
+}
+
+export default function KeyboardsContent({
+  defaultStatuses,
+  sectionTitle = "Keyboard Group Buy Dashboard",
+  sectionDescription,
+}: Props) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { region, currency, countryCode } = useLocation();
   const { convert, format } = useCurrency(currency);
 
-  // We fetch ALL keyboards once and do filtering client-side so the KPI stat
-  // cards always reflect the full picture (not the currently-filtered subset).
   const [all, setAll] = useState<GroupBuyWithPricing[]>([]);
   const [loading, setLoading] = useState(true);
-  const [contributeOpen, setContributeOpen] = useState(false);
 
   const search = searchParams.get("search") ?? "";
   const sortBy = searchParams.get("sort") ?? "date-desc";
@@ -34,13 +39,13 @@ export default function KeyboardsContent() {
   const brands = searchParams.getAll("brand");
   const rawStatuses = searchParams.getAll("status") as GBStatus[];
 
-  // Effective stage filter. Empty = all stages.
   const statuses: GBStatus[] = useMemo(() => {
     if (joinableOnly) return JOINABLE_STATUSES;
-    if (rawStatuses.includes("all" as GBStatus)) return [];
-    return rawStatuses;
+    if (rawStatuses.includes("all" as GBStatus)) return defaultStatuses ?? [];
+    if (rawStatuses.length > 0) return rawStatuses;
+    return defaultStatuses ?? [];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams.toString(), joinableOnly]);
+  }, [searchParams.toString(), joinableOnly, defaultStatuses?.join(",")]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -59,9 +64,14 @@ export default function KeyboardsContent() {
     fetchAll();
   }, [fetchAll]);
 
-  // ── Client-side filtering ──────────────────────────────────────────────────
+  // Filter to section scope first, then apply user-chosen sub-filters
+  const sectionItems = useMemo(() => {
+    if (!defaultStatuses) return all;
+    return all.filter((k) => defaultStatuses.includes(k.status));
+  }, [all, defaultStatuses]);
+
   const filtered = useMemo(() => {
-    return all.filter((k) => {
+    return sectionItems.filter((k) => {
       if (statuses.length > 0 && !statuses.includes(k.status)) return false;
       if (closingSoon) {
         if (k.status !== "ACTIVE_GB" || !k.gbEnd) return false;
@@ -80,9 +90,8 @@ export default function KeyboardsContent() {
       }
       return true;
     });
-  }, [all, statuses, closingSoon, layouts, brands, search]);
+  }, [sectionItems, statuses, closingSoon, layouts, brands, search]);
 
-  // ── URL param helpers ──────────────────────────────────────────────────────
   const updateParams = useCallback(
     (updates: Record<string, string | string[]>) => {
       const params = new URLSearchParams(searchParams.toString());
@@ -91,7 +100,7 @@ export default function KeyboardsContent() {
         if (Array.isArray(value)) value.forEach((v) => params.append(key, v));
         else if (value) params.set(key, value);
       }
-      router.replace(`/keyboards?${params.toString()}`);
+      router.replace(`?${params.toString()}`);
     },
     [searchParams, router]
   );
@@ -139,13 +148,17 @@ export default function KeyboardsContent() {
             </span>
           )}
         </div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Keyboard Group Buy Dashboard</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{sectionTitle}</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          {loading ? "Loading..." : `Tracking ${all.length} keyboards · ${filtered.length} shown · prices in ${currency} incl. est. shipping to ${countryCode}`}
+          {loading
+            ? "Loading..."
+            : sectionDescription
+              ? sectionDescription
+              : `Tracking ${sectionItems.length} keyboards · ${filtered.length} shown · prices in ${currency} incl. est. shipping to ${countryCode}`}
         </p>
       </div>
 
-      {/* KPI stat cards (always reflect the full dataset) */}
+      {/* KPI stat cards */}
       {!loading && all.length > 0 && (
         <KeyboardStatCards
           all={all}
@@ -158,11 +171,6 @@ export default function KeyboardsContent() {
           onSelectClosingSoon={() => updateParams({ closing: "1", status: [], joinable: "" })}
         />
       )}
-
-      {/* Community contribution ribbon */}
-      <div className="mb-5">
-        <ContributeRibbon onClick={() => setContributeOpen(true)} />
-      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-6">
         <aside>
@@ -221,10 +229,6 @@ export default function KeyboardsContent() {
           )}
         </div>
       </div>
-
-      {/* Floating community contribution button (mobile) + shared modal */}
-      <ContributeFab onClick={() => setContributeOpen(true)} />
-      <ContributeModal isOpen={contributeOpen} onClose={() => setContributeOpen(false)} />
     </div>
   );
 }
