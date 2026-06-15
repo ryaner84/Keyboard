@@ -5,19 +5,30 @@ over Remote Desktop). It uses a **real Chromium browser** to read data that Verc
 can't fetch because of bot protection:
 
 - **gmk.net** → per‑kit render images (the set image carousel)
-- **vendor Shopify stores** → live prices
+- **vendor Shopify stores** → live keycap prices
+- **zFrontier** → active GMK group buys in the Asia community
+- **keyboard vendor stores** → keyboard group buys (NovelKeys, CannonKeys,
+  KBDfans, MatrixLab, Prototypist, KLC, Ktechs, Pantheon, ClickClack, iLumKB)
 
 It writes straight into the **same Supabase database** the website reads, so updates
 appear on the live site with no deploy. The website reads pages dynamically, so a
 scraped price/image shows on the next page load.
 
-It never overwrites a price you set manually in the admin panel (`priceSource = 'MANUAL'`).
+It never overwrites a price you set manually in the admin panel
+(`priceSource = 'MANUAL'`), nor a keyboard's admin‑set layout / mount / material.
+
+> **Keyboards run here, not on Vercel.** The Vercel `/api/cron/keyboards` job
+> returned 0 because serverless IPs are blocked by the stores and the build
+> couldn't migrate the database. Keyboards change infrequently, so the nightly
+> browser run on the WorkSpace covers them reliably. That cron is now unscheduled.
 
 ---
 
 ## What runs
 
-- `scrape.py` — the scraper (Playwright + direct Postgres writes).
+- `scrape.py` — the scraper (Playwright + direct Postgres writes). Runs five
+  passes each night: **GMK catalog** → **zFrontier** → **keyboards** →
+  **images** → **prices**, sharing a 30‑minute time budget.
 - `schedule_time.py` — prints the PC‑local time equal to **00:00 GMT+8**.
 - `run-scraper.bat` — **the file you double‑click.** Each run it: `git pull`s the
   latest `scrape.py`, ensures Python + Playwright are installed, asks for the DB
@@ -77,21 +88,40 @@ Just edit `scraper/scrape.py` in GitHub (or locally and push). The nightly
 `run-scraper.bat` does `git pull` before every run, so the next run uses your
 latest code — nothing to re‑install on the WorkSpace.
 
+**To add a keyboard vendor**, append a tuple to `KEYBOARD_VENDORS` in
+`scrape.py`:
+
+```python
+("id", "Display Name",
+ ["https://store.com/collections/group-buy/products.json"],  # one or more
+ "USD", "US"),   # currency, region
+```
+
+The collection's URL slug sets the default stage (`group-buy`/`ongoing-gb` →
+Active, `extra-drop`/`extras` → Extra Drop, `pre-order`/`coming-soon` →
+Pre‑order). Anything under **$300** or any **Keychron** product is dropped.
+
 ---
 
 ## Checking it worked
 
 - Console output and `scraper\logs\scrape_<date>.log` show counts like
-  `Images -> attempted=… enriched=…` and `Prices -> attempted=… updated=…`.
+  `Images -> attempted=… enriched=…`, `Prices -> attempted=… updated=…`, and
+  `Keyboards -> fetched=… created=… updated=… failed=…`.
 - In Supabase SQL editor:
   ```sql
   select slug, array_length(images,1) from "GroupBuy" where slug='gmk-masterpiece-r2';
   select "productUrl","price","priceSource","priceUpdatedAt"
     from "VendorKit" where "priceSource"='SCRAPED'
     order by "priceUpdatedAt" desc limit 10;
+  -- keyboards scraped this run:
+  select slug,"vendorName",status,"basePrice","priceCurrency"
+    from "GroupBuy" where "productType"='KEYBOARD'
+    order by "updatedAt" desc limit 20;
   ```
 - On the live site, open a scraped set: the carousel shows multiple renders and
-  vendor rows show real prices.
+  vendor rows show real prices. The **`/keyboards`** dashboard lists the scraped
+  boards with price + stage.
 
 ---
 
