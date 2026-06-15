@@ -1,41 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import Link from "next/link";
-import Image from "next/image";
 import { useSearchParams, useRouter } from "next/navigation";
-import { normalizeImageUrl } from "@/lib/utils";
 import { useLocation } from "@/context/LocationContext";
+import { KeyboardCard } from "@/components/keyboards/KeyboardCard";
 import type { GroupBuyWithPricing } from "@/types";
-
-const STAGE_META: Record<string, { label: string; cls: string; dot: string }> = {
-  SHIPPING: { label: "Shipping", cls: "text-purple-700 bg-purple-50 border-purple-200 dark:text-purple-300 dark:bg-purple-950 dark:border-purple-800", dot: "bg-purple-500" },
-  DELIVERED: { label: "Delivered", cls: "text-gray-600 bg-gray-50 border-gray-200 dark:text-gray-400 dark:bg-gray-800 dark:border-gray-700", dot: "bg-gray-400" },
-};
-
-const REGION_FLAG: Record<string, string> = {
-  US: "🇺🇸", CA: "🇨🇦", EU: "🇪🇺", UK: "🇬🇧",
-  AU: "🇦🇺", SG: "🇸🇬", ASIA: "🌏",
-  CN: "🇨🇳", China: "🇨🇳", Korea: "🇰🇷",
-  Global: "🌐", GLOBAL: "🌐",
-};
-
-function timeAgo(date: string | Date): string {
-  const ms = Date.now() - new Date(date).getTime();
-  const days = Math.floor(ms / (1000 * 60 * 60 * 24));
-  if (days === 0) return "Today";
-  if (days === 1) return "Yesterday";
-  if (days < 30) return `${days} days ago`;
-  const months = Math.floor(days / 30);
-  if (months === 1) return "1 month ago";
-  if (months < 12) return `${months} months ago`;
-  return `${Math.floor(months / 12)}y ago`;
-}
-
-function truncate(text: string, maxLen = 150): string {
-  if (!text || text.length <= maxLen) return text ?? "";
-  return text.slice(0, maxLen).replace(/\s\S*$/, "") + "…";
-}
 
 const BRANDS = [
   "TGR", "Keycult", "Matrix", "Mode", "Geonworks",
@@ -174,61 +143,9 @@ export function KeyboardPastContent() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {filtered.map((k) => {
-            const meta = STAGE_META[k.status] ?? STAGE_META.DELIVERED;
-            const img = normalizeImageUrl(k.imageUrl);
-            const flag = REGION_FLAG[k.vendorRegion ?? ""] ?? "";
-            const desc = truncate(k.description ?? "");
-
-            return (
-              <Link
-                key={k.id}
-                href={`/sets/${k.slug}?country=${countryCode}`}
-                className="group bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden hover:border-violet-300 dark:hover:border-violet-700 hover:shadow-md transition-all"
-              >
-                {/* Image */}
-                <div className="relative aspect-[4/3] bg-gray-100 dark:bg-gray-800 overflow-hidden">
-                  {img ? (
-                    <Image src={img} alt={k.name} fill className="object-cover group-hover:scale-105 transition-transform duration-300" unoptimized />
-                  ) : (
-                    <span className="absolute inset-0 flex items-center justify-center text-4xl text-gray-300">⌨</span>
-                  )}
-                </div>
-
-                {/* Content */}
-                <div className="p-3">
-                  <div className="flex items-start justify-between gap-2 mb-1.5">
-                    <h3 className="font-semibold text-gray-900 dark:text-white text-sm leading-snug group-hover:text-violet-600 dark:group-hover:text-violet-400 line-clamp-2">
-                      {k.name}
-                    </h3>
-                    <span className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold border px-1.5 py-0.5 rounded-full ${meta.cls}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
-                      {meta.label}
-                    </span>
-                  </div>
-
-                  {/* Vendor + region */}
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-2">
-                    {flag} {k.vendorName ?? k.designer}
-                  </p>
-
-                  {/* Description */}
-                  {desc && (
-                    <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed line-clamp-3 mb-2">
-                      {desc}
-                    </p>
-                  )}
-
-                  {/* Update date */}
-                  {k.updatedAt && (
-                    <p className="text-[10px] text-gray-400 dark:text-gray-500">
-                      Updated {timeAgo(k.updatedAt)}
-                    </p>
-                  )}
-                </div>
-              </Link>
-            );
-          })}
+          {filtered.map((k) => (
+            <KeyboardCard key={k.id} kb={k} countryCode={countryCode} />
+          ))}
         </div>
       )}
     </div>

@@ -10,11 +10,21 @@ import type { GroupBuyWithKits } from "@/types";
 
 interface UpcomingCarouselProps {
   sets: GroupBuyWithKits[];
+  // Right-rail heading + the "view all / show more" link target. Defaults to the
+  // keycap group-buy copy; the keyboard carousels override these.
+  railTitle?: string;
+  viewAllHref?: string;
+  moreLabel?: string;
 }
 
 const AUTO_ADVANCE_MS = 6000;
 
-export function UpcomingCarousel({ sets }: UpcomingCarouselProps) {
+export function UpcomingCarousel({
+  sets,
+  railTitle = "Upcoming Group Buys",
+  viewAllHref = "/browse",
+  moreLabel = "Show more group buys",
+}: UpcomingCarouselProps) {
   const { countryCode } = useLocation();
   const [active, setActive] = useState(0);
 
@@ -139,8 +149,8 @@ export function UpcomingCarousel({ sets }: UpcomingCarouselProps) {
           {/* Right rail — upcoming list */}
           <div className="hidden lg:flex flex-col">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold text-gray-700">Upcoming Group Buys</h3>
-              <Link href="/browse" className="text-xs text-indigo-600 hover:text-indigo-700">
+              <h3 className="text-sm font-semibold text-gray-700">{railTitle}</h3>
+              <Link href={viewAllHref} className="text-xs text-indigo-600 hover:text-indigo-700">
                 View all →
               </Link>
             </div>
@@ -174,10 +184,10 @@ export function UpcomingCarousel({ sets }: UpcomingCarouselProps) {
               })}
             </div>
             <Link
-              href="/browse"
+              href={viewAllHref}
               className="mt-2 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-dashed border-gray-200 text-sm font-medium text-gray-500 hover:border-indigo-300 hover:text-indigo-600 transition-colors"
             >
-              Show more group buys
+              {moreLabel}
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
@@ -188,10 +198,10 @@ export function UpcomingCarousel({ sets }: UpcomingCarouselProps) {
         {/* Mobile "show more" (right rail is hidden on small screens) */}
         <div className="lg:hidden mt-3">
           <Link
-            href="/browse"
+            href={viewAllHref}
             className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-dashed border-gray-200 text-sm font-medium text-gray-500 hover:border-indigo-300 hover:text-indigo-600 transition-colors"
           >
-            Show more group buys
+            {moreLabel}
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>

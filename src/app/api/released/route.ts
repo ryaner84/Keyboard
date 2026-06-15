@@ -65,6 +65,11 @@ export async function GET(req: NextRequest) {
   const sortBy = searchParams.get("sort") ?? "released-desc";
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
   const limit = Math.min(48, Math.max(1, parseInt(searchParams.get("limit") ?? "24")));
+  // Released sets split into two categories. Keycaps keep the multi-vendor
+  // price-compare experience; keyboards are single-vendor (price on the row),
+  // so the available/savings/deals machinery is skipped for them.
+  const productType = searchParams.get("type") === "KEYBOARD" ? "KEYBOARD" : "KEYCAPS";
+  const isKeyboard = productType === "KEYBOARD";
 
   let yearFilter: Record<string, unknown> = {};
   if (/^\d{4}$/.test(year)) {
@@ -76,14 +81,19 @@ export async function GET(req: NextRequest) {
     };
   }
 
-  const priceSort = sortBy === "price-asc";
-  // Savings sort = widest gap between the cheapest and priciest vendor, in %.
-  // Needs 2+ priced vendors per set, so it implies the available filter.
-  const savingsSort = sortBy === "savings-desc";
-  const effectiveAvailability = priceSort || savingsSort ? "available" : availability;
+  // The price/savings sorts and availability filter are keycap-only (they read
+  // multi-vendor VendorKit prices). Keyboards ignore them entirely.
+  const priceSort = !isKeyboard && sortBy === "price-asc";
+  const savingsSort = !isKeyboard && sortBy === "savings-desc";
+  const effectiveAvailability = isKeyboard
+    ? ""
+    : priceSort || savingsSort
+      ? "available"
+      : availability;
 
   const where = {
     status: { in: [...RELEASED_STATUSES] },
+    productType,
     ...yearFilter,
     ...(effectiveAvailability === "available" && AVAILABLE_FILTER),
     ...(effectiveAvailability === "soldout" && { NOT: AVAILABLE_FILTER }),
@@ -114,7 +124,7 @@ export async function GET(req: NextRequest) {
         ? { gbEnd: { sort: "asc" as const, nulls: "last" as const } }
         : { gbEnd: { sort: "desc" as const, nulls: "last" as const } };
 
-  const releasedWhere = { status: { in: [...RELEASED_STATUSES] } };
+  const releasedWhere = { status: { in: [...RELEASED_STATUSES] }, productType };
 
   const needRates = priceSort || savingsSort || page === 1;
   const usdRates: Record<string, number> = {};
@@ -172,9 +182,15 @@ export async function GET(req: NextRequest) {
     ]);
   }
 
-  const [totalReleased, totalAvailable] = await Promise.all([
+  // Per-category released counts power the Keycaps / Keyboards tab badges.
+  const baseReleased = { status: { in: [...RELEASED_STATUSES] } };
+  const [totalReleased, totalAvailable, countKeycaps, countKeyboards] = await Promise.all([
     prisma.groupBuy.count({ where: releasedWhere }),
-    prisma.groupBuy.count({ where: { ...releasedWhere, ...AVAILABLE_FILTER } }),
+    isKeyboard
+      ? Promise.resolve(0)
+      : prisma.groupBuy.count({ where: { ...releasedWhere, ...AVAILABLE_FILTER } }),
+    prisma.groupBuy.count({ where: { ...baseReleased, productType: "KEYCAPS" } }),
+    prisma.groupBuy.count({ where: { ...baseReleased, productType: "KEYBOARD" } }),
   ]);
 
   // Top designers for the filter dropdown — only returned on page 1 with no
@@ -209,9 +225,9 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // "Biggest savings" deals rail
+  // "Biggest savings" deals rail (keycap-only — needs multi-vendor pricing)
   let deals: unknown[] = [];
-  if (page === 1 && !search && !year && !designer && !vendor && availability !== "soldout") {
+  if (!isKeyboard && page === 1 && !search && !year && !designer && !vendor && availability !== "soldout") {
     const available = await prisma.groupBuy.findMany({
       where: { ...releasedWhere, ...AVAILABLE_FILTER },
       include: PRICING_INCLUDE,
@@ -236,5 +252,5 @@ export async function GET(req: NextRequest) {
       .map((r) => r.set);
   }
 
-  return NextResponse.json({ data, total, page, limit, totalReleased, totalAvailable, deals, topDesigners, topVendors });
+  return NextResponse.json({ data, total, page, limit, totalReleased, totalAvailable, countKeycaps, countKeyboards, deals, topDesigners, topVendors });
 }

@@ -73,10 +73,38 @@ async function getNewGroupBuys(): Promise<GroupBuyWithPricing[]> {
 async function getUpcomingSets(): Promise<GroupBuyWithKits[]> {
   try {
     return (await prisma.groupBuy.findMany({
-      where: { status: { in: ["ACTIVE_GB", "INTEREST_CHECK"] } },
+      where: { productType: "KEYCAPS", status: { in: ["ACTIVE_GB", "INTEREST_CHECK"] } },
       include: { kits: { select: { id: true, name: true, type: true } } },
       orderBy: [{ featured: "desc" }, { status: "asc" }, { gbEnd: "asc" }],
       take: 5,
+    })) as GroupBuyWithKits[];
+  } catch {
+    return [];
+  }
+}
+
+// Keyboards run their group buys single-vendor (price on the row), so the home
+// carousel shows them in the simpler upcoming-style layout for both tabs.
+async function getKeyboardGBs(): Promise<GroupBuyWithKits[]> {
+  try {
+    return (await prisma.groupBuy.findMany({
+      where: { productType: "KEYBOARD", status: { in: ["ACTIVE_GB", "IN_STOCK"] } },
+      include: { kits: { select: { id: true, name: true, type: true } } },
+      orderBy: [{ featured: "desc" }, { gbEnd: { sort: "asc", nulls: "last" } }],
+      take: 6,
+    })) as GroupBuyWithKits[];
+  } catch {
+    return [];
+  }
+}
+
+async function getKeyboardReleased(): Promise<GroupBuyWithKits[]> {
+  try {
+    return (await prisma.groupBuy.findMany({
+      where: { productType: "KEYBOARD", status: { in: ["SHIPPING", "DELIVERED"] } },
+      include: { kits: { select: { id: true, name: true, type: true } } },
+      orderBy: { updatedAt: "desc" },
+      take: 6,
     })) as GroupBuyWithKits[];
   } catch {
     return [];
@@ -210,7 +238,7 @@ async function getReleasedForCarousel(): Promise<GroupBuyWithPricing[]> {
 }
 
 export default async function HomePage() {
-  const [featured, stats, upcoming, finishingSoon, newGBs, released, bestDeals] = await Promise.all([
+  const [featured, stats, upcoming, finishingSoon, newGBs, released, bestDeals, kbUpcoming, kbReleased] = await Promise.all([
     getFeaturedSets(),
     getStats(),
     getUpcomingSets(),
@@ -218,12 +246,14 @@ export default async function HomePage() {
     getNewGroupBuys(),
     getReleasedForCarousel(),
     getBestReleasedDeals(),
+    getKeyboardGBs(),
+    getKeyboardReleased(),
   ]);
 
   return (
     <div>
-      {/* Hero carousel — tab between live group buys and released deals */}
-      <HomeCarousel upcoming={upcoming} released={released} />
+      {/* Hero carousel — Keycaps / Keyboards, each with Group Buys / Released */}
+      <HomeCarousel upcoming={upcoming} released={released} kbUpcoming={kbUpcoming} kbReleased={kbReleased} />
 
       {/* Hero */}
       <section className="bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800">
