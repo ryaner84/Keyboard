@@ -16,8 +16,13 @@ so updates appear live with no deploy:
     for BASE kits only — the price stored is the BASE kit variant (never the
     cheapest add-on), bounded to a plausible range (30–500 in western
     currencies)
+  - GroupBuy(productType='KEYBOARD') rows for keyboard group buys scraped from
+    vendor Shopify collections (NovelKeys, CannonKeys, KBDfans, MatrixLab, …).
+    This pass replaced the Vercel /api/cron/keyboards job, which returned 0
+    because serverless IPs are blocked and the build couldn't migrate the DB.
 
-It NEVER overwrites a price whose priceSource = 'MANUAL'.
+It NEVER overwrites a price whose priceSource = 'MANUAL', nor an admin-set
+keyboard layout / mount / material.
 
 Run via scraper/run-scraper.bat (which git-pulls the latest copy first).
 """
@@ -1443,6 +1448,358 @@ def now_ms() -> float:
 
 
 # ----------------------------------------------------------------------------
+# Keyboard group buys
+#
+# Moved off the Vercel cron: serverless fetches returned 0 because the stores'
+# Cloudflare / datacenter-IP rules block them, and even when they fetched, the
+# build-time migration couldn't reach the DB so the columns were missing. A
+# REAL browser on the WorkSpace beats both. Keyboards change infrequently, so a
+# nightly pass here is plenty — no need for a separate serverless schedule.
+#
+# Each product becomes a GroupBuy with productType='KEYBOARD'. The price lives
+# directly on the row (single-vendor), unlike keycaps which fan out to many
+# vendors via VendorKit. Admin-set layout/mount/material are never overwritten.
+# ----------------------------------------------------------------------------
+KEYBOARD_MIN_PRICE_USD = 300
+KEYBOARD_BLOCKED_BRANDS = ("keychron",)
+
+# (id, displayName, [collection products.json urls], currency, region)
+KEYBOARD_VENDORS = [
+    ("nk", "NovelKeys",
+     ["https://novelkeys.com/collections/keyboards/products.json"], "USD", "US"),
+    ("ml", "MatrixLab",
+     ["https://www.matrixlab.store/collections/group-buy/products.json"], "USD", "Global"),
+    ("pt", "Prototypist", [
+        "https://prototypist.net/collections/live-group-buys/products.json",
+        "https://prototypist.net/collections/pre-orders/products.json",
+    ], "USD", "US"),
+    ("klc", "KLC Playground", [
+        "https://klc-playground.com/collections/extra-drop-from-group-buy/products.json",
+        "https://klc-playground.com/collections/on-going-gb/products.json",
+    ], "SGD", "SG"),
+    ("kt", "Ktechs", [
+        "https://ktechs.store/collections/group-buy/products.json",
+        "https://ktechs.store/collections/pre-order/products.json",
+    ], "USD", "US"),
+    ("pk", "Pantheon Keys",
+     ["https://pantheonkeys.com/collections/ongoing-group-buys/products.json"], "USD", "US"),
+    ("kbd", "KBDfans", [
+        "https://kbdfans.com/collections/group-buy-live/products.json",
+        "https://kbdfans.com/collections/group-buy-extra/products.json",
+        "https://kbdfans.com/collections/pre-order/products.json",
+    ], "USD", "Global"),
+    ("cc", "ClickClack",
+     ["https://clickclack.io/collections/groupbuy/products.json"], "SGD", "SG"),
+    ("ilu", "iLumKB", [
+        "https://ilumkb.com/collections/live/products.json",
+        "https://ilumkb.com/collections/pre-order-keycaps/products.json",
+    ], "SGD", "SG"),
+    ("ck", "CannonKeys", [
+        "https://cannonkeys.com/collections/keyboard-group-buys/products.json",
+        "https://cannonkeys.com/collections/keyboard-extras/products.json",
+        "https://cannonkeys.com/collections/coming-soon/products.json",
+    ], "USD", "US"),
+]
+
+_KB_LAYOUTS = [
+    (re.compile(r"\b(100%|full[\s-]?size|fullsize)\b", re.I), "Full-size"),
+    (re.compile(r"\b(tkl|80%|tenkeyless)\b", re.I), "TKL"),
+    (re.compile(r"\b75%\b", re.I), "75%"),
+    (re.compile(r"\b65%\b", re.I), "65%"),
+    (re.compile(r"\b60%\b", re.I), "60%"),
+    (re.compile(r"\b40%\b", re.I), "40%"),
+    (re.compile(r"\b(alice|arisu)\b", re.I), "Alice/Arisu"),
+    (re.compile(r"\bsplit\b", re.I), "Split"),
+    (re.compile(r"\b(numpad|num\s?pad)\b", re.I), "Numpad"),
+]
+_KB_MOUNTS = [
+    (re.compile(r"\bgasket\b", re.I), "Gasket"),
+    (re.compile(r"\btop[\s-]?mount\b", re.I), "Top Mount"),
+    (re.compile(r"\btray[\s-]?mount\b", re.I), "Tray Mount"),
+    (re.compile(r"\bleaf[\s-]?spring\b", re.I), "Leaf Spring"),
+    (re.compile(r"\bburger\b", re.I), "Burger"),
+    (re.compile(r"\bplateless\b", re.I), "Plateless"),
+]
+_KB_MATERIALS = [
+    (re.compile(r"\bpolycarbonate\b|\bpc\b", re.I), "Polycarbonate"),
+    (re.compile(r"\balumini?u?m\b|\balu\b", re.I), "Aluminum"),
+    (re.compile(r"\bacrylic\b", re.I), "Acrylic"),
+    (re.compile(r"\bbrass\b", re.I), "PC + Brass"),
+]
+
+
+def ensure_keyboard_columns(conn) -> None:
+    """Create keyboard columns if the build-time migration didn't (the Vercel
+    build often can't reach the DB). All idempotent."""
+    stmts = [
+        'ALTER TABLE "GroupBuy" ADD COLUMN IF NOT EXISTS "productType" text NOT NULL DEFAULT \'KEYCAPS\'',
+        'ALTER TABLE "GroupBuy" ADD COLUMN IF NOT EXISTS "layout" text',
+        'ALTER TABLE "GroupBuy" ADD COLUMN IF NOT EXISTS "material" text',
+        'ALTER TABLE "GroupBuy" ADD COLUMN IF NOT EXISTS "mountingStyle" text',
+        'ALTER TABLE "GroupBuy" ADD COLUMN IF NOT EXISTS "basePrice" double precision',
+        'ALTER TABLE "GroupBuy" ADD COLUMN IF NOT EXISTS "priceCurrency" text',
+        'ALTER TABLE "GroupBuy" ADD COLUMN IF NOT EXISTS "productUrl" text',
+        'ALTER TABLE "GroupBuy" ADD COLUMN IF NOT EXISTS "vendorName" text',
+        'ALTER TABLE "GroupBuy" ADD COLUMN IF NOT EXISTS "vendorRegion" text',
+    ]
+    with conn.cursor() as cur:
+        for s in stmts:
+            try:
+                cur.execute(s)
+            except Exception as e:
+                log(f"  keyboard column ensure skipped: {e}")
+    conn.commit()
+
+
+def _kb_detect(patterns, text: str):
+    for rx, val in patterns:
+        if rx.search(text):
+            return val
+    return None
+
+
+def _kb_tags(product: dict) -> list[str]:
+    """Public /products.json returns tags as a list; be tolerant of a string."""
+    t = product.get("tags")
+    if isinstance(t, list):
+        return [str(x).strip().lower() for x in t]
+    return [s.strip().lower() for s in str(t or "").split(",")]
+
+
+def kb_category_from_url(url: str):
+    if re.search(r"extra.?drop|extras", url, re.I):
+        return "extra-drop"
+    if re.search(r"on.?going", url, re.I):
+        return "ongoing-gb"
+    if re.search(r"pre.?order|coming.?soon", url, re.I):
+        return "pre-order"
+    if re.search(r"group.?buy|live.?gb", url, re.I):
+        return "group-buy"
+    return None
+
+
+def kb_detect_status(product: dict, category_hint) -> str:
+    tags = _kb_tags(product)
+    title = (product.get("title") or "").lower()
+    any_available = any(v.get("available") for v in (product.get("variants") or []))
+
+    if "interest-check" in tags or "ic" in tags or "interest check" in title:
+        return "INTEREST_CHECK"
+    if "shipping" in tags or "fulfillment" in tags or "shipping now" in title:
+        return "SHIPPING"
+    if "delivered" in tags or "complete" in tags or "fulfilled" in tags:
+        return "DELIVERED"
+
+    if category_hint == "extra-drop":
+        return "IN_STOCK" if any_available else "DELIVERED"
+    if category_hint in ("ongoing-gb", "group-buy"):
+        return "ACTIVE_GB" if any_available else "DELIVERED"
+    if category_hint == "pre-order":
+        return "ACTIVE_GB" if any_available else "INTEREST_CHECK"
+
+    return "ACTIVE_GB" if any_available else "DELIVERED"
+
+
+def kb_detect_specs(product: dict) -> dict:
+    body = re.sub(r"<[^>]+>", " ", product.get("body_html") or "")
+    tags_text = ", ".join(_kb_tags(product))
+    hay = " ".join([product.get("title") or "", tags_text, body])
+    return {
+        "layout": _kb_detect(_KB_LAYOUTS, hay),
+        "mountingStyle": _kb_detect(_KB_MOUNTS, hay),
+        "material": _kb_detect(_KB_MATERIALS, hay),
+    }
+
+
+def kb_variant_prices(product: dict) -> list[float]:
+    out = []
+    for v in (product.get("variants") or []):
+        try:
+            p = float(v.get("price"))
+            if p > 0:
+                out.append(p)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def kb_qualifies(product: dict) -> bool:
+    """A keyboard if ANY variant clears the floor — cheap add-on variants
+    (deposit, deskmat, extra PCB) must not drop the whole board."""
+    return any(p >= KEYBOARD_MIN_PRICE_USD for p in kb_variant_prices(product))
+
+
+def kb_base_price(product: dict):
+    prices = kb_variant_prices(product)
+    if not prices:
+        return None
+    real = [p for p in prices if p >= KEYBOARD_MIN_PRICE_USD]
+    return min(real) if real else min(prices)
+
+
+def kb_is_blocked(product: dict) -> bool:
+    text = (f"{product.get('title', '')} {product.get('tags', '')} "
+            f"{product.get('product_type', '')}").lower()
+    return any(b in text for b in KEYBOARD_BLOCKED_BRANDS)
+
+
+def fetch_collection_products(page: Page, products_json_url: str,
+                              deadline: float) -> list[dict]:
+    """Navigate to the collection page (acquires cf_clearance) then fetch its
+    paginated products.json from the page context so it carries the cookies."""
+    collection_page = products_json_url.replace("/products.json", "")
+    try:
+        page.goto(collection_page, wait_until="domcontentloaded",
+                  timeout=NAV_TIMEOUT_MS)
+    except Exception as e:
+        log(f"  collection nav failed ({collection_page}): {e}")
+
+    products: list[dict] = []
+    pg = 1
+    while pg <= 10:
+        if now_ms() > deadline:
+            break
+        url = f"{products_json_url}?limit=250&page={pg}"
+        data = page.evaluate(
+            """async (u) => {
+                try {
+                    const r = await fetch(u, { headers: { 'Accept': 'application/json' } });
+                    if (!r.ok) return null;
+                    return await r.json();
+                } catch (e) { return null; }
+            }""",
+            url,
+        )
+        if not data or "products" not in data:
+            break
+        batch = data.get("products") or []
+        products.extend(batch)
+        if len(batch) < 250:
+            break
+        pg += 1
+    return products
+
+
+def upsert_keyboard(conn, vendor, product: dict, source_url: str) -> tuple:
+    """Upsert one keyboard as a GroupBuy(productType='KEYBOARD')."""
+    vid, vname, _urls, currency, region = vendor
+    handle = product.get("handle") or ""
+    if not handle:
+        return None, False
+    slug = f"{vid}-{handle}"[:120]
+
+    category = kb_category_from_url(source_url)
+    status = kb_detect_status(product, category)
+    specs = kb_detect_specs(product)
+    images = [img.get("src") for img in (product.get("images") or [])
+              if img.get("src")][:8]
+    image_url = images[0] if images else None
+    base_price = kb_base_price(product)
+    body = re.sub(r"<[^>]+>", " ", product.get("body_html") or "")
+    description = re.sub(r"\s{2,}", " ", body).strip()[:1000]
+    origin = urllib.parse.urlsplit(source_url)
+    product_url = f"{origin.scheme}://{origin.netloc}/products/{handle}"
+    title = product.get("title") or handle
+
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute('SELECT id FROM "GroupBuy" WHERE slug = %s', (slug,))
+        existing = cur.fetchone()
+
+    if existing:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE "GroupBuy" SET
+                    name = %s,
+                    status = %s::"GBStatus",
+                    "productType" = 'KEYBOARD',
+                    "imageUrl" = COALESCE(%s, "imageUrl"),
+                    "basePrice" = %s,
+                    "priceCurrency" = %s,
+                    "productUrl" = %s,
+                    "vendorName" = %s,
+                    "vendorRegion" = %s,
+                    layout = COALESCE(layout, %s),
+                    material = COALESCE(material, %s),
+                    "mountingStyle" = COALESCE("mountingStyle", %s),
+                    "updatedAt" = now()
+                WHERE slug = %s
+            """, (title, status, image_url, base_price, currency, product_url,
+                  vname, region, specs["layout"], specs["material"],
+                  specs["mountingStyle"], slug))
+        return existing["id"], False
+
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("""
+            INSERT INTO "GroupBuy"
+                (id, slug, name, colorway, designer, status, "productType",
+                 "imageUrl", images, description, featured,
+                 "basePrice", "priceCurrency", "productUrl", "vendorName",
+                 "vendorRegion", layout, material, "mountingStyle",
+                 "createdAt", "updatedAt")
+            VALUES
+                (gen_random_uuid()::text, %s, %s, '', %s, %s::"GBStatus",
+                 'KEYBOARD', %s, %s, %s, false,
+                 %s, %s, %s, %s, %s, %s, %s, %s, now(), now())
+            ON CONFLICT (slug) DO NOTHING
+            RETURNING id
+        """, (slug, title, vname, status, image_url, images,
+              description or "", base_price, currency, product_url, vname,
+              region, specs["layout"], specs["material"],
+              specs["mountingStyle"]))
+        row = cur.fetchone()
+    return (row["id"] if row else None), True
+
+
+def run_keyboards(conn, context: BrowserContext, deadline: float) -> dict:
+    stats = {"fetched": 0, "created": 0, "updated": 0, "skipped": 0, "failed": 0}
+    log("Keyboard pass: scraping vendor stores (real browser) ...")
+    ensure_keyboard_columns(conn)
+    page = context.new_page()
+    try:
+        for vendor in KEYBOARD_VENDORS:
+            if now_ms() > deadline:
+                log("Keyboard pass: deadline reached — stopping.")
+                break
+            vid = vendor[0]
+            urls = vendor[2]
+
+            seen: dict = {}
+            collected: list[tuple] = []
+            for url in urls:
+                if now_ms() > deadline:
+                    break
+                for p in fetch_collection_products(page, url, deadline):
+                    pid = p.get("id")
+                    if pid not in seen:
+                        seen[pid] = url
+                        collected.append((p, url))
+
+            kept = [(p, src) for (p, src) in collected
+                    if not kb_is_blocked(p) and kb_qualifies(p)]
+            for p, src in kept:
+                try:
+                    _id, created = upsert_keyboard(conn, vendor, p, src)
+                    conn.commit()
+                    if created:
+                        stats["created"] += 1
+                    else:
+                        stats["updated"] += 1
+                    stats["fetched"] += 1
+                except Exception as e:
+                    conn.rollback()
+                    if stats["failed"] == 0:
+                        log(f"  {vid} first write error ({p.get('handle')}): {e}")
+                    stats["failed"] += 1
+            log(f"  {vid}: kept={len(kept)} of {len(collected)} "
+                f"(created so far={stats['created']} updated={stats['updated']})")
+    finally:
+        page.close()
+    log(f"Keyboard pass: fetched={stats['fetched']} created={stats['created']} "
+        f"updated={stats['updated']} failed={stats['failed']}")
+    return stats
+
+
+# ----------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------
 def main() -> int:
@@ -1471,6 +1828,7 @@ def main() -> int:
             # Catalog first so image + price passes have full set coverage
             catalog_stats = run_catalog(conn, context, deadline)
             zf_stats = run_zfrontier(conn, context, deadline)
+            kb_stats = run_keyboards(conn, context, deadline)
             img_stats = run_images(conn, context, deadline)
             price_stats = run_prices(conn, context, deadline)
         finally:
@@ -1483,6 +1841,8 @@ def main() -> int:
     log(f"zFrontier -> cards={zf_stats['cards']} created={zf_stats['created']} "
         f"updated={zf_stats['updated']} skipped={zf_stats['skipped']} "
         f"failed={zf_stats['failed']}")
+    log(f"Keyboards -> fetched={kb_stats['fetched']} created={kb_stats['created']} "
+        f"updated={kb_stats['updated']} failed={kb_stats['failed']}")
     log(f"Images  -> attempted={img_stats['attempted']} "
         f"enriched={img_stats['enriched']} failed={img_stats['failed']}")
     log(f"Prices  -> attempted={price_stats['attempted']} "

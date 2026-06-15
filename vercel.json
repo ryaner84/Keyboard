@@ -10,10 +10,6 @@
     {
       "path": "/api/cron/refresh",
       "schedule": "0 16 * * *"
-    },
-    {
-      "path": "/api/cron/keyboards",
-      "schedule": "0 10 * * *"
     }
   ]
 }
