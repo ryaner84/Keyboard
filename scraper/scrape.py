@@ -1504,7 +1504,7 @@ KEYBOARD_VENDORS = [
         "https://ktechs.store/collections/pre-order/products.json",
     ], "USD", "US"),
     ("pk", "Pantheon Keys",
-     ["https://pantheonkeys.com/collections/ongoing-group-buys/products.json"], "USD", "US"),
+     ["https://pantheonkeys.com/collections/ongoing-group-buys/products.json"], "SGD", "SG"),
     ("kbd", "KBDfans", [
         "https://kbdfans.com/collections/group-buy-live/products.json",
         "https://kbdfans.com/collections/group-buy-extra/products.json",
@@ -1662,6 +1662,11 @@ def kb_base_price(product: dict):
     return min(real) if real else min(prices)
 
 
+def kb_is_keycap(product: dict) -> bool:
+    """A keycap set that slipped into a keyboard vendor collection (GMK, CYL, SA…)."""
+    return bool(_KB_KEYCAP_PROFILE_RE.search(product.get("title", "")))
+
+
 def kb_is_blocked(product: dict) -> bool:
     title = product.get("title", "")
     text = (f"{title} {product.get('tags', '')} "
@@ -1669,7 +1674,7 @@ def kb_is_blocked(product: dict) -> bool:
     if any(b in text for b in KEYBOARD_BLOCKED_BRANDS):
         return True
     # Block keycap sets that appear in keyboard vendor collections (e.g. GMK CYL, SA, KAT…)
-    if _KB_KEYCAP_PROFILE_RE.search(title):
+    if kb_is_keycap(product):
         return True
     return False
 
@@ -1899,6 +1904,28 @@ def run_keyboards(conn, context: BrowserContext, deadline: float) -> dict:
                         seen[pid] = url
                         collected.append((p, url))
 
+            # Self-heal: keycap sets that were previously scraped as KEYBOARD rows
+            # (e.g. "GMK CYL Splash" from KBDfans) get reclassified to KEYCAPS so
+            # they drop off the keyboards page on the next run.
+            for p, _src in collected:
+                if kb_is_keycap(p):
+                    handle = p.get("handle") or ""
+                    if not handle:
+                        continue
+                    kc_slug = f"{vid}-{handle}"[:120]
+                    try:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                'UPDATE "GroupBuy" SET "productType" = %s, "updatedAt" = now() '
+                                'WHERE slug = %s AND "productType" = %s',
+                                ("KEYCAPS", kc_slug, "KEYBOARD"),
+                            )
+                            if cur.rowcount:
+                                stats["reclassified"] = stats.get("reclassified", 0) + 1
+                        conn.commit()
+                    except Exception:
+                        conn.rollback()
+
             kept = [(p, src) for (p, src) in collected
                     if not kb_is_blocked(p) and kb_qualifies(p)]
             for p, src in kept:
@@ -1920,7 +1947,8 @@ def run_keyboards(conn, context: BrowserContext, deadline: float) -> dict:
     finally:
         page.close()
     log(f"Keyboard pass: fetched={stats['fetched']} created={stats['created']} "
-        f"updated={stats['updated']} failed={stats['failed']}")
+        f"updated={stats['updated']} reclassified={stats.get('reclassified', 0)} "
+        f"failed={stats['failed']}")
     return stats
 
 
