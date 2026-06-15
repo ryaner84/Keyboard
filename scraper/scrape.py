@@ -1471,6 +1471,20 @@ def now_ms() -> float:
 KEYBOARD_MIN_PRICE_USD = 300
 KEYBOARD_BLOCKED_BRANDS = ("keychron", "nicepbt")
 
+# Keycap profile prefixes in a product title → it's a keycap set, not a keyboard
+_KB_KEYCAP_PROFILE_RE = re.compile(
+    r"^\s*(?:gmk|sa\b|dcs\b|mtnu|kat\b|mt3\b|cyl\b|xda\b|mda\b|dsa\b|dss\b|kam\b|"
+    r"nicepbt|infinikey|keyreative|melgeek|sp[-\s]?sa)",
+    re.I,
+)
+
+# Geekhack meta-threads to ignore (announcements, indexes, sticky posts)
+_GH_META_RE = re.compile(
+    r"^\*{2,}|list\s+of\s+(?:current|running|active)|"
+    r"\[index\]|\[master\s+list\]|(?:board|forum)\s+rules",
+    re.I,
+)
+
 # (id, displayName, [collection products.json urls], currency, region)
 KEYBOARD_VENDORS = [
     ("nk", "NovelKeys",
@@ -1649,9 +1663,15 @@ def kb_base_price(product: dict):
 
 
 def kb_is_blocked(product: dict) -> bool:
-    text = (f"{product.get('title', '')} {product.get('tags', '')} "
+    title = product.get("title", "")
+    text = (f"{title} {product.get('tags', '')} "
             f"{product.get('product_type', '')}").lower()
-    return any(b in text for b in KEYBOARD_BLOCKED_BRANDS)
+    if any(b in text for b in KEYBOARD_BLOCKED_BRANDS):
+        return True
+    # Block keycap sets that appear in keyboard vendor collections (e.g. GMK CYL, SA, KAT…)
+    if _KB_KEYCAP_PROFILE_RE.search(title):
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -2249,6 +2269,11 @@ def run_geekhack(conn, context: BrowserContext, deadline: float) -> dict:
 
             topic_id = str(thread.get("topic_id") or "")
             if not topic_id:
+                continue
+
+            thread_title = thread.get("title") or ""
+            if _GH_META_RE.search(thread_title):
+                stats["skipped_old"] += 1  # reuse counter; these are noise
                 continue
 
             last_post_dt: datetime | None = thread.get("last_post_dt")
