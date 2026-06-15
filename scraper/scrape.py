@@ -1468,7 +1468,7 @@ KEYBOARD_VENDORS = [
     ("nk", "NovelKeys",
      ["https://novelkeys.com/collections/keyboards/products.json"], "USD", "US"),
     ("ml", "MatrixLab",
-     ["https://www.matrixlab.store/collections/group-buy/products.json"], "USD", "Global"),
+     ["https://www.matrixlab.store/collections/group-buy/products.json"], "USD", "China"),
     ("pt", "Prototypist", [
         "https://prototypist.net/collections/live-group-buys/products.json",
         "https://prototypist.net/collections/pre-orders/products.json",
@@ -1476,7 +1476,7 @@ KEYBOARD_VENDORS = [
     ("klc", "KLC Playground", [
         "https://klc-playground.com/collections/extra-drop-from-group-buy/products.json",
         "https://klc-playground.com/collections/on-going-gb/products.json",
-    ], "SGD", "SG"),
+    ], "SGD", "Korea"),
     ("kt", "Ktechs", [
         "https://ktechs.store/collections/group-buy/products.json",
         "https://ktechs.store/collections/pre-order/products.json",
@@ -1487,7 +1487,7 @@ KEYBOARD_VENDORS = [
         "https://kbdfans.com/collections/group-buy-live/products.json",
         "https://kbdfans.com/collections/group-buy-extra/products.json",
         "https://kbdfans.com/collections/pre-order/products.json",
-    ], "USD", "Global"),
+    ], "USD", "China"),
     ("cc", "ClickClack",
      ["https://clickclack.io/collections/groupbuy/products.json"], "SGD", "SG"),
     ("ilu", "iLumKB", [

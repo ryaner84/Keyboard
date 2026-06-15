@@ -66,7 +66,7 @@ export const KEYBOARD_VENDORS: VendorConfig[] = [
     officialUpdatesUrl: "https://matrixlab.notion.site/?v=b2053c28d1614303a42a91b0a6762a5e",
     collectionUrl: "https://www.matrixlab.store/collections/group-buy/products.json",
     currency: "USD",
-    region: "Global",
+    region: "China",
   },
   {
     id: "pt",
@@ -90,7 +90,7 @@ export const KEYBOARD_VENDORS: VendorConfig[] = [
       "https://klc-playground.com/collections/on-going-gb/products.json",
     ],
     currency: "SGD",
-    region: "SG",
+    region: "Korea",
   },
   {
     id: "kt",
@@ -118,7 +118,7 @@ export const KEYBOARD_VENDORS: VendorConfig[] = [
       "https://kbdfans.com/collections/pre-order/products.json",
     ],
     currency: "USD",
-    region: "Global",
+    region: "China",
   },
   {
     id: "cc",
