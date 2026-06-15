@@ -58,6 +58,12 @@ const CURRENCY_HOME_COUNTRY: Record<string, string> = {
 const ADDON_VARIANT_RE =
   /(desk\s?mat|mouse\s?pad|wrist\s?rest|cable|artisan|sticker|sample|keychain|coin|tray|deposit|shipping|insurance|add[\s-]?on|extra)/i;
 
+// Standard child kits a GB sells ALONGSIDE the base kit — always cheaper than
+// the base, so one must never become the headline base price. Used only as a
+// fallback guard when no variant is explicitly classified BASE (e.g. Keygem
+// lists "Novelties" €38 and "International" €60 — the base is International).
+const CHILD_KIT_CATEGORIES = new Set(["NOVELTIES", "SPACEBARS", "ALPHA"]);
+
 // Per-currency plausibility bounds for a GMK BASE kit. New base kits run
 // roughly USD 90–180, but RELEASED sets are routinely cleared out at USD
 // 40–70 (NovelKeys/CannonKeys clearance sales), so the lower bound must
@@ -174,7 +180,16 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     const pinned = pinnedId ? variants.find((v) => v.id === pinnedId) : undefined;
     const nonAddon = variants.filter((v) => !ADDON_VARIANT_RE.test(v.title));
     const pool = nonAddon.length > 0 ? nonAddon : variants;
-    const chosen = pinned ?? pool.find((v) => classifyVariant(v.title) === "BASE") ?? pool[0];
+    // No variant explicitly named "Base"? Fall back to the first one that ISN'T
+    // a known child kit (Novelties / Spacebars / Alpha) rather than pool[0] —
+    // those add-on kits are always cheaper than the base and must never become
+    // the headline price (Keygem lists only "Novelties" €38 + "International"
+    // €60; pool[0] stored the €38 Novelties kit). A listing of ONLY child kits
+    // isn't a base listing at all — leave it unpriced instead of guessing.
+    const baseLike = pool.filter((v) => !CHILD_KIT_CATEGORIES.has(classifyVariant(v.title)));
+    const chosen =
+      pinned ?? pool.find((v) => classifyVariant(v.title) === "BASE") ?? baseLike[0];
+    if (!chosen) return null;
 
     // Refuse implausible kit prices rather than store garbage, and refuse
     // currencies the site can't convert.
@@ -220,6 +235,52 @@ async function fetchShopifyCurrency(productUrl: string): Promise<string | null> 
   return null;
 }
 
+// Lowercased, trailing-slash-stripped pathname of a URL (host-agnostic so
+// www/non-www and http/https compare equal). Empty string if unparseable.
+function pathname(u: string): string {
+  try {
+    return new URL(u).pathname.replace(/\/+$/, "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+// Every URL a JSON-LD Product node points at — its own url/@id plus any offer
+// urls (including an AggregateOffer's nested offers). Used to tell whether the
+// node describes the page we asked for or a cross-sell carousel entry.
+function ldNodeUrls(node: unknown): string[] {
+  const urls: string[] = [];
+  const push = (u: unknown) => {
+    if (typeof u === "string" && u) urls.push(u);
+  };
+  const n = node as Record<string, unknown>;
+  push(n.url);
+  push(n["@id"]);
+  const off = n.offers;
+  const offerArr = Array.isArray(off) ? off : off ? [off] : [];
+  for (const o of offerArr as Array<Record<string, unknown>>) {
+    push(o?.url);
+    const nested = Array.isArray(o?.offers) ? o.offers : o?.offers ? [o.offers] : [];
+    for (const x of nested as Array<Record<string, unknown>>) push(x?.url);
+  }
+  return urls;
+}
+
+// True if a Product node describes the requested page. A node that carries no
+// URL anywhere is assumed to be the main product (nothing to disprove it with);
+// a node whose URLs all point elsewhere is a cross-sell / related-products
+// entry and must be ignored.
+function ldNodeMatches(node: unknown, wantPath: string, wantSlug: string): boolean {
+  const urls = ldNodeUrls(node);
+  if (urls.length === 0) return true;
+  return urls.some((u) => {
+    const p = pathname(u);
+    if (!p) return false;
+    if (p === wantPath) return true;
+    return wantSlug.length > 2 && p.split("/").filter(Boolean).includes(wantSlug);
+  });
+}
+
 // Non-Shopify stores (custom platforms, WooCommerce, Magento, BigCommerce…)
 // don't expose a product JSON API, but virtually every e-commerce platform
 // embeds schema.org Product markup as JSON-LD for SEO — price + priceCurrency
@@ -231,6 +292,14 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
     const res = await fetchWithTimeout(productUrl);
     if (!res.ok) return null;
     const html = await res.text();
+
+    // The product we actually requested — used to reject cross-sell / "related
+    // products" carousels. Latamkeys (Tiendanube) embeds JSON-LD Product markup
+    // for ~8 OTHER products on every page; without this guard the scraper
+    // returned an unrelated product's price (Mictlan Rebirth's page stored the
+    // unrelated "SW Graphite" listing at 101,414 ARS).
+    const wantPath = pathname(productUrl);
+    const wantSlug = wantPath.split("/").filter(Boolean).pop() ?? "";
 
     const blocks = Array.from(
       html.matchAll(
@@ -248,14 +317,18 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
       type LdOffer = {
         "@type"?: string;
         name?: string;
+        url?: string;
         price?: string | number;
         lowPrice?: string | number;
+        highPrice?: string | number;
         priceCurrency?: string;
         offerCount?: string | number;
         offers?: LdOffer | LdOffer[];
       };
       type LdNode = {
         "@type"?: string | string[];
+        "@id"?: string;
+        url?: string;
         "@graph"?: LdNode[];
         offers?: LdOffer | LdOffer[];
       };
@@ -271,9 +344,14 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
         const isProduct = type === "Product" || (Array.isArray(type) && type.includes("Product"));
         if (!isProduct || !node.offers) continue;
 
+        // Ignore Product nodes that describe a different product than the page
+        // we requested (cross-sell carousels).
+        if (!ldNodeMatches(node, wantPath, wantSlug)) continue;
+
         // Flatten offers into a list. Shopware (GMK.net) emits an AggregateOffer
         // with nested individual offers (one per variant: "Base", "International",
-        // etc.); Shopify pages may emit a plain array or single Offer.
+        // etc.); Shopify pages may emit a plain array or single Offer; WooCommerce
+        // (STACKS) emits an array holding a single AggregateOffer summary.
         const rawOffers = node.offers;
         const offerList: LdOffer[] = Array.isArray(rawOffers)
           ? rawOffers
@@ -285,29 +363,34 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
         // keycap kit and International/regional variants as separate named
         // offers. The International variant may be in stock while Base is not,
         // but we always want the base keycap kit price regardless of stock.
-        // Multiple offers with no "Base"-named one (Shopware emits UNNAMED
-        // offer arrays) means we cannot tell the base kit from a spacebars/
-        // addon child kit — offers[0] is just the cheapest (how GMK.net base
-        // kits got stored as 49.82). Skip rather than guess.
+        // Multiple INDIVIDUAL offers with no "Base"-named one means we cannot
+        // tell the base kit from a spacebars/addon child kit — offers[0] is
+        // just the cheapest (how GMK.net base kits got stored as 49.82). Skip
+        // rather than guess. (Aggregate summaries are excluded from this count
+        // and handled separately below.)
         const namedBase = offerList.find((o) => /\bbase\b/i.test(String(o?.name ?? "")));
-        if (!namedBase && offerList.length > 1) continue;
+        const individualOffers = offerList.filter(
+          (o) => !/AggregateOffer/i.test(String(o?.["@type"] ?? ""))
+        );
+        if (!namedBase && individualOffers.length > 1) continue;
+
         const chosen: LdOffer | undefined =
           namedBase ??
+          individualOffers[0] ??
           offerList[0] ??
           (Array.isArray(rawOffers) ? rawOffers[0] : (rawOffers as LdOffer));
 
-        // A bare AggregateOffer covering several kits exposes only lowPrice —
-        // the CHEAPEST child kit (a spacebars/addon kit, not the base; this is
-        // how GMK.net base kits got stored as 49.82). Without named offers to
-        // pick from, the price is ambiguous — skip rather than store garbage.
-        const agg = !Array.isArray(rawOffers) ? (rawOffers as LdOffer) : null;
-        if (
-          offerList.length === 0 &&
-          agg &&
-          chosen?.price == null &&
-          Number(agg.offerCount ?? 1) > 1
-        ) {
-          continue;
+        // An AggregateOffer summarises several variants by price range only —
+        // we can't tell which is the base kit. If every variant shares one
+        // price (lowPrice === highPrice) it's unambiguous; otherwise skip
+        // rather than store the cheapest child kit. STACKS (WooCommerce) wraps
+        // its AggregateOffer in an array, which slipped past the old bare-object
+        // guard and stored ₹10,010 — a child kit — as the ₹13,999 base.
+        if (chosen && /AggregateOffer/i.test(String(chosen["@type"] ?? ""))) {
+          const low = Number(chosen.lowPrice);
+          const high = Number(chosen.highPrice ?? chosen.lowPrice);
+          const count = Number(chosen.offerCount ?? 0);
+          if (isNaN(low) || (low !== high && count > 1)) continue;
         }
 
         // Currency: from the chosen offer, then fall back to the parent

@@ -432,11 +432,20 @@ def is_plausible_base_price(price: float, currency: str | None) -> bool:
     return bounds[0] <= price <= bounds[1]
 
 
+# Standard child kits a GB sells ALONGSIDE the base kit — always cheaper than
+# the base, so one must never become the headline base price (mirrors
+# CHILD_KIT_CATEGORIES in prices.ts).
+_CHILD_KIT_CATEGORIES = {"NOVELTIES", "SPACEBARS", "ALPHA"}
+
+
 def choose_kit_variant(variants: list[dict]) -> dict | None:
     """Pick the variant that is actually the BASE kit, NOT the cheapest one.
-    Preference: BASE-classified variant > first non-add-on variant (Shopify
+    Preference: BASE-classified variant > first non-child-kit variant (Shopify
     returns variants in display order; single-kit listings have one 'Default
-    Title' variant)."""
+    Title' variant). A listing of ONLY child kits (Novelties/Spacebars/Alpha)
+    isn't a base listing — leave it unpriced rather than store an add-on price
+    (Keygem lists only 'Novelties' EUR 38 and 'International' EUR 60; returning
+    pool[0] stored the EUR 38 Novelties kit as the base)."""
     if not variants:
         return None
     non_addon = [v for v in variants if not _ADDON_VARIANT_RE.search(v["title"])]
@@ -444,7 +453,10 @@ def choose_kit_variant(variants: list[dict]) -> dict | None:
     for v in pool:
         if classify_variant(v["title"]) == "BASE":
             return v
-    return pool[0]
+    for v in pool:
+        if classify_variant(v["title"]) not in _CHILD_KIT_CATEGORIES:
+            return v
+    return None
 
 
 # Home country per currency — pins Shopify Markets' geo-localization to the
