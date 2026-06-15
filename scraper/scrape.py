@@ -34,6 +34,7 @@ import csv
 import getpass
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -55,10 +56,17 @@ LOCAL_CONFIG_PATH = HERE / "config.local.ini"
 CREDENTIALS_PATH = HERE / "credentials.csv"
 PROFILE_DIR = HERE / ".scraper-profile"
 LOG_DIR = HERE / "logs"
+GH_SEEN_PATH = HERE / "gh_seen.json"  # topic_id → last_post_at ISO — never committed
 
 # Time budget so a stuck run can't hang the machine forever (no serverless cap).
 SCRAPE_BUDGET_MS = 30 * 60 * 1000  # 30 minutes
 NAV_TIMEOUT_MS = 30_000
+
+# Geekhack board 70.0 — Group Buys (keycaps + keyboards)
+GEEKHACK_BOARD_URL = "https://geekhack.org/index.php?board=70.0"
+GEEKHACK_MIN_YEAR = 2026          # skip threads whose last post predates this year
+GEEKHACK_DELAY_MIN = 4.0          # seconds — random jitter between thread opens
+GEEKHACK_DELAY_MAX = 9.0
 
 SGT = timezone(timedelta(hours=8))  # Singapore — GMT+8, no DST
 
@@ -1889,6 +1897,445 @@ def run_keyboards(conn, context: BrowserContext, deadline: float) -> dict:
 
 
 # ----------------------------------------------------------------------------
+# Geekhack board 70.0 scraper
+# Reads the Group Buy listing, opens each thread that has a new last-post,
+# extracts the first post (OP), and upserts into GroupBuy.
+# Re-scrape guard: gh_seen.json tracks the last-post datetime we processed
+# per topic so unchanged threads are skipped without opening them.
+# ----------------------------------------------------------------------------
+
+# Keycap profile keywords in thread titles → productType = "KEYCAPS"
+_GH_KEYCAP_PROFILE = re.compile(
+    r"\b(GMK|SA|DCS|MTNU|KAT|MT3|CYL|XDA|MDA|DSA|DSS|KAM|OG|SP[-\s]?SA|"
+    r"Signature\s+Plastics|Cherry|PBT|Infinikey|Keyreative|Melgeek)\b",
+    re.I,
+)
+
+# SMF date: "Mon, 01 June 2026, 17:13:33"
+_GH_DATE_FMT = "%a, %d %B %Y, %H:%M:%S"
+# Short SMF date: "Today at 17:13:33" or "Yesterday at …" — handled separately
+_GH_DATE_SHORT = re.compile(r"(\d{1,2})\s+(\w+)\s+(\d{4}),?\s+(\d{2}:\d{2}:\d{2})", re.I)
+
+
+def _gh_load_seen() -> dict:
+    try:
+        if GH_SEEN_PATH.exists():
+            return json.loads(GH_SEEN_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _gh_save_seen(seen: dict) -> None:
+    try:
+        GH_SEEN_PATH.write_text(json.dumps(seen, indent=2), encoding="utf-8")
+    except Exception as e:
+        log(f"  gh_seen.json write failed: {e}")
+
+
+def _gh_parse_last_post(text: str) -> datetime | None:
+    """Parse SMF last-post date string into a datetime (UTC)."""
+    text = text.strip()
+    # Try "Mon, 01 June 2026, 17:13:33"
+    try:
+        return datetime.strptime(text, _GH_DATE_FMT).replace(tzinfo=timezone.utc)
+    except ValueError:
+        pass
+    # Try loose match: "01 June 2026, 17:13:33"
+    m = _GH_DATE_SHORT.search(text)
+    if m:
+        try:
+            return datetime.strptime(
+                f"{m.group(1)} {m.group(2)} {m.group(3)} {m.group(4)}",
+                "%d %B %Y %H:%M:%S",
+            ).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return None
+
+
+def _gh_slugify(title: str) -> str:
+    """Strip forum prefix/suffix noise then slugify a thread title."""
+    # Remove [GB], [IC], [closed], trailing ' | note' sections
+    t = re.sub(r"\[.*?\]", "", title)
+    t = re.sub(r"\|.*", "", t)
+    t = re.sub(r"\s*[-–]\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec).*", "", t, flags=re.I)
+    t = t.strip()
+    slug = re.sub(r"[^\w\s-]", "", t.lower())
+    slug = re.sub(r"\s+", "-", slug)
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    return slug[:120]
+
+
+def _gh_slug_variants(title: str) -> list[str]:
+    base = _gh_slugify(title)
+    variants = [base]
+    # Also try without "CYL " — KeycapLendar sometimes omits the CYL profile prefix
+    without_cyl = re.sub(r"\bcyl[-\s]+", "", base, flags=re.I).strip("-")
+    if without_cyl != base and without_cyl:
+        variants.append(without_cyl)
+    return variants
+
+
+def _gh_detect_product_type(title: str) -> str:
+    return "KEYCAPS" if _GH_KEYCAP_PROFILE.search(title) else "KEYBOARD"
+
+
+def _gh_status(title: str, gb_end_date) -> str:
+    """Determine GBStatus from thread title and extracted end date."""
+    from datetime import date as _date
+    t = title.lower()
+    if "[ic]" in t or "interest check" in t:
+        return "INTEREST_CHECK"
+    if "closed" in t or "fulfilled" in t or "delivered" in t:
+        # Could be SHIPPING if recent, DELIVERED if old
+        if gb_end_date and isinstance(gb_end_date, _date):
+            return "DELIVERED" if gb_end_date < _date.today() else "SHIPPING"
+        return "DELIVERED"
+    if "shipping" in t or "fulfillment" in t:
+        return "SHIPPING"
+    if gb_end_date and isinstance(gb_end_date, _date) and gb_end_date < _date.today():
+        return "SHIPPING"
+    return "ACTIVE_GB"
+
+
+def _gh_extract_images(html: str) -> list[str]:
+    """Pull external image URLs from first-post HTML. Skips forum smileys/avatars."""
+    imgs = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', html, re.I)
+    out = []
+    for src in imgs:
+        lsrc = src.lower()
+        # Skip SMF smileys, avatars, icons, tiny images
+        if any(x in lsrc for x in ("smiley", "emoji", "avatar", "icon", "thumb", "16x16", "32x32")):
+            continue
+        # Keep only https:// external images
+        if src.startswith("https://"):
+            out.append(src)
+    return out[:8]
+
+
+# JavaScript injected into the board listing page to extract thread rows
+_GH_BOARD_JS = """
+() => {
+    const rows = Array.from(document.querySelectorAll(
+        '#messageindex tbody tr, table.table_grid tbody tr'
+    ));
+    return rows.map(row => {
+        const subj = row.querySelector(
+            'td.subject a[href*="topic="], td[class*="subject"] a[href*="topic="]'
+        );
+        if (!subj) return null;
+        const href = subj.href;
+        const m = href.match(/topic=(\\d+)/);
+        const lastEl = row.querySelector(
+            'td.lastpost, td[class*="lastpost"]'
+        );
+        return {
+            topic_id: m ? m[1] : null,
+            title: subj.innerText.trim(),
+            url: href.replace(/;start=\\d+$/, '.0'),
+            last_post_text: lastEl ? lastEl.innerText.trim() : ''
+        };
+    }).filter(r => r && r.topic_id);
+}
+"""
+
+# JavaScript to extract first-post data from a topic page
+_GH_POST_JS = """
+() => {
+    // First post body — try multiple SMF selectors
+    const selectors = [
+        '#bodyarea .post .inner',
+        '.postarea .post',
+        '#forumposts div.post',
+        '.postbody',
+        '#msg_content',
+    ];
+    let el = null;
+    for (const sel of selectors) {
+        el = document.querySelector(sel);
+        if (el) break;
+    }
+    if (!el) {
+        // fallback: first .post div
+        el = document.querySelector('.post');
+    }
+    const html = el ? el.innerHTML : '';
+    const text = el ? el.innerText : '';
+    const imgs = el ? Array.from(el.querySelectorAll('img')).map(i => i.src) : [];
+    return { html, text, imgs };
+}
+"""
+
+
+def _fetch_gh_board_page(page, url: str) -> list[dict]:
+    """Navigate to one board listing page and return thread rows."""
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+        page.wait_for_timeout(2_000)  # let JS render
+    except Exception as e:
+        log(f"  gh board page nav failed ({url}): {e}")
+        return []
+    try:
+        rows = page.evaluate(_GH_BOARD_JS)
+        return rows if isinstance(rows, list) else []
+    except Exception as e:
+        log(f"  gh board page extract failed: {e}")
+        return []
+
+
+def _fetch_gh_first_post(page, topic_url: str) -> dict | None:
+    """Navigate to a topic and extract first-post content."""
+    try:
+        page.goto(topic_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+        page.wait_for_timeout(2_000)
+    except Exception as e:
+        log(f"  gh thread nav failed ({topic_url}): {e}")
+        return None
+    try:
+        data = page.evaluate(_GH_POST_JS)
+        if not data:
+            return None
+        return data
+    except Exception as e:
+        log(f"  gh thread extract failed: {e}")
+        return None
+
+
+def _upsert_gh_set(conn, data: dict) -> tuple[str | None, bool]:
+    """
+    Try to match an existing GroupBuy row by slug variants.
+    If found: enrich description/gbEnd/productUrl cautiously (never overwrite
+    vendor-set productUrl or admin-set specs).
+    If not found: INSERT a new row with slug = gh-{topic_id}.
+    Returns (id, was_created).
+    """
+    variants = data["slug_variants"]
+    gh_slug = data["gh_slug"]
+    product_type = data["product_type"]
+    status = data["status"]
+    description = (data.get("description") or "")[:2000]
+    image_url = data.get("image_url")
+    images = data.get("images") or []
+    gb_end_ts = data.get("gb_end_ts")
+    topic_url = data["topic_url"]
+    title = data["title"]
+
+    # Try to match existing row
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            'SELECT id, slug, "productUrl", description FROM "GroupBuy" WHERE slug = ANY(%s)',
+            (variants,),
+        )
+        existing = cur.fetchone()
+
+    if existing:
+        # Enrich conservatively: only fill blank fields; never overwrite productUrl
+        # (that's the vendor buy-link). gbEnd uses COALESCE so we only set if absent.
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE "GroupBuy" SET
+                    description = CASE WHEN (description IS NULL OR description = '') THEN %s ELSE description END,
+                    "gbEnd"     = COALESCE("gbEnd", %s),
+                    "updatedAt" = now()
+                WHERE slug = %s
+                """,
+                (description, gb_end_ts, existing["slug"]),
+            )
+        return existing["id"], False
+
+    # No match — create new row with gh- slug
+    # Use gh- slug if no variant matches, else one of the variants
+    insert_slug = gh_slug
+    designer = ""
+    # Attempt to extract designer hint from title: "by AuthorName" or "GMK Set | DesignerName"
+    m = re.search(r"\|\s*(.+)$", title)
+    if m:
+        designer = m.group(1).strip()[:100]
+
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            INSERT INTO "GroupBuy"
+                (id, slug, name, colorway, designer, status, "productType",
+                 "imageUrl", images, description, featured,
+                 "productUrl", "gbEnd", "createdAt", "updatedAt")
+            VALUES
+                (gen_random_uuid()::text, %s, %s, '', %s, %s::"GBStatus", %s,
+                 %s, %s, %s, false,
+                 %s, %s, now(), now())
+            ON CONFLICT (slug) DO NOTHING
+            RETURNING id
+            """,
+            (
+                insert_slug, title, designer, status, product_type,
+                image_url, images, description,
+                topic_url, gb_end_ts,
+            ),
+        )
+        row = cur.fetchone()
+    return (row["id"] if row else None), True
+
+
+def run_geekhack(conn, context: BrowserContext, deadline: float) -> dict:
+    """
+    Scrape geekhack.org board 70.0 (Group Buys).
+    - Paginates the listing until all threads with last-post >= GEEKHACK_MIN_YEAR
+      are collected (stops at the first page where all visible posts predate the cutoff).
+    - For each thread: skip if last-post hasn't advanced since gh_seen.json.
+    - Opens thread → reads first post → upserts GroupBuy.
+    - Adds random 4–9s jitter between thread opens to be a polite guest.
+    """
+    stats = {
+        "pages": 0, "threads_seen": 0, "skipped_old": 0, "skipped_unchanged": 0,
+        "scraped": 0, "created": 0, "updated": 0, "failed": 0,
+    }
+    log("Geekhack pass: board 70.0 (Group Buys) …")
+
+    seen = _gh_load_seen()
+    page = context.new_page()
+    try:
+        # ── 1. Collect thread listing ──────────────────────────────────────────
+        all_threads: list[dict] = []
+        start = 0
+        while True:
+            if now_ms() > deadline:
+                log("  Geekhack: deadline reached during listing phase.")
+                break
+            board_url = (
+                f"{GEEKHACK_BOARD_URL};start={start}" if start else GEEKHACK_BOARD_URL
+            )
+            rows = _fetch_gh_board_page(page, board_url)
+            if not rows:
+                break
+            stats["pages"] += 1
+
+            fresh = []
+            old_count = 0
+            for row in rows:
+                lp = _gh_parse_last_post(row.get("last_post_text", ""))
+                row["last_post_dt"] = lp
+                if lp and lp.year >= GEEKHACK_MIN_YEAR:
+                    fresh.append(row)
+                else:
+                    old_count += 1
+
+            all_threads.extend(fresh)
+            stats["threads_seen"] += len(rows)
+            stats["skipped_old"] += old_count
+
+            # Stop paginating once we hit a page where any thread predates the cutoff
+            if old_count > 0:
+                break
+            start += 20  # SMF paginates in steps of 20
+
+        log(f"  Geekhack: {len(all_threads)} threads from {stats['pages']} pages "
+            f"(skipped {stats['skipped_old']} pre-{GEEKHACK_MIN_YEAR})")
+
+        # ── 2. Scrape each thread ──────────────────────────────────────────────
+        for thread in all_threads:
+            if now_ms() > deadline:
+                log("  Geekhack: deadline reached during thread scrape.")
+                break
+
+            topic_id = str(thread.get("topic_id") or "")
+            if not topic_id:
+                continue
+
+            last_post_dt: datetime | None = thread.get("last_post_dt")
+            last_post_iso = last_post_dt.isoformat() if last_post_dt else ""
+
+            # Skip if last-post hasn't advanced
+            if seen.get(topic_id) and last_post_iso and last_post_iso <= seen[topic_id]:
+                stats["skipped_unchanged"] += 1
+                continue
+
+            # Polite delay before opening each thread
+            time.sleep(random.uniform(GEEKHACK_DELAY_MIN, GEEKHACK_DELAY_MAX))
+            if now_ms() > deadline:
+                break
+
+            topic_url = thread.get("url") or ""
+            if not topic_url:
+                continue
+
+            try:
+                post = _fetch_gh_first_post(page, topic_url)
+                if not post:
+                    stats["failed"] += 1
+                    continue
+
+                title = thread.get("title") or ""
+                body_html = post.get("html") or ""
+                raw_images = post.get("imgs") or []
+                images = _gh_extract_images(
+                    body_html if body_html else "\n".join(f'<img src="{u}">' for u in raw_images)
+                )
+
+                # Re-use the same date extraction logic as the keyboard pass
+                gb_end_date = kb_extract_gb_end_date({"body_html": body_html})
+                gb_end_ts = (
+                    datetime.combine(gb_end_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+                    if gb_end_date else None
+                )
+
+                product_type = _gh_detect_product_type(title)
+                status = _gh_status(title, gb_end_date)
+
+                # Clean description: strip HTML tags
+                description = re.sub(r"<[^>]+>", " ", body_html)
+                description = re.sub(r"\s{2,}", " ", description).strip()[:2000]
+
+                upsert_data = {
+                    "topic_id": topic_id,
+                    "title": title,
+                    "slug_variants": _gh_slug_variants(title),
+                    "gh_slug": f"gh-{topic_id}",
+                    "product_type": product_type,
+                    "status": status,
+                    "description": description,
+                    "image_url": images[0] if images else None,
+                    "images": images,
+                    "gb_end_ts": gb_end_ts,
+                    "topic_url": topic_url,
+                }
+
+                _id, created = _upsert_gh_set(conn, upsert_data)
+                conn.commit()
+
+                if created:
+                    stats["created"] += 1
+                else:
+                    stats["updated"] += 1
+                stats["scraped"] += 1
+
+                # Update seen cache immediately so a crash doesn't re-scrape
+                if last_post_iso:
+                    seen[topic_id] = last_post_iso
+                    _gh_save_seen(seen)
+
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                log(f"  gh topic {topic_id} error: {e}")
+                stats["failed"] += 1
+
+    finally:
+        page.close()
+
+    log(
+        f"Geekhack: pages={stats['pages']} seen={stats['threads_seen']} "
+        f"old={stats['skipped_old']} unchanged={stats['skipped_unchanged']} "
+        f"scraped={stats['scraped']} created={stats['created']} "
+        f"updated={stats['updated']} failed={stats['failed']}"
+    )
+    return stats
+
+
+# ----------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------
 def main() -> int:
@@ -1918,6 +2365,7 @@ def main() -> int:
             catalog_stats = run_catalog(conn, context, deadline)
             zf_stats = run_zfrontier(conn, context, deadline)
             kb_stats = run_keyboards(conn, context, deadline)
+            gh_stats = run_geekhack(conn, context, deadline)
             img_stats = run_images(conn, context, deadline)
             price_stats = run_prices(conn, context, deadline)
         finally:
@@ -1932,6 +2380,10 @@ def main() -> int:
         f"failed={zf_stats['failed']}")
     log(f"Keyboards -> fetched={kb_stats['fetched']} created={kb_stats['created']} "
         f"updated={kb_stats['updated']} failed={kb_stats['failed']}")
+    log(f"Geekhack -> pages={gh_stats['pages']} scraped={gh_stats['scraped']} "
+        f"created={gh_stats['created']} updated={gh_stats['updated']} "
+        f"unchanged={gh_stats['skipped_unchanged']} old={gh_stats['skipped_old']} "
+        f"failed={gh_stats['failed']}")
     log(f"Images  -> attempted={img_stats['attempted']} "
         f"enriched={img_stats['enriched']} failed={img_stats['failed']}")
     log(f"Prices  -> attempted={price_stats['attempted']} "

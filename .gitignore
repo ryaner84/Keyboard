@@ -45,3 +45,4 @@ next-env.d.ts
 /scraper/logs/
 /scraper/.venv/
 /scraper/__pycache__/
+/scraper/gh_seen.json

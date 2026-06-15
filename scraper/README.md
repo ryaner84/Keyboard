@@ -26,9 +26,9 @@ It never overwrites a price you set manually in the admin panel
 
 ## What runs
 
-- `scrape.py` — the scraper (Playwright + direct Postgres writes). Runs five
+- `scrape.py` — the scraper (Playwright + direct Postgres writes). Runs six
   passes each night: **GMK catalog** → **zFrontier** → **keyboards** →
-  **images** → **prices**, sharing a 30‑minute time budget.
+  **Geekhack** → **images** → **prices**, sharing a 30‑minute time budget.
 - `schedule_time.py` — prints the PC‑local time equal to **00:00 GMT+8**.
 - `run-scraper.bat` — **the file you double‑click.** Each run it: `git pull`s the
   latest `scrape.py`, ensures Python + Playwright are installed, asks for the DB
@@ -101,13 +101,22 @@ The collection's URL slug sets the default stage (`group-buy`/`ongoing-gb` →
 Active, `extra-drop`/`extras` → Extra Drop, `pre-order`/`coming-soon` →
 Pre‑order). Anything under **$300** or any **Keychron** product is dropped.
 
+**Geekhack board 70.0** is scraped automatically each night. Threads with a
+last‑post older than 2026 are skipped. Each thread's last‑post datetime is
+cached in `scraper/gh_seen.json` (gitignored) — a thread is only re‑opened
+when the board shows a newer last‑post. A random 4–9 s delay is added between
+each thread open. If a thread title matches an existing GroupBuy slug (e.g.
+"GMK Gregory 2" → `gmk-gregory-2`), the existing row is enriched in place.
+Otherwise a new row with slug `gh-<topicid>` is created.
+
 ---
 
 ## Checking it worked
 
 - Console output and `scraper\logs\scrape_<date>.log` show counts like
-  `Images -> attempted=… enriched=…`, `Prices -> attempted=… updated=…`, and
-  `Keyboards -> fetched=… created=… updated=… failed=…`.
+  `Images -> attempted=… enriched=…`, `Prices -> attempted=… updated=…`,
+  `Keyboards -> fetched=… created=… updated=… failed=…`, and
+  `Geekhack -> pages=… scraped=… created=… updated=… unchanged=… old=…`.
 - In Supabase SQL editor:
   ```sql
   select slug, array_length(images,1) from "GroupBuy" where slug='gmk-masterpiece-r2';
