@@ -3,11 +3,15 @@
 import type { GBStatus } from "@/types";
 
 const LAYOUTS = ["40%", "60%", "65%", "75%", "TKL", "Full-size", "Alice/Arisu", "Other"];
-const MOUNTS = ["Gasket", "Top Mount", "Tray Mount", "Leaf Spring", "Burger", "Plateless"];
-const MATERIALS = ["Aluminum", "Polycarbonate", "PC + Brass", "Acrylic"];
 
-// Labels use keyboard-collector vocabulary rather than generic e-commerce terms.
-// Ordered by the typical lifecycle of a keyboard group buy.
+// Collector-focused brands — matched against keyboard name (substring).
+// Ordered roughly by notoriety in the hobby.
+const BRANDS = [
+  "TGR", "Keycult", "Matrix", "Mode", "Geonworks",
+  "Rama", "Norbauer", "Duck", "Hiney", "Angry Miao",
+  "Percent", "Swagkeys", "CannonKeys", "NovelKeys", "KBDfans",
+];
+
 const STATUS_OPTIONS: { value: GBStatus; label: string; desc: string; dot: string }[] = [
   {
     value: "INTEREST_CHECK",
@@ -47,15 +51,13 @@ interface KeyboardFiltersProps {
   sortBy?: string;
   joinableOnly: boolean;
   layouts: string[];
-  mounts: string[];
-  materials: string[];
+  brands: string[];
   onSearchChange: (v: string) => void;
   onStatusToggle: (s: GBStatus) => void;
   onSortChange?: (v: string) => void;
   onJoinableToggle: () => void;
   onLayoutToggle: (v: string) => void;
-  onMountToggle: (v: string) => void;
-  onMaterialToggle: (v: string) => void;
+  onBrandToggle: (v: string) => void;
 }
 
 function FilterSection({ label, children }: { label: string; children: React.ReactNode }) {
@@ -109,14 +111,12 @@ export function KeyboardFilters({
   statuses,
   joinableOnly,
   layouts,
-  mounts,
-  materials,
+  brands,
   onSearchChange,
   onStatusToggle,
   onJoinableToggle,
   onLayoutToggle,
-  onMountToggle,
-  onMaterialToggle,
+  onBrandToggle,
 }: KeyboardFiltersProps) {
   return (
     <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 p-4 space-y-5">
@@ -135,7 +135,7 @@ export function KeyboardFilters({
         />
       </div>
 
-      {/* Availability — the #1 question for a keyboard hunter */}
+      {/* Availability */}
       <button
         onClick={onJoinableToggle}
         className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition-all ${
@@ -157,22 +157,17 @@ export function KeyboardFilters({
         </span>
       </button>
 
-      {/* Layout — second most important */}
+      {/* Layout */}
       <FilterSection label="Layout">
         <ChipGroup options={LAYOUTS} active={layouts} onToggle={onLayoutToggle} />
       </FilterSection>
 
-      {/* Mount type */}
-      <FilterSection label="Mount type">
-        <ChipGroup options={MOUNTS} active={mounts} onToggle={onMountToggle} />
+      {/* Brand */}
+      <FilterSection label="Brand">
+        <ChipGroup options={BRANDS} active={brands} onToggle={onBrandToggle} color="indigo" />
       </FilterSection>
 
-      {/* Material */}
-      <FilterSection label="Material">
-        <ChipGroup options={MATERIALS} active={materials} onToggle={onMaterialToggle} />
-      </FilterSection>
-
-      {/* Status — full lifecycle, collector vocabulary */}
+      {/* Status */}
       <FilterSection label="GB Stage">
         <div className="space-y-1.5">
           {STATUS_OPTIONS.map(({ value, label, desc, dot }) => {

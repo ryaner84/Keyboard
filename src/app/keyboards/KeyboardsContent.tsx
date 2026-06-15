@@ -31,8 +31,7 @@ export default function KeyboardsContent() {
   const joinableOnly = searchParams.get("joinable") === "1";
   const closingSoon = searchParams.get("closing") === "1";
   const layouts = searchParams.getAll("layout");
-  const mounts = searchParams.getAll("mount");
-  const materials = searchParams.getAll("material");
+  const brands = searchParams.getAll("brand");
   const rawStatuses = searchParams.getAll("status") as GBStatus[];
 
   // Effective stage filter. Empty = all stages.
@@ -70,8 +69,10 @@ export default function KeyboardsContent() {
         if (isNaN(d) || d < 0 || d > 7) return false;
       }
       if (layouts.length > 0 && !(k.layout && layouts.includes(k.layout))) return false;
-      if (mounts.length > 0 && !(k.mountingStyle && mounts.includes(k.mountingStyle))) return false;
-      if (materials.length > 0 && !(k.material && materials.includes(k.material))) return false;
+      if (brands.length > 0) {
+        const nameLower = k.name.toLowerCase();
+        if (!brands.some((b) => nameLower.includes(b.toLowerCase()))) return false;
+      }
       if (search) {
         const q = search.toLowerCase();
         const hay = `${k.name} ${k.vendorName ?? k.designer}`.toLowerCase();
@@ -79,7 +80,7 @@ export default function KeyboardsContent() {
       }
       return true;
     });
-  }, [all, statuses, closingSoon, layouts, mounts, materials, search]);
+  }, [all, statuses, closingSoon, layouts, brands, search]);
 
   // ── URL param helpers ──────────────────────────────────────────────────────
   const updateParams = useCallback(
@@ -171,15 +172,13 @@ export default function KeyboardsContent() {
             sortBy={sortBy}
             joinableOnly={joinableOnly}
             layouts={layouts}
-            mounts={mounts}
-            materials={materials}
+            brands={brands}
             onSearchChange={(v) => updateParams({ search: v })}
             onStatusToggle={handleStatusToggle}
             onSortChange={(v) => updateParams({ sort: v })}
             onJoinableToggle={handleJoinableToggle}
             onLayoutToggle={(v) => handleMultiToggle("layout", layouts, v)}
-            onMountToggle={(v) => handleMultiToggle("mount", mounts, v)}
-            onMaterialToggle={(v) => handleMultiToggle("material", materials, v)}
+            onBrandToggle={(v) => handleMultiToggle("brand", brands, v)}
           />
         </aside>
 
