@@ -516,6 +516,11 @@ export async function importKeyboardVendor(
         result.updated++;
       }
     } catch (err) {
+      // Surface the first real error per vendor in the logs (the rest are
+      // almost always identical, e.g. a missing column or constraint).
+      if (result.errors.length === 0) {
+        console.warn(`[keyboard-vendors] ${vendor.id} first write error (${product.handle}):`, err);
+      }
       result.errors.push(`${product.handle}: ${err}`);
     }
   }

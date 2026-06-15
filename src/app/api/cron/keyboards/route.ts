@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { importAllKeyboardVendors } from "@/lib/import/keyboard-vendors";
 import { importZFrontierKeyboards } from "@/lib/import/zfrontier";
 import { importMatrixLabNotion } from "@/lib/import/matrixlab-notion";
+import { ensureKeyboardSchema } from "@/lib/import/ensure-keyboard-schema";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -17,6 +18,10 @@ export async function GET(req: NextRequest) {
   if (!isAuthorized(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Make sure the keyboard columns exist before any writes — the build-time
+  // migration can silently skip when Vercel's build can't reach the DB.
+  const schema = await ensureKeyboardSchema();
 
   // Run all three sources in parallel — each is independent.
   const [vendorResults, zfResult, matrixResult] = await Promise.all([
@@ -38,6 +43,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
+    schema,
     vendors: vendorResults,
     vendorSummary,
     zfrontier: zfResult,
