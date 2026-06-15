@@ -1939,6 +1939,16 @@ _GH_KEYCAP_PROFILE = re.compile(
     re.I,
 )
 
+# Positive keyboard indicators — only these phrases flip the default to KEYBOARD
+# (absent these, Geekhack threads default to KEYCAPS since most GBs are keycap sets)
+_GH_KB_INDICATOR = re.compile(
+    r"\b(keyboard|kbd\b|PCB|build\s+kit|typing\s+kit|FR4\s+plate|"
+    r"TGR|Keycult|Norbaforce|Norbauer|Bakeneko|Meletrix|Geonworks|"
+    r"Matrix\s*Lab|Rama\s+Works|Duck\s+(?:Orion|Octagon|Viper|Eagle)|"
+    r"Hiney|Angry\s+Miao|Percent\s+Studio|Swagkeys)\b",
+    re.I,
+)
+
 # SMF date: "Mon, 01 June 2026, 17:13:33"
 _GH_DATE_FMT = "%a, %d %B %Y, %H:%M:%S"
 # Short SMF date: "Today at 17:13:33" or "Yesterday at …" — handled separately
@@ -2006,7 +2016,11 @@ def _gh_slug_variants(title: str) -> list[str]:
 
 
 def _gh_detect_product_type(title: str) -> str:
-    return "KEYCAPS" if _GH_KEYCAP_PROFILE.search(title) else "KEYBOARD"
+    if _GH_KEYCAP_PROFILE.search(title):
+        return "KEYCAPS"
+    if _GH_KB_INDICATOR.search(title):
+        return "KEYBOARD"
+    return "KEYCAPS"  # default: most Geekhack board-70 GBs are keycap sets
 
 
 def _gh_status(title: str, gb_end_date) -> str:
