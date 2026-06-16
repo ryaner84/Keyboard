@@ -1469,12 +1469,15 @@ def now_ms() -> float:
 # vendors via VendorKit. Admin-set layout/mount/material are never overwritten.
 # ----------------------------------------------------------------------------
 KEYBOARD_MIN_PRICE_USD = 300
-KEYBOARD_BLOCKED_BRANDS = ("keychron", "nicepbt")
+KEYBOARD_BLOCKED_BRANDS = ("keychron", "nicepbt", "keykobo", "milkyway")
 
-# Keycap profile prefixes in a product title → it's a keycap set, not a keyboard
+# Keycap profile prefixes / keycap-only brands in a product title → it's a
+# keycap set, not a keyboard. "mw\b" catches Milkyway's MW abbreviation
+# (e.g. "MW Gesha") only as a leading whole word, never mid-word.
 _KB_KEYCAP_PROFILE_RE = re.compile(
     r"^\s*(?:gmk|sa\b|dcs\b|mtnu|kat\b|mt3\b|cyl\b|xda\b|mda\b|dsa\b|dss\b|kam\b|"
-    r"nicepbt|infinikey|keyreative|melgeek|sp[-\s]?sa)",
+    r"nicepbt|keykobo|key[-\s]?kobo|milkyway|milky[-\s]?way|mw\b|"
+    r"infinikey|keyreative|melgeek|sp[-\s]?sa)",
     re.I,
 )
 
@@ -1960,10 +1963,12 @@ def run_keyboards(conn, context: BrowserContext, deadline: float) -> dict:
 # per topic so unchanged threads are skipped without opening them.
 # ----------------------------------------------------------------------------
 
-# Keycap profile keywords in thread titles → productType = "KEYCAPS"
+# Keycap profile keywords / keycap-only brands in thread titles → "KEYCAPS".
+# MW = Milkyway's keycap abbreviation (e.g. "MW Gesha"); matched as a whole word.
 _GH_KEYCAP_PROFILE = re.compile(
     r"\b(GMK|SA|DCS|MTNU|KAT|MT3|CYL|XDA|MDA|DSA|DSS|KAM|OG|SP[-\s]?SA|"
-    r"Signature\s+Plastics|Cherry|PBT|NICEPBT|Infinikey|Keyreative|Melgeek)\b",
+    r"Signature\s+Plastics|Cherry|PBT|NICEPBT|Keykobo|Key\s+Kobo|"
+    r"Milkyway|Milky\s+Way|MW|Infinikey|Keyreative|Melgeek)\b",
     re.I,
 )
 

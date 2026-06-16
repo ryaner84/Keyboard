@@ -281,6 +281,8 @@ async function main() {
         await purgeMispricedListings(client);
         await prioritizePreorderVendors(client);
         await markPricedVendorKitsInStock(client);
+        await reclassifyMisflaggedKeycaps(client);
+        await dropForumDuplicatesOfOfficialSets(client);
       }
     }
 
@@ -311,6 +313,8 @@ async function main() {
     await resetPollutedGalleries(client);
     await backfillShipping(client);
     await cleanupInterestChecks(client);
+    await reclassifyMisflaggedKeycaps(client);
+    await dropForumDuplicatesOfOfficialSets(client);
   } catch (err) {
     console.warn(`[db-setup] Setup failed: ${err.message}`);
     console.warn("[db-setup] The app will still deploy; you can re-run by redeploying once the DB is reachable.");
@@ -1167,6 +1171,87 @@ async function markPricedVendorKitsInStock(client) {
     }
   } catch (err) {
     console.warn(`[db-setup] markPricedVendorKitsInStock skipped: ${err.message}`);
+  }
+}
+
+// RECURRING (every deploy): some keycap sets get scraped into the keyboards
+// space (productType='KEYBOARD') — they show up on /keyboards/active even
+// though they're keycaps. This happens for keycap-only brands the scraper
+// hadn't yet learned (Keykobo, MW/Milkyway) and for keycap PROFILE names
+// (GMK, SA, KAT, MT3, …) that slipped in before the classifier was tightened.
+// Flip any such KEYBOARD row back to KEYCAPS by its name. The tokens here are
+// keycap-exclusive in this domain, so the match is safe to run every deploy
+// (it self-heals rows the nightly scraper may re-introduce until its own code
+// is refreshed). Mirrors _GH_KEYCAP_PROFILE / KEYBOARD_BLOCKED_BRANDS in
+// scraper/scrape.py.
+async function reclassifyMisflaggedKeycaps(client) {
+  try {
+    const { rowCount } = await client.query(
+      `UPDATE public."GroupBuy"
+       SET "productType" = 'KEYCAPS', "updatedAt" = now()
+       WHERE "productType" = 'KEYBOARD'
+         AND (
+              -- keycap profiles + keycap-only brands as whole words, anywhere
+              name ~* '\\y(gmk|sa|dcs|mtnu|kat|mt3|cyl|xda|mda|dsa|dss|kam|nicepbt|npbt|keykobo|infinikey|keyreative|melgeek|milkyway)\\y'
+              OR name ~* '\\ykey\\s+kobo\\y'
+              OR name ~* '\\ymilky\\s+way\\y'
+              -- "MW" (Milkyway) only as the leading token, tolerating [GB]/[IC] tags,
+              -- so it can't match an "mw" buried inside an unrelated keyboard name
+              OR name ~* '^\\s*(?:\\[[^\\]]*\\]\\s*)*mw\\y'
+         )`
+    );
+    if (rowCount > 0) {
+      console.log(`[db-setup] Reclassified ${rowCount} keycap set(s) mislabeled as keyboards → KEYCAPS.`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Keycap reclassification skipped: ${err.message}`);
+  }
+}
+
+// RECURRING (every deploy): Geekhack forum threads are imported as stub sets
+// with a `gh-<topicid>` slug. When the same colorway also has an official,
+// fully-named "GMK <colorway>" entry (from KeycapLendar / a vendor), the forum
+// stub is a lower-quality duplicate — e.g. forum "Distortion" vs official
+// "GMK Distortion". Drop the forum stub and keep the official one.
+//
+// Matching strips bracket tags ([GB]/[IC]), the "| designer" suffix, and a
+// leading keycap-profile word (GMK / GMK CYL / SA / KAT / …), then compares the
+// remaining colorway, case-insensitively, ignoring punctuation/spacing. A forum
+// stub is deleted ONLY when a NON-forum twin with the same colorway exists AND
+// that twin's name actually starts with "GMK" — so forum-only sets (no official
+// equivalent) are always kept. Child Kit/VendorKit rows cascade on delete.
+async function dropForumDuplicatesOfOfficialSets(client) {
+  try {
+    const { rowCount } = await client.query(
+      `WITH normd AS (
+         SELECT id, slug, name,
+           regexp_replace(
+             lower(
+               regexp_replace(
+                 regexp_replace(
+                   regexp_replace(name, '\\|.*$', ''),          -- drop "| designer"
+                   '\\[[^\\]]*\\]', '', 'g'),                    -- drop [GB]/[IC] tags
+                 '^\\s*(gmk\\s+cyl|gmk|sa|dcs|mtnu|kat|mt3|cyl|xda|mda|dsa|dss|kam)\\s+', '', 'i')
+             ),
+             '[^a-z0-9]+', '', 'g'                               -- keep only [a-z0-9]
+           ) AS key
+         FROM public."GroupBuy"
+       )
+       DELETE FROM public."GroupBuy" g
+       USING normd f, normd o
+       WHERE g.id = f.id
+         AND f.slug LIKE 'gh-%'                                  -- target: forum stub
+         AND o.slug NOT LIKE 'gh-%'                              -- twin: non-forum
+         AND o.id <> f.id
+         AND f.key <> '' AND f.key = o.key                       -- same colorway
+         AND o.name ~* '^\\s*(?:\\[[^\\]]*\\]\\s*)*gmk\\y'        -- twin is officially "GMK …"
+      `
+    );
+    if (rowCount > 0) {
+      console.log(`[db-setup] Dropped ${rowCount} forum stub(s) duplicating an official "GMK …" set.`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Forum-duplicate cleanup skipped: ${err.message}`);
   }
 }
 
