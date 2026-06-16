@@ -258,6 +258,7 @@ async function main() {
         await ensureVendorSuggestionTable(client);
         await ensureFeedbackTable(client);
         await ensurePriceReportTable(client);
+        await ensureListingReportTable(client);
         await purgeBlockedVendors(client);
         await purgeCancelledSets(client);
         await ensureDiscoveryColumn(client);
@@ -302,6 +303,7 @@ async function main() {
     await ensureVendorSuggestionTable(client);
     await ensureFeedbackTable(client);
     await ensurePriceReportTable(client);
+    await ensureListingReportTable(client);
     await purgeBlockedVendors(client);
     await purgeCancelledSets(client);
     await ensureDiscoveryColumn(client);
@@ -738,6 +740,31 @@ async function ensurePriceReportTable(client) {
     );
   } catch (err) {
     console.warn(`[db-setup] PriceReport table setup skipped: ${err.message}`);
+  }
+}
+
+// "Report a listing" submissions — the flag icon + modal on every set card and
+// keyboard row. Owner reviews these daily (GET /api/listing-reports); the site
+// never reads them back to visitors. `id` is a Prisma-generated cuid, so the
+// column carries no DB-side default.
+async function ensureListingReportTable(client) {
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."ListingReport" (
+         id            text NOT NULL PRIMARY KEY,
+         slug          text NOT NULL,
+         name          text NOT NULL,
+         "issueType"   text NOT NULL,
+         notes         text,
+         "submittedAt" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS "ListingReport_submittedAt_idx"
+       ON public."ListingReport" ("submittedAt")`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] ListingReport table setup skipped: ${err.message}`);
   }
 }
 
