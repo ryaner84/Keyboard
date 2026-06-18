@@ -6,6 +6,20 @@ interface EmailMessage {
   html: string;
 }
 
+export class TrackerEmailDeliveryError extends Error {
+  constructor(
+    message: string,
+    readonly definitive: boolean
+  ) {
+    super(message);
+    this.name = "TrackerEmailDeliveryError";
+  }
+}
+
+export function isDefinitiveTrackerEmailFailure(error: unknown): boolean {
+  return error instanceof TrackerEmailDeliveryError && error.definitive;
+}
+
 function escapeHtml(value: string): string {
   return value.replace(
     /[&<>"']/g,
@@ -24,7 +38,10 @@ export async function sendTrackerEmail(message: EmailMessage): Promise<void> {
       console.info(`[tracker-email] ${message.subject} -> ${message.to}`);
       return;
     }
-    throw new Error("Tracker email delivery is not configured");
+    throw new TrackerEmailDeliveryError(
+      "Tracker email delivery is not configured",
+      true
+    );
   }
 
   const response = await fetch("https://api.resend.com/emails", {
@@ -44,7 +61,10 @@ export async function sendTrackerEmail(message: EmailMessage): Promise<void> {
 
   if (!response.ok) {
     const details = await response.text().catch(() => "");
-    throw new Error(`Email provider rejected the message (${response.status}): ${details}`);
+    throw new TrackerEmailDeliveryError(
+      `Email provider rejected the message (${response.status}): ${details}`,
+      true
+    );
   }
 }
 

@@ -239,6 +239,7 @@ function SaveTrackerModal({
   const [stage, setStage] = useState<"email" | "code">("email");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [resent, setResent] = useState(false);
 
   useEffect(() => {
@@ -246,6 +247,7 @@ function SaveTrackerModal({
       setStage("email");
       setOtp("");
       setError("");
+      setNotice("");
       setBusy(false);
       setResent(false);
     }
@@ -262,6 +264,7 @@ function SaveTrackerModal({
   const requestCode = async () => {
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       const response = await fetch("/api/auth/request", {
         method: "POST",
@@ -269,9 +272,18 @@ function SaveTrackerModal({
         body: JSON.stringify({ email, slugs, countryCode, region, currency }),
       });
       const data = await response.json();
+      if (response.status === 429 && data.canVerify) {
+        setStage("code");
+        setResent(true);
+        setNotice(
+          `A sign-in email was already requested. Enter the latest code or try resending in ${data.retryAfter ?? 60} seconds.`
+        );
+        return;
+      }
       if (!response.ok) throw new Error(data.error || "Could not send email");
       setStage("code");
       setResent(true);
+      setNotice("Email sent. Use the link or 6-digit code within 10 minutes.");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not send email");
     } finally {
@@ -282,6 +294,7 @@ function SaveTrackerModal({
   const verifyCode = async () => {
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       const response = await fetch("/api/auth/verify", {
         method: "POST",
@@ -392,6 +405,7 @@ function SaveTrackerModal({
                   onClick={() => {
                     setStage("email");
                     setError("");
+                    setNotice("");
                   }}
                   className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
                 >
@@ -411,6 +425,11 @@ function SaveTrackerModal({
           {error && (
             <p role="alert" className="text-sm text-red-600 dark:text-red-400">
               {error}
+            </p>
+          )}
+          {notice && (
+            <p role="status" className="text-sm text-indigo-600 dark:text-indigo-300">
+              {notice}
             </p>
           )}
           <p className="text-xs leading-relaxed text-gray-400 dark:text-gray-500">

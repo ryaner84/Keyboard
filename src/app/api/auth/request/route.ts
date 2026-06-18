@@ -6,7 +6,10 @@ import {
   normalizeTrackerEmail,
   trackerIpHash,
 } from "@/lib/tracker-auth";
-import { sendTrackerLoginEmail } from "@/lib/tracker-email";
+import {
+  isDefinitiveTrackerEmailFailure,
+  sendTrackerLoginEmail,
+} from "@/lib/tracker-email";
 
 export const dynamic = "force-dynamic";
 
@@ -31,8 +34,14 @@ export async function POST(req: NextRequest) {
         })
       : Promise.resolve(0),
     prisma.trackerAuthChallenge.findFirst({
-      where: { email, requestedAt: { gte: minuteAgo } },
-      select: { id: true },
+      where: {
+        email,
+        requestedAt: { gte: minuteAgo },
+        consumedAt: null,
+        expiresAt: { gt: now },
+      },
+      orderBy: { requestedAt: "desc" },
+      select: { id: true, requestedAt: true },
     }),
     prisma.trackerAuthChallenge.deleteMany({
       where: { expiresAt: { lt: new Date(now.getTime() - 24 * 60 * 60 * 1000) } },
@@ -46,9 +55,20 @@ export async function POST(req: NextRequest) {
     );
   }
   if (recent) {
+    const retryAfter = Math.max(
+      1,
+      60 - Math.floor((now.getTime() - recent.requestedAt.getTime()) / 1000)
+    );
     return NextResponse.json(
-      { error: "A code was just sent. Please wait before requesting another." },
-      { status: 429 }
+      {
+        error: "A sign-in email was requested recently.",
+        canVerify: true,
+        retryAfter,
+      },
+      {
+        status: 429,
+        headers: { "Retry-After": String(retryAfter) },
+      }
     );
   }
 
@@ -61,7 +81,7 @@ export async function POST(req: NextRequest) {
         .slice(0, 200)
     )
   );
-  await prisma.trackerAuthChallenge.create({
+  const createdChallenge = await prisma.trackerAuthChallenge.create({
     data: {
       email,
       magicTokenHash: challenge.magicTokenHash,
@@ -92,6 +112,13 @@ export async function POST(req: NextRequest) {
     }
   } catch (error) {
     console.error("[tracker-auth] Login email failed", error);
+    if (isDefinitiveTrackerEmailFailure(error)) {
+      await prisma.trackerAuthChallenge
+        .delete({ where: { id: createdChallenge.id } })
+        .catch((cleanupError) => {
+          console.error("[tracker-auth] Failed challenge cleanup failed", cleanupError);
+        });
+    }
     return NextResponse.json(
       { error: "We could not send the email. Please try again shortly." },
       { status: 503 }
