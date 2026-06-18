@@ -18,6 +18,13 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+## Passwordless tracker email
+
+Production deployments require `RESEND_API_KEY`, `TRACKER_AUTH_SECRET`, and
+`NEXT_PUBLIC_SITE_URL`. Add them to the Vercel Production environment before
+deploying. `TRACKER_EMAIL_FROM` is optional and should only be set to an address
+on a domain verified by Resend.
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More
