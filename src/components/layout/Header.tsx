@@ -7,6 +7,7 @@ import { CurrencySelector } from "./CurrencySelector";
 import { ThemeToggle } from "./ThemeToggle";
 import { FeedbackButton } from "./FeedbackButton";
 import { HeaderSearch } from "./HeaderSearch";
+import { TrackerAccountButton } from "./TrackerAccountButton";
 
 // Segmented pill that groups keycap GBs and keyboard GBs as one nav category.
 function GBSegment({ pathname }: { pathname: string }) {
@@ -129,6 +130,7 @@ export function Header() {
 
             <CurrencySelector />
             <ThemeToggle />
+            <TrackerAccountButton />
           </div>
         </div>
       </div>

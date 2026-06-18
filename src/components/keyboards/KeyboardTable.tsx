@@ -7,6 +7,7 @@ import type { GroupBuyWithPricing, GBStatus } from "@/types";
 import { normalizeImageUrl } from "@/lib/utils";
 import { estimateKeyboardShippingUSD } from "@/lib/keyboard-shipping";
 import { ReportListingButton } from "@/components/ui/ReportListingButton";
+import { useTrackedSets } from "@/hooks/useTrackedSets";
 
 interface Props {
   rows: GroupBuyWithPricing[];
@@ -119,6 +120,7 @@ function SortHeader({
 }
 
 export function KeyboardTable({ rows, currency, destRegion, countryCode, convert, format }: Props) {
+  const { isTracked, toggle } = useTrackedSets();
   const [sortKey, setSortKey] = useState<SortKey>("ends");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
@@ -179,6 +181,7 @@ export function KeyboardTable({ rows, currency, destRegion, countryCode, convert
               <th className="px-3 py-2.5 text-right">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Link</span>
               </th>
+              <th className="w-8" />
               <th className="w-8" />
             </tr>
           </thead>
@@ -274,6 +277,23 @@ export function KeyboardTable({ rows, currency, destRegion, countryCode, convert
                         Details
                       </Link>
                     )}
+                  </td>
+
+                  {/* Personal tracker */}
+                  <td className="py-2.5">
+                    <button
+                      onClick={() => toggle(row.slug)}
+                      title={isTracked(row.slug) ? "Remove from tracker" : "Add to tracker"}
+                      className={`rounded-md p-1.5 transition-colors ${
+                        isTracked(row.slug)
+                          ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950"
+                          : "text-gray-300 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-950"
+                      }`}
+                    >
+                      <svg className="h-4 w-4" fill={isTracked(row.slug) ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                      </svg>
+                    </button>
                   </td>
 
                   {/* Report */}

@@ -22,8 +22,14 @@ const result = await refreshPrices({
   concurrency: 8,
   maxRuntimeMs: 12 * 60_000,
 });
+const { processTrackerNotifications } = await import("../src/lib/tracker-notifications.ts");
+const trackerNotifications = await processTrackerNotifications();
 console.log(
   `Price refresh: attempted=${result.attempted} updated=${result.updated} ` +
     `failed=${result.failed} stoppedEarly=${result.stoppedEarly}`
+);
+console.log(
+  `Tracker alerts: checked=${trackerNotifications.checked} ` +
+    `detected=${trackerNotifications.detected} delivered=${trackerNotifications.delivered}`
 );
 process.exit(0);

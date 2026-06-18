@@ -7,6 +7,7 @@ import { LocationSelector } from "@/components/home/LocationSelector";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ShippingLocationTab } from "@/components/layout/ShippingLocationTab";
+import { TrackerProvider } from "@/context/TrackerContext";
 
 export const metadata: Metadata = {
   title: {
@@ -31,11 +32,13 @@ export default function RootLayout({
       <body className="bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 min-h-screen flex flex-col">
         <ThemeProvider>
           <LocationProvider>
-            <LocationSelector />
-            <Header />
-            <ShippingLocationTab />
-            <main className="flex-1">{children}</main>
-            <Footer />
+            <TrackerProvider>
+              <LocationSelector />
+              <Header />
+              <ShippingLocationTab />
+              <main className="flex-1">{children}</main>
+              <Footer />
+            </TrackerProvider>
           </LocationProvider>
         </ThemeProvider>
         <Analytics />

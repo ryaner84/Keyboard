@@ -38,40 +38,41 @@ enum Region {
 }
 
 model GroupBuy {
-  id          String    @id @default(cuid())
-  slug        String    @unique
-  name        String
-  subtitle    String?
-  colorway    String?
-  designer    String
-  status      GBStatus
-  gbStart     DateTime?
-  gbEnd       DateTime?
-  imageUrl    String?
-  images      String[]  @default([])
+  id              String        @id @default(cuid())
+  slug            String        @unique
+  name            String
+  subtitle        String?
+  colorway        String?
+  designer        String
+  status          GBStatus
+  gbStart         DateTime?
+  gbEnd           DateTime?
+  imageUrl        String?
+  images          String[]      @default([])
   // When the gmk.net gallery was last (re)checked — rotates scraper attention
   // oldest-first and lets previously-scraped galleries self-heal over time.
   imagesUpdatedAt DateTime?
-  description String?
-  featured    Boolean   @default(false)
+  description     String?
+  featured        Boolean       @default(false)
   // "KEYCAPS" (default) or "KEYBOARD". Drives category filter and determines
   // which set-detail layout to render (price-compare vs dev-tracker).
-  productType String    @default("KEYCAPS")
+  productType     String        @default("KEYCAPS")
   // Keyboard-specific spec fields (null for keycap sets).
-  layout      String?   // e.g. "TKL", "65%", "75%", "60%", "Full-size"
-  material    String?   // e.g. "Aluminum", "Polycarbonate", "PC + Brass"
-  mountingStyle String? // e.g. "Top Mount", "Gasket Mount", "Tray Mount"
+  layout          String? // e.g. "TKL", "65%", "75%", "60%", "Full-size"
+  material        String? // e.g. "Aluminum", "Polycarbonate", "PC + Brass"
+  mountingStyle   String? // e.g. "Top Mount", "Gasket Mount", "Tray Mount"
   // Keyboard pricing/vendor fields. Unlike keycaps (multi-vendor price compare),
   // a keyboard GB is sold by a single store, so price lives directly on the row.
-  basePrice     Float?  // lowest variant price in the vendor's native currency
-  priceCurrency String? // ISO code of basePrice, e.g. "USD", "SGD", "CNY"
-  productUrl    String? // direct link to the product/GB page to actually buy
-  vendorName    String? // store running the GB, e.g. "NovelKeys", "Prototypist"
-  vendorRegion  String? // origin region for shipping estimate: US/EU/SG/ASIA/...
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  kits        Kit[]
-  devUpdates  DevUpdate[]
+  basePrice       Float? // lowest variant price in the vendor's native currency
+  priceCurrency   String? // ISO code of basePrice, e.g. "USD", "SGD", "CNY"
+  productUrl      String? // direct link to the product/GB page to actually buy
+  vendorName      String? // store running the GB, e.g. "NovelKeys", "Prototypist"
+  vendorRegion    String? // origin region for shipping estimate: US/EU/SG/ASIA/...
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  kits            Kit[]
+  devUpdates      DevUpdate[]
+  trackerItems    TrackerItem[]
 }
 
 model Kit {
@@ -169,8 +170,8 @@ model Feedback {
 // reviews and triggers a targeted scrape or manual entry.
 model KeyboardContribution {
   id          String   @id @default(cuid())
-  content     String   // URL or free-text tip — either format accepted
-  handle      String?  // optional "Discord handle / name to credit"
+  content     String // URL or free-text tip — either format accepted
+  handle      String? // optional "Discord handle / name to credit"
   submittedAt DateTime @default(now())
   processed   Boolean  @default(false)
 }
@@ -179,17 +180,17 @@ model KeyboardContribution {
 // Designers post updates (tooling confirmation, prototype photos, PCB tests,
 // shipping timelines) between GB close and delivery — this captures those.
 model DevUpdate {
-  id          String    @id @default(cuid())
-  groupBuyId  String
-  groupBuy    GroupBuy  @relation(fields: [groupBuyId], references: [id], onDelete: Cascade)
-  title       String
-  content     String
+  id         String   @id @default(cuid())
+  groupBuyId String
+  groupBuy   GroupBuy @relation(fields: [groupBuyId], references: [id], onDelete: Cascade)
+  title      String
+  content    String
   // Short milestone tag shown as a badge: "Tooling", "Prototype", "PCB Testing",
   // "Shipping", "Delivered", "Announcement", "IC", "GB", "Extra Sale", etc.
-  milestone   String?
-  imageUrls   String[]  @default([])
-  postedAt    DateTime  @default(now())
-  createdAt   DateTime  @default(now())
+  milestone  String?
+  imageUrls  String[] @default([])
+  postedAt   DateTime @default(now())
+  createdAt  DateTime @default(now())
 
   @@index([groupBuyId, postedAt])
 }
@@ -201,7 +202,7 @@ model ListingReport {
   id          String   @id @default(cuid())
   slug        String
   name        String
-  issueType   String   // "wrong_category" | "wrong_price" | "inactive" | "duplicate" | "wrong_vendor" | "other"
+  issueType   String // "wrong_category" | "wrong_price" | "inactive" | "duplicate" | "wrong_vendor" | "other"
   notes       String?
   submittedAt DateTime @default(now())
 
@@ -211,10 +212,84 @@ model ListingReport {
 // User-submitted wrong-price reports on a specific vendor row.
 // Write-only from the site — view rows in Supabase to triage data issues.
 model PriceReport {
-  id           String   @id @default(cuid())
-  setSlug      String
-  vendorKitId  String
-  vendorName   String
-  reason       String?
-  submittedAt  DateTime @default(now())
+  id          String   @id @default(cuid())
+  setSlug     String
+  vendorKitId String
+  vendorName  String
+  reason      String?
+  submittedAt DateTime @default(now())
+}
+
+// Passwordless tracker identity. Email is the only user-facing identifier;
+// admin authentication remains completely separate.
+model TrackerUser {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  alertsEnabled Boolean  @default(true)
+  countryCode   String?
+  region        String?
+  currency      String?
+  verifiedAt    DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  items         TrackerItem[]
+  notifications TrackerNotification[]
+}
+
+// One-time magic-link and OTP challenge. Tokens are stored only as hashes.
+model TrackerAuthChallenge {
+  id             String    @id @default(cuid())
+  email          String
+  magicTokenHash String    @unique
+  otpHash        String
+  attempts       Int       @default(0)
+  ipHash         String?
+  pendingSlugs   String[]  @default([])
+  countryCode    String?
+  region         String?
+  currency       String?
+  expiresAt      DateTime
+  consumedAt     DateTime?
+  requestedAt    DateTime  @default(now())
+
+  @@index([email, requestedAt])
+  @@index([expiresAt])
+}
+
+model TrackerItem {
+  id               String    @id @default(cuid())
+  userId           String
+  groupBuyId       String
+  alertsEnabled    Boolean   @default(true)
+  lastStatus       String?
+  lastBestPriceUsd Float?
+  lastVendorCount  Int       @default(0)
+  lastDevUpdateAt  DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user          TrackerUser           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  groupBuy      GroupBuy              @relation(fields: [groupBuyId], references: [id], onDelete: Cascade)
+  notifications TrackerNotification[]
+
+  @@unique([userId, groupBuyId])
+  @@index([groupBuyId])
+}
+
+model TrackerNotification {
+  id            String    @id @default(cuid())
+  userId        String
+  trackerItemId String?
+  type          String
+  title         String
+  body          String
+  fingerprint   String    @unique
+  createdAt     DateTime  @default(now())
+  sentAt        DateTime?
+
+  user        TrackerUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trackerItem TrackerItem? @relation(fields: [trackerItemId], references: [id], onDelete: SetNull)
+
+  @@index([userId, sentAt])
 }

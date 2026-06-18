@@ -5,7 +5,7 @@
   "crons": [
     {
       "path": "/api/currencies?force=true",
-      "schedule": "0 0 * * *"
+      "schedule": "15 16 * * *"
     },
     {
       "path": "/api/cron/refresh",

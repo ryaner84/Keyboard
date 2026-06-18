@@ -259,6 +259,7 @@ async function main() {
         await ensureFeedbackTable(client);
         await ensurePriceReportTable(client);
         await ensureListingReportTable(client);
+        await ensurePersonalTrackerTables(client);
         await purgeBlockedVendors(client);
         await purgeCancelledSets(client);
         await ensureDiscoveryColumn(client);
@@ -306,6 +307,7 @@ async function main() {
     await ensureFeedbackTable(client);
     await ensurePriceReportTable(client);
     await ensureListingReportTable(client);
+    await ensurePersonalTrackerTables(client);
     await purgeBlockedVendors(client);
     await purgeCancelledSets(client);
     await ensureDiscoveryColumn(client);
@@ -769,6 +771,97 @@ async function ensureListingReportTable(client) {
     );
   } catch (err) {
     console.warn(`[db-setup] ListingReport table setup skipped: ${err.message}`);
+  }
+}
+
+// Passwordless personal tracker tables. These are also represented by a Prisma
+// migration, but production deploys use this idempotent setup path.
+async function ensurePersonalTrackerTables(client) {
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."TrackerUser" (
+         id              text NOT NULL PRIMARY KEY,
+         email           text NOT NULL UNIQUE,
+         "alertsEnabled" boolean NOT NULL DEFAULT true,
+         "countryCode"   text,
+         region           text,
+         currency         text,
+         "verifiedAt"    timestamp(3) without time zone NOT NULL,
+         "createdAt"     timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         "updatedAt"     timestamp(3) without time zone NOT NULL
+       )`
+    );
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."TrackerAuthChallenge" (
+         id               text NOT NULL PRIMARY KEY,
+         email            text NOT NULL,
+         "magicTokenHash" text NOT NULL UNIQUE,
+         "otpHash"        text NOT NULL,
+         attempts         integer NOT NULL DEFAULT 0,
+         "ipHash"         text,
+         "pendingSlugs"   text[] NOT NULL DEFAULT ARRAY[]::text[],
+         "countryCode"    text,
+         region            text,
+         currency          text,
+         "expiresAt"      timestamp(3) without time zone NOT NULL,
+         "consumedAt"     timestamp(3) without time zone,
+         "requestedAt"    timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS "TrackerAuthChallenge_email_requestedAt_idx"
+       ON public."TrackerAuthChallenge" (email, "requestedAt")`
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS "TrackerAuthChallenge_expiresAt_idx"
+       ON public."TrackerAuthChallenge" ("expiresAt")`
+    );
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."TrackerItem" (
+         id                 text NOT NULL PRIMARY KEY,
+         "userId"           text NOT NULL,
+         "groupBuyId"       text NOT NULL,
+         "alertsEnabled"    boolean NOT NULL DEFAULT true,
+         "lastStatus"       text,
+         "lastBestPriceUsd" double precision,
+         "lastVendorCount"  integer NOT NULL DEFAULT 0,
+         "lastDevUpdateAt"  timestamp(3) without time zone,
+         "createdAt"        timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         "updatedAt"        timestamp(3) without time zone NOT NULL,
+         CONSTRAINT "TrackerItem_userId_fkey"
+           FOREIGN KEY ("userId") REFERENCES public."TrackerUser"(id) ON DELETE CASCADE,
+         CONSTRAINT "TrackerItem_groupBuyId_fkey"
+           FOREIGN KEY ("groupBuyId") REFERENCES public."GroupBuy"(id) ON DELETE CASCADE,
+         CONSTRAINT "TrackerItem_userId_groupBuyId_key" UNIQUE ("userId", "groupBuyId")
+       )`
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS "TrackerItem_groupBuyId_idx"
+       ON public."TrackerItem" ("groupBuyId")`
+    );
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."TrackerNotification" (
+         id              text NOT NULL PRIMARY KEY,
+         "userId"        text NOT NULL,
+         "trackerItemId" text,
+         type            text NOT NULL,
+         title           text NOT NULL,
+         body            text NOT NULL,
+         fingerprint     text NOT NULL UNIQUE,
+         "createdAt"     timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         "sentAt"        timestamp(3) without time zone,
+         CONSTRAINT "TrackerNotification_userId_fkey"
+           FOREIGN KEY ("userId") REFERENCES public."TrackerUser"(id) ON DELETE CASCADE,
+         CONSTRAINT "TrackerNotification_trackerItemId_fkey"
+           FOREIGN KEY ("trackerItemId") REFERENCES public."TrackerItem"(id) ON DELETE SET NULL
+       )`
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS "TrackerNotification_userId_sentAt_idx"
+       ON public."TrackerNotification" ("userId", "sentAt")`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] Personal tracker table setup skipped: ${err.message}`);
   }
 }
 
