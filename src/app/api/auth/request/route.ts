@@ -9,6 +9,7 @@ import {
 import {
   isDefinitiveTrackerEmailFailure,
   sendTrackerLoginEmail,
+  trackerEmailFailureCode,
 } from "@/lib/tracker-email";
 
 export const dynamic = "force-dynamic";
@@ -111,7 +112,8 @@ export async function POST(req: NextRequest) {
       console.info(`[tracker-auth] Development OTP for ${email}: ${challenge.otp}`);
     }
   } catch (error) {
-    console.error("[tracker-auth] Login email failed", error);
+    const deliveryCode = trackerEmailFailureCode(error);
+    console.error(`[tracker-auth] Login email failed (${deliveryCode})`, error);
     if (isDefinitiveTrackerEmailFailure(error)) {
       await prisma.trackerAuthChallenge
         .delete({ where: { id: createdChallenge.id } })
@@ -123,6 +125,7 @@ export async function POST(req: NextRequest) {
       {
         error:
           "Email sign-in is temporarily unavailable. Your tracker is still saved on this device.",
+        code: deliveryCode,
       },
       { status: 503 }
     );

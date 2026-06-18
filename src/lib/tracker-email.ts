@@ -6,10 +6,20 @@ interface EmailMessage {
   html: string;
 }
 
+export type TrackerEmailDeliveryCode =
+  | "configuration_missing"
+  | "api_key_invalid"
+  | "sender_not_verified"
+  | "sandbox_recipient_restricted"
+  | "provider_rate_limited"
+  | "provider_rejected"
+  | "provider_unavailable";
+
 export class TrackerEmailDeliveryError extends Error {
   constructor(
     message: string,
-    readonly definitive: boolean
+    readonly definitive: boolean,
+    readonly code: TrackerEmailDeliveryCode
   ) {
     super(message);
     this.name = "TrackerEmailDeliveryError";
@@ -18,6 +28,14 @@ export class TrackerEmailDeliveryError extends Error {
 
 export function isDefinitiveTrackerEmailFailure(error: unknown): boolean {
   return error instanceof TrackerEmailDeliveryError && error.definitive;
+}
+
+export function trackerEmailFailureCode(
+  error: unknown
+): TrackerEmailDeliveryCode {
+  return error instanceof TrackerEmailDeliveryError
+    ? error.code
+    : "provider_unavailable";
 }
 
 function escapeHtml(value: string): string {
@@ -30,10 +48,85 @@ function escapeHtml(value: string): string {
   );
 }
 
+const RESEND_EMAIL_URL = "https://api.resend.com/emails";
+const RESEND_SANDBOX_FROM = "GMK Tracker <onboarding@resend.dev>";
+
+function configuredSender(): string {
+  const value = process.env.TRACKER_EMAIL_FROM?.trim();
+  if (!value || /your-domain\.com/i.test(value)) return RESEND_SANDBOX_FROM;
+  return value;
+}
+
+function deliveryError(status: number, details: string): TrackerEmailDeliveryError {
+  const normalized = details.toLowerCase();
+  let code: TrackerEmailDeliveryCode = "provider_rejected";
+
+  if (status === 401 || normalized.includes("invalid_api_key")) {
+    code = "api_key_invalid";
+  } else if (
+    normalized.includes("testing emails") ||
+    normalized.includes("only send") && normalized.includes("own email")
+  ) {
+    code = "sandbox_recipient_restricted";
+  } else if (
+    normalized.includes("domain") &&
+    (normalized.includes("not verified") || normalized.includes("verify"))
+  ) {
+    code = "sender_not_verified";
+  } else if (status === 429) {
+    code = "provider_rate_limited";
+  }
+
+  return new TrackerEmailDeliveryError(
+    `Email provider rejected the message (${status}): ${details}`,
+    true,
+    code
+  );
+}
+
+async function sendWithResend({
+  apiKey,
+  from,
+  message,
+}: {
+  apiKey: string;
+  from: string;
+  message: EmailMessage;
+}): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(RESEND_EMAIL_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: [message.to],
+        reply_to: process.env.TRACKER_EMAIL_REPLY_TO || undefined,
+        subject: message.subject,
+        html: message.html,
+      }),
+    });
+  } catch (error) {
+    throw new TrackerEmailDeliveryError(
+      `Email provider could not be reached: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      false,
+      "provider_unavailable"
+    );
+  }
+
+  if (!response.ok) {
+    const details = await response.text().catch(() => "");
+    throw deliveryError(response.status, details);
+  }
+}
+
 export async function sendTrackerEmail(message: EmailMessage): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY;
-  const from =
-    process.env.TRACKER_EMAIL_FROM || "GMK Tracker <onboarding@resend.dev>";
   if (!apiKey) {
     if (process.env.NODE_ENV === "development") {
       console.info(`[tracker-email] ${message.subject} -> ${message.to}`);
@@ -41,31 +134,26 @@ export async function sendTrackerEmail(message: EmailMessage): Promise<void> {
     }
     throw new TrackerEmailDeliveryError(
       "Tracker email delivery is not configured: RESEND_API_KEY is missing",
-      true
+      true,
+      "configuration_missing"
     );
   }
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from,
-      to: [message.to],
-      reply_to: process.env.TRACKER_EMAIL_REPLY_TO || undefined,
-      subject: message.subject,
-      html: message.html,
-    }),
-  });
-
-  if (!response.ok) {
-    const details = await response.text().catch(() => "");
-    throw new TrackerEmailDeliveryError(
-      `Email provider rejected the message (${response.status}): ${details}`,
-      true
-    );
+  const from = configuredSender();
+  try {
+    await sendWithResend({ apiKey, from, message });
+  } catch (error) {
+    // A stale or unverified custom sender in Vercel should not prevent the
+    // Resend account owner from using passwordless login during setup.
+    if (
+      from !== RESEND_SANDBOX_FROM &&
+      error instanceof TrackerEmailDeliveryError &&
+      error.code === "sender_not_verified"
+    ) {
+      await sendWithResend({ apiKey, from: RESEND_SANDBOX_FROM, message });
+      return;
+    }
+    throw error;
   }
 }
 
