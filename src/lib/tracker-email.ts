@@ -32,14 +32,15 @@ function escapeHtml(value: string): string {
 
 export async function sendTrackerEmail(message: EmailMessage): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.TRACKER_EMAIL_FROM;
-  if (!apiKey || !from) {
+  const from =
+    process.env.TRACKER_EMAIL_FROM || "GMK Tracker <onboarding@resend.dev>";
+  if (!apiKey) {
     if (process.env.NODE_ENV === "development") {
       console.info(`[tracker-email] ${message.subject} -> ${message.to}`);
       return;
     }
     throw new TrackerEmailDeliveryError(
-      "Tracker email delivery is not configured",
+      "Tracker email delivery is not configured: RESEND_API_KEY is missing",
       true
     );
   }

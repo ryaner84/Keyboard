@@ -120,7 +120,10 @@ export async function POST(req: NextRequest) {
         });
     }
     return NextResponse.json(
-      { error: "We could not send the email. Please try again shortly." },
+      {
+        error:
+          "Email sign-in is temporarily unavailable. Your tracker is still saved on this device.",
+      },
       { status: 503 }
     );
   }
