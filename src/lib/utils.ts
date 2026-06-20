@@ -28,6 +28,8 @@ const IMAGE_OVERRIDES: Record<string, string> = {
     "https://www.gmk.net/shop/media/40/f9/26/1765191031/GMK_CYL_Hangulbeit_Keycaps%20%283%29.webp?ts=1765191049",
   "gmk-unobtainium-blue":
     "https://novelkeys.com/cdn/shop/files/GMK_CYL_Unobtainium_TILE_1200x.jpg?v=1778615730",
+  "gmk-mtnu-divinapapaya":
+    "https://www.gmk.net/shop/media/eb/4c/2c/1765538863/GMK_CYL-MTNU_Divinapapaya_Keycaps%20%282%29.webp?ts=1765539130",
 };
 
 // Some imports have a populated gallery but a null or stale hero image. Cards

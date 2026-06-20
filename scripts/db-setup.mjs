@@ -383,6 +383,10 @@ async function repairKnownBrokenImages(client) {
       "gmk-unobtainium-blue",
       "https://novelkeys.com/cdn/shop/files/GMK_CYL_Unobtainium_TILE_1200x.jpg?v=1778615730",
     ],
+    [
+      "gmk-mtnu-divinapapaya",
+      "https://www.gmk.net/shop/media/eb/4c/2c/1765538863/GMK_CYL-MTNU_Divinapapaya_Keycaps%20%282%29.webp?ts=1765539130",
+    ],
   ];
 
   try {
