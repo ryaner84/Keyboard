@@ -590,6 +590,54 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
                 available = variant.get("available")
                 if isinstance(available, bool):
                     availability_by_id[str(variant.get("id") or "")] = available
+        if not availability_by_id:
+            structured_stock = page.evaluate(
+                """() => {
+                    const result = {};
+                    for (const script of document.querySelectorAll(
+                        'script[type="application/ld+json"]'
+                    )) {
+                        try {
+                            const walk = (node) => {
+                                if (Array.isArray(node)) {
+                                    node.forEach(walk);
+                                    return;
+                                }
+                                if (!node || typeof node !== 'object') return;
+                                const offers =
+                                    node.offers && typeof node.offers === 'object'
+                                        ? node.offers
+                                        : null;
+                                const identity = [
+                                    node['@id'],
+                                    node.url,
+                                    offers && offers['@id'],
+                                    offers && offers.url,
+                                ].filter((value) => typeof value === 'string').join(' ');
+                                const match = identity.match(/[?&]variant=(\\d+)/);
+                                const availability =
+                                    offers && typeof offers.availability === 'string'
+                                        ? offers.availability
+                                        : typeof node.availability === 'string'
+                                            ? node.availability
+                                            : null;
+                                if (match && availability) {
+                                    result[match[1]] =
+                                        !/(outofstock|soldout|discontinued)/i.test(
+                                            availability
+                                        );
+                                }
+                                Object.values(node).forEach(walk);
+                            };
+                            walk(JSON.parse(script.textContent || 'null'));
+                        } catch (e) {}
+                    }
+                    return result;
+                }"""
+            )
+            for variant_id, available in (structured_stock or {}).items():
+                if isinstance(available, bool):
+                    availability_by_id[str(variant_id)] = available
 
         # Step 1: try the Shopify /meta.json endpoint (most reliable — this is
         # the store's PRIMARY currency that prices are denominated in).
