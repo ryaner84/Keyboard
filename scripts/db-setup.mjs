@@ -300,6 +300,7 @@ async function main() {
     console.log(`[db-setup] Done. Loaded ${rows[0].n} group buys.`);
 
     await ensureImagesColumn(client);
+    await repairKnownBrokenImages(client);
     await ensureVariantsColumn(client);
     await ensureKeyboardColumns(client);
     await ensureKeyboardContributionTable(client);
@@ -362,6 +363,51 @@ async function ensureImagesColumn(client) {
     }
   } catch (err) {
     console.warn(`[db-setup] images column setup skipped: ${err.message}`);
+  }
+}
+
+// RECURRING (every deploy): these source galleries were removed or now reject
+// hotlinks. Replace them with verified manufacturer/vendor CDN images so the
+// same dead URLs cannot be restored as the hero by a later import.
+async function repairKnownBrokenImages(client) {
+  const overrides = [
+    [
+      "gh-117742",
+      "https://keebsforall.com/cdn/shop/products/IMG-20220222-WA0010_306026171769143_b2453097-427a-45e8-8dec-c761a74f9b5d.jpg?v=1703031359&width=1533",
+    ],
+    [
+      "gmk-hangulbeit",
+      "https://www.gmk.net/shop/media/40/f9/26/1765191031/GMK_CYL_Hangulbeit_Keycaps%20%283%29.webp?ts=1765191049",
+    ],
+    [
+      "gmk-unobtainium-blue",
+      "https://novelkeys.com/cdn/shop/files/GMK_CYL_Unobtainium_TILE_1200x.jpg?v=1778615730",
+    ],
+  ];
+
+  try {
+    let repaired = 0;
+    for (const [slug, imageUrl] of overrides) {
+      const result = await client.query(
+        `UPDATE public."GroupBuy"
+         SET "imageUrl" = $2,
+             images = ARRAY[$2]::text[],
+             "imagesUpdatedAt" = now(),
+             "updatedAt" = now()
+         WHERE slug = $1
+           AND (
+             "imageUrl" IS DISTINCT FROM $2
+             OR images IS DISTINCT FROM ARRAY[$2]::text[]
+           )`,
+        [slug, imageUrl]
+      );
+      repaired += result.rowCount;
+    }
+    if (repaired > 0) {
+      console.log(`[db-setup] Replaced ${repaired} broken image gallery source(s).`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Known image repair skipped: ${err.message}`);
   }
 }
 
