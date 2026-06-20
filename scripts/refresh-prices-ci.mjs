@@ -1,6 +1,8 @@
 // Price refresh from CI (GitHub Actions): runs the same refreshPrices() the
 // Vercel cron uses, but from a runner IP that vendor stores don't blanket-
 // block, and without the 60s serverless budget. Requires DATABASE_URL.
+// Tracker notifications run separately from the daily Vercel currency cron,
+// which has access to the production email and authentication configuration.
 // Run with: npx tsx scripts/refresh-prices-ci.mjs
 
 // Env check BEFORE the import — importing prices.ts instantiates the Prisma
@@ -22,14 +24,8 @@ const result = await refreshPrices({
   concurrency: 8,
   maxRuntimeMs: 12 * 60_000,
 });
-const { processTrackerNotifications } = await import("../src/lib/tracker-notifications.ts");
-const trackerNotifications = await processTrackerNotifications();
 console.log(
   `Price refresh: attempted=${result.attempted} updated=${result.updated} ` +
     `failed=${result.failed} stoppedEarly=${result.stoppedEarly}`
-);
-console.log(
-  `Tracker alerts: checked=${trackerNotifications.checked} ` +
-    `detected=${trackerNotifications.detected} delivered=${trackerNotifications.delivered}`
 );
 process.exit(0);

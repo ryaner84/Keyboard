@@ -6,6 +6,10 @@
 # connection string). If it contains the __PASSWORD__ placeholder, the
 # DATABASE_PASSWORD secret must be set too (same split as the Vercel env).
 # Without DATABASE_URL the job exits cleanly doing nothing.
+#
+# Tracker alert emails are intentionally excluded from this workflow. They run
+# daily through Vercel's /api/currencies?force=true cron, where the production
+# email and authentication environment variables are available.
 name: Refresh vendor prices
 
 on:

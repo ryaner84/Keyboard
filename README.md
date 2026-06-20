@@ -25,6 +25,10 @@ Production deployments require `RESEND_API_KEY`, `TRACKER_AUTH_SECRET`, and
 deploying. `TRACKER_EMAIL_FROM` is optional and should only be set to an address
 on a domain verified by Resend.
 
+Tracker alerts are processed daily by Vercel through
+`/api/currencies?force=true`. The six-hour GitHub Actions workflow only refreshes
+vendor prices and does not require email or tracker-authentication secrets.
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More
