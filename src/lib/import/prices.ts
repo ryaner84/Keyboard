@@ -125,6 +125,59 @@ function pinnedVariantId(productUrl: string): string | null {
   }
 }
 
+function structuredVariantAvailability(html: string): Map<string, boolean> {
+  const result = new Map<string, boolean>();
+  const scriptPattern =
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+
+    const value = node as Record<string, unknown>;
+    const offers =
+      value.offers && typeof value.offers === "object"
+        ? (value.offers as Record<string, unknown>)
+        : null;
+    const identity = [
+      value["@id"],
+      value.url,
+      offers?.["@id"],
+      offers?.url,
+    ]
+      .filter((item): item is string => typeof item === "string")
+      .join(" ");
+    const variantId = identity.match(/[?&]variant=(\d+)/)?.[1];
+    const availability =
+      typeof offers?.availability === "string"
+        ? offers.availability
+        : typeof value.availability === "string"
+          ? value.availability
+          : null;
+    if (variantId && availability) {
+      result.set(
+        variantId,
+        !/(outofstock|soldout|discontinued)/i.test(availability)
+      );
+    }
+
+    Object.values(value).forEach(walk);
+  };
+
+  let match: RegExpExecArray | null;
+  while ((match = scriptPattern.exec(html)) !== null) {
+    try {
+      walk(JSON.parse(match[1]));
+    } catch {
+      // Ignore malformed third-party JSON-LD blocks.
+    }
+  }
+  return result;
+}
+
 // Shopify exposes a product's data at {productUrl}.json — used by most
 // keyboard vendors (CannonKeys, NovelKeys, KBDfans, Deskhero, Daily Clack...).
 async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): Promise<PriceResult | null> {
@@ -213,9 +266,32 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
       : baseVariants.length > 0
         ? baseVariants
         : [chosen];
-    const knownAvailability = relevantVariants
+    let knownAvailability = relevantVariants
       .map((variant) => availableById.get(variant.id))
       .filter((available): available is boolean => available !== undefined);
+
+    // Some stores serve product.json but block product.js to datacenter IPs.
+    // Their rendered product page still publishes per-variant JSON-LD offers,
+    // so use that precise structured data before treating stock as unknown.
+    if (knownAvailability.length === 0) {
+      try {
+        const pageRes = await fetchWithTimeout(
+          clean,
+          cookie ? { Cookie: cookie } : undefined
+        );
+        if (pageRes.ok) {
+          const structured = structuredVariantAvailability(await pageRes.text());
+          structured.forEach((available, id) => {
+            availableById.set(id, available);
+          });
+          knownAvailability = relevantVariants
+            .map((variant) => availableById.get(variant.id))
+            .filter((available): available is boolean => available !== undefined);
+        }
+      } catch {
+        // Availability remains unknown; preserve the priced listing.
+      }
+    }
     const inStock =
       knownAvailability.length === 0 || knownAvailability.some(Boolean);
 
