@@ -347,6 +347,19 @@ async function ensureImagesColumn(client) {
     if (rowCount > 0) {
       console.log(`[db-setup] Backfilled images[] for ${rowCount} sets.`);
     }
+
+    // Older imports can contain a complete gallery but no hero image. Catalog
+    // cards historically read imageUrl only, so keep both fields synchronized.
+    const heroBackfill = await client.query(
+      `UPDATE public."GroupBuy"
+       SET "imageUrl" = images[1]
+       WHERE ("imageUrl" IS NULL OR btrim("imageUrl") = '')
+         AND cardinality(images) > 0
+         AND images[1] IS NOT NULL`
+    );
+    if (heroBackfill.rowCount > 0) {
+      console.log(`[db-setup] Backfilled hero images for ${heroBackfill.rowCount} sets.`);
+    }
   } catch (err) {
     console.warn(`[db-setup] images column setup skipped: ${err.message}`);
   }

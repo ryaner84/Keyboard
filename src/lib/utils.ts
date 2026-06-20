@@ -18,6 +18,28 @@ export function normalizeImageUrl(url: string | null | undefined): string | null
   return url.replace("keysets%2F", "thumbs%2F").replace("/keysets/", "/thumbs/");
 }
 
+// Some imports have a populated gallery but a null or stale hero image. Cards
+// therefore use both fields and advance through every candidate on load errors.
+export function getImageCandidates(
+  imageUrl: string | null | undefined,
+  images: string[] | null | undefined = []
+): string[] {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of [imageUrl, ...(images ?? [])]) {
+    if (!raw) continue;
+    const normalized = normalizeImageUrl(raw);
+    for (const candidate of [normalized, raw]) {
+      if (!candidate || seen.has(candidate)) continue;
+      seen.add(candidate);
+      candidates.push(candidate);
+    }
+  }
+
+  return candidates;
+}
+
 export function formatDate(date: Date | string | null): string {
   if (!date) return "TBD";
   return new Date(date).toLocaleDateString("en-SG", {

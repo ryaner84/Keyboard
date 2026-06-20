@@ -1,10 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { formatRelativeDate, getCountdownLabel, normalizeImageUrl } from "@/lib/utils";
+import {
+  formatRelativeDate,
+  getCountdownLabel,
+  getImageCandidates,
+} from "@/lib/utils";
 import { formatCurrency } from "@/lib/currency-utils";
 import { computeCheapest, computeSavings, latestUpdate } from "@/lib/pricing";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
@@ -56,10 +60,16 @@ export function SetCard({ set }: SetCardProps) {
   const { rates, loading } = useCurrency(currency);
   const tracked = isTracked(set.slug);
   const countdown = getCountdownLabel(set.status, set.gbStart, set.gbEnd);
-  // "thumb" → try normalised thumbnail URL
-  // "original" → thumbnail 404'd, try the raw imageUrl
-  // "failed" → both failed, show placeholder
-  const [imgPhase, setImgPhase] = useState<"thumb" | "original" | "failed">("thumb");
+  const imageCandidates = useMemo(
+    () => getImageCandidates(set.imageUrl, set.images),
+    [set.imageUrl, set.images]
+  );
+  const imageSignature = imageCandidates.join("\n");
+  const [imageIndex, setImageIndex] = useState(0);
+
+  useEffect(() => {
+    setImageIndex(0);
+  }, [set.id, imageSignature]);
 
   const allPrices = computeCheapest(set, region as Region, currency, rates);
   const cheapest = allPrices.slice(0, 3);
@@ -70,20 +80,11 @@ export function SetCard({ set }: SetCardProps) {
   const updated = latestUpdate(cheapest);
   const href = `/sets/${set.slug}?country=${countryCode}`;
 
-  const thumbSrc = normalizeImageUrl(set.imageUrl); // may point to /thumbs/ path
-  const originalSrc = set.imageUrl ?? null;          // raw Firebase URL
-  const imgSrc =
-    imgPhase === "thumb" ? thumbSrc :
-    imgPhase === "original" ? originalSrc :
-    null;
-  const showImage = !!imgSrc && imgPhase !== "failed";
+  const imgSrc = imageCandidates[imageIndex] ?? null;
+  const showImage = !!imgSrc;
 
   const handleImgError = () => {
-    if (imgPhase === "thumb" && originalSrc && originalSrc !== thumbSrc) {
-      setImgPhase("original"); // try full-size before giving up
-    } else {
-      setImgPhase("failed");
-    }
+    setImageIndex((current) => current + 1);
   };
 
   return (

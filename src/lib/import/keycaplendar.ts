@@ -150,7 +150,8 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
     prisma.groupBuy.findMany({
       select: {
         id: true, slug: true, name: true, colorway: true, designer: true,
-        status: true, gbStart: true, gbEnd: true, imageUrl: true, description: true,
+        status: true, gbStart: true, gbEnd: true, imageUrl: true, images: true,
+        description: true,
       },
     }),
     prisma.kit.findMany({ where: { type: "BASE" }, select: { id: true, groupBuyId: true } }),
@@ -206,10 +207,24 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
         select: { id: true },
       });
       groupBuyId = created.id;
-      setBySlug.set(slug, { id: groupBuyId, slug, name, colorway, designer, status, gbStart, gbEnd, imageUrl: render, description });
+      setBySlug.set(slug, {
+        id: groupBuyId,
+        slug,
+        name,
+        colorway,
+        designer,
+        status,
+        gbStart,
+        gbEnd,
+        imageUrl: render,
+        images: render ? [render] : [],
+        description,
+      });
       setChanged = true;
     } else {
       groupBuyId = existing.id;
+      const imageChanged = !!render && existing.imageUrl !== render;
+      const galleryNeedsBackfill = !!render && existing.images.length === 0;
       const dirty =
         existing.name !== name ||
         existing.colorway !== colorway ||
@@ -217,13 +232,25 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
         existing.status !== status ||
         !sameDate(existing.gbStart, gbStart) ||
         !sameDate(existing.gbEnd, gbEnd) ||
-        existing.imageUrl !== render ||
+        imageChanged ||
+        galleryNeedsBackfill ||
         existing.description !== description;
       if (dirty) {
-        // Leave `images` untouched so any scraped gallery survives.
+        // Never clear a valid image when KeycapLendar has no render. Preserve
+        // scraped galleries, but seed an empty gallery from a new render.
         await prisma.groupBuy.update({
           where: { id: groupBuyId },
-          data: { name, colorway, designer, status, gbStart, gbEnd, imageUrl: render, description },
+          data: {
+            name,
+            colorway,
+            designer,
+            status,
+            gbStart,
+            gbEnd,
+            description,
+            ...(render ? { imageUrl: render } : {}),
+            ...(galleryNeedsBackfill ? { images: [render] } : {}),
+          },
         });
         setChanged = true;
       }

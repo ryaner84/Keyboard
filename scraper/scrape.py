@@ -2004,6 +2004,35 @@ def _gh_save_seen(seen: dict) -> None:
         log(f"  gh_seen.json write failed: {e}")
 
 
+def _gh_repair_topic_ids(conn) -> set[str]:
+    """Topics that must be revisited even when their last-post date is unchanged."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT slug
+                FROM "GroupBuy"
+                WHERE slug ~ '^gh-[0-9]+$'
+                  AND (
+                    "imageUrl" IS NULL
+                    OR COALESCE(cardinality(images), 0) = 0
+                  )
+                  AND (
+                    "imagesUpdatedAt" IS NULL
+                    OR "imagesUpdatedAt" < now() - interval '7 days'
+                  )
+                """
+            )
+            return {
+                slug[3:]
+                for (slug,) in cur.fetchall()
+                if isinstance(slug, str) and slug.startswith("gh-")
+            }
+    except Exception as e:
+        log(f"  Geekhack repair scan failed: {e}")
+        return set()
+
+
 def _gh_parse_last_post(text: str) -> datetime | None:
     """Parse SMF last-post date string into a datetime (UTC)."""
     text = text.strip()
@@ -2076,15 +2105,19 @@ def _gh_status(title: str, gb_end_date) -> str:
 
 def _gh_extract_images(html: str) -> list[str]:
     """Pull external image URLs from first-post HTML. Skips forum smileys/avatars."""
-    imgs = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', html, re.I)
+    imgs = re.findall(
+        r'<img[^>]+(?:src|data-src|data-original|data-lazy-src)=["\']([^"\']+)["\']',
+        html,
+        re.I,
+    )
     out = []
     for src in imgs:
         lsrc = src.lower()
         # Skip SMF smileys, avatars, icons, tiny images
-        if any(x in lsrc for x in ("smiley", "emoji", "avatar", "icon", "thumb", "16x16", "32x32")):
+        if any(x in lsrc for x in ("smiley", "emoji", "avatar", "icon", "16x16", "32x32")):
             continue
         # Keep only https:// external images
-        if src.startswith("https://"):
+        if src.startswith("https://") and src not in out:
             out.append(src)
     return out[:8]
 
@@ -2137,7 +2170,21 @@ _GH_POST_JS = """
     }
     const html = el ? el.innerHTML : '';
     const text = el ? el.innerText : '';
-    const imgs = el ? Array.from(el.querySelectorAll('img')).map(i => i.src) : [];
+    const imgs = el ? Array.from(el.querySelectorAll('img')).flatMap(i => {
+        const parentHref = i.closest('a')?.href;
+        const linkedImage = parentHref && (
+            /\\.(?:jpe?g|png|webp|gif)(?:[?#]|$)/i.test(parentHref)
+            || parentHref.includes('action=dlattach')
+        ) ? parentHref : null;
+        return [
+            linkedImage,
+            i.currentSrc,
+            i.src,
+            i.getAttribute('data-src'),
+            i.getAttribute('data-original'),
+            i.getAttribute('data-lazy-src'),
+        ].filter(Boolean);
+    }) : [];
     return { html, text, imgs };
 }
 """
@@ -2205,18 +2252,37 @@ def _upsert_gh_set(conn, data: dict) -> tuple[str | None, bool]:
         existing = cur.fetchone()
 
     if existing:
-        # Enrich conservatively: only fill blank fields; never overwrite productUrl
-        # (that's the vendor buy-link). gbEnd uses COALESCE so we only set if absent.
+        # Enrich conservatively: only fill blank image fields; never overwrite
+        # productUrl (that's the vendor buy-link). Re-running a previously empty
+        # thread can therefore repair its card without replacing curated data.
         with conn.cursor() as cur:
             cur.execute(
                 """
                 UPDATE "GroupBuy" SET
                     description = CASE WHEN (description IS NULL OR description = '') THEN %s ELSE description END,
                     "gbEnd"     = COALESCE("gbEnd", %s),
+                    "imageUrl" = CASE
+                        WHEN ("imageUrl" IS NULL OR "imageUrl" = '') AND %s IS NOT NULL
+                        THEN %s ELSE "imageUrl"
+                    END,
+                    images = CASE
+                        WHEN COALESCE(cardinality(images), 0) = 0
+                             AND cardinality(%s::text[]) > 0
+                        THEN %s::text[] ELSE images
+                    END,
+                    "imagesUpdatedAt" = now(),
                     "updatedAt" = now()
                 WHERE slug = %s
                 """,
-                (description, gb_end_ts, existing["slug"]),
+                (
+                    description,
+                    gb_end_ts,
+                    image_url,
+                    image_url,
+                    images,
+                    images,
+                    existing["slug"],
+                ),
             )
         return existing["id"], False
 
@@ -2234,11 +2300,11 @@ def _upsert_gh_set(conn, data: dict) -> tuple[str | None, bool]:
             """
             INSERT INTO "GroupBuy"
                 (id, slug, name, colorway, designer, status, "productType",
-                 "imageUrl", images, description, featured,
+                 "imageUrl", images, "imagesUpdatedAt", description, featured,
                  "productUrl", "gbEnd", "createdAt", "updatedAt")
             VALUES
                 (gen_random_uuid()::text, %s, %s, '', %s, %s::"GBStatus", %s,
-                 %s, %s, %s, false,
+                 %s, %s, now(), %s, false,
                  %s, %s, now(), now())
             ON CONFLICT (slug) DO NOTHING
             RETURNING id
@@ -2269,6 +2335,9 @@ def run_geekhack(conn, context: BrowserContext, deadline: float) -> dict:
     log("Geekhack pass: board 70.0 (Group Buys) …")
 
     seen = _gh_load_seen()
+    repair_topic_ids = _gh_repair_topic_ids(conn)
+    if repair_topic_ids:
+        log(f"  Geekhack: forcing repair for {len(repair_topic_ids)} topic(s).")
     page = context.new_page()
     try:
         # ── 1. Collect thread listing ──────────────────────────────────────────
@@ -2327,7 +2396,12 @@ def run_geekhack(conn, context: BrowserContext, deadline: float) -> dict:
             last_post_iso = last_post_dt.isoformat() if last_post_dt else ""
 
             # Skip if last-post hasn't advanced
-            if seen.get(topic_id) and last_post_iso and last_post_iso <= seen[topic_id]:
+            if (
+                topic_id not in repair_topic_ids
+                and seen.get(topic_id)
+                and last_post_iso
+                and last_post_iso <= seen[topic_id]
+            ):
                 stats["skipped_unchanged"] += 1
                 continue
 
@@ -2349,9 +2423,10 @@ def run_geekhack(conn, context: BrowserContext, deadline: float) -> dict:
                 title = thread.get("title") or ""
                 body_html = post.get("html") or ""
                 raw_images = post.get("imgs") or []
-                images = _gh_extract_images(
-                    body_html if body_html else "\n".join(f'<img src="{u}">' for u in raw_images)
+                image_html = body_html + "\n" + "\n".join(
+                    f'<img src="{u}">' for u in raw_images
                 )
+                images = _gh_extract_images(image_html)
 
                 # Re-use the same date extraction logic as the keyboard pass
                 gb_end_date = kb_extract_gb_end_date({"body_html": body_html})
