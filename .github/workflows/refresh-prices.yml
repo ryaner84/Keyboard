@@ -20,6 +20,11 @@ on:
         required: false
         type: boolean
         default: false
+      vendor_kit_ids:
+        description: Optional comma-separated VendorKit IDs to refresh exclusively
+        required: false
+        type: string
+        default: ""
   schedule:
     - cron: "30 */6 * * *" # every 6 hours
 
@@ -49,4 +54,5 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
           FORCE_PRICE_REFRESH: ${{ github.event_name == 'workflow_dispatch' && inputs.force || 'false' }}
+          PRICE_REFRESH_IDS: ${{ github.event_name == 'workflow_dispatch' && inputs.vendor_kit_ids || '' }}
         run: npx tsx scripts/refresh-prices-ci.mjs
