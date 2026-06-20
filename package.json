@@ -28,6 +28,7 @@
     "bcryptjs": "^3.0.3",
     "jsonwebtoken": "^9.0.3",
     "next": "14.2.35",
+    "nodemailer": "^9.0.1",
     "pg": "^8.21.0",
     "prisma": "^7.8.0",
     "qrcode": "^1.5.4",
@@ -37,6 +38,7 @@
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/nodemailer": "^8.0.1",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "dotenv": "^17.4.2",

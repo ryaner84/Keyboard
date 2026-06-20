@@ -20,10 +20,11 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 ## Passwordless tracker email
 
-Production deployments require `RESEND_API_KEY`, `TRACKER_AUTH_SECRET`, and
-`NEXT_PUBLIC_SITE_URL`. Add them to the Vercel Production environment before
-deploying. `TRACKER_EMAIL_FROM` is optional and should only be set to an address
-on a domain verified by Resend.
+Production deployments require `TRACKER_AUTH_SECRET`, `NEXT_PUBLIC_SITE_URL`,
+and an email provider. Gmail SMTP is preferred: set `GMAIL_USER`,
+`GMAIL_APP_PASSWORD`, and `TRACKER_EMAIL_FROM` to a dedicated Gmail account.
+The password must be a Google App Password, not the account password. Resend
+remains available as a fallback when the Gmail variables are absent.
 
 Tracker alerts are processed daily by Vercel through
 `/api/currencies?force=true`. The six-hour GitHub Actions workflow only refreshes

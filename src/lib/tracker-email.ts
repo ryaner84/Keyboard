@@ -1,5 +1,7 @@
 import "server-only";
 
+import nodemailer from "nodemailer";
+
 interface EmailMessage {
   to: string;
   subject: string;
@@ -9,6 +11,7 @@ interface EmailMessage {
 export type TrackerEmailDeliveryCode =
   | "configuration_missing"
   | "api_key_invalid"
+  | "smtp_auth_failed"
   | "sender_not_verified"
   | "sandbox_recipient_restricted"
   | "provider_rate_limited"
@@ -51,9 +54,17 @@ function escapeHtml(value: string): string {
 const RESEND_EMAIL_URL = "https://api.resend.com/emails";
 const RESEND_SANDBOX_FROM = "GMK Tracker <onboarding@resend.dev>";
 
-function configuredSender(): string {
+function configuredResendSender(): string {
   const value = process.env.TRACKER_EMAIL_FROM?.trim();
   if (!value || /your-domain\.com/i.test(value)) return RESEND_SANDBOX_FROM;
+  return value;
+}
+
+function configuredGmailSender(user: string): string {
+  const value = process.env.TRACKER_EMAIL_FROM?.trim();
+  if (!value || /your-domain\.com/i.test(value)) {
+    return `GMK Tracker <${user}>`;
+  }
   return value;
 }
 
@@ -82,6 +93,88 @@ function deliveryError(status: number, details: string): TrackerEmailDeliveryErr
     true,
     code
   );
+}
+
+function gmailDeliveryError(error: unknown): TrackerEmailDeliveryError {
+  const smtpError = error as {
+    code?: string;
+    response?: string;
+    responseCode?: number;
+    message?: string;
+  };
+  const details =
+    smtpError.response || smtpError.message || "Unknown Gmail SMTP error";
+  const normalized = details.toLowerCase();
+
+  if (
+    smtpError.code === "EAUTH" ||
+    smtpError.responseCode === 535 ||
+    normalized.includes("username and password not accepted") ||
+    normalized.includes("invalid login")
+  ) {
+    return new TrackerEmailDeliveryError(
+      `Gmail SMTP authentication failed: ${details}`,
+      true,
+      "smtp_auth_failed"
+    );
+  }
+
+  if (
+    [421, 450, 451, 452].includes(smtpError.responseCode ?? 0) ||
+    normalized.includes("rate limit") ||
+    normalized.includes("too many")
+  ) {
+    return new TrackerEmailDeliveryError(
+      `Gmail SMTP temporarily rejected the message: ${details}`,
+      false,
+      "provider_rate_limited"
+    );
+  }
+
+  const definitive =
+    typeof smtpError.responseCode === "number" && smtpError.responseCode >= 500;
+  return new TrackerEmailDeliveryError(
+    `Gmail SMTP delivery failed: ${details}`,
+    definitive,
+    definitive ? "provider_rejected" : "provider_unavailable"
+  );
+}
+
+async function sendWithGmail({
+  user,
+  appPassword,
+  message,
+}: {
+  user: string;
+  appPassword: string;
+  message: EmailMessage;
+}): Promise<void> {
+  const transporter = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+    auth: {
+      user,
+      pass: appPassword.replace(/\s/g, ""),
+    },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
+  });
+
+  try {
+    await transporter.sendMail({
+      from: configuredGmailSender(user),
+      to: message.to,
+      replyTo: process.env.TRACKER_EMAIL_REPLY_TO || undefined,
+      subject: message.subject,
+      html: message.html,
+    });
+  } catch (error) {
+    throw gmailDeliveryError(error);
+  } finally {
+    transporter.close();
+  }
 }
 
 async function sendWithResend({
@@ -126,20 +219,39 @@ async function sendWithResend({
 }
 
 export async function sendTrackerEmail(message: EmailMessage): Promise<void> {
+  const gmailUser = process.env.GMAIL_USER?.trim();
+  const gmailAppPassword = process.env.GMAIL_APP_PASSWORD?.trim();
   const apiKey = process.env.RESEND_API_KEY;
+
+  if (gmailUser || gmailAppPassword) {
+    if (!gmailUser || !gmailAppPassword) {
+      throw new TrackerEmailDeliveryError(
+        "Gmail email delivery is not configured: both GMAIL_USER and GMAIL_APP_PASSWORD are required",
+        true,
+        "configuration_missing"
+      );
+    }
+    await sendWithGmail({
+      user: gmailUser,
+      appPassword: gmailAppPassword,
+      message,
+    });
+    return;
+  }
+
   if (!apiKey) {
     if (process.env.NODE_ENV === "development") {
       console.info(`[tracker-email] ${message.subject} -> ${message.to}`);
       return;
     }
     throw new TrackerEmailDeliveryError(
-      "Tracker email delivery is not configured: RESEND_API_KEY is missing",
+      "Tracker email delivery is not configured: set Gmail SMTP or Resend credentials",
       true,
       "configuration_missing"
     );
   }
 
-  const from = configuredSender();
+  const from = configuredResendSender();
   try {
     await sendWithResend({ apiKey, from, message });
   } catch (error) {
