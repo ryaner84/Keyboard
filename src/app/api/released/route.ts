@@ -3,14 +3,13 @@ import { prisma } from "@/lib/prisma";
 
 const RELEASED_STATUSES = ["SHIPPING", "DELIVERED", "IN_STOCK"] as const;
 
-// "Available" means at least one vendor has a current price — the inStock flag
-// is set by the GB-lifecycle importer (false for DELIVERED/SHIPPING) and is
-// unreliable for released sets. A non-null scraped price is the real signal.
+// "Available" means at least one vendor has a current price and its selected
+// base-kit variant is currently purchasable.
 const AVAILABLE_FILTER = {
   kits: {
     some: {
       type: "BASE" as const,
-      vendorKits: { some: { price: { not: null } } },
+      vendorKits: { some: { price: { not: null }, inStock: true } },
     },
   },
 };
@@ -44,7 +43,7 @@ function priceStats(
   let max = 0;
   let count = 0;
   for (const vk of base.vendorKits) {
-    if (vk.price == null) continue;
+    if (vk.price == null || !vk.inStock) continue;
     const rate = usdRates[vk.currency ?? "USD"] ?? 1;
     const usd = vk.price / rate;
     count++;
@@ -98,13 +97,18 @@ export async function GET(req: NextRequest) {
     ...(effectiveAvailability === "available" && AVAILABLE_FILTER),
     ...(effectiveAvailability === "soldout" && { NOT: AVAILABLE_FILTER }),
     ...(designer && { designer: { equals: designer, mode: "insensitive" as const } }),
-    // Vendor filter = "this vendor stocks it right now": the vendor's listing
-    // must carry a live price (unpriced listings are hidden on released sets).
+    // Vendor filter = "this vendor stocks it right now".
     ...(vendor && {
       kits: {
         some: {
           type: "BASE" as const,
-          vendorKits: { some: { price: { not: null }, vendor: { slug: vendor } } },
+          vendorKits: {
+            some: {
+              price: { not: null },
+              inStock: true,
+              vendor: { slug: vendor },
+            },
+          },
         },
       },
     }),
@@ -216,6 +220,7 @@ export async function GET(req: NextRequest) {
         vendorKits: {
           some: {
             price: { not: null },
+            inStock: true,
             kit: { type: "BASE", groupBuy: releasedWhere },
           },
         },

@@ -507,6 +507,28 @@ def _pick_variant(variants: list[dict], pinned_id: str | None) -> dict | None:
     return choose_kit_variant(variants)
 
 
+def _base_variants_in_stock(
+    variants: list[dict],
+    chosen: dict,
+    pinned_id: str | None,
+    availability_by_id: dict[str, bool],
+) -> bool:
+    """Use explicit Shopify stock for the selected/base variants when known."""
+    if pinned_id:
+        relevant = [chosen]
+    else:
+        non_addon = [v for v in variants if not _ADDON_VARIANT_RE.search(v["title"])]
+        pool = non_addon if non_addon else variants
+        base = [v for v in pool if classify_variant(v["title"]) == "BASE"]
+        relevant = base if base else [chosen]
+    known = [
+        availability_by_id[v["id"]]
+        for v in relevant
+        if v["id"] in availability_by_id
+    ]
+    return any(known) if known else True
+
+
 def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> dict | None:
     """Navigate to the product (acquires cf_clearance) then fetch its .json from
     inside the page context so the request carries the clearance cookies."""
@@ -515,6 +537,7 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
     pinned_id = pinned_variant_id(product_url)
     clean = product_url.split("?")[0].split("#")[0].rstrip("/")
     json_url = clean + ".json"
+    js_url = clean + ".js"
     origin = urllib.parse.urlsplit(clean)
     origin_url = f"{origin.scheme}://{origin.netloc}"
     try:
@@ -544,6 +567,29 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
         chosen = _pick_variant(variants, pinned_id)
         if chosen is None:
             return None
+
+        # product.json omits stock on some themes; product.js exposes an
+        # explicit `available` flag for the same variant IDs.
+        availability_by_id: dict[str, bool] = {}
+        for variant in data["product"].get("variants") or []:
+            available = variant.get("available")
+            if isinstance(available, bool):
+                availability_by_id[str(variant.get("id") or "")] = available
+        stock_data = page.evaluate(
+            """async (u) => {
+                try {
+                    const r = await fetch(u, { headers: { 'Accept': 'application/json' } });
+                    if (!r.ok) return null;
+                    return await r.json();
+                } catch (e) { return null; }
+            }""",
+            js_url,
+        )
+        if stock_data:
+            for variant in stock_data.get("variants") or []:
+                available = variant.get("available")
+                if isinstance(available, bool):
+                    availability_by_id[str(variant.get("id") or "")] = available
 
         # Step 1: try the Shopify /meta.json endpoint (most reliable — this is
         # the store's PRIMARY currency that prices are denominated in).
@@ -648,9 +694,17 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
             log(f"  implausible kit price {chosen['price']} {currency} — skipped ({product_url})")
             return None
 
+        in_stock = _base_variants_in_stock(
+            variants, chosen, pinned_id, availability_by_id
+        )
         # Stored variants carry title+price only (what the UI parses).
         variants = [{"title": v["title"], "price": v["price"]} for v in variants]
-        return {"price": chosen["price"], "currency": currency, "variants": variants}
+        return {
+            "price": chosen["price"],
+            "currency": currency,
+            "variants": variants,
+            "inStock": in_stock,
+        }
     except Exception as e:  # noqa: BLE001
         log(f"  price fetch failed for {product_url}: {e}")
         return None
@@ -1426,12 +1480,13 @@ def run_prices(conn, context: BrowserContext, deadline: float) -> dict:
                 with conn.cursor() as cur:
                     cur.execute(
                         'UPDATE "VendorKit" SET price = %s, currency = %s, '
-                        'variants = %s::jsonb, "inStock" = true, '
+                        'variants = %s::jsonb, "inStock" = %s, '
                         '"priceUpdatedAt" = now(), "priceSource" = \'SCRAPED\' WHERE id = %s',
                         (
                             result["price"],
                             result["currency"],
                             json.dumps(result["variants"]),
+                            result["inStock"],
                             vk["id"],
                         ),
                     )

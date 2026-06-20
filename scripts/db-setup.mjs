@@ -281,7 +281,6 @@ async function main() {
         await auditCleanupV3(client);
         await purgeMispricedListings(client);
         await prioritizePreorderVendors(client);
-        await markPricedVendorKitsInStock(client);
         await reclassifyMisflaggedKeycaps(client);
         await dropForumDuplicatesOfOfficialSets(client);
       }
@@ -1306,27 +1305,6 @@ async function cleanupInterestChecks(client) {
     }
   } catch (err) {
     console.warn(`[db-setup] Interest-check cleanup skipped: ${err.message}`);
-  }
-}
-
-// One-time (idempotent) fix: scraped prices were historically written without
-// setting inStock=true, so DELIVERED/SHIPPING sets with real prices still had
-// inStock=false and were invisible in the "available" filter.
-// Set inStock=true for every VendorKit that has a non-null scraped/manual price.
-async function markPricedVendorKitsInStock(client) {
-  try {
-    const { rowCount } = await client.query(
-      `UPDATE public."VendorKit"
-       SET "inStock" = true
-       WHERE price IS NOT NULL
-         AND "priceSource" IN ('SCRAPED', 'MANUAL')
-         AND "inStock" = false`
-    );
-    if (rowCount > 0) {
-      console.log(`[db-setup] Marked ${rowCount} priced VendorKit(s) as inStock=true.`);
-    }
-  } catch (err) {
-    console.warn(`[db-setup] markPricedVendorKitsInStock skipped: ${err.message}`);
   }
 }
 

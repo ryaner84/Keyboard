@@ -25,6 +25,8 @@ const DEFAULT_MAX_RUNTIME_MS = 50_000;
 
 export interface PriceResult {
   price: number;
+  // Vendor-level availability for the selected/base-kit variants.
+  inStock: boolean;
   // null when the store's /meta.json is blocked — caller must fall back to the
   // vendor's own currency, never assume USD.
   currency: string | null;
@@ -157,10 +159,38 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
         variants?: Array<{ id?: number | string; title?: string; price?: string | number; available?: boolean }>;
       };
     };
-    const variants = (data.product?.variants ?? [])
+    const rawVariants = data.product?.variants ?? [];
+    const variants = rawVariants
       .map((v) => ({ id: String(v.id ?? ""), title: String(v.title ?? ""), price: Number(v.price) }))
       .filter((v) => !isNaN(v.price) && v.price > 0);
     if (variants.length === 0) return null;
+
+    // Shopify's product.json omits availability on some themes. product.js
+    // exposes the same variant IDs with an explicit `available` boolean.
+    const availableById = new Map<string, boolean>();
+    for (const variant of rawVariants) {
+      if (typeof variant.available === "boolean") {
+        availableById.set(String(variant.id ?? ""), variant.available);
+      }
+    }
+    try {
+      const stockRes = await fetchWithTimeout(
+        `${clean}.js`,
+        cookie ? { Cookie: cookie } : undefined
+      );
+      if (stockRes.ok) {
+        const stockData = (await stockRes.json()) as {
+          variants?: Array<{ id?: number | string; available?: boolean }>;
+        };
+        for (const variant of stockData.variants ?? []) {
+          if (typeof variant.available === "boolean") {
+            availableById.set(String(variant.id ?? ""), variant.available);
+          }
+        }
+      }
+    } catch {
+      // Availability remains unknown; preserve the priced listing as available.
+    }
 
     // Pick the variant that is actually the BASE kit, NOT the cheapest one — GB
     // listings carry cheap add-on variants (deskmats, samples, deposits) that
@@ -175,6 +205,19 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     const nonAddon = variants.filter((v) => !ADDON_VARIANT_RE.test(v.title));
     const pool = nonAddon.length > 0 ? nonAddon : variants;
     const chosen = pinned ?? pool.find((v) => classifyVariant(v.title) === "BASE") ?? pool[0];
+    const baseVariants = pool.filter(
+      (variant) => classifyVariant(variant.title) === "BASE"
+    );
+    const relevantVariants = pinned
+      ? [pinned]
+      : baseVariants.length > 0
+        ? baseVariants
+        : [chosen];
+    const knownAvailability = relevantVariants
+      .map((variant) => availableById.get(variant.id))
+      .filter((available): available is boolean => available !== undefined);
+    const inStock =
+      knownAvailability.length === 0 || knownAvailability.some(Boolean);
 
     // Refuse implausible kit prices rather than store garbage, and refuse
     // currencies the site can't convert.
@@ -186,7 +229,12 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
       return null;
     }
 
-    return { price: chosen.price, currency, variants: variants.map(({ title, price }) => ({ title, price })) };
+    return {
+      price: chosen.price,
+      currency,
+      inStock,
+      variants: variants.map(({ title, price }) => ({ title, price })),
+    };
   } catch {
     return null;
   }
@@ -251,6 +299,7 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
         price?: string | number;
         lowPrice?: string | number;
         priceCurrency?: string;
+        availability?: string;
         offerCount?: string | number;
         offers?: LdOffer | LdOffer[];
       };
@@ -322,7 +371,15 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
 
         const price = Number(chosen?.price ?? chosen?.lowPrice);
         if (!isNaN(price) && price > 0 && isPlausibleBaseKitPrice(price, currency)) {
-          return { price, currency, variants: [] };
+          const availability =
+            chosen?.availability ??
+            (!Array.isArray(rawOffers)
+              ? (rawOffers as LdOffer)?.availability
+              : undefined);
+          const inStock =
+            !availability ||
+            !/(outofstock|soldout|discontinued)/i.test(availability);
+          return { price, currency, inStock, variants: [] };
         }
       }
     }
@@ -334,12 +391,18 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
     const cur =
       html.match(/property=["']product:price:currency["'][^>]*content=["']([A-Z]{3})["']/i) ??
       html.match(/content=["']([A-Z]{3})["'][^>]*property=["']product:price:currency["']/i);
+    const availability =
+      html.match(/property=["']product:availability["'][^>]*content=["']([^"']+)["']/i) ??
+      html.match(/content=["']([^"']+)["'][^>]*property=["']product:availability["']/i);
     if (amount) {
       const price = Number(amount[1].replace(/,/g, ""));
       const currency = cur ? cur[1] : null;
       if (currency && !SUPPORTED_CURRENCIES.has(currency)) return null;
       if (!isNaN(price) && price > 0 && isPlausibleBaseKitPrice(price, currency)) {
-        return { price, currency, variants: [] };
+        const inStock =
+          !availability ||
+          !/(outofstock|soldout|discontinued)/i.test(availability[1]);
+        return { price, currency, inStock, variants: [] };
       }
     }
     return null;
@@ -396,9 +459,9 @@ async function refreshOne(
         priceUpdatedAt: new Date(),
         priceSource: "SCRAPED",
         variants: priceData.variants,
-        // A live price means the vendor currently carries this set — mark it
-        // available. (DELIVERED/SHIPPING GBs are often sold as clearance stock.)
-        inStock: true,
+        // Keep the last valid price for comparison, while stock follows the
+        // selected/base variant's current vendor availability.
+        inStock: priceData.inStock,
       },
     });
     result.updated++;

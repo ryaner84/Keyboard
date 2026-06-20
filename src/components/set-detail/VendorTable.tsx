@@ -144,7 +144,7 @@ export function VendorTable({
     for (const vk of vendorKits) {
       // Vendors without a scraped/manual kit price are not shown at all —
       // a row with no price is noise, not information.
-      if (vk.price == null) continue; // price is the availability signal; inStock reflects GB status not vendor stock
+      if (vk.price == null) continue;
       // No stored currency → the price is in the vendor's own store currency.
       const kitCurrency = vk.currency ?? vk.vendor.currency ?? "USD";
 
@@ -201,8 +201,11 @@ export function VendorTable({
         baseVariants,
       });
     }
-    // Cheapest total first.
-    out.sort((a, b) => a.totalLocal - b.totalLocal);
+    // Purchasable listings rank first, then cheapest total within each group.
+    out.sort((a, b) => {
+      if (a.vk.inStock !== b.vk.inStock) return a.vk.inStock ? -1 : 1;
+      return a.totalLocal - b.totalLocal;
+    });
     return out;
   }, [vendorKits, userRegion, userCurrency, rates]);
 
@@ -233,7 +236,7 @@ export function VendorTable({
     );
   }
 
-  if (rows.length === 0) {
+  if (rows.length === 0 && (!showUnpriced || unpricedRows.length === 0)) {
     return (
       <div className="text-center py-10">
         <p className="text-gray-400 mb-3">No pricing data available for this region yet.</p>
@@ -249,22 +252,26 @@ export function VendorTable({
     );
   }
 
+  const bestVendorId = rows.find((candidate) => candidate.vk.inStock)?.vk.id;
+
   return (
     <div className="space-y-2">
-      {rows.map((row, idx) => {
-        const isBest = idx === 0;
+      {rows.map((row) => {
+        const isBest = row.vk.id === bestVendorId;
         const multiBase = row.baseVariants.length > 1;
 
         return (
           <div
             key={row.vk.id}
             className={`p-4 rounded-xl border transition-colors ${
-              isBest
+              !row.vk.inStock
+                ? "bg-gray-50 border-gray-200"
+                : isBest
                 ? "bg-green-50 border-green-200"
                 : "bg-white border-gray-100 hover:border-indigo-100 hover:bg-indigo-50/30"
             }`}
           >
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
             {/* Vendor info */}
             <div className="flex items-center gap-3 flex-1 min-w-0">
               <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
@@ -297,7 +304,7 @@ export function VendorTable({
             </div>
 
             {/* Shipping — DHL estimate */}
-            <div className="text-right w-24">
+            <div className="text-right hidden md:block w-24">
               <p className="text-xs text-gray-400">
                 Ship <span className="text-gray-300">· DHL est.</span>
               </p>
@@ -306,8 +313,27 @@ export function VendorTable({
               </p>
             </div>
 
+            {/* Vendor inventory status */}
+            <div className="w-20 text-right sm:w-24 sm:text-center">
+              <p className="text-xs text-gray-400">Stock</p>
+              <span
+                className={`mt-1 inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${
+                  row.vk.inStock
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-gray-200 text-gray-600"
+                }`}
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    row.vk.inStock ? "bg-emerald-500" : "bg-gray-400"
+                  }`}
+                />
+                {row.vk.inStock ? "In stock" : "Sold out"}
+              </span>
+            </div>
+
             {/* Total + report flag */}
-            <div className="text-right w-24">
+            <div className="text-right w-20 sm:w-24">
               <p className="text-xs text-gray-400">Total</p>
               <p className={`text-base font-bold ${isBest ? "text-green-700" : "text-gray-900"}`}>
                 {formatCurrency(row.totalLocal, userCurrency)}
@@ -320,7 +346,7 @@ export function VendorTable({
             </div>
 
             {/* Buy button */}
-            {(row.vk.gbUrl || row.vk.productUrl) && (
+            {row.vk.inStock && (row.vk.gbUrl || row.vk.productUrl) ? (
               <a
                 href={(row.vk.gbUrl || row.vk.productUrl)!}
                 target="_blank"
@@ -329,7 +355,11 @@ export function VendorTable({
               >
                 Buy →
               </a>
-            )}
+            ) : !row.vk.inStock ? (
+              <span className="ml-1 rounded-lg bg-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-500 whitespace-nowrap flex-shrink-0">
+                Sold out
+              </span>
+            ) : null}
 
             {/* Report wrong price — small flag, opens popover */}
             <ReportPriceButton
