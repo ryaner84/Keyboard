@@ -2,106 +2,125 @@
 
 import type { GBStatus } from "@/types";
 
-const LAYOUTS = ["40%", "60%", "65%", "75%", "TKL", "Full-size", "Alice/Arisu", "Other"];
+const LAYOUTS = [
+  "40%",
+  "60%",
+  "65%",
+  "75%",
+  "TKL",
+  "Full-size",
+  "Alice/Arisu",
+  "Other",
+];
 
-// Collector-focused brands — matched against keyboard name (substring).
-// Ordered roughly by notoriety in the hobby.
 const BRANDS = [
-  "TGR", "Keycult", "Matrix", "Mode", "Geonworks",
-  "Rama", "Norbauer", "Duck", "Hiney", "Angry Miao",
-  "Percent", "Swagkeys", "CannonKeys", "NovelKeys", "KBDfans",
+  "TGR",
+  "Keycult",
+  "Matrix",
+  "Mode",
+  "Geonworks",
+  "Rama",
+  "Norbauer",
+  "Duck",
+  "Hiney",
+  "Angry Miao",
+  "Percent",
+  "Swagkeys",
+  "CannonKeys",
+  "NovelKeys",
+  "KBDfans",
 ];
 
-const STATUS_OPTIONS: { value: GBStatus; label: string; desc: string; dot: string }[] = [
-  {
-    value: "INTEREST_CHECK",
-    label: "Interest Check",
-    desc: "Designer gauging interest — no ordering yet",
-    dot: "bg-blue-400",
+const STATUS_META: Record<
+  GBStatus,
+  { label: string; active: string; dot: string }
+> = {
+  ACTIVE_GB: {
+    label: "Group buys",
+    active:
+      "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+    dot: "bg-emerald-500",
   },
-  {
-    value: "ACTIVE_GB",
-    label: "Group Buy Open",
-    desc: "Ordering window is live — join now",
-    dot: "bg-green-500",
+  IN_STOCK: {
+    label: "In-stock extras",
+    active:
+      "border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
+    dot: "bg-amber-500",
   },
-  {
-    value: "IN_STOCK",
-    label: "Extra Drop",
-    desc: "Post-GB leftover units available to buy now",
-    dot: "bg-amber-400",
+  INTEREST_CHECK: {
+    label: "Interest checks",
+    active:
+      "border-sky-500 bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
+    dot: "bg-sky-500",
   },
-  {
-    value: "SHIPPING",
+  SHIPPING: {
     label: "Shipping",
-    desc: "GB closed, units on the way to buyers",
-    dot: "bg-purple-400",
+    active:
+      "border-violet-500 bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-300",
+    dot: "bg-violet-500",
   },
-  {
-    value: "DELIVERED",
+  DELIVERED: {
     label: "Delivered",
-    desc: "GB complete — all units received",
-    dot: "bg-gray-400",
+    active:
+      "border-gray-500 bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200",
+    dot: "bg-gray-500",
   },
-];
+  CANCELLED: {
+    label: "Cancelled",
+    active:
+      "border-gray-500 bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200",
+    dot: "bg-gray-500",
+  },
+};
 
 interface KeyboardFiltersProps {
   search: string;
   statuses: GBStatus[];
-  sortBy?: string;
-  joinableOnly: boolean;
+  availableStatuses?: GBStatus[];
+  sortBy: string;
+  closingSoon?: boolean;
+  showClosingSoon?: boolean;
+  joinableOnly?: boolean;
   layouts: string[];
   brands: string[];
-  onSearchChange: (v: string) => void;
-  onStatusToggle: (s: GBStatus) => void;
-  onSortChange?: (v: string) => void;
-  onJoinableToggle: () => void;
-  onLayoutToggle: (v: string) => void;
-  onBrandToggle: (v: string) => void;
-}
-
-function FilterSection({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
-        {label}
-      </p>
-      {children}
-    </div>
-  );
+  statusFilterActive?: boolean;
+  onSearchChange: (value: string) => void;
+  onStatusToggle: (status: GBStatus) => void;
+  onSortChange: (value: string) => void;
+  onClosingToggle?: () => void;
+  onJoinableToggle?: () => void;
+  onLayoutToggle: (value: string) => void;
+  onBrandToggle: (value: string) => void;
+  onClearAll?: () => void;
 }
 
 function ChipGroup({
   options,
   active,
   onToggle,
-  color = "violet",
 }: {
   options: string[];
   active: string[];
-  onToggle: (v: string) => void;
-  color?: "violet" | "indigo";
+  onToggle: (value: string) => void;
 }) {
-  const on = color === "violet"
-    ? "bg-violet-600 text-white border-violet-600"
-    : "bg-indigo-600 text-white border-indigo-600";
-  const off = color === "violet"
-    ? "bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-violet-300 dark:hover:border-violet-600"
-    : "bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-indigo-300";
-
   return (
-    <div className="flex flex-wrap gap-1.5">
-      {options.map((opt) => (
-        <button
-          key={opt}
-          onClick={() => onToggle(opt)}
-          className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
-            active.includes(opt) ? on : off
-          }`}
-        >
-          {opt}
-        </button>
-      ))}
+    <div className="flex flex-wrap gap-2">
+      {options.map((option) => {
+        const selected = active.includes(option);
+        return (
+          <button
+            key={option}
+            onClick={() => onToggle(option)}
+            className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+              selected
+                ? "border-violet-600 bg-violet-600 text-white"
+                : "border-gray-200 bg-white text-gray-600 hover:border-violet-300 hover:text-violet-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+            }`}
+          >
+            {option}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -109,99 +128,193 @@ function ChipGroup({
 export function KeyboardFilters({
   search,
   statuses,
-  joinableOnly,
+  availableStatuses = [],
+  sortBy,
+  closingSoon = false,
+  showClosingSoon = false,
   layouts,
   brands,
+  statusFilterActive = false,
   onSearchChange,
   onStatusToggle,
-  onJoinableToggle,
+  onSortChange,
+  onClosingToggle,
   onLayoutToggle,
   onBrandToggle,
+  onClearAll,
 }: KeyboardFiltersProps) {
+  const activeCount =
+    layouts.length +
+    brands.length +
+    (closingSoon ? 1 : 0) +
+    (statusFilterActive ? 1 : 0) +
+    (search ? 1 : 0);
+
   return (
-    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 p-4 space-y-5">
-
-      {/* Search */}
-      <div className="relative">
-        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
-        <input
-          type="text"
-          placeholder="Search keyboards, designers..."
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          className="w-full pl-9 pr-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 dark:bg-gray-800 dark:text-white"
-        />
-      </div>
-
-      {/* Availability */}
-      <button
-        onClick={onJoinableToggle}
-        className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition-all ${
-          joinableOnly
-            ? "bg-green-50 dark:bg-green-950 border-green-400 dark:border-green-600 text-green-800 dark:text-green-300"
-            : "bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-green-300"
+    <section className="rounded-3xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-5">
+      <div
+        className={`grid gap-3 ${
+          showClosingSoon
+            ? "lg:grid-cols-[minmax(260px,1fr)_190px_auto]"
+            : "lg:grid-cols-[minmax(260px,1fr)_190px]"
         }`}
       >
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <span className={`w-2 h-2 rounded-full ${joinableOnly ? "bg-green-500 animate-pulse" : "bg-gray-300 dark:bg-gray-600"}`} />
-          Still open to join
-        </div>
-        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-          joinableOnly
-            ? "bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-200"
-            : "bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400"
-        }`}>
-          {joinableOnly ? "ON" : "OFF"}
-        </span>
-      </button>
+        <label className="relative block">
+          <span className="sr-only">Search keyboards</span>
+          <svg
+            className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
+          </svg>
+          <input
+            type="search"
+            placeholder="Search keyboard, designer, vendor or layout"
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 py-3 pl-10 pr-4 text-sm text-gray-900 outline-none transition focus:border-violet-400 focus:bg-white focus:ring-4 focus:ring-violet-100 dark:border-gray-700 dark:bg-gray-800 dark:text-white dark:focus:ring-violet-950"
+          />
+        </label>
 
-      {/* Layout */}
-      <FilterSection label="Layout">
-        <ChipGroup options={LAYOUTS} active={layouts} onToggle={onLayoutToggle} />
-      </FilterSection>
+        <label className="relative block">
+          <span className="sr-only">Sort keyboards</span>
+          <select
+            value={sortBy}
+            onChange={(event) => onSortChange(event.target.value)}
+            className="h-full min-h-11 w-full appearance-none rounded-xl border border-gray-200 bg-white px-3 pr-9 text-sm font-semibold text-gray-700 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:focus:ring-violet-950"
+          >
+            <option value="closing">Closing soon</option>
+            <option value="updated">Recently updated</option>
+            <option value="price-asc">Price: low to high</option>
+            <option value="price-desc">Price: high to low</option>
+            <option value="name">Name: A to Z</option>
+          </select>
+          <svg
+            className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M8 9l4-4 4 4m0 6l-4 4-4-4"
+            />
+          </svg>
+        </label>
 
-      {/* Brand */}
-      <FilterSection label="Brand">
-        <ChipGroup options={BRANDS} active={brands} onToggle={onBrandToggle} color="indigo" />
-      </FilterSection>
-
-      {/* Status */}
-      <FilterSection label="GB Stage">
-        <div className="space-y-1.5">
-          {STATUS_OPTIONS.map(({ value, label, desc, dot }) => {
-            const isActive = statuses.includes(value);
-            const closedStage = value === "SHIPPING" || value === "DELIVERED";
-            const disabled = joinableOnly && closedStage;
-            return (
-              <button
-                key={value}
-                onClick={() => !disabled && onStatusToggle(value)}
-                disabled={disabled}
-                title={desc}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border text-left text-xs transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
-                  isActive
-                    ? "bg-violet-50 dark:bg-violet-950 border-violet-300 dark:border-violet-700 text-violet-800 dark:text-violet-200"
-                    : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-violet-300"
-                }`}
-              >
-                <span className={`w-2 h-2 rounded-full shrink-0 ${isActive ? dot : "bg-gray-300 dark:bg-gray-600"}`} />
-                <span className="font-medium">{label}</span>
-                <span className={`ml-auto text-[10px] ${isActive ? "text-violet-500" : "text-gray-400"}`}>
-                  {desc}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        {!joinableOnly && (
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2">
-            Select none to show all stages · click table headers to sort
-          </p>
+        {showClosingSoon && onClosingToggle && (
+          <button
+            onClick={onClosingToggle}
+            className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-bold transition ${
+              closingSoon
+                ? "border-rose-500 bg-rose-500 text-white"
+                : "border-gray-200 bg-white text-gray-700 hover:border-rose-400 hover:text-rose-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+            }`}
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${
+                closingSoon ? "animate-pulse bg-white" : "bg-rose-500"
+              }`}
+            />
+            Closing within 7 days
+          </button>
         )}
-      </FilterSection>
+      </div>
 
-    </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-4 dark:border-gray-800">
+        <span className="mr-1 text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">
+          Stage
+        </span>
+        {availableStatuses.map((status) => {
+          const meta = STATUS_META[status];
+          const selected = statuses.length === 0 || statuses.includes(status);
+          return (
+            <button
+              key={status}
+              onClick={() => onStatusToggle(status)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                selected
+                  ? meta.active
+                  : "border-gray-200 bg-white text-gray-500 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400"
+              }`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  selected ? meta.dot : "bg-gray-300 dark:bg-gray-600"
+                }`}
+              />
+              {meta.label}
+            </button>
+          );
+        })}
+
+        {activeCount > 0 && onClearAll && (
+          <button
+            onClick={onClearAll}
+            className="ml-auto text-xs font-bold text-violet-600 hover:text-violet-800 dark:text-violet-400"
+          >
+            Clear filters ({activeCount})
+          </button>
+        )}
+      </div>
+
+      <details className="group mt-4 border-t border-gray-100 pt-4 dark:border-gray-800">
+        <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-bold text-gray-700 dark:text-gray-200">
+          <span>
+            More filters
+            {(layouts.length > 0 || brands.length > 0) && (
+              <span className="ml-2 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] text-violet-700 dark:bg-violet-950 dark:text-violet-300">
+                {layouts.length + brands.length} active
+              </span>
+            )}
+          </span>
+          <svg
+            className="h-4 w-4 text-gray-400 transition group-open:rotate-180"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 9l-7 7-7-7"
+            />
+          </svg>
+        </summary>
+
+        <div className="mt-4 grid gap-5 lg:grid-cols-2">
+          <div>
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">
+              Layout
+            </p>
+            <ChipGroup
+              options={LAYOUTS}
+              active={layouts}
+              onToggle={onLayoutToggle}
+            />
+          </div>
+          <div>
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">
+              Maker / vendor
+            </p>
+            <ChipGroup
+              options={BRANDS}
+              active={brands}
+              onToggle={onBrandToggle}
+            />
+          </div>
+        </div>
+      </details>
+    </section>
   );
 }

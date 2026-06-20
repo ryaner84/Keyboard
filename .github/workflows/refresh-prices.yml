@@ -14,6 +14,12 @@ name: Refresh vendor prices
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: Recheck every vendor listing, including recently refreshed rows
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: "30 */6 * * *" # every 6 hours
 
@@ -42,4 +48,5 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+          FORCE_PRICE_REFRESH: ${{ github.event_name == 'workflow_dispatch' && inputs.force || 'false' }}
         run: npx tsx scripts/refresh-prices-ci.mjs
