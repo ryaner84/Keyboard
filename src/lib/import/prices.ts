@@ -270,6 +270,35 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
       .map((variant) => availableById.get(variant.id))
       .filter((available): available is boolean => available !== undefined);
 
+    // Shopify also exposes each variant independently at /variants/{id}.js.
+    // This remains available on some stores that block product.js and the
+    // rendered product page to CI/datacenter traffic.
+    if (knownAvailability.length === 0) {
+      const origin = new URL(clean).origin;
+      await Promise.all(
+        relevantVariants.map(async (variant) => {
+          try {
+            const variantRes = await fetchWithTimeout(
+              `${origin}/variants/${variant.id}.js`,
+              cookie ? { Cookie: cookie } : undefined
+            );
+            if (!variantRes.ok) return;
+            const variantData = (await variantRes.json()) as {
+              available?: boolean;
+            };
+            if (typeof variantData.available === "boolean") {
+              availableById.set(variant.id, variantData.available);
+            }
+          } catch {
+            // Fall through to structured product-page data.
+          }
+        })
+      );
+      knownAvailability = relevantVariants
+        .map((variant) => availableById.get(variant.id))
+        .filter((available): available is boolean => available !== undefined);
+    }
+
     // Some stores serve product.json but block product.js to datacenter IPs.
     // Their rendered product page still publishes per-variant JSON-LD offers,
     // so use that precise structured data before treating stock as unknown.

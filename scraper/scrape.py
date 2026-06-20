@@ -507,6 +507,17 @@ def _pick_variant(variants: list[dict], pinned_id: str | None) -> dict | None:
     return choose_kit_variant(variants)
 
 
+def _relevant_base_variants(
+    variants: list[dict], chosen: dict, pinned_id: str | None
+) -> list[dict]:
+    if pinned_id:
+        return [chosen]
+    non_addon = [v for v in variants if not _ADDON_VARIANT_RE.search(v["title"])]
+    pool = non_addon if non_addon else variants
+    base = [v for v in pool if classify_variant(v["title"]) == "BASE"]
+    return base if base else [chosen]
+
+
 def _base_variants_in_stock(
     variants: list[dict],
     chosen: dict,
@@ -514,13 +525,7 @@ def _base_variants_in_stock(
     availability_by_id: dict[str, bool],
 ) -> bool:
     """Use explicit Shopify stock for the selected/base variants when known."""
-    if pinned_id:
-        relevant = [chosen]
-    else:
-        non_addon = [v for v in variants if not _ADDON_VARIANT_RE.search(v["title"])]
-        pool = non_addon if non_addon else variants
-        base = [v for v in pool if classify_variant(v["title"]) == "BASE"]
-        relevant = base if base else [chosen]
+    relevant = _relevant_base_variants(variants, chosen, pinned_id)
     known = [
         availability_by_id[v["id"]]
         for v in relevant
@@ -590,6 +595,34 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
                 available = variant.get("available")
                 if isinstance(available, bool):
                     availability_by_id[str(variant.get("id") or "")] = available
+        if not availability_by_id:
+            relevant_ids = [
+                variant["id"]
+                for variant in _relevant_base_variants(variants, chosen, pinned_id)
+            ]
+            variant_stock = page.evaluate(
+                """async ({ origin, ids }) => {
+                    const result = {};
+                    await Promise.all(ids.map(async (id) => {
+                        try {
+                            const r = await fetch(
+                                `${origin}/variants/${id}.js`,
+                                { headers: { 'Accept': 'application/json' } }
+                            );
+                            if (!r.ok) return;
+                            const data = await r.json();
+                            if (typeof data.available === 'boolean') {
+                                result[id] = data.available;
+                            }
+                        } catch (e) {}
+                    }));
+                    return result;
+                }""",
+                {"origin": origin_url, "ids": relevant_ids},
+            )
+            for variant_id, available in (variant_stock or {}).items():
+                if isinstance(available, bool):
+                    availability_by_id[str(variant_id)] = available
         if not availability_by_id:
             structured_stock = page.evaluate(
                 """() => {

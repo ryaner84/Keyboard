@@ -18,12 +18,17 @@ if (process.env.DATABASE_URL.includes("__PASSWORD__") && !process.env.DATABASE_P
 
 const { refreshPrices } = await import("../src/lib/import/prices.ts");
 const force = process.env.FORCE_PRICE_REFRESH === "true";
+const ids = (process.env.PRICE_REFRESH_IDS ?? "")
+  .split(",")
+  .map((id) => id.trim())
+  .filter(Boolean);
 
 const result = await refreshPrices({
-  limit: 2000,
+  limit: ids.length > 0 ? ids.length : 2000,
   maxAgeHours: force ? 0 : 6,
   concurrency: 8,
   maxRuntimeMs: 12 * 60_000,
+  ids: ids.length > 0 ? ids : undefined,
 });
 console.log(
   `Price refresh: attempted=${result.attempted} updated=${result.updated} ` +
