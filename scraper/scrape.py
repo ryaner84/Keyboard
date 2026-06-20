@@ -541,12 +541,17 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
         return None
     pinned_id = pinned_variant_id(product_url)
     clean = product_url.split("?")[0].split("#")[0].rstrip("/")
-    json_url = clean + ".json"
-    js_url = clean + ".js"
-    origin = urllib.parse.urlsplit(clean)
-    origin_url = f"{origin.scheme}://{origin.netloc}"
     try:
         page.goto(product_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+        # Shopify can redirect an obsolete product handle to its current one.
+        # Build JSON endpoints from the final browser URL, not the stale link.
+        final_url = page.url.split("?")[0].split("#")[0].rstrip("/")
+        if "/products/" in final_url:
+            clean = final_url
+        json_url = clean + ".json"
+        js_url = clean + ".js"
+        origin = urllib.parse.urlsplit(clean)
+        origin_url = f"{origin.scheme}://{origin.netloc}"
         data = page.evaluate(
             """async (u) => {
                 try {

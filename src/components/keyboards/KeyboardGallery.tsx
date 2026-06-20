@@ -7,6 +7,7 @@ import type { GroupBuyWithPricing } from "@/types";
 import { getImageCandidates } from "@/lib/utils";
 import { estimateKeyboardShippingUSD } from "@/lib/keyboard-shipping";
 import { ReportListingButton } from "@/components/ui/ReportListingButton";
+import { ShareSetButton } from "@/components/ui/ShareSetButton";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
 
 interface Props {
@@ -259,29 +260,38 @@ export function KeyboardGallery({
                   <CountdownBadge row={row} />
                 </div>
 
-                <button
-                  onClick={() => toggle(row.slug)}
-                  title={tracked ? "Remove from tracker" : "Add to tracker"}
-                  className={`absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full border shadow-lg backdrop-blur transition ${
-                    tracked
-                      ? "border-violet-500 bg-violet-600 text-white"
-                      : "border-white/70 bg-white/90 text-gray-700 hover:bg-violet-600 hover:text-white dark:border-gray-700 dark:bg-gray-900/90 dark:text-gray-200"
-                  }`}
-                >
-                  <svg
-                    className="h-[18px] w-[18px]"
-                    fill={tracked ? "currentColor" : "none"}
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
+                <div className="absolute right-3 top-3 z-10 flex flex-col gap-2">
+                  <button
+                    onClick={() => toggle(row.slug)}
+                    title={tracked ? "Remove from tracker" : "Add to tracker"}
+                    className={`flex h-10 w-10 items-center justify-center rounded-full border shadow-lg backdrop-blur transition ${
+                      tracked
+                        ? "border-violet-500 bg-violet-600 text-white"
+                        : "border-white/70 bg-white/90 text-gray-700 hover:bg-violet-600 hover:text-white dark:border-gray-700 dark:bg-gray-900/90 dark:text-gray-200"
+                    }`}
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
-                    />
-                  </svg>
-                </button>
+                    <svg
+                      className="h-[18px] w-[18px]"
+                      fill={tracked ? "currentColor" : "none"}
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
+                      />
+                    </svg>
+                  </button>
+                  <ShareSetButton
+                    slug={row.slug}
+                    name={title}
+                    countryCode={countryCode}
+                    currency={currency}
+                    variant="icon"
+                  />
+                </div>
               </div>
 
               <div className="flex flex-1 flex-col p-5">

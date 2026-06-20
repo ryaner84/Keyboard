@@ -185,8 +185,7 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
 
   // Strip query/hash, then request the .json variant.
   const pinnedId = pinnedVariantId(productUrl);
-  const clean = normalizeShopifyUrl(productUrl).split("?")[0].split("#")[0].replace(/\/$/, "");
-  const jsonUrl = `${clean}.json`;
+  let clean = normalizeShopifyUrl(productUrl).split("?")[0].split("#")[0].replace(/\/$/, "");
 
   try {
     // Shop currency FIRST (cached per origin) — needed to pin the price
@@ -199,13 +198,49 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     // rows carry a wrong currency (Yushakobo listed as USD, store is JPY),
     // and relabeling real ¥20,000 numbers as "USD" poisons the listing. Wrong
     // vendor records are fixed in db-setup, not papered over here.
-    const currency = await fetchShopifyCurrency(clean);
+    let currency = await fetchShopifyCurrency(clean);
 
-    const cookie = currency
+    let cookie = currency
       ? `cart_currency=${currency}; localization=${CURRENCY_HOME_COUNTRY[currency] ?? "US"}`
       : undefined;
 
-    const res = await fetchWithTimeout(jsonUrl, cookie ? { Cookie: cookie } : undefined);
+    let res = await fetchWithTimeout(
+      `${clean}.json`,
+      cookie ? { Cookie: cookie } : undefined
+    );
+    if (!res.ok) {
+      // Shopify product handles can change. The human product URL redirects to
+      // the current handle, while the old .json/.js endpoints return 404.
+      // Resolve that canonical product URL before giving up so old database
+      // links self-heal and still receive exact variant stock data.
+      try {
+        const canonicalRes = await fetchWithTimeout(
+          clean,
+          cookie ? { Cookie: cookie } : undefined
+        );
+        const canonical = normalizeShopifyUrl(canonicalRes.url)
+          .split("?")[0]
+          .split("#")[0]
+          .replace(/\/$/, "");
+        if (
+          canonicalRes.ok &&
+          canonical.includes("/products/") &&
+          canonical !== clean
+        ) {
+          clean = canonical;
+          currency = await fetchShopifyCurrency(clean);
+          cookie = currency
+            ? `cart_currency=${currency}; localization=${CURRENCY_HOME_COUNTRY[currency] ?? "US"}`
+            : undefined;
+          res = await fetchWithTimeout(
+            `${clean}.json`,
+            cookie ? { Cookie: cookie } : undefined
+          );
+        }
+      } catch {
+        // Fall through to the existing generic structured-data fallback.
+      }
+    }
     if (!res.ok) return null;
     const data = (await res.json()) as {
       product?: {
