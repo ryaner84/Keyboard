@@ -61,8 +61,8 @@ export function SetCard({ set }: SetCardProps) {
   const tracked = isTracked(set.slug);
   const countdown = getCountdownLabel(set.status, set.gbStart, set.gbEnd);
   const imageCandidates = useMemo(
-    () => getImageCandidates(set.imageUrl, set.images),
-    [set.imageUrl, set.images]
+    () => getImageCandidates(set.imageUrl, set.images, set.slug),
+    [set.imageUrl, set.images, set.slug]
   );
   const imageSignature = imageCandidates.join("\n");
   const [imageIndex, setImageIndex] = useState(0);

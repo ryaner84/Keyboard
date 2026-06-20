@@ -18,16 +18,30 @@ export function normalizeImageUrl(url: string | null | undefined): string | null
   return url.replace("keysets%2F", "thumbs%2F").replace("/keysets/", "/thumbs/");
 }
 
+// Verified manufacturer/vendor replacements for galleries whose original host
+// removed the files or now rejects hotlinks. Keep these first in the candidate
+// list so browse cards recover even when a deployment does not run db-setup.
+const IMAGE_OVERRIDES: Record<string, string> = {
+  "gh-117742":
+    "https://keebsforall.com/cdn/shop/products/IMG-20220222-WA0010_306026171769143_b2453097-427a-45e8-8dec-c761a74f9b5d.jpg?v=1703031359&width=1533",
+  "gmk-hangulbeit":
+    "https://www.gmk.net/shop/media/40/f9/26/1765191031/GMK_CYL_Hangulbeit_Keycaps%20%283%29.webp?ts=1765191049",
+  "gmk-unobtainium-blue":
+    "https://novelkeys.com/cdn/shop/files/GMK_CYL_Unobtainium_TILE_1200x.jpg?v=1778615730",
+};
+
 // Some imports have a populated gallery but a null or stale hero image. Cards
 // therefore use both fields and advance through every candidate on load errors.
 export function getImageCandidates(
   imageUrl: string | null | undefined,
-  images: string[] | null | undefined = []
+  images: string[] | null | undefined = [],
+  slug?: string
 ): string[] {
   const candidates: string[] = [];
   const seen = new Set<string>();
 
-  for (const raw of [imageUrl, ...(images ?? [])]) {
+  const override = slug ? IMAGE_OVERRIDES[slug] : null;
+  for (const raw of [override, imageUrl, ...(images ?? [])]) {
     if (!raw) continue;
     const normalized = normalizeImageUrl(raw);
     for (const candidate of [normalized, raw]) {
