@@ -12,12 +12,19 @@ wrong. The "Price reports feed" workflow (`.github/workflows/price-reports-feed.
 prints the pending reports. When triaging these reports — whether run by hand or
 on a schedule:
 
-1. **Fix everything actionable in one pass, then report.** Don't stop at
-   analysis. Apply the fixes you're confident in, then send a summary split
-   into two sections:
-   - **Fixed** — what changed, in which file, and how it resolves the report.
-   - **Needs your decision** — reports you could not safely auto-fix, each with
-     the specific reason and the options.
+1. **Reactive self-heal is the default, and that's fine.** The owner is happy
+   for a price to be **wrong initially until someone reports it** — the report →
+   re-scrape → (2 reports in 7 days) → null loop is the primary safety net and
+   needs zero management. So:
+   - **Proactively fix only clear, low-risk scraper bugs** (e.g. a sub-kit being
+     stored as the base kit) where the fix is code-provable and improves the
+     self-heal loop itself.
+   - For anything that needs live vendor-page inspection or a site-wide
+     tradeoff, **do NOT keep pinging the owner for a decision** — it's
+     acceptable to let the price be wrong until it's reported, then let the
+     loop hide it (it may go blank rather than be corrected; that's OK).
+   - Still send a short summary split into **Fixed** (what changed + why) and
+     **Left to the report loop** (one line each), but don't block on decisions.
 2. **Inventory/stock reports are valid errors, not noise.** A "sold out" item
    shown in stock (or vice-versa) is a real scraper bug — treat it like a price
    error, don't dismiss it as "not a price issue."
