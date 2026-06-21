@@ -2266,22 +2266,55 @@ def _gh_detect_product_type(title: str) -> str:
     return "KEYCAPS"  # default: most Geekhack board-70 GBs are keycap sets
 
 
-def _gh_status(title: str, gb_end_date) -> str:
+def _gh_status(
+    title: str,
+    gb_end_date,
+    last_post_dt: datetime | None = None,
+) -> str:
     """Determine GBStatus from thread title and extracted end date."""
     from datetime import date as _date
     t = title.lower()
     if "[ic]" in t or "interest check" in t:
         return "INTEREST_CHECK"
-    if "closed" in t or "fulfilled" in t or "delivered" in t:
-        # Could be SHIPPING if recent, DELIVERED if old
-        if gb_end_date and isinstance(gb_end_date, _date):
-            return "DELIVERED" if gb_end_date < _date.today() else "SHIPPING"
+    completed = (
+        "closed", "fulfilled", "delivered", "completed",
+        "gb finish", "gb ended", "100% sent", "100% shipped",
+    )
+    if any(marker in t for marker in completed) or re.search(r"\bcomplete\b", t):
         return "DELIVERED"
     if "shipping" in t or "fulfillment" in t:
+        if last_post_dt and last_post_dt < datetime.now(timezone.utc) - timedelta(days=365):
+            return "DELIVERED"
         return "SHIPPING"
-    if gb_end_date and isinstance(gb_end_date, _date) and gb_end_date < _date.today():
-        return "SHIPPING"
+    if gb_end_date and isinstance(gb_end_date, _date):
+        if gb_end_date < _date.today() - timedelta(days=365):
+            return "DELIVERED"
+        if gb_end_date < _date.today():
+            return "SHIPPING"
+    if last_post_dt and last_post_dt < datetime.now(timezone.utc) - timedelta(days=365):
+        return "DELIVERED"
     return "ACTIVE_GB"
+
+
+def _update_gh_listing_status(
+    conn,
+    topic_id: str,
+    title: str,
+    last_post_dt: datetime | None,
+) -> None:
+    """Repair imported gh-* rows using the board's authoritative activity date."""
+    status = _gh_status(title, None, last_post_dt)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE "GroupBuy"
+            SET status = %s::"GBStatus", "updatedAt" = now()
+            WHERE slug = %s
+              AND "productType" = 'KEYBOARD'
+              AND status IS DISTINCT FROM %s::"GBStatus"
+            """,
+            (status, f"gh-{topic_id}", status),
+        )
 
 
 def _gh_extract_images(html: str) -> list[str]:
@@ -2598,6 +2631,9 @@ def run_geekhack(
             last_post_dt: datetime | None = thread.get("last_post_dt")
             last_post_iso = last_post_dt.isoformat() if last_post_dt else ""
 
+            if keyboards_only:
+                _update_gh_listing_status(conn, topic_id, thread_title, last_post_dt)
+
             # Skip if last-post hasn't advanced
             if (
                 topic_id not in repair_topic_ids
@@ -2639,7 +2675,7 @@ def run_geekhack(
                 )
 
                 product_type = _gh_detect_product_type(title)
-                status = _gh_status(title, gb_end_date)
+                status = _gh_status(title, gb_end_date, last_post_dt)
 
                 # Clean description: strip HTML tags
                 description = re.sub(r"<[^>]+>", " ", body_html)
