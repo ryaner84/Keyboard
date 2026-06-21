@@ -1,3 +1,5 @@
+import Image from "next/image";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SetImageCarousel } from "@/components/set-detail/SetImageCarousel";
 import { prisma } from "@/lib/prisma";
@@ -6,6 +8,7 @@ import { COUNTRY_BY_CODE, DEFAULT_COUNTRY } from "@/data/countries";
 import { formatDateRange, normalizeImageUrl } from "@/lib/utils";
 import { getSiteUrl } from "@/lib/site-url";
 import { SetDetailClient } from "./SetDetailClient";
+import { getKeyboardEditionFamily } from "@/data/keyboard-edition-families";
 import type { Metadata } from "next";
 
 interface PageProps {
@@ -90,6 +93,27 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
 
   if (!groupBuy) notFound();
 
+  const editionFamily = getKeyboardEditionFamily(slug);
+  const relatedEditions = editionFamily
+    ? await prisma.groupBuy.findMany({
+        where: { slug: { in: editionFamily.slugs } },
+        select: {
+          slug: true,
+          name: true,
+          subtitle: true,
+          imageUrl: true,
+          status: true,
+        },
+      })
+    : [];
+  const orderedEditions = editionFamily
+    ? editionFamily.slugs
+        .map((editionSlug) =>
+          relatedEditions.find((edition) => edition.slug === editionSlug)
+        )
+        .filter((edition): edition is NonNullable<typeof edition> => Boolean(edition))
+    : [];
+
   // Gallery: prefer the multi-image array, fall back to the single hero image.
   // De-duplicate and normalize each Firebase path so all thumbnails load.
   const heroImages = Array.from(
@@ -144,6 +168,78 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
           )}
         </div>
       </div>
+
+      {editionFamily && orderedEditions.length > 1 && (
+        <section className="mb-6 overflow-hidden rounded-2xl border border-[#dfd2b9] bg-[#faf7f0] dark:border-[#4b402d] dark:bg-[#1d1a15]">
+          <div className="border-b border-[#e7dcc8] px-5 py-5 dark:border-[#4b402d] sm:px-6">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9a7a42] dark:text-[#d0b278]">
+              Collector identification
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-gray-950 dark:text-white">
+              Choose the exact {editionFamily.familyName} edition
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600 dark:text-gray-400">
+              These are separate keyboards with different construction and
+              production runs. Open the version you own before adding it to your
+              collection.
+            </p>
+          </div>
+
+          <div className="grid gap-3 p-4 sm:grid-cols-3 sm:p-5">
+            {orderedEditions.map((edition) => {
+              const imageUrl = normalizeImageUrl(edition.imageUrl);
+              const active = edition.slug === slug;
+              return (
+                <article
+                  key={edition.slug}
+                  className={`overflow-hidden rounded-xl border bg-white dark:bg-[#111417] ${
+                    active
+                      ? "border-[#9a7a42] ring-2 ring-[#9a7a42]/20 dark:border-[#d0b278]"
+                      : "border-black/10 dark:border-white/10"
+                  }`}
+                >
+                  <Link href={`/sets/${edition.slug}?country=${country}`} className="block">
+                    <div className="relative aspect-[16/9] overflow-hidden bg-gray-100 dark:bg-gray-900">
+                      {imageUrl ? (
+                        <Image
+                          src={imageUrl}
+                          alt={edition.name}
+                          fill
+                          unoptimized
+                          className="object-cover transition duration-500 hover:scale-[1.025]"
+                        />
+                      ) : (
+                        <span className="absolute inset-0 flex items-center justify-center text-3xl text-gray-300">
+                          ⌨
+                        </span>
+                      )}
+                      {active && (
+                        <span className="absolute left-3 top-3 rounded-full bg-[#9a7a42] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white">
+                          Current edition
+                        </span>
+                      )}
+                    </div>
+                    <div className="p-4">
+                      <h3 className="font-semibold text-gray-950 dark:text-white">
+                        {edition.name}
+                      </h3>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {edition.subtitle || "Collector catalog edition"}
+                      </p>
+                    </div>
+                  </Link>
+                  <Link
+                    href={`/collection?find=${encodeURIComponent(edition.name)}`}
+                    className="block border-t border-gray-100 px-4 py-3 text-xs font-semibold text-[#80632f] hover:bg-[#f5efe3] dark:border-white/10 dark:text-[#d0b278] dark:hover:bg-white/5"
+                  >
+                    Add this exact edition to collection →
+                  </Link>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Client-side interactive section */}
       <SetDetailClient

@@ -269,6 +269,7 @@ async function main() {
         await cleanupInterestChecks(client);
         await ensureVariantsColumn(client);
         await ensureKeyboardColumns(client);
+        await ensureCollectorCatalogEntries(client);
         await ensureKeyboardContributionTable(client);
         await purgeImplausibleScrapedPrices(client);
         await restorePurgedPricesFromVariants(client);
@@ -302,6 +303,7 @@ async function main() {
     await repairKnownBrokenImages(client);
     await ensureVariantsColumn(client);
     await ensureKeyboardColumns(client);
+    await ensureCollectorCatalogEntries(client);
     await ensureKeyboardContributionTable(client);
     await ensureVendorSuggestionTable(client);
     await ensureFeedbackTable(client);
@@ -531,6 +533,87 @@ async function ensureKeyboardColumns(client) {
     );
   } catch (err) {
     console.warn(`[db-setup] keyboard columns setup skipped: ${err.message}`);
+  }
+}
+
+// Curated collector catalog entries for meaningful keyboard editions that did
+// not all have a Geekhack GB thread. Keeping these as separate GroupBuy rows
+// lets a collector own multiple editions from the same family (for example,
+// both a Jane v2 OG and a Jane v2 ME) without collapsing them into one record.
+async function ensureCollectorCatalogEntries(client) {
+  try {
+    await client.query(`
+      UPDATE public."GroupBuy"
+      SET name = 'TGR Jane v2 OG',
+          subtitle = 'Original 2018 Jane v2 group buy',
+          designer = 'TGR',
+          layout = 'TKL',
+          material = 'Aluminum + stainless steel + brass',
+          "mountingStyle" = 'Top Mount',
+          "updatedAt" = now()
+      WHERE slug = 'gh-97552'
+    `);
+
+    await client.query(`
+      UPDATE public."GroupBuy"
+      SET name = 'TGR Jane v2 CE',
+          subtitle = 'Carbon Edition',
+          designer = 'TGR',
+          layout = 'F13 TKL',
+          material = 'Aluminum + carbon fiber + stainless steel',
+          "mountingStyle" = 'Top Mount',
+          "updatedAt" = now()
+      WHERE slug = 'gh-100415'
+    `);
+
+    await client.query(`
+      INSERT INTO public."GroupBuy" (
+        id, slug, name, subtitle, colorway, designer, status,
+        "imageUrl", images, description, featured, "productType",
+        layout, material, "mountingStyle", "productUrl",
+        "vendorName", "vendorRegion", "createdAt", "updatedAt"
+      )
+      VALUES (
+        'catalog-tgr-jane-v2-me',
+        'tgr-jane-v2-me',
+        'TGR Jane v2 ME',
+        'MONOKEI Edition',
+        '',
+        'TGR × MONOKEI',
+        'DELIVERED'::"GBStatus",
+        'https://static1.squarespace.com/static/5f68da90297b94613c756dd6/62e80f8a45d6171b85fb81ae/633c80cb67446f0a2c5fe3ee/1735515639445/LXI05775+TKL.jpg?format=1500w',
+        ARRAY['https://static1.squarespace.com/static/5f68da90297b94613c756dd6/62e80f8a45d6171b85fb81ae/633c80cb67446f0a2c5fe3ee/1735515639445/LXI05775+TKL.jpg?format=1500w']::text[],
+        'The Jane v2 ME is the MONOKEI collaboration edition of the TGR Jane family. It introduced a magnetic aluminum backplate, USB-C, modern alignment features, and top-mount or O-ring build support.',
+        false,
+        'KEYBOARD',
+        'F13 TKL',
+        'Aluminum + stainless steel',
+        'Top Mount / O-ring',
+        'https://www.instagram.com/p/Ckr15ZVPMTB/',
+        'MONOKEI',
+        'SG',
+        now(),
+        now()
+      )
+      ON CONFLICT (slug) DO UPDATE SET
+        name = EXCLUDED.name,
+        subtitle = EXCLUDED.subtitle,
+        designer = EXCLUDED.designer,
+        status = EXCLUDED.status,
+        "imageUrl" = EXCLUDED."imageUrl",
+        images = EXCLUDED.images,
+        description = EXCLUDED.description,
+        "productType" = EXCLUDED."productType",
+        layout = EXCLUDED.layout,
+        material = EXCLUDED.material,
+        "mountingStyle" = EXCLUDED."mountingStyle",
+        "productUrl" = EXCLUDED."productUrl",
+        "vendorName" = EXCLUDED."vendorName",
+        "vendorRegion" = EXCLUDED."vendorRegion",
+        "updatedAt" = now()
+    `);
+  } catch (err) {
+    console.warn(`[db-setup] Collector catalog entries skipped: ${err.message}`);
   }
 }
 
