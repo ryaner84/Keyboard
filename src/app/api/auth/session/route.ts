@@ -15,6 +15,11 @@ export async function GET() {
       countryCode: user.countryCode,
       region: user.region,
       currency: user.currency,
+      displayName: user.displayName,
+      collectionTitle: user.collectionTitle,
+      collectionBio: user.collectionBio,
+      collectionPublished: user.collectionPublished,
+      collectionSlug: user.collectionSlug,
     },
   });
 }

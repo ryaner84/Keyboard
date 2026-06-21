@@ -121,6 +121,35 @@ export async function findOrCreateTrackerUser(email: string) {
   });
 }
 
+export async function ensureCollectionSlug(userId: string): Promise<string> {
+  const existing = await prisma.trackerUser.findUnique({
+    where: { id: userId },
+    select: { collectionSlug: true },
+  });
+  if (existing?.collectionSlug) return existing.collectionSlug;
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = crypto.randomBytes(9).toString("base64url").toLowerCase();
+    try {
+      const result = await prisma.trackerUser.updateMany({
+        where: { id: userId, collectionSlug: null },
+        data: { collectionSlug: candidate },
+      });
+      if (result.count === 1) return candidate;
+    } catch {
+      // Extremely unlikely unique collision; generate another opaque slug.
+    }
+
+    const current = await prisma.trackerUser.findUnique({
+      where: { id: userId },
+      select: { collectionSlug: true },
+    });
+    if (current?.collectionSlug) return current.collectionSlug;
+  }
+
+  throw new Error("Could not allocate a collection URL");
+}
+
 export function createUnsubscribeToken(userId: string): string {
   return jwt.sign({ sub: userId, kind: "tracker-unsubscribe" }, secret(), {
     expiresIn: "365d",

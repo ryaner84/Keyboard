@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token") ?? "";
   const challenge = token ? await consumeMagicChallenge(token) : null;
-  const redirectUrl = new URL("/tracker", getSiteUrl());
+  const redirectUrl = new URL("/collection", getSiteUrl());
 
   if (!challenge) {
     redirectUrl.searchParams.set("auth", "expired");

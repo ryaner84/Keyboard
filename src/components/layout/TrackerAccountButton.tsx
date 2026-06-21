@@ -35,7 +35,7 @@ export function TrackerAccountButton() {
     return (
       <button
         onClick={openSavePrompt}
-        title="Save and sync tracker"
+        title="Save and sync collection"
         className="relative flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-300 hover:border-indigo-300 hover:text-indigo-600"
       >
         <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -54,7 +54,7 @@ export function TrackerAccountButton() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((value) => !value)}
-        title="Tracker account"
+        title="Collection account"
         className="flex h-8 w-8 items-center justify-center rounded-full border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950 text-green-700 dark:text-green-300"
       >
         <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -63,7 +63,7 @@ export function TrackerAccountButton() {
       </button>
       {open && (
         <div className="absolute right-0 top-10 z-50 w-72 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 shadow-xl">
-          <p className="text-xs font-semibold uppercase text-gray-400">Tracker synced</p>
+          <p className="text-xs font-semibold uppercase text-gray-400">Collection synced</p>
           <p className="mt-1 truncate text-sm font-medium text-gray-900 dark:text-white">
             {email}
           </p>
