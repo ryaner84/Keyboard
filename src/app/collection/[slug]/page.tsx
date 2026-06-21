@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { normalizeImageUrl } from "@/lib/utils";
+import { getSiteUrl } from "@/lib/site-url";
 
 export const dynamic = "force-dynamic";
 
@@ -68,16 +69,34 @@ export async function generateMetadata({
   const description =
     collection.collectionBio ||
     `Explore ${owner}'s curated mechanical keyboard collection.`;
-  const heroImage = normalizeImageUrl(collection.items[0]?.groupBuy.imageUrl);
+  const siteUrl = getSiteUrl();
+  const pageUrl = `${siteUrl}/collection/${slug}`;
+  const posterUrl = `${siteUrl}/api/collection-poster/${slug}`;
 
   return {
     title,
     description,
+    alternates: { canonical: pageUrl },
     openGraph: {
       title,
       description,
       type: "website",
-      images: heroImage ? [{ url: heroImage }] : undefined,
+      url: pageUrl,
+      siteName: "GMK Tracker",
+      images: [
+        {
+          url: posterUrl,
+          width: 800,
+          height: 420,
+          alt: `${title} collection preview`,
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: [posterUrl],
     },
   };
 }

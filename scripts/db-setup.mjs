@@ -901,6 +901,7 @@ async function ensurePersonalTrackerTables(client) {
          "userId"           text NOT NULL,
          "groupBuyId"       text NOT NULL,
          "alertsEnabled"    boolean NOT NULL DEFAULT true,
+         "isTracking"       boolean NOT NULL DEFAULT true,
          "inCollection"     boolean NOT NULL DEFAULT false,
          "isPublic"         boolean NOT NULL DEFAULT false,
          "acquiredAt"       timestamp(3) without time zone,
@@ -928,6 +929,7 @@ async function ensurePersonalTrackerTables(client) {
     );
     await client.query(
       `ALTER TABLE public."TrackerItem"
+         ADD COLUMN IF NOT EXISTS "isTracking" boolean NOT NULL DEFAULT true,
          ADD COLUMN IF NOT EXISTS "inCollection" boolean NOT NULL DEFAULT false,
          ADD COLUMN IF NOT EXISTS "isPublic" boolean NOT NULL DEFAULT false,
          ADD COLUMN IF NOT EXISTS "acquiredAt" timestamp(3) without time zone,

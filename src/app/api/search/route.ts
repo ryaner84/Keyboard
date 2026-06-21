@@ -6,6 +6,10 @@ import { prisma } from "@/lib/prisma";
 export async function GET(req: NextRequest) {
   const q = (req.nextUrl.searchParams.get("q") ?? "").trim();
   if (q.length < 2) return NextResponse.json({ results: [] });
+  const limit = Math.min(
+    48,
+    Math.max(1, Number(req.nextUrl.searchParams.get("limit") ?? 8) || 8)
+  );
 
   const results = await prisma.groupBuy.findMany({
     where: {
@@ -13,6 +17,7 @@ export async function GET(req: NextRequest) {
         { name: { contains: q, mode: "insensitive" } },
         { colorway: { contains: q, mode: "insensitive" } },
         { designer: { contains: q, mode: "insensitive" } },
+        { vendorName: { contains: q, mode: "insensitive" } },
       ],
     },
     select: {
@@ -21,9 +26,10 @@ export async function GET(req: NextRequest) {
       designer: true,
       status: true,
       imageUrl: true,
+      productType: true,
     },
     orderBy: { name: "asc" },
-    take: 8,
+    take: limit,
   });
 
   return NextResponse.json({ results });

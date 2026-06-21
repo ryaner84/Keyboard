@@ -73,8 +73,17 @@ export default function KeyboardCollectionContent({
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
+      const params = new URLSearchParams({
+        type: "KEYBOARD",
+        limit: "800",
+      });
+      if (defaultStatuses?.length) {
+        defaultStatuses.forEach((status) => params.append("status", status));
+      } else {
+        params.set("status", "all");
+      }
       const response = await fetch(
-        "/api/group-buys?type=KEYBOARD&status=all&limit=200"
+        `/api/group-buys?${params}`
       );
       if (!response.ok) throw new Error("Keyboard listings unavailable");
       const payload = await response.json();
@@ -84,7 +93,7 @@ export default function KeyboardCollectionContent({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [defaultStatuses]);
 
   useEffect(() => {
     fetchAll();
