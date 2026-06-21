@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "@/context/LocationContext";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
 import { normalizeImageUrl } from "@/lib/utils";
@@ -61,6 +61,8 @@ export default function CollectionContent() {
   const [sharePickerOpen, setSharePickerOpen] = useState(false);
   const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
   const [notice, setNotice] = useState("");
+  const findQuery = searchParams.get("find")?.trim().slice(0, 120) || "";
+  const findQueryHandled = useRef(false);
 
   const legacySharedSlugs = useMemo(
     () => searchParams.get("sets")?.split(",").map((slug) => slug.trim()).filter(Boolean).slice(0, 100) ?? [],
@@ -138,6 +140,19 @@ export default function CollectionContent() {
     const timeout = window.setTimeout(() => setNotice(""), 4500);
     return () => window.clearTimeout(timeout);
   }, [notice]);
+
+  useEffect(() => {
+    if (
+      !hydrated ||
+      !authenticated ||
+      !findQuery ||
+      findQueryHandled.current
+    ) {
+      return;
+    }
+    findQueryHandled.current = true;
+    setCatalogPickerOpen(true);
+  }, [authenticated, findQuery, hydrated]);
 
   const owned = useMemo(
     () =>
@@ -549,6 +564,7 @@ export default function CollectionContent() {
 
       {catalogPickerOpen && (
         <CollectionCatalogPicker
+          initialQuery={findQuery}
           existingItems={
             new Map(items.map((item) => [item.slug, item.collection]))
           }
@@ -1258,10 +1274,12 @@ interface CatalogPickerResult {
 }
 
 function CollectionCatalogPicker({
+  initialQuery,
   existingItems,
   onClose,
   onAdd,
 }: {
+  initialQuery?: string;
   existingItems: Map<string, CollectionItemDetails>;
   onClose: () => void;
   onAdd: (
@@ -1269,7 +1287,7 @@ function CollectionCatalogPicker({
     mode: "collection" | "tracking"
   ) => Promise<void>;
 }) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery || "");
   const [results, setResults] = useState<CatalogPickerResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
@@ -1338,6 +1356,10 @@ function CollectionCatalogPicker({
         <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
           Add something you own directly to your collection, or save it under
           Tracking for later.
+        </p>
+        <p className="mt-2 text-xs leading-5 text-[#80632f] dark:text-[#d0b278]">
+          For keyboard families with multiple versions, select the exact edition
+          shown in the result name before choosing “I own this.”
         </p>
         <label className="relative mt-5 block">
           <span className="sr-only">Search catalog</span>
