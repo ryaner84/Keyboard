@@ -445,11 +445,26 @@ def is_plausible_base_price(price: float, currency: str | None) -> bool:
     return bounds[0] <= price <= bounds[1]
 
 
+# Variant categories that are explicit NON-base sub-kits. A vendor may list a
+# set's Novelties / Spacebars / Alphas WITHOUT carrying the base kit at all
+# (e.g. Keygem's Rainy Day r2 page) — those must never win the base-kit slot.
+_NON_BASE_SUBKIT_CATEGORIES = {"NOVELTIES", "SPACEBARS", "ALPHA"}
+
+# Sentinel returned by shopify_price when a product loads but sells no base kit.
+# Distinct from None (fetch failed / blocked → keep the last good price): this
+# means the listing is verified to carry no base kit, so run_prices CLEARS any
+# stale price rather than leaving a sub-kit price showing as the base.
+NO_BASE_KIT = "NO_BASE_KIT"
+
+
 def choose_kit_variant(variants: list[dict]) -> dict | None:
     """Pick the variant that is actually the BASE kit, NOT the cheapest one.
-    Preference: BASE-classified variant > first non-add-on variant (Shopify
-    returns variants in display order; single-kit listings have one 'Default
-    Title' variant)."""
+    Preference: BASE-classified variant > first variant that is NOT an explicit
+    non-base sub-kit (Shopify returns variants in display order; single-kit
+    listings have one 'Default Title' variant, which classifies as OTHERS and
+    stays eligible). Returns None when EVERY variant is a Novelties/Spacebars/
+    Alphas sub-kit — the listing then has no base kit, and the old fallback to
+    pool[0] stored a sub-kit (e.g. a €38 novelty) as if it were the base."""
     if not variants:
         return None
     non_addon = [v for v in variants if not _ADDON_VARIANT_RE.search(v["title"])]
@@ -457,7 +472,10 @@ def choose_kit_variant(variants: list[dict]) -> dict | None:
     for v in pool:
         if classify_variant(v["title"]) == "BASE":
             return v
-    return pool[0]
+    for v in pool:
+        if classify_variant(v["title"]) not in _NON_BASE_SUBKIT_CATEGORIES:
+            return v
+    return None
 
 
 # Home country per currency — pins Shopify Markets' geo-localization to the
@@ -534,7 +552,7 @@ def _base_variants_in_stock(
     return any(known) if known else True
 
 
-def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> dict | None:
+def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> dict | str | None:
     """Navigate to the product (acquires cf_clearance) then fetch its .json from
     inside the page context so the request carries the clearance cookies."""
     if "/products/" not in product_url:
@@ -574,9 +592,14 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
             return None
 
         variants = _parse_shopify_variants(data["product"].get("variants") or [])
+        if not variants:
+            return None
         chosen = _pick_variant(variants, pinned_id)
         if chosen is None:
-            return None
+            # variants present but none is a base kit (only Novelties/Spacebars/
+            # Alphas) → the listing sells no base kit; clear any stale price.
+            log(f"  no base kit on listing — clearing price ({product_url})")
+            return NO_BASE_KIT
 
         # product.json omits stock on some themes; product.js exposes an
         # explicit `available` flag for the same variant IDs.
@@ -1562,7 +1585,19 @@ def run_prices(conn, context: BrowserContext, deadline: float) -> dict:
                 break
             stats["attempted"] += 1
             result = shopify_price(page, vk["productUrl"], vk.get("vendor_currency"))
-            if result:
+            if result == NO_BASE_KIT:
+                # Listing loaded but sells no base kit — clear the stale price so
+                # the row drops off the site instead of showing a sub-kit price.
+                with conn.cursor() as cur:
+                    cur.execute(
+                        'UPDATE "VendorKit" SET price = NULL, "inStock" = false, '
+                        'variants = %s::jsonb, "priceUpdatedAt" = now(), '
+                        '"priceSource" = \'SCRAPED\' WHERE id = %s',
+                        (json.dumps([]), vk["id"]),
+                    )
+                conn.commit()
+                stats["updated"] += 1
+            elif result:
                 with conn.cursor() as cur:
                     cur.execute(
                         'UPDATE "VendorKit" SET price = %s, currency = %s, '

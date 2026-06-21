@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { classifyVariant } from "@/lib/kit-variants";
+import { classifyVariant, type VariantCategory } from "@/lib/kit-variants";
 
 const BROWSER_HEADERS = {
   "User-Agent":
@@ -59,6 +59,25 @@ const CURRENCY_HOME_COUNTRY: Record<string, string> = {
 // often bundle add-ons (deskmats, samples, deposits...) as cheap variants.
 const ADDON_VARIANT_RE =
   /(desk\s?mat|mouse\s?pad|wrist\s?rest|cable|artisan|sticker|sample|keychain|coin|tray|deposit|shipping|insurance|add[\s-]?on|extra)/i;
+
+// Variant categories that are explicit NON-base sub-kits. A vendor may list the
+// Novelties / Spacebars / Alphas of a set WITHOUT carrying the base kit at all
+// (e.g. Keygem's Rainy Day r2 page). These must never win the base-kit slot —
+// the old "first non-add-on variant" fallback stored a €38 novelty as if it
+// were the base kit. See the selection logic in fetchShopifyPrice.
+const NON_BASE_SUBKIT_CATEGORIES = new Set<VariantCategory>([
+  "NOVELTIES",
+  "SPACEBARS",
+  "ALPHA",
+]);
+
+// Sentinel: the product loaded fine but carries no base kit (only Novelties /
+// Spacebars / Alphas). Distinct from `null` (couldn't fetch / blocked): a null
+// keeps the last good price so a transient block doesn't blank the site, while
+// NO_BASE_KIT means the listing is verified to sell no base kit, so the caller
+// CLEARS any stale price rather than showing a sub-kit price as the base.
+const NO_BASE_KIT = "NO_BASE_KIT" as const;
+type FetchPriceResult = PriceResult | typeof NO_BASE_KIT | null;
 
 // Per-currency plausibility bounds for a GMK BASE kit. New base kits run
 // roughly USD 90–180, but RELEASED sets are routinely cleared out at USD
@@ -180,7 +199,7 @@ function structuredVariantAvailability(html: string): Map<string, boolean> {
 
 // Shopify exposes a product's data at {productUrl}.json — used by most
 // keyboard vendors (CannonKeys, NovelKeys, KBDfans, Deskhero, Daily Clack...).
-async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): Promise<PriceResult | null> {
+async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): Promise<FetchPriceResult> {
   if (!productUrl.includes("/products/")) return null;
 
   // Strip query/hash, then request the .json variant.
@@ -283,19 +302,26 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     // Pick the variant that is actually the BASE kit, NOT the cheapest one — GB
     // listings carry cheap add-on variants (deskmats, samples, deposits) that
     // used to win a Math.min and produce absurd prices like $22 for a base kit.
-    // Preference: the variant the vendor link itself pins (?variant=<id> — exact,
-    // survives non-English titles like Yushakobo's) > the variant classified BASE
-    // (same classifier the set-page filter uses, so the stored price always
-    // matches what's displayed) > first non-add-on variant (Shopify returns
-    // variants in display order; the primary kit comes first on single-kit
-    // listings titled "Default Title").
+    // The exact preference order and the no-base-kit case are documented inline
+    // on the `chosen` assignment below.
     const pinned = pinnedId ? variants.find((v) => v.id === pinnedId) : undefined;
     const nonAddon = variants.filter((v) => !ADDON_VARIANT_RE.test(v.title));
     const pool = nonAddon.length > 0 ? nonAddon : variants;
-    const chosen = pinned ?? pool.find((v) => classifyVariant(v.title) === "BASE") ?? pool[0];
     const baseVariants = pool.filter(
       (variant) => classifyVariant(variant.title) === "BASE"
     );
+    // Order: the vendor-pinned variant (?variant=<id> — exact, survives
+    // non-English titles) > a BASE-classified variant > the first variant that
+    // is NOT an explicit non-base sub-kit. "Default Title" (single-kit listings)
+    // and colorway-named variants classify as OTHERS, so they stay eligible.
+    // If EVERY variant is a Novelties/Spacebars/Alphas sub-kit, the listing has
+    // no base kit at all — return NO_BASE_KIT so the caller clears the stale
+    // price instead of storing a sub-kit price (the €38 Keygem-novelty bug).
+    const chosen =
+      pinned ??
+      baseVariants[0] ??
+      pool.find((v) => !NON_BASE_SUBKIT_CATEGORIES.has(classifyVariant(v.title)));
+    if (!chosen) return NO_BASE_KIT;
     const relevantVariants = pinned
       ? [pinned]
       : baseVariants.length > 0
@@ -555,11 +581,14 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
 // JSON first (rich variant data), generic JSON-LD/OpenGraph markup otherwise.
 // Pass vendorCurrency so Shopify geo-localization is pinned to the vendor's
 // base currency rather than whatever the runner's IP geo-detects.
-export async function fetchVendorPrice(productUrl: string, vendorCurrency?: string): Promise<PriceResult | null> {
+export async function fetchVendorPrice(productUrl: string, vendorCurrency?: string): Promise<FetchPriceResult> {
   if (!productUrl) return null;
   // GMK is the manufacturer, not a vendor — gmk.net links are catalog/image
   // references and must never produce a price.
   if (/gmk\.net/i.test(productUrl)) return null;
+  // A Shopify product that loads but sells no base kit returns NO_BASE_KIT
+  // (truthy) — forward it so the price is cleared; only a `null` (not Shopify,
+  // or fetch blocked) falls through to the generic JSON-LD/OpenGraph reader.
   const shopify = await fetchShopifyPrice(productUrl, vendorCurrency);
   if (shopify) return shopify;
   return fetchJsonLdPrice(productUrl);
@@ -588,7 +617,22 @@ async function refreshOne(
   if (!vk.productUrl) return;
   result.attempted++;
   const priceData = await fetchVendorPrice(vk.productUrl, vk.vendor.currency);
-  if (priceData) {
+  if (priceData === NO_BASE_KIT) {
+    // The listing loaded but sells no base kit (only Novelties/Spacebars/
+    // Alphas). Clear any stale price so the row drops off the site instead of
+    // showing a sub-kit price as the base kit — the self-heal a report expects.
+    await prisma.vendorKit.update({
+      where: { id: vk.id },
+      data: {
+        price: null,
+        inStock: false,
+        variants: [],
+        priceUpdatedAt: new Date(),
+        priceSource: "SCRAPED",
+      },
+    });
+    result.updated++;
+  } else if (priceData) {
     await prisma.vendorKit.update({
       where: { id: vk.id },
       data: {
