@@ -25,6 +25,7 @@ export async function GET() {
     data: items.map((item) => ({
       ...item.groupBuy,
       collection: {
+        isTracking: item.isTracking,
         inCollection: item.inCollection,
         isPublic: item.isPublic,
         acquiredAt: item.acquiredAt,

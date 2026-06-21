@@ -16,7 +16,7 @@ export async function PATCH(
   const { slug } = await params;
   const item = await prisma.trackerItem.findFirst({
     where: { userId: user.id, groupBuy: { slug } },
-    select: { id: true, inCollection: true },
+    select: { id: true, isTracking: true, inCollection: true },
   });
   if (!item) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
@@ -26,6 +26,7 @@ export async function PATCH(
   }
 
   const data: {
+    isTracking?: boolean;
     inCollection?: boolean;
     isPublic?: boolean;
     acquiredAt?: Date | null;
@@ -40,6 +41,7 @@ export async function PATCH(
     displayOrder?: number;
   } = {};
 
+  if (typeof body.isTracking === "boolean") data.isTracking = body.isTracking;
   if (typeof body.inCollection === "boolean") data.inCollection = body.inCollection;
   if (typeof body.isPublic === "boolean") data.isPublic = body.isPublic;
   if ("acquiredAt" in body) {
@@ -88,6 +90,11 @@ export async function PATCH(
     data.isPublic = false;
     data.showPurchasePrice = false;
   }
+  const willBeTracking = data.isTracking ?? item.isTracking;
+  if (!willBeTracking && !willBeInCollection) {
+    await prisma.trackerItem.delete({ where: { id: item.id } });
+    return NextResponse.json({ ok: true, deleted: true });
+  }
 
   const updated = await prisma.trackerItem.update({
     where: { id: item.id },
@@ -97,6 +104,7 @@ export async function PATCH(
   return NextResponse.json({
     ok: true,
     collection: {
+      isTracking: updated.isTracking,
       inCollection: updated.inCollection,
       isPublic: updated.isPublic,
       acquiredAt: updated.acquiredAt,
@@ -123,9 +131,20 @@ export async function DELETE(
   }
 
   const { slug } = await params;
-  await prisma.trackerItem.deleteMany({
+  const item = await prisma.trackerItem.findFirst({
     where: { userId: user.id, groupBuy: { slug } },
+    select: { id: true, inCollection: true },
   });
+  if (!item) return NextResponse.json({ ok: true });
+
+  if (item.inCollection) {
+    await prisma.trackerItem.update({
+      where: { id: item.id },
+      data: { isTracking: false, alertsEnabled: false },
+    });
+  } else {
+    await prisma.trackerItem.delete({ where: { id: item.id } });
+  }
   return NextResponse.json({ ok: true });
 }
 

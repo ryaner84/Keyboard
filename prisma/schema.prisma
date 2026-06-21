@@ -267,6 +267,7 @@ model TrackerItem {
   userId            String
   groupBuyId        String
   alertsEnabled     Boolean   @default(true)
+  isTracking        Boolean   @default(true)
   inCollection      Boolean   @default(false)
   isPublic          Boolean   @default(false)
   acquiredAt        DateTime?

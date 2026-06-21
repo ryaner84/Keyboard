@@ -8,6 +8,18 @@ import type { GroupBuyWithPricing, GBStatus } from "@/types";
 
 const DEFAULT_STATUSES: GBStatus[] = ["INTEREST_CHECK", "ACTIVE_GB"];
 
+function isUsefulKeycapListing(set: GroupBuyWithPricing): boolean {
+  if (set.productType !== "KEYCAPS") return false;
+  const name = set.name.trim();
+  if (
+    /\b(?:keyboard|macropad|numpad|tkl|hhkb|alice|arisu)\b/i.test(name) &&
+    !/\b(?:keycaps?|keyset)\b/i.test(name)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export default function BrowseContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -47,8 +59,9 @@ export default function BrowseContent() {
     try {
       const res = await fetch(`/api/group-buys?${params}`);
       const data = await res.json();
-      setSets(data.data ?? []);
-      setTotal(data.total ?? 0);
+      const useful = (data.data ?? []).filter(isUsefulKeycapListing);
+      setSets(useful);
+      setTotal(Math.max(0, (data.total ?? 0) - ((data.data ?? []).length - useful.length)));
     } catch {
       setSets([]);
     } finally {

@@ -36,6 +36,7 @@ export async function processTrackerNotifications() {
   const [items, rates] = await Promise.all([
     prisma.trackerItem.findMany({
       where: {
+        isTracking: true,
         alertsEnabled: true,
         user: { alertsEnabled: true },
       },

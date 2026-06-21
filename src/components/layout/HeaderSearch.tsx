@@ -13,6 +13,7 @@ interface SearchResult {
   designer: string | null;
   status: string;
   imageUrl: string | null;
+  productType: string;
 }
 
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
@@ -101,6 +102,13 @@ export function HeaderSearch() {
     router.push(`/sets/${slug}`);
   };
 
+  const showAllResults = () => {
+    const search = query.trim();
+    if (search.length < 2) return;
+    close();
+    router.push(`/search?q=${encodeURIComponent(search)}`);
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -108,8 +116,9 @@ export function HeaderSearch() {
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setHighlighted((h) => Math.max(h - 1, 0));
-    } else if (e.key === "Enter" && results[highlighted]) {
-      go(results[highlighted].slug);
+    } else if (e.key === "Enter" && query.trim().length >= 2) {
+      e.preventDefault();
+      showAllResults();
     }
   };
 
@@ -196,9 +205,10 @@ export function HeaderSearch() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{r.name}</p>
-                        {r.designer && (
-                          <p className="text-xs text-gray-400 truncate">by {r.designer}</p>
-                        )}
+                        <p className="text-xs text-gray-400 truncate">
+                          {r.productType === "KEYBOARD" ? "Keyboard" : "Keycap set"}
+                          {r.designer ? ` · ${r.designer}` : ""}
+                        </p>
                       </div>
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${badge.cls}`}>
                         {badge.label}
@@ -208,6 +218,20 @@ export function HeaderSearch() {
                 })
               )}
             </div>
+            {query.trim().length >= 2 && (
+              <button
+                onClick={showAllResults}
+                className="flex w-full items-center justify-between gap-3 border-t border-gray-100 bg-gray-50 px-4 py-3 text-left text-sm font-semibold text-indigo-700 hover:bg-indigo-50 dark:border-gray-800 dark:bg-gray-950 dark:text-indigo-300 dark:hover:bg-indigo-950/40"
+              >
+                <span>
+                  View full results for “{query.trim()}”
+                  <span className="ml-2 font-normal text-gray-400">Compare before opening</span>
+                </span>
+                <span className="rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] text-gray-500 dark:border-gray-700 dark:bg-gray-900">
+                  ENTER
+                </span>
+              </button>
+            )}
           </div>
         </div>
       )}

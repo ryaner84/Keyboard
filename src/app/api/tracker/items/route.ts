@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
 
   await prisma.trackerItem.upsert({
     where: { userId_groupBuyId: { userId: user.id, groupBuyId: groupBuy.id } },
-    update: {},
+    update: { isTracking: true, alertsEnabled: true },
     create: {
       userId: user.id,
       groupBuyId: groupBuy.id,

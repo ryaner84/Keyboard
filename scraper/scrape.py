@@ -1663,7 +1663,8 @@ _KB_KEYCAP_PROFILE_RE = re.compile(
 # Geekhack meta-threads to ignore (announcements, indexes, sticky posts)
 _GH_META_RE = re.compile(
     r"^\*{2,}|list\s+of\s+(?:current|running|active)|"
-    r"\[index\]|\[master\s+list\]|(?:board|forum)\s+rules",
+    r"\[index\]|\[master\s+list\]|(?:board|forum)\s+rules|"
+    r"stealing\s+my\s+identity|vendor\s+trust\s+and\s+safety",
     re.I,
 )
 
@@ -2147,7 +2148,8 @@ def run_keyboards(conn, context: BrowserContext, deadline: float) -> dict:
 _GH_KEYCAP_PROFILE = re.compile(
     r"\b(GMK|SA|DCS|MTNU|KAT|MT3|CYL|XDA|MDA|DSA|DSS|KAM|OG|SP[-\s]?SA|"
     r"Signature\s+Plastics|Cherry|PBT|NICEPBT|Keykobo|Key\s+Kobo|"
-    r"Milkyway|Milky\s+Way|MW|Infinikey|Keyreative|Melgeek)\b",
+    r"Milkyway|Milky\s+Way|MW|Infinikey|Keyreative|Melgeek|KKB|PBS|SLK|EPBT|"
+    r"EnjoyPBT)\b",
     re.I,
 )
 
@@ -2162,15 +2164,30 @@ _GH_KB_INDICATOR = re.compile(
     re.I,
 )
 _GH_KB_LAYOUT = re.compile(r"(?<!\d)(?:40|45|50|60|65|75|80|96|100)%(?!\w)", re.I)
-_GH_EXPLICIT_KEYCAP = re.compile(r"\bkey[\s-]?caps?\b", re.I)
+_GH_EXPLICIT_KEYCAP = re.compile(r"\b(?:key[\s-]?caps?|keysets?)\b", re.I)
 _GH_ACCESSORY = re.compile(
     r"\b(stabili[sz]ers?|stabs?|wrist\s+rests?|keyboard\s+bags?|carrying\s+cases?|"
     r"cables?|deskmats?|case\s+foam|switch\s+films?|switches?\s+(?:gb|group\s+buy)|"
+    r"linear\s+switc(?:h|hes)?|tactile\s+(?:switch|ec\s+domes?)|ec\s+domes?|"
     r"artisan\s+cases?)\b",
     re.I,
 )
 _GH_COMPONENT = re.compile(r"\b(replacement\s+PCBs?|PCBs?|plates?)\b", re.I)
-_GH_STRONG_KB = re.compile(r"\b(keyboard|kbd\b|build\s+kit|typing\s+kit|macropad|numpad)\b", re.I)
+_GH_STRONG_KB = re.compile(
+    r"\b(keyboard|kbd\b|build\s+kit|typing\s+kit|macropad|numpad|"
+    r"board|case|housing|topre|realforce|fc660c?|split|ortho|ergo)\b",
+    re.I,
+)
+_GH_KB_SIZE_NAME = re.compile(
+    r"\b(?:[a-z][a-z0-9_-]*)?(?:40|45|50|60|62|64|65|66|68|70|75|80|87|96|100|104|170)"
+    r"(?:v\d+)?\b",
+    re.I,
+)
+_GH_KB_MODEL = re.compile(
+    r"\b(Rukia|BOCC|KIRA|Equilibrium|Nyawice|Jahre|KeyMaze|Metanoia|"
+    r"Nooir|Klavier|Parabolica|Sonic170|Xte+|Sho66|Finn\s*60XT|RF[\s—-]*8X)\b",
+    re.I,
+)
 
 # SMF date: "Mon, 01 June 2026, 17:13:33"
 _GH_DATE_FMT = "%a, %d %B %Y, %H:%M:%S"
@@ -2267,21 +2284,32 @@ def _gh_slug_variants(title: str) -> list[str]:
     return variants
 
 
-def _gh_detect_product_type(title: str) -> str:
+def _gh_classify_title(title: str) -> str:
     if _GH_META_RE.search(title):
         return "ACCESSORY"
-    if _GH_EXPLICIT_KEYCAP.search(title):
-        return "KEYCAPS"
     strong_keyboard = bool(_GH_STRONG_KB.search(title))
+    if _GH_KEYCAP_PROFILE.search(title):
+        return "KEYCAPS"
+    if _GH_EXPLICIT_KEYCAP.search(title) and not strong_keyboard:
+        return "KEYCAPS"
     if _GH_ACCESSORY.search(title):
         return "ACCESSORY"
     if _GH_COMPONENT.search(title) and not strong_keyboard:
         return "ACCESSORY"
-    if strong_keyboard or _GH_KB_INDICATOR.search(title) or _GH_KB_LAYOUT.search(title):
+    if (
+        strong_keyboard
+        or _GH_KB_INDICATOR.search(title)
+        or _GH_KB_LAYOUT.search(title)
+        or _GH_KB_SIZE_NAME.search(title)
+        or _GH_KB_MODEL.search(title)
+    ):
         return "KEYBOARD"
-    if _GH_KEYCAP_PROFILE.search(title):
-        return "KEYCAPS"
-    return "KEYCAPS"  # default: most Geekhack board-70 GBs are keycap sets
+    return "UNKNOWN"
+
+
+def _gh_detect_product_type(title: str) -> str:
+    classified = _gh_classify_title(title)
+    return "KEYCAPS" if classified == "UNKNOWN" else classified
 
 
 def _gh_status(
@@ -2322,28 +2350,39 @@ def _update_gh_listing_metadata(
 ) -> None:
     """Repair imported gh-* rows using the current board listing."""
     status = _gh_status(title, None, last_post_dt)
-    product_type = _gh_detect_product_type(title)
+    product_type = _gh_classify_title(title)
     with conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE "GroupBuy"
-            SET status = %s::"GBStatus",
-                "productType" = %s,
-                "updatedAt" = now()
-            WHERE slug = %s
-              AND (
-                status IS DISTINCT FROM %s::"GBStatus"
-                OR "productType" IS DISTINCT FROM %s
-              )
-            """,
-            (
-                status,
-                product_type,
-                f"gh-{topic_id}",
-                status,
-                product_type,
-            ),
-        )
+        if product_type == "UNKNOWN":
+            cur.execute(
+                """
+                UPDATE "GroupBuy"
+                SET status = %s::"GBStatus", "updatedAt" = now()
+                WHERE slug = %s
+                  AND status IS DISTINCT FROM %s::"GBStatus"
+                """,
+                (status, f"gh-{topic_id}", status),
+            )
+        else:
+            cur.execute(
+                """
+                UPDATE "GroupBuy"
+                SET status = %s::"GBStatus",
+                    "productType" = %s,
+                    "updatedAt" = now()
+                WHERE slug = %s
+                  AND (
+                    status IS DISTINCT FROM %s::"GBStatus"
+                    OR "productType" IS DISTINCT FROM %s
+                  )
+                """,
+                (
+                    status,
+                    product_type,
+                    f"gh-{topic_id}",
+                    status,
+                    product_type,
+                ),
+            )
 
 
 def _gh_extract_images(html: str) -> list[str]:

@@ -116,6 +116,7 @@ export interface GroupBuyWithPricing extends Omit<GroupBuyWithKits, "kits"> {
 }
 
 export interface CollectionItemDetails {
+  isTracking: boolean;
   inCollection: boolean;
   isPublic: boolean;
   acquiredAt: Date | string | null;

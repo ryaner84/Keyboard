@@ -147,7 +147,7 @@ export async function syncTrackerSlugsForUser({
         where: {
           userId_groupBuyId: { userId, groupBuyId: groupBuy.id },
         },
-        update: {},
+        update: { isTracking: true, alertsEnabled: true },
         create: {
           userId,
           groupBuyId: groupBuy.id,
@@ -166,7 +166,7 @@ export async function syncTrackerSlugsForUser({
   ]);
 
   const items = await prisma.trackerItem.findMany({
-    where: { userId },
+    where: { userId, isTracking: true },
     select: { groupBuy: { select: { slug: true } } },
   });
   return items.map((item) => item.groupBuy.slug);
