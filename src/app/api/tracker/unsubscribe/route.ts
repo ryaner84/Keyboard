@@ -6,7 +6,7 @@ import { verifyUnsubscribeToken } from "@/lib/tracker-auth";
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token") ?? "";
   const userId = verifyUnsubscribeToken(token);
-  const redirectUrl = new URL("/tracker", getSiteUrl());
+  const redirectUrl = new URL("/collection", getSiteUrl());
 
   if (!userId) {
     redirectUrl.searchParams.set("alerts", "invalid");

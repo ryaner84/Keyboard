@@ -73,7 +73,7 @@ export function Header() {
   const navLinks = [
     { href: "/released", label: "Released" },
     { href: "/timeline", label: "Timeline" },
-    { href: "/tracker", label: "My Tracker" },
+    { href: "/collection", label: "My Collection" },
   ];
 
   return (

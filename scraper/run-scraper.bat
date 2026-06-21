@@ -87,7 +87,7 @@ echo [boot] Setup complete. Launching the real scraper from the clone ...
 echo.
 REM Hand off to the canonical copy inside the clone. It will detect it IS inside
 REM a repo and run normally (no infinite loop).
-call "%CLONE_DIR%\scraper\run-scraper.bat"
+call "%CLONE_DIR%\scraper\run-scraper.bat" %*
 exit /b %ERRORLEVEL%
 
 :have_repo
@@ -215,7 +215,7 @@ if defined LOCALTIME (
 
 REM --- 6. Run the scraper -----------------------------------------------------
 echo [run] Launching scraper ^(logs in %SCRAPER%\logs^) ...
-"%VENV_PY%" "%SCRAPER%\scrape.py"
+"%VENV_PY%" "%SCRAPER%\scrape.py" %*
 set "RC=!ERRORLEVEL!"
 
 echo.

@@ -282,16 +282,16 @@ export async function sendTrackerLoginEmail({
   const safeOtp = escapeHtml(otp);
   await sendTrackerEmail({
     to: email,
-    subject: "Save your GMK Tracker",
+    subject: "Save your keyboard collection",
     html: `
       <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;color:#111827">
-        <h1 style="font-size:22px;margin-bottom:12px">Save your tracker</h1>
+        <h1 style="font-size:22px;margin-bottom:12px">Save your collection</h1>
         <p style="line-height:1.6;color:#4b5563">
           Use the button below to verify your email and sync your tracked keyboards and keycap sets.
         </p>
         <p style="margin:24px 0">
           <a href="${safeUrl}" style="display:inline-block;background:#4f46e5;color:white;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600">
-            Verify and open my tracker
+            Verify and open my collection
           </a>
         </p>
         <p style="color:#4b5563">Or enter this 6-digit code:</p>

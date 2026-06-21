@@ -29,6 +29,7 @@ Run via scraper/run-scraper.bat (which git-pulls the latest copy first).
 
 from __future__ import annotations
 
+import argparse
 import configparser
 import csv
 import getpass
@@ -248,6 +249,12 @@ def get_connection(cfg: dict):
     First-run flow: try the saved password; if missing or wrong, prompt the user
     (hidden input), validate against Supabase, loop until it works, then persist.
     """
+    env_url = normalized_env_database_url()
+    if env_url:
+        conn = connect_with_pool_retry(env_url)
+        log("Database connection OK (DATABASE_URL).")
+        return conn
+
     saved = read_saved_password()
     if saved:
         try:
@@ -285,6 +292,37 @@ def get_connection(cfg: dict):
                 log(f"Cannot reach the database: {e}")
                 print("  Connection error (not a password problem). Check your "
                       "network/config.ini, then try again.")
+
+
+def normalized_env_database_url() -> str | None:
+    """Return a psycopg2-compatible DATABASE_URL without logging credentials."""
+    raw = (os.environ.get("DATABASE_URL") or "").strip()
+    if not raw:
+        return None
+
+    password = os.environ.get("DATABASE_PASSWORD") or ""
+    if "__PASSWORD__" in raw:
+        if not password:
+            raise OperationalError(
+                "DATABASE_URL contains __PASSWORD__ but DATABASE_PASSWORD is missing"
+            )
+        raw = raw.replace("__PASSWORD__", urllib.parse.quote(password, safe=""))
+
+    parsed = urllib.parse.urlsplit(raw)
+    query = [
+        (key, value)
+        for key, value in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        if key.lower() not in {"pgbouncer", "connection_limit", "pool_timeout"}
+    ]
+    return urllib.parse.urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            urllib.parse.urlencode(query),
+            parsed.fragment,
+        )
+    )
 
 
 # ----------------------------------------------------------------------------
@@ -2117,11 +2155,13 @@ _GH_KEYCAP_PROFILE = re.compile(
 # (absent these, Geekhack threads default to KEYCAPS since most GBs are keycap sets)
 _GH_KB_INDICATOR = re.compile(
     r"\b(keyboard|kbd\b|PCB|build\s+kit|typing\s+kit|FR4\s+plate|"
+    r"TKL|HHKB|WKL|WK|Alice|Arisu|macropad|numpad|"
     r"TGR|Keycult|Norbaforce|Norbauer|Bakeneko|Meletrix|Geonworks|"
     r"Matrix\s*Lab|Rama\s+Works|Duck\s+(?:Orion|Octagon|Viper|Eagle)|"
     r"Hiney|Angry\s+Miao|Percent\s+Studio|Swagkeys)\b",
     re.I,
 )
+_GH_KB_LAYOUT = re.compile(r"(?<!\d)(?:40|45|50|60|65|75|80|96|100)%(?!\w)", re.I)
 
 # SMF date: "Mon, 01 June 2026, 17:13:33"
 _GH_DATE_FMT = "%a, %d %B %Y, %H:%M:%S"
@@ -2219,10 +2259,10 @@ def _gh_slug_variants(title: str) -> list[str]:
 
 
 def _gh_detect_product_type(title: str) -> str:
+    if _GH_KB_INDICATOR.search(title) or _GH_KB_LAYOUT.search(title):
+        return "KEYBOARD"
     if _GH_KEYCAP_PROFILE.search(title):
         return "KEYCAPS"
-    if _GH_KB_INDICATOR.search(title):
-        return "KEYBOARD"
     return "KEYCAPS"  # default: most Geekhack board-70 GBs are keycap sets
 
 
@@ -2460,20 +2500,31 @@ def _upsert_gh_set(conn, data: dict) -> tuple[str | None, bool]:
     return (row["id"] if row else None), True
 
 
-def run_geekhack(conn, context: BrowserContext, deadline: float) -> dict:
+def run_geekhack(
+    conn,
+    context: BrowserContext,
+    deadline: float,
+    *,
+    min_year: int = GEEKHACK_MIN_YEAR,
+    keyboards_only: bool = False,
+    delay_min: float = GEEKHACK_DELAY_MIN,
+    delay_max: float = GEEKHACK_DELAY_MAX,
+) -> dict:
     """
     Scrape geekhack.org board 70.0 (Group Buys).
-    - Paginates the listing until all threads with last-post >= GEEKHACK_MIN_YEAR
+    - Paginates the listing until all threads with last-post >= min_year
       are collected (stops at the first page where all visible posts predate the cutoff).
     - For each thread: skip if last-post hasn't advanced since gh_seen.json.
     - Opens thread → reads first post → upserts GroupBuy.
     - Adds random 4–9s jitter between thread opens to be a polite guest.
     """
     stats = {
-        "pages": 0, "threads_seen": 0, "skipped_old": 0, "skipped_unchanged": 0,
+        "pages": 0, "threads_seen": 0, "skipped_old": 0,
+        "skipped_non_keyboard": 0, "skipped_unchanged": 0,
         "scraped": 0, "created": 0, "updated": 0, "failed": 0,
     }
-    log("Geekhack pass: board 70.0 (Group Buys) …")
+    scope = "keyboard history only" if keyboards_only else "all group buys"
+    log(f"Geekhack pass: board 70.0 ({scope}, from {min_year}) …")
 
     seen = _gh_load_seen()
     repair_topic_ids = _gh_repair_topic_ids(conn)
@@ -2501,7 +2552,7 @@ def run_geekhack(conn, context: BrowserContext, deadline: float) -> dict:
             for row in rows:
                 lp = _gh_parse_last_post(row.get("last_post_text", ""))
                 row["last_post_dt"] = lp
-                if lp and lp.year >= GEEKHACK_MIN_YEAR:
+                if lp and lp.year >= min_year:
                     fresh.append(row)
                 else:
                     old_count += 1
@@ -2510,13 +2561,14 @@ def run_geekhack(conn, context: BrowserContext, deadline: float) -> dict:
             stats["threads_seen"] += len(rows)
             stats["skipped_old"] += old_count
 
-            # Stop paginating once we hit a page where any thread predates the cutoff
-            if old_count > 0:
+            # Pinned and malformed rows can be older than surrounding threads.
+            # Stop only after a full page falls before the requested cutoff.
+            if old_count == len(rows):
                 break
-            start += 20  # SMF paginates in steps of 20
+            start += 50  # Geekhack's SMF board pages contain 50 topics
 
         log(f"  Geekhack: {len(all_threads)} threads from {stats['pages']} pages "
-            f"(skipped {stats['skipped_old']} pre-{GEEKHACK_MIN_YEAR})")
+            f"(skipped {stats['skipped_old']} pre-{min_year})")
 
         # ── 2. Scrape each thread ──────────────────────────────────────────────
         for thread in all_threads:
@@ -2531,6 +2583,9 @@ def run_geekhack(conn, context: BrowserContext, deadline: float) -> dict:
             thread_title = thread.get("title") or ""
             if _GH_META_RE.search(thread_title):
                 stats["skipped_old"] += 1  # reuse counter; these are noise
+                continue
+            if keyboards_only and _gh_detect_product_type(thread_title) != "KEYBOARD":
+                stats["skipped_non_keyboard"] += 1
                 continue
 
             last_post_dt: datetime | None = thread.get("last_post_dt")
@@ -2547,7 +2602,7 @@ def run_geekhack(conn, context: BrowserContext, deadline: float) -> dict:
                 continue
 
             # Polite delay before opening each thread
-            time.sleep(random.uniform(GEEKHACK_DELAY_MIN, GEEKHACK_DELAY_MAX))
+            time.sleep(random.uniform(delay_min, delay_max))
             if now_ms() > deadline:
                 break
 
@@ -2624,7 +2679,8 @@ def run_geekhack(conn, context: BrowserContext, deadline: float) -> dict:
 
     log(
         f"Geekhack: pages={stats['pages']} seen={stats['threads_seen']} "
-        f"old={stats['skipped_old']} unchanged={stats['skipped_unchanged']} "
+        f"old={stats['skipped_old']} non_keyboard={stats['skipped_non_keyboard']} "
+        f"unchanged={stats['skipped_unchanged']} "
         f"scraped={stats['scraped']} created={stats['created']} "
         f"updated={stats['updated']} failed={stats['failed']}"
     )
@@ -2634,11 +2690,47 @@ def run_geekhack(conn, context: BrowserContext, deadline: float) -> dict:
 # ----------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------
+def parse_args():
+    parser = argparse.ArgumentParser(description="GMK Tracker browser scraper")
+    parser.add_argument(
+        "--geekhack-backfill-year",
+        type=int,
+        metavar="YEAR",
+        help=(
+            "Run only a resumable Geekhack keyboard-history import, including "
+            "threads whose last post is in YEAR or later."
+        ),
+    )
+    parser.add_argument(
+        "--budget-minutes",
+        type=int,
+        help="Maximum run time. Defaults to 30 normally and 240 for a backfill.",
+    )
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run Chromium without a visible window (used by manual GitHub Actions).",
+    )
+    return parser.parse_args()
+
+
 def main() -> int:
     global _LOG_FILE
+    args = parse_args()
+    if (
+        args.geekhack_backfill_year is not None
+        and not 2005 <= args.geekhack_backfill_year <= datetime.now().year
+    ):
+        print("ERROR: --geekhack-backfill-year must be between 2005 and the current year.")
+        return 2
+    if args.budget_minutes is not None and not 5 <= args.budget_minutes <= 720:
+        print("ERROR: --budget-minutes must be between 5 and 720.")
+        return 2
+
     LOG_DIR.mkdir(exist_ok=True)
-    _LOG_FILE = LOG_DIR / f"scrape_{datetime.now(SGT).strftime('%Y-%m-%d')}.log"
-    cfg = load_config()
+    log_prefix = "geekhack_backfill" if args.geekhack_backfill_year else "scrape"
+    _LOG_FILE = LOG_DIR / f"{log_prefix}_{datetime.now(SGT).strftime('%Y-%m-%d')}.log"
+    cfg = {} if os.environ.get("DATABASE_URL") else load_config()
 
     try:
         conn = get_connection(cfg)
@@ -2646,28 +2738,55 @@ def main() -> int:
         log(f"FATAL: could not connect to the database: {e}")
         return 1
 
-    deadline = now_ms() + SCRAPE_BUDGET_MS
+    budget_minutes = args.budget_minutes or (240 if args.geekhack_backfill_year else 30)
+    deadline = now_ms() + budget_minutes * 60 * 1000
     PROFILE_DIR.mkdir(exist_ok=True)
 
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
             user_data_dir=str(PROFILE_DIR),
-            headless=False,
+            headless=args.headless,
             viewport=None,
             args=["--start-maximized"],
         )
         try:
-            # Catalog first so image + price passes have full set coverage
-            catalog_stats = run_catalog(conn, context, deadline)
-            zf_stats = run_zfrontier(conn, context, deadline)
-            kb_stats = run_keyboards(conn, context, deadline)
-            gh_stats = run_geekhack(conn, context, deadline)
-            img_stats = run_images(conn, context, deadline)
-            price_stats = run_prices(conn, context, deadline)
+            if args.geekhack_backfill_year:
+                log(
+                    f"One-time Geekhack keyboard backfill from "
+                    f"{args.geekhack_backfill_year}; budget={budget_minutes} minutes."
+                )
+                gh_stats = run_geekhack(
+                    conn,
+                    context,
+                    deadline,
+                    min_year=args.geekhack_backfill_year,
+                    keyboards_only=True,
+                    delay_min=2.0,
+                    delay_max=4.0,
+                )
+            else:
+                # Catalog first so image + price passes have full set coverage
+                catalog_stats = run_catalog(conn, context, deadline)
+                zf_stats = run_zfrontier(conn, context, deadline)
+                kb_stats = run_keyboards(conn, context, deadline)
+                gh_stats = run_geekhack(conn, context, deadline)
+                img_stats = run_images(conn, context, deadline)
+                price_stats = run_prices(conn, context, deadline)
         finally:
             context.close()
 
     conn.close()
+    if args.geekhack_backfill_year:
+        log(
+            f"Geekhack backfill -> pages={gh_stats['pages']} "
+            f"keyboard_threads={gh_stats['scraped']} created={gh_stats['created']} "
+            f"updated={gh_stats['updated']} unchanged={gh_stats['skipped_unchanged']} "
+            f"non_keyboard={gh_stats['skipped_non_keyboard']} "
+            f"old={gh_stats['skipped_old']} failed={gh_stats['failed']}"
+        )
+        log("Backfill done. Re-run the same command safely if the deadline was reached.")
+        return 0
+
     log(f"Catalog -> urls={catalog_stats['urls_found']} "
         f"created={catalog_stats['created']} updated={catalog_stats['updated']} "
         f"skipped={catalog_stats['skipped']} failed={catalog_stats['failed']}")

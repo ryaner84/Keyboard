@@ -115,6 +115,35 @@ export interface GroupBuyWithPricing extends Omit<GroupBuyWithKits, "kits"> {
   kits: KitWithVendors[];
 }
 
+export interface CollectionItemDetails {
+  inCollection: boolean;
+  isPublic: boolean;
+  acquiredAt: Date | string | null;
+  condition: string | null;
+  purchasePrice: number | null;
+  purchaseCurrency: string | null;
+  showPurchasePrice: boolean;
+  switches: string | null;
+  keycaps: string | null;
+  buildDetails: string | null;
+  notes: string | null;
+  displayOrder: number;
+}
+
+export interface CollectionCatalogItem extends GroupBuyWithPricing {
+  collection: CollectionItemDetails;
+}
+
+export interface CollectionProfile {
+  email: string;
+  alertsEnabled: boolean;
+  displayName: string | null;
+  collectionTitle: string | null;
+  collectionBio: string | null;
+  collectionPublished: boolean;
+  collectionSlug: string | null;
+}
+
 // A single computed vendor price for the user's region/currency.
 export interface ComputedVendorPrice {
   vendorName: string;

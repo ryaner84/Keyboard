@@ -33,6 +33,9 @@ It never overwrites a price you set manually in the admin panel
 - `run-scraper.bat` — **the file you double‑click.** Each run it: `git pull`s the
   latest `scrape.py`, ensures Python + Playwright are installed, asks for the DB
   password the first time, registers the nightly schedule, then runs.
+- `run-geekhack-backfill.bat` — a one-time, resumable import of keyboard group
+  buys from Geekhack back to 2020. It runs only the history pass with a four-hour
+  budget and does not change the nightly scraper's normal 2026 cutoff.
 - `config.ini` — your Supabase project ref + region (not secret).
 - `credentials.csv` — created on first run, holds your DB password. **Gitignored —
   never committed.**
@@ -108,6 +111,20 @@ when the board shows a newer last‑post. A random 4–9 s delay is added betwee
 each thread open. If a thread title matches an existing GroupBuy slug (e.g.
 "GMK Gregory 2" → `gmk-gregory-2`), the existing row is enriched in place.
 Otherwise a new row with slug `gh-<topicid>` is created.
+
+### One-time keyboard history import
+
+After deploying a version that contains `run-geekhack-backfill.bat`, double-click
+that file once on the WorkSpace. It scans board 70 back to 2020, opens only
+threads whose titles identify them as keyboard group buys, and writes them to the
+same production database. Progress is cached in `gh_seen.json`, so it is safe to
+run the file again if the four-hour deadline is reached. Keycap-only threads are
+not imported by this historical pass.
+
+The same import is available as the manual GitHub Actions workflow
+**Backfill Geekhack keyboard history**. It uses only the repository's existing
+database secret, runs headlessly, and caches `gh_seen.json` between retries. It
+has no schedule and receives no collection-authentication or email credentials.
 
 ---
 

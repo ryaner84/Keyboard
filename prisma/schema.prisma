@@ -223,15 +223,20 @@ model PriceReport {
 // Passwordless tracker identity. Email is the only user-facing identifier;
 // admin authentication remains completely separate.
 model TrackerUser {
-  id            String   @id @default(cuid())
-  email         String   @unique
-  alertsEnabled Boolean  @default(true)
-  countryCode   String?
-  region        String?
-  currency      String?
-  verifiedAt    DateTime
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  email               String   @unique
+  alertsEnabled       Boolean  @default(true)
+  countryCode         String?
+  region              String?
+  currency            String?
+  displayName         String?
+  collectionSlug      String?  @unique
+  collectionTitle     String?
+  collectionBio      String?
+  collectionPublished Boolean @default(false)
+  verifiedAt          DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   items         TrackerItem[]
   notifications TrackerNotification[]
@@ -258,16 +263,28 @@ model TrackerAuthChallenge {
 }
 
 model TrackerItem {
-  id               String    @id @default(cuid())
-  userId           String
-  groupBuyId       String
-  alertsEnabled    Boolean   @default(true)
-  lastStatus       String?
-  lastBestPriceUsd Float?
-  lastVendorCount  Int       @default(0)
-  lastDevUpdateAt  DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  userId            String
+  groupBuyId        String
+  alertsEnabled     Boolean   @default(true)
+  inCollection      Boolean   @default(false)
+  isPublic          Boolean   @default(false)
+  acquiredAt        DateTime?
+  condition         String?
+  purchasePrice     Float?
+  purchaseCurrency  String?
+  showPurchasePrice Boolean   @default(false)
+  switches          String?
+  keycaps           String?
+  buildDetails      String?
+  notes             String?
+  displayOrder      Int       @default(0)
+  lastStatus        String?
+  lastBestPriceUsd  Float?
+  lastVendorCount   Int       @default(0)
+  lastDevUpdateAt   DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   user          TrackerUser           @relation(fields: [userId], references: [id], onDelete: Cascade)
   groupBuy      GroupBuy              @relation(fields: [groupBuyId], references: [id], onDelete: Cascade)

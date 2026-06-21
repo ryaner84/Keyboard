@@ -1,0 +1,55 @@
+# Manual-only historical keyboard import. It uses the existing production
+# DATABASE_URL secret but receives no tracker-auth, email, or site secrets.
+name: Backfill Geekhack keyboard history
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: geekhack-keyboard-history
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scraper/requirements.txt
+
+      - name: Install scraper
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r scraper/requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Restore resumable Geekhack progress
+        uses: actions/cache@v4
+        with:
+          path: scraper/gh_seen.json
+          key: geekhack-keyboard-history-v1-${{ github.run_id }}
+          restore-keys: |
+            geekhack-keyboard-history-v1-
+
+      - name: Import keyboard group buys back to 2020
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+        run: >-
+          python scraper/scrape.py
+          --geekhack-backfill-year 2020
+          --budget-minutes 300
+          --headless
+
+      - name: Upload import log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: geekhack-history-log-${{ github.run_id }}
+          path: scraper/logs/geekhack_backfill_*.log
+          if-no-files-found: ignore
+          retention-days: 14

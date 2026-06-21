@@ -226,7 +226,7 @@ export async function deliverPendingTrackerNotifications(): Promise<number> {
     const rows = visible
       .map((notification: PendingNotification) => {
         const slug = notification.trackerItem?.groupBuy.slug;
-        const href = slug ? `${getSiteUrl()}/sets/${encodeURIComponent(slug)}` : `${getSiteUrl()}/tracker`;
+        const href = slug ? `${getSiteUrl()}/sets/${encodeURIComponent(slug)}` : `${getSiteUrl()}/collection`;
         return `
           <li style="margin:0 0 18px">
             <a href="${escapeHtml(href)}" style="font-weight:700;color:#4338ca;text-decoration:none">${escapeHtml(notification.title)}</a>
@@ -242,17 +242,17 @@ export async function deliverPendingTrackerNotifications(): Promise<number> {
         subject:
           visible.length === 1
             ? visible[0].title
-            : `${visible.length} updates from your GMK Tracker`,
+            : `${visible.length} updates from your keyboard collection`,
         html: `
           <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#111827">
-            <h1 style="font-size:22px">Your tracker changed</h1>
+            <h1 style="font-size:22px">Your tracked items changed</h1>
             <ul style="padding-left:20px">${rows}</ul>
             <p style="margin-top:28px">
-              <a href="${getSiteUrl()}/tracker" style="display:inline-block;background:#4f46e5;color:white;text-decoration:none;padding:10px 16px;border-radius:8px;font-weight:600">Open my tracker</a>
+              <a href="${getSiteUrl()}/collection" style="display:inline-block;background:#4f46e5;color:white;text-decoration:none;padding:10px 16px;border-radius:8px;font-weight:600">Open my collection</a>
             </p>
             <p style="margin-top:28px;font-size:12px;color:#9ca3af">
               These are utility alerts for items you tracked.
-              <a href="${escapeHtml(unsubscribeUrl)}" style="color:#6b7280">Turn off tracker alerts</a>.
+              <a href="${escapeHtml(unsubscribeUrl)}" style="color:#6b7280">Turn off collection alerts</a>.
             </p>
           </div>
         `,

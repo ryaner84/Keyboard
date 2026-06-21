@@ -21,7 +21,6 @@ interface TrackerContextValue {
   alertsEnabled: boolean;
   isTracked: (slug: string) => boolean;
   toggle: (slug: string) => void;
-  getShareUrl: (countryCode: string) => string;
   openSavePrompt: () => void;
   logout: () => Promise<void>;
   setAlertsEnabled: (enabled: boolean) => Promise<void>;
@@ -143,17 +142,6 @@ export function TrackerProvider({ children }: { children: React.ReactNode }) {
 
   const isTracked = useCallback((slug: string) => tracked.includes(slug), [tracked]);
 
-  const getShareUrl = useCallback(
-    (shareCountryCode: string) => {
-      const params = new URLSearchParams({
-        sets: tracked.join(","),
-        country: shareCountryCode,
-      });
-      return `${window.location.origin}/tracker?${params}`;
-    },
-    [tracked]
-  );
-
   const logout = useCallback(async () => {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     setAuthenticated(false);
@@ -179,7 +167,6 @@ export function TrackerProvider({ children }: { children: React.ReactNode }) {
       alertsEnabled,
       isTracked,
       toggle,
-      getShareUrl,
       openSavePrompt: () => setSavePromptOpen(true),
       logout,
       setAlertsEnabled,
@@ -192,7 +179,6 @@ export function TrackerProvider({ children }: { children: React.ReactNode }) {
       alertsEnabled,
       isTracked,
       toggle,
-      getShareUrl,
       logout,
       setAlertsEnabled,
     ]
@@ -318,13 +304,13 @@ function SaveTrackerModal({
       <button
         className="absolute inset-0 bg-black/45 backdrop-blur-sm"
         onClick={onClose}
-        aria-label="Close save tracker dialog"
+        aria-label="Close save collection dialog"
       />
       <div className="relative w-full max-w-md rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-gray-100 dark:border-gray-800 px-5 py-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Save your tracker
+              Save your collection
             </h2>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
               Sync your list and receive important keyboard and keycap updates.
@@ -398,7 +384,7 @@ function SaveTrackerModal({
                 disabled={busy || otp.length !== 6}
                 className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {busy ? "Verifying..." : "Verify and sync tracker"}
+                {busy ? "Verifying..." : "Verify and sync collection"}
               </button>
               <div className="flex items-center justify-between text-xs">
                 <button
@@ -433,7 +419,7 @@ function SaveTrackerModal({
             </p>
           )}
           <p className="text-xs leading-relaxed text-gray-400 dark:text-gray-500">
-            Your email is used only for tracker access and alerts you enable. No password
+            Your email is used only for collection access and alerts you enable. No password
             or marketing signup.
           </p>
         </div>

@@ -841,17 +841,34 @@ async function ensureListingReportTable(client) {
 async function ensurePersonalTrackerTables(client) {
   try {
     await client.query(
-      `CREATE TABLE IF NOT EXISTS public."TrackerUser" (
+       `CREATE TABLE IF NOT EXISTS public."TrackerUser" (
          id              text NOT NULL PRIMARY KEY,
          email           text NOT NULL UNIQUE,
          "alertsEnabled" boolean NOT NULL DEFAULT true,
          "countryCode"   text,
          region           text,
          currency         text,
+         "displayName"    text,
+         "collectionSlug" text,
+         "collectionTitle" text,
+         "collectionBio"  text,
+         "collectionPublished" boolean NOT NULL DEFAULT false,
          "verifiedAt"    timestamp(3) without time zone NOT NULL,
          "createdAt"     timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
          "updatedAt"     timestamp(3) without time zone NOT NULL
        )`
+    );
+    await client.query(
+      `ALTER TABLE public."TrackerUser"
+         ADD COLUMN IF NOT EXISTS "displayName" text,
+         ADD COLUMN IF NOT EXISTS "collectionSlug" text,
+         ADD COLUMN IF NOT EXISTS "collectionTitle" text,
+         ADD COLUMN IF NOT EXISTS "collectionBio" text,
+         ADD COLUMN IF NOT EXISTS "collectionPublished" boolean NOT NULL DEFAULT false`
+    );
+    await client.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "TrackerUser_collectionSlug_key"
+       ON public."TrackerUser" ("collectionSlug")`
     );
     await client.query(
       `CREATE TABLE IF NOT EXISTS public."TrackerAuthChallenge" (
@@ -884,6 +901,18 @@ async function ensurePersonalTrackerTables(client) {
          "userId"           text NOT NULL,
          "groupBuyId"       text NOT NULL,
          "alertsEnabled"    boolean NOT NULL DEFAULT true,
+         "inCollection"     boolean NOT NULL DEFAULT false,
+         "isPublic"         boolean NOT NULL DEFAULT false,
+         "acquiredAt"       timestamp(3) without time zone,
+         condition          text,
+         "purchasePrice"    double precision,
+         "purchaseCurrency" text,
+         "showPurchasePrice" boolean NOT NULL DEFAULT false,
+         switches           text,
+         keycaps            text,
+         "buildDetails"     text,
+         notes              text,
+         "displayOrder"     integer NOT NULL DEFAULT 0,
          "lastStatus"       text,
          "lastBestPriceUsd" double precision,
          "lastVendorCount"  integer NOT NULL DEFAULT 0,
@@ -896,6 +925,21 @@ async function ensurePersonalTrackerTables(client) {
            FOREIGN KEY ("groupBuyId") REFERENCES public."GroupBuy"(id) ON DELETE CASCADE,
          CONSTRAINT "TrackerItem_userId_groupBuyId_key" UNIQUE ("userId", "groupBuyId")
        )`
+    );
+    await client.query(
+      `ALTER TABLE public."TrackerItem"
+         ADD COLUMN IF NOT EXISTS "inCollection" boolean NOT NULL DEFAULT false,
+         ADD COLUMN IF NOT EXISTS "isPublic" boolean NOT NULL DEFAULT false,
+         ADD COLUMN IF NOT EXISTS "acquiredAt" timestamp(3) without time zone,
+         ADD COLUMN IF NOT EXISTS condition text,
+         ADD COLUMN IF NOT EXISTS "purchasePrice" double precision,
+         ADD COLUMN IF NOT EXISTS "purchaseCurrency" text,
+         ADD COLUMN IF NOT EXISTS "showPurchasePrice" boolean NOT NULL DEFAULT false,
+         ADD COLUMN IF NOT EXISTS switches text,
+         ADD COLUMN IF NOT EXISTS keycaps text,
+         ADD COLUMN IF NOT EXISTS "buildDetails" text,
+         ADD COLUMN IF NOT EXISTS notes text,
+         ADD COLUMN IF NOT EXISTS "displayOrder" integer NOT NULL DEFAULT 0`
     );
     await client.query(
       `CREATE INDEX IF NOT EXISTS "TrackerItem_groupBuyId_idx"

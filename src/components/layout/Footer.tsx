@@ -46,7 +46,7 @@ export function Footer() {
           </p>
           <div className="flex gap-4 text-sm text-gray-400">
             <a href="/browse" className="hover:text-gray-600 transition-colors">Browse</a>
-            <a href="/tracker" className="hover:text-gray-600 transition-colors">Tracker</a>
+            <a href="/collection" className="hover:text-gray-600 transition-colors">My Collection</a>
           </div>
         </div>
         <VersionStamp />
