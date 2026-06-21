@@ -2539,8 +2539,12 @@ def run_geekhack(
             if now_ms() > deadline:
                 log("  Geekhack: deadline reached during listing phase.")
                 break
+            # SMF encodes the topic offset as the suffix after the board id:
+            # board=70.0, board=70.50, board=70.100, ...
             board_url = (
-                f"{GEEKHACK_BOARD_URL};start={start}" if start else GEEKHACK_BOARD_URL
+                f"https://geekhack.org/index.php?board=70.{start}"
+                if start
+                else GEEKHACK_BOARD_URL
             )
             rows = _fetch_gh_board_page(page, board_url)
             if not rows:
@@ -2564,6 +2568,9 @@ def run_geekhack(
             # Pinned and malformed rows can be older than surrounding threads.
             # Stop only after a full page falls before the requested cutoff.
             if old_count == len(rows):
+                break
+            if stats["pages"] >= 250:
+                log("  Geekhack: stopped at the 250-page safety limit.")
                 break
             start += 50  # Geekhack's SMF board pages contain 50 topics
 
