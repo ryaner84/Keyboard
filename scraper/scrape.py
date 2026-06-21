@@ -2162,6 +2162,15 @@ _GH_KB_INDICATOR = re.compile(
     re.I,
 )
 _GH_KB_LAYOUT = re.compile(r"(?<!\d)(?:40|45|50|60|65|75|80|96|100)%(?!\w)", re.I)
+_GH_EXPLICIT_KEYCAP = re.compile(r"\bkey[\s-]?caps?\b", re.I)
+_GH_ACCESSORY = re.compile(
+    r"\b(stabili[sz]ers?|stabs?|wrist\s+rests?|keyboard\s+bags?|carrying\s+cases?|"
+    r"cables?|deskmats?|case\s+foam|switch\s+films?|switches?\s+(?:gb|group\s+buy)|"
+    r"artisan\s+cases?)\b",
+    re.I,
+)
+_GH_COMPONENT = re.compile(r"\b(replacement\s+PCBs?|PCBs?|plates?)\b", re.I)
+_GH_STRONG_KB = re.compile(r"\b(keyboard|kbd\b|build\s+kit|typing\s+kit|macropad|numpad)\b", re.I)
 
 # SMF date: "Mon, 01 June 2026, 17:13:33"
 _GH_DATE_FMT = "%a, %d %B %Y, %H:%M:%S"
@@ -2259,7 +2268,16 @@ def _gh_slug_variants(title: str) -> list[str]:
 
 
 def _gh_detect_product_type(title: str) -> str:
-    if _GH_KB_INDICATOR.search(title) or _GH_KB_LAYOUT.search(title):
+    if _GH_META_RE.search(title):
+        return "ACCESSORY"
+    if _GH_EXPLICIT_KEYCAP.search(title):
+        return "KEYCAPS"
+    strong_keyboard = bool(_GH_STRONG_KB.search(title))
+    if _GH_ACCESSORY.search(title):
+        return "ACCESSORY"
+    if _GH_COMPONENT.search(title) and not strong_keyboard:
+        return "ACCESSORY"
+    if strong_keyboard or _GH_KB_INDICATOR.search(title) or _GH_KB_LAYOUT.search(title):
         return "KEYBOARD"
     if _GH_KEYCAP_PROFILE.search(title):
         return "KEYCAPS"
@@ -2296,24 +2314,35 @@ def _gh_status(
     return "ACTIVE_GB"
 
 
-def _update_gh_listing_status(
+def _update_gh_listing_metadata(
     conn,
     topic_id: str,
     title: str,
     last_post_dt: datetime | None,
 ) -> None:
-    """Repair imported gh-* rows using the board's authoritative activity date."""
+    """Repair imported gh-* rows using the current board listing."""
     status = _gh_status(title, None, last_post_dt)
+    product_type = _gh_detect_product_type(title)
     with conn.cursor() as cur:
         cur.execute(
             """
             UPDATE "GroupBuy"
-            SET status = %s::"GBStatus", "updatedAt" = now()
+            SET status = %s::"GBStatus",
+                "productType" = %s,
+                "updatedAt" = now()
             WHERE slug = %s
-              AND "productType" = 'KEYBOARD'
-              AND status IS DISTINCT FROM %s::"GBStatus"
+              AND (
+                status IS DISTINCT FROM %s::"GBStatus"
+                OR "productType" IS DISTINCT FROM %s
+              )
             """,
-            (status, f"gh-{topic_id}", status),
+            (
+                status,
+                product_type,
+                f"gh-{topic_id}",
+                status,
+                product_type,
+            ),
         )
 
 
@@ -2621,18 +2650,19 @@ def run_geekhack(
                 continue
 
             thread_title = thread.get("title") or ""
-            if _GH_META_RE.search(thread_title):
-                stats["skipped_old"] += 1  # reuse counter; these are noise
-                continue
-            if keyboards_only and _gh_detect_product_type(thread_title) != "KEYBOARD":
-                stats["skipped_non_keyboard"] += 1
-                continue
-
+            product_type = _gh_detect_product_type(thread_title)
             last_post_dt: datetime | None = thread.get("last_post_dt")
             last_post_iso = last_post_dt.isoformat() if last_post_dt else ""
 
             if keyboards_only:
-                _update_gh_listing_status(conn, topic_id, thread_title, last_post_dt)
+                _update_gh_listing_metadata(conn, topic_id, thread_title, last_post_dt)
+
+            if _GH_META_RE.search(thread_title):
+                stats["skipped_old"] += 1  # reuse counter; these are noise
+                continue
+            if keyboards_only and product_type != "KEYBOARD":
+                stats["skipped_non_keyboard"] += 1
+                continue
 
             # Skip if last-post hasn't advanced
             if (
@@ -2674,7 +2704,6 @@ def run_geekhack(
                     if gb_end_date else None
                 )
 
-                product_type = _gh_detect_product_type(title)
                 status = _gh_status(title, gb_end_date, last_post_dt)
 
                 # Clean description: strip HTML tags
