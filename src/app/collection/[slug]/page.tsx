@@ -338,6 +338,7 @@ function PublicCollectionCard({
                 collectionSlug={collectionSlug}
                 trackerItemId={item.id}
                 label={item.groupBuy.name}
+                showPurchasePrice={item.showPurchasePrice}
               />
             ))}
           </div>
@@ -348,6 +349,9 @@ function PublicCollectionCard({
 }
 
 type PublicBuildShape = {
+  acquiredAt: string | null;
+  purchasePrice: number | null;
+  purchaseCurrency: string | null;
   color: string | null;
   condition: string | null;
   switches: string | null;
@@ -359,6 +363,9 @@ type PublicBuildShape = {
 // Expand a public item into per-build rows (build 1 = top-level fields, the
 // rest from the `units` JSON). Returns exactly `quantity` builds.
 function assemblePublicBuilds(item: {
+  acquiredAt: Date | null;
+  purchasePrice: number | null;
+  purchaseCurrency: string | null;
   color: string | null;
   condition: string | null;
   switches: string | null;
@@ -370,6 +377,9 @@ function assemblePublicBuilds(item: {
 }): PublicBuildShape[] {
   const qty = Math.max(1, item.quantity || 1);
   const first: PublicBuildShape = {
+    acquiredAt: item.acquiredAt?.toISOString() ?? null,
+    purchasePrice: item.purchasePrice,
+    purchaseCurrency: item.purchaseCurrency,
     color: item.color,
     condition: item.condition,
     switches: item.switches,
@@ -379,6 +389,20 @@ function assemblePublicBuilds(item: {
   };
   const extra = Array.isArray(item.units)
     ? (item.units as Record<string, unknown>[]).map((u) => ({
+        acquiredAt:
+          u?.acquiredAt === undefined
+            ? item.acquiredAt?.toISOString() ?? null
+            : (u?.acquiredAt as string) ?? null,
+        purchasePrice:
+          u?.purchasePrice === undefined
+            ? item.purchasePrice
+            : typeof u?.purchasePrice === "number"
+              ? u.purchasePrice
+              : null,
+        purchaseCurrency:
+          u?.purchaseCurrency === undefined
+            ? item.purchaseCurrency
+            : (u?.purchaseCurrency as string) ?? null,
         color: (u?.color as string) ?? null,
         condition: (u?.condition as string) ?? null,
         switches: (u?.switches as string) ?? null,
@@ -390,6 +414,9 @@ function assemblePublicBuilds(item: {
   const builds = [first, ...extra].slice(0, qty);
   while (builds.length < qty) {
     builds.push({
+      acquiredAt: null,
+      purchasePrice: null,
+      purchaseCurrency: null,
       color: null,
       condition: null,
       switches: null,
@@ -407,14 +434,22 @@ function PublicBuild({
   collectionSlug,
   trackerItemId,
   label,
+  showPurchasePrice,
 }: {
   build: PublicBuildShape;
   index: number;
   collectionSlug: string;
   trackerItemId: string;
   label: string;
+  showPurchasePrice: boolean;
 }) {
   const specs = [
+    build.acquiredAt
+      ? `Collected ${new Date(build.acquiredAt).getFullYear()}`
+      : null,
+    showPurchasePrice && build.purchasePrice != null
+      ? `${build.purchaseCurrency || "USD"} ${build.purchasePrice.toLocaleString()}`
+      : null,
     build.color,
     build.condition ? formatCondition(build.condition) : null,
     build.switches,
