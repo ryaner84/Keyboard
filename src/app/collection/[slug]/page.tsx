@@ -430,13 +430,15 @@ function PublicBuild({
             alt={`Build ${index + 1}`}
             className="h-full w-full rounded-lg object-cover"
           />
-          <ReportPhotoButton
-            collectionSlug={collectionSlug}
-            trackerItemId={trackerItemId}
-            buildIndex={index}
-            label={`${label}, build ${index + 1}`}
-            className="absolute -bottom-1.5 -right-1.5 !h-6 !w-6"
-          />
+          {index > 0 && (
+            <ReportPhotoButton
+              collectionSlug={collectionSlug}
+              trackerItemId={trackerItemId}
+              buildIndex={index}
+              label={`${label}, build ${index + 1}`}
+              className="absolute -bottom-1.5 -right-1.5 !h-6 !w-6"
+            />
+          )}
         </div>
       ) : (
         <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-lg text-gray-300 dark:bg-gray-800 dark:text-gray-600">
