@@ -178,7 +178,7 @@ export async function GET(
     ...collection.items
       .map((item) => item.groupBuy)
       .filter((groupBuy) => groupBuy.productType !== "KEYBOARD"),
-  ].slice(0, 6);
+  ].slice(0, 5);
   const images = await Promise.all(
     candidates.map(async (item) => {
       const url = normalizeImageUrl(item.imageUrl);
@@ -317,82 +317,51 @@ export async function GET(
             width: 520,
             height: 270,
             display: "flex",
-            flexWrap: "wrap",
             gap: 8,
           }}
         >
-          {Array.from({ length: 6 }).map((_, index) => {
-            const item = candidates[index];
-            return (
-              <div
-                key={item ? `${item.name}-${index}` : `empty-${index}`}
-                style={{
-                  width: 168,
-                  height: 131,
-                  display: "flex",
-                  position: "relative",
-                  overflow: "hidden",
-                  borderRadius: 12,
-                  border: "1px solid rgba(255,255,255,0.13)",
-                  background: "#20262a",
-                  boxShadow: "0 12px 26px rgba(0,0,0,0.26)",
-                }}
-              >
-                {item && images[index] ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={images[index] as string}
-                    alt=""
-                    width={168}
+          <PosterThumbnail
+            item={candidates[0]}
+            image={images[0]}
+            width={256}
+            height={270}
+            showLabel
+          />
+          <div
+            style={{
+              width: 256,
+              height: 270,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            {[0, 1].map((row) => (
+            <div
+              key={row}
+              style={{
+                width: 256,
+                height: 131,
+                display: "flex",
+                gap: 8,
+              }}
+            >
+              {[0, 1].map((column) => {
+                const index = row * 2 + column + 1;
+                const item = candidates[index];
+                return (
+                  <PosterThumbnail
+                    key={item ? `${item.name}-${index}` : `empty-${index}`}
+                    item={item}
+                    image={images[index]}
+                    width={124}
                     height={131}
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
                   />
-                ) : (
-                  <div
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "rgba(255,255,255,0.18)",
-                      fontSize: 30,
-                    }}
-                  >
-                    ⌨
-                  </div>
-                )}
-                {item && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      minHeight: 38,
-                      padding: "17px 9px 7px",
-                      display: "flex",
-                      alignItems: "flex-end",
-                      background:
-                        "linear-gradient(180deg, transparent 0%, rgba(4,6,8,0.9) 70%)",
-                    }}
-                  >
-                    <span
-                      style={{
-                        display: "flex",
-                        color: "#ffffff",
-                        fontSize: 9,
-                        fontWeight: 700,
-                        lineHeight: 1.15,
-                      }}
-                    >
-                      {item.name.slice(0, 30)}
-                    </span>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+            ))}
+          </div>
         </div>
 
         <div
@@ -551,6 +520,89 @@ function StatPanel({
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+function PosterThumbnail({
+  item,
+  image,
+  width,
+  height,
+  showLabel = false,
+}: {
+  item: CollectionGroupBuy | undefined;
+  image: string | null | undefined;
+  width: number;
+  height: number;
+  showLabel?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        width,
+        height,
+        display: "flex",
+        position: "relative",
+        overflow: "hidden",
+        borderRadius: 12,
+        border: "1px solid rgba(255,255,255,0.13)",
+        background: "#20262a",
+        boxShadow: "0 12px 26px rgba(0,0,0,0.26)",
+      }}
+    >
+      {item && image ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={image}
+          alt=""
+          width={width}
+          height={height}
+          style={{ width, height, objectFit: "cover" }}
+        />
+      ) : (
+        <div
+          style={{
+            width,
+            height,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "rgba(255,255,255,0.18)",
+            fontSize: 30,
+          }}
+        >
+          ⌨
+        </div>
+      )}
+      {item && showLabel && (
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            minHeight: 38,
+            padding: "17px 9px 7px",
+            display: "flex",
+            alignItems: "flex-end",
+            background:
+              "linear-gradient(180deg, transparent 0%, rgba(4,6,8,0.9) 70%)",
+          }}
+        >
+          <span
+            style={{
+              display: "flex",
+              color: "#ffffff",
+              fontSize: 9,
+              fontWeight: 700,
+              lineHeight: 1.15,
+            }}
+          >
+            {item.name.slice(0, 30)}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
