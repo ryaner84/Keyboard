@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "@/context/LocationContext";
+import { DISPLAY_CURRENCIES } from "@/data/countries";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
 import { normalizeImageUrl } from "@/lib/utils";
@@ -1686,6 +1687,25 @@ function CollectionItemEditor({
   const [activeBuild, setActiveBuild] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const purchaseCurrencies = useMemo(() => {
+    const options = [...DISPLAY_CURRENCIES];
+    const savedCurrency = form.purchaseCurrency.trim().toUpperCase();
+    if (
+      savedCurrency &&
+      !options.some((option) => option.code === savedCurrency)
+    ) {
+      options.push({
+        code: savedCurrency,
+        symbol: savedCurrency,
+        name: "Previously saved currency",
+      });
+    }
+    return options.sort((a, b) => {
+      if (a.code === defaultCurrency) return -1;
+      if (b.code === defaultCurrency) return 1;
+      return a.code.localeCompare(b.code);
+    });
+  }, [defaultCurrency, form.purchaseCurrency]);
 
   useModalBodyLock();
 
@@ -1782,7 +1802,7 @@ function CollectionItemEditor({
           </Field>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-[1fr_120px]">
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
           <Field label="Purchase price per unit">
             <div>
               <input
@@ -1803,13 +1823,19 @@ function CollectionItemEditor({
             </div>
           </Field>
           <Field label="Currency">
-            <input
+            <select
               value={form.purchaseCurrency}
               onChange={(event) =>
-                setForm({ ...form, purchaseCurrency: event.target.value.toUpperCase().slice(0, 8) })
+                setForm({ ...form, purchaseCurrency: event.target.value })
               }
               className={inputClass}
-            />
+            >
+              {purchaseCurrencies.map((option) => (
+                <option key={option.code} value={option.code}>
+                  {option.code} — {option.name}
+                </option>
+              ))}
+            </select>
           </Field>
         </div>
         <CheckRow
