@@ -8,7 +8,8 @@ can't fetch because of bot protection:
 - **vendor Shopify stores** → live keycap prices
 - **zFrontier** → active GMK group buys in the Asia community
 - **keyboard vendor stores** → keyboard group buys (NovelKeys, CannonKeys,
-  KBDfans, MatrixLab, Prototypist, KLC, Ktechs, Pantheon, ClickClack, iLumKB)
+  KBDfans, MatrixLab, Prototypist, KLC, Ktechs, Pantheon, ClickClack, iLumKB,
+  Geonworks, Oblotzky, Lightning Keyboards)
 
 It writes straight into the **same Supabase database** the website reads, so updates
 appear on the live site with no deploy. The website reads pages dynamically, so a

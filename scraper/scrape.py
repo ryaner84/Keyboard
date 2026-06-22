@@ -1707,6 +1707,16 @@ KEYBOARD_VENDORS = [
     ("gn", "Geonworks", [
         "https://geon.works/collections/groupbuys/products.json",
     ], "USD", "Korea"),
+    # Oblotzky Industries (EU GMK + keyboard store). Already scraped for keycap
+    # pricing; this adds its keyboards. Store-wide products.json is used because
+    # the keyboard classifier (price floor + keycap-profile filter) reliably
+    # keeps boards like the TGR Jane V3 and drops their large GMK keycap catalog,
+    # so we don't need to guess the exact collection handle.
+    ("obl", "Oblotzky Industries",
+     ["https://oblotzky.industries/products.json"], "EUR", "EU"),
+    # Lightning Keyboards (US) — broad keyboard catalog with rich product photos.
+    ("lk", "Lightning Keyboards",
+     ["https://lightningkeyboards.com/products.json"], "USD", "US"),
 ]
 
 _KB_LAYOUTS = [
