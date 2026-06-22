@@ -5,9 +5,11 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "@/context/LocationContext";
+import { useCurrency } from "@/hooks/useCurrency";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
 import { normalizeImageUrl } from "@/lib/utils";
 import { collectionSharePath } from "@/lib/collection-share";
+import { convertCurrency, formatCurrency } from "@/lib/currency-utils";
 import type {
   CollectionCatalogItem,
   CollectionItemDetails,
@@ -55,6 +57,120 @@ const CONDITION_LABELS: Record<string, string> = {
   FAIR: "Fair",
   PROJECT: "Project board",
 };
+
+interface SpendingMonth {
+  key: string;
+  label: string;
+  shortLabel: string;
+  amount: number;
+  purchases: number;
+}
+
+interface CollectionSpending {
+  total: number;
+  averagePerUnit: number;
+  pricedEntries: number;
+  pricedUnits: number;
+  missingPriceCount: number;
+  missingDateCount: number;
+  unconvertedCount: number;
+  months: SpendingMonth[];
+  activeMonths: number;
+}
+
+function calculateCollectionSpending(
+  items: CollectionCatalogItem[],
+  targetCurrency: string,
+  rates: Record<string, number>
+): CollectionSpending {
+  const keyboards = items.filter((item) => item.productType === "KEYBOARD");
+  const now = new Date();
+  const months: SpendingMonth[] = Array.from({ length: 12 }, (_, index) => {
+    const date = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (11 - index), 1)
+    );
+    return {
+      key: `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`,
+      label: date.toLocaleDateString("en-SG", {
+        month: "long",
+        year: "numeric",
+        timeZone: "UTC",
+      }),
+      shortLabel: date.toLocaleDateString("en-SG", {
+        month: "short",
+        timeZone: "UTC",
+      }),
+      amount: 0,
+      purchases: 0,
+    };
+  });
+  const monthByKey = new Map(months.map((month) => [month.key, month]));
+
+  let total = 0;
+  let pricedEntries = 0;
+  let pricedUnits = 0;
+  let missingPriceCount = 0;
+  let missingDateCount = 0;
+  let unconvertedCount = 0;
+
+  for (const item of keyboards) {
+    const price = item.collection.purchasePrice;
+    const sourceCurrency = item.collection.purchaseCurrency || targetCurrency;
+    if (price == null) {
+      missingPriceCount++;
+      continue;
+    }
+
+    const canConvert =
+      sourceCurrency === targetCurrency ||
+      (Number.isFinite(rates[sourceCurrency]) &&
+        Number.isFinite(rates[targetCurrency]));
+    if (!canConvert) {
+      unconvertedCount++;
+      continue;
+    }
+
+    const quantity = Math.max(1, item.collection.quantity || 1);
+    const convertedPerUnit =
+      sourceCurrency === targetCurrency
+        ? price
+        : convertCurrency(price, sourceCurrency, targetCurrency, rates);
+    const purchaseTotal = convertedPerUnit * quantity;
+    total += purchaseTotal;
+    pricedEntries++;
+    pricedUnits += quantity;
+
+    if (!item.collection.acquiredAt) {
+      missingDateCount++;
+      continue;
+    }
+    const acquiredAt = new Date(item.collection.acquiredAt);
+    if (Number.isNaN(acquiredAt.getTime())) {
+      missingDateCount++;
+      continue;
+    }
+    const key = `${acquiredAt.getUTCFullYear()}-${String(
+      acquiredAt.getUTCMonth() + 1
+    ).padStart(2, "0")}`;
+    const month = monthByKey.get(key);
+    if (month) {
+      month.amount += purchaseTotal;
+      month.purchases += quantity;
+    }
+  }
+
+  return {
+    total,
+    averagePerUnit: pricedUnits > 0 ? total / pricedUnits : 0,
+    pricedEntries,
+    pricedUnits,
+    missingPriceCount,
+    missingDateCount,
+    unconvertedCount,
+    months,
+    activeMonths: months.filter((month) => month.amount > 0).length,
+  };
+}
 
 // Expand a collection record into per-build rows. Build 1 lives on the record's
 // top-level fields; builds 2..N come from the `units` array. Always returns
@@ -397,6 +513,7 @@ function BuildFields({
 export default function CollectionContent() {
   const searchParams = useSearchParams();
   const { countryCode, currency } = useLocation();
+  const { rates, loading: ratesLoading } = useCurrency(currency);
   const {
     tracked,
     hydrated,
@@ -525,6 +642,19 @@ export default function CollectionContent() {
   );
   const publicItems = useMemo(
     () => owned.filter((item) => item.collection.isPublic),
+    [owned]
+  );
+  const spending = useMemo(
+    () => calculateCollectionSpending(owned, currency, rates),
+    [currency, owned, rates]
+  );
+  const firstKeyboardMissingSpend = useMemo(
+    () =>
+      owned.find(
+        (item) =>
+          item.productType === "KEYBOARD" &&
+          (item.collection.purchasePrice == null || !item.collection.acquiredAt)
+      ) ?? null,
     [owned]
   );
 
@@ -746,6 +876,19 @@ export default function CollectionContent() {
                 : "Public page not published"}
             </span>
           </div>
+        )}
+
+        {authenticated && owned.some((item) => item.productType === "KEYBOARD") && (
+          <CollectionSpendingPanel
+            spending={spending}
+            currency={currency}
+            loading={ratesLoading}
+            onAddDetails={
+              firstKeyboardMissingSpend
+                ? () => setEditingItem(firstKeyboardMissingSpend)
+                : undefined
+            }
+          />
         )}
 
         <section className="mt-10">
@@ -972,6 +1115,195 @@ export default function CollectionContent() {
   );
 }
 
+function CollectionSpendingPanel({
+  spending,
+  currency,
+  loading,
+  onAddDetails,
+}: {
+  spending: CollectionSpending;
+  currency: string;
+  loading: boolean;
+  onAddDetails?: () => void;
+}) {
+  const maxMonth = Math.max(...spending.months.map((month) => month.amount), 1);
+  const hasSpend = spending.pricedEntries > 0;
+  const completionMessage =
+    spending.missingPriceCount > 0
+      ? `${spending.missingPriceCount} keyboard${
+          spending.missingPriceCount === 1 ? "" : "s"
+        } missing a purchase price`
+      : spending.missingDateCount > 0
+        ? `${spending.missingDateCount} priced purchase${
+            spending.missingDateCount === 1 ? "" : "s"
+          } missing an acquisition date`
+        : null;
+
+  return (
+    <section
+      data-testid="collection-spending"
+      className="mt-6 overflow-hidden rounded-2xl border border-black/[0.08] bg-white shadow-[0_18px_60px_rgba(29,25,18,0.06)] dark:border-white/10 dark:bg-[#111417]"
+    >
+      <div className="grid lg:grid-cols-[0.82fr_1.18fr]">
+        <div className="border-b border-black/[0.07] p-5 dark:border-white/10 sm:p-7 lg:border-b-0 lg:border-r">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9a7a42] dark:text-[#c9ab72]">
+                <SpendIcon />
+                Collection spend
+              </div>
+              <h2 className="mt-2 text-xl font-semibold tracking-tight text-gray-950 dark:text-white">
+                Your keyboard investment
+              </h2>
+            </div>
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1.5 text-[10px] font-semibold text-gray-500 dark:bg-white/10 dark:text-gray-300">
+              <PrivateIcon />
+              Private
+            </span>
+          </div>
+
+          <div className="mt-7">
+            <p className="text-xs font-medium text-gray-400">Recorded total</p>
+            {loading ? (
+              <div className="mt-2 h-12 w-48 animate-pulse rounded-lg bg-gray-100 dark:bg-white/10" />
+            ) : (
+              <p className="mt-1 font-serif text-4xl tracking-tight text-gray-950 dark:text-white sm:text-5xl">
+                {formatCurrency(spending.total, currency)}
+              </p>
+            )}
+            <p className="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
+              Purchase price per unit × quantity, converted to {currency}.
+            </p>
+          </div>
+
+          <dl className="mt-7 grid grid-cols-3 gap-3 border-t border-gray-100 pt-5 dark:border-white/10">
+            <SpendStat
+              label="Units valued"
+              value={loading ? "—" : String(spending.pricedUnits)}
+            />
+            <SpendStat
+              label="Average"
+              value={
+                loading || !hasSpend
+                  ? "—"
+                  : formatCurrency(spending.averagePerUnit, currency)
+              }
+            />
+            <SpendStat
+              label="Active months"
+              value={loading ? "—" : String(spending.activeMonths)}
+            />
+          </dl>
+
+          {(completionMessage || spending.unconvertedCount > 0 || !hasSpend) && (
+            <div className="mt-5 rounded-xl bg-[#f7f3ea] px-4 py-3 dark:bg-[#211d16]">
+              <p className="text-xs font-semibold text-[#725729] dark:text-[#d5b779]">
+                {!hasSpend ? "Start your private spend history" : "Complete your ledger"}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-400">
+                {!hasSpend
+                  ? "Add a purchase price and acquisition date from any keyboard’s Edit details panel."
+                  : completionMessage ||
+                    `${spending.unconvertedCount} purchase could not be converted yet.`}
+              </p>
+              {onAddDetails && (
+                <button
+                  type="button"
+                  onClick={onAddDetails}
+                  className="mt-3 text-xs font-semibold text-[#80632f] underline decoration-[#c9ab72]/60 underline-offset-4 hover:text-gray-950 dark:text-[#d5b779] dark:hover:text-white"
+                >
+                  Add missing purchase details
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="p-5 sm:p-7">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+                Monthly trend
+              </p>
+              <h3 className="mt-1 text-lg font-semibold text-gray-950 dark:text-white">
+                Purchases over the last 12 months
+              </h3>
+            </div>
+            <p className="text-xs text-gray-400">
+              Based on acquisition date · {currency}
+            </p>
+          </div>
+
+          <div className="mt-7 overflow-x-auto pb-1">
+            <div className="grid min-w-[610px] grid-cols-12 gap-2" role="img" aria-label="Monthly keyboard spending over the last twelve months">
+              {spending.months.map((month) => {
+                const height =
+                  month.amount > 0
+                    ? Math.max(10, Math.round((month.amount / maxMonth) * 100))
+                    : 3;
+                return (
+                  <div key={month.key} className="flex min-w-0 flex-col items-center">
+                    <div className="flex h-36 w-full items-end justify-center rounded-lg bg-gray-50 px-1.5 pt-3 dark:bg-white/[0.035]">
+                      <div
+                        title={`${month.label}: ${formatCurrency(
+                          month.amount,
+                          currency
+                        )}`}
+                        aria-label={`${month.label}: ${formatCurrency(
+                          month.amount,
+                          currency
+                        )}`}
+                        className={`w-full rounded-t-md transition-[height] ${
+                          month.amount > 0
+                            ? "bg-gradient-to-t from-[#8b6d38] to-[#d8bd87]"
+                            : "bg-gray-200 dark:bg-white/10"
+                        }`}
+                        style={{ height: `${height}%` }}
+                      />
+                    </div>
+                    <span className="mt-2 text-[9px] font-semibold uppercase tracking-wide text-gray-400">
+                      {month.shortLabel}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4 text-xs text-gray-500 dark:border-white/10 dark:text-gray-400">
+            <span>
+              {spending.activeMonths > 0
+                ? `${spending.activeMonths} month${
+                    spending.activeMonths === 1 ? "" : "s"
+                  } with recorded purchases`
+                : "Add acquisition dates to populate the trend"}
+            </span>
+            {spending.missingDateCount > 0 && (
+              <span>
+                {spending.missingDateCount} priced purchase
+                {spending.missingDateCount === 1 ? "" : "s"} not charted
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SpendStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[9px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+        {label}
+      </dt>
+      <dd className="mt-1 truncate text-sm font-semibold text-gray-900 dark:text-white">
+        {value}
+      </dd>
+    </div>
+  );
+}
+
 function HeroStat({
   value,
   label,
@@ -988,6 +1320,44 @@ function HeroStat({
         {label}
       </span>
     </div>
+  );
+}
+
+function SpendIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      className="h-4 w-4"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M4 7.5h16v11H4zM7 7.5V5.8C7 4.8 7.8 4 8.8 4h6.4c1 0 1.8.8 1.8 1.8v1.7M8 13h8m-4-2v4"
+      />
+    </svg>
+  );
+}
+
+function PrivateIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      className="h-3.5 w-3.5"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M7 10V8a5 5 0 0 1 10 0v2m-11 0h12v10H6z"
+      />
+    </svg>
   );
 }
 
@@ -1413,16 +1783,24 @@ function CollectionItemEditor({
         </div>
 
         <div className="grid gap-4 sm:grid-cols-[1fr_120px]">
-          <Field label="Purchase price">
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={form.purchasePrice}
-              onChange={(event) => setForm({ ...form, purchasePrice: event.target.value })}
-              placeholder="Optional"
-              className={inputClass}
-            />
+          <Field label="Purchase price per unit">
+            <div>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.purchasePrice}
+                onChange={(event) => setForm({ ...form, purchasePrice: event.target.value })}
+                placeholder="Optional"
+                className={inputClass}
+              />
+              <p className="mt-1.5 text-[11px] leading-4 text-gray-400">
+                Used privately for your collection total and monthly spending trend.
+                {form.quantity > 1
+                  ? ` Total recorded spend will be price × ${form.quantity} units.`
+                  : ""}
+              </p>
+            </div>
           </Field>
           <Field label="Currency">
             <input
