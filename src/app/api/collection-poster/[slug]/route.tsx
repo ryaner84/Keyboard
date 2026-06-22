@@ -1,4 +1,5 @@
 import { ImageResponse } from "next/og";
+import sharp from "sharp";
 import { prisma } from "@/lib/prisma";
 import { normalizeImageUrl } from "@/lib/utils";
 
@@ -56,7 +57,7 @@ function posterThumbnailUrl(rawUrl: string): string {
     return rawUrl;
   }
 }
-async function fetchImageDataUri(url: string): Promise<string | null> {
+async function fetchImageBuffer(url: string): Promise<Buffer | null> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 6000);
@@ -71,8 +72,61 @@ async function fetchImageDataUri(url: string): Promise<string | null> {
 
     const buffer = Buffer.from(await response.arrayBuffer());
     if (buffer.length > 1_500_000) return null;
-    return `data:${contentType};base64,${buffer.toString("base64")}`;
+    return buffer;
   } catch {
+    return null;
+  }
+}
+
+async function createGalleryDataUri(
+  images: Array<Buffer | null>
+): Promise<string | null> {
+  const slots = [
+    { left: 0, top: 0, width: 256, height: 270 },
+    { left: 264, top: 0, width: 124, height: 131 },
+    { left: 396, top: 0, width: 124, height: 131 },
+    { left: 264, top: 139, width: 124, height: 131 },
+    { left: 396, top: 139, width: 124, height: 131 },
+  ];
+
+  try {
+    const composites = await Promise.all(
+      slots.map(async (slot, index) => {
+        const image = images[index];
+        const input = image
+          ? await sharp(image)
+              .rotate()
+              .resize(slot.width, slot.height, { fit: "cover" })
+              .jpeg({ quality: 78 })
+              .toBuffer()
+          : await sharp({
+              create: {
+                width: slot.width,
+                height: slot.height,
+                channels: 3,
+                background: "#20262a",
+              },
+            })
+              .jpeg({ quality: 78 })
+              .toBuffer();
+        return { input, left: slot.left, top: slot.top };
+      })
+    );
+
+    const gallery = await sharp({
+      create: {
+        width: 520,
+        height: 270,
+        channels: 3,
+        background: "#151a1e",
+      },
+    })
+      .composite(composites)
+      .jpeg({ quality: 82 })
+      .toBuffer();
+    return `data:image/jpeg;base64,${gallery.toString("base64")}`;
+  } catch (error) {
+    console.error("[collection-poster] gallery composition failed", error);
     return null;
   }
 }
@@ -178,12 +232,13 @@ export async function GET(
       .map((item) => item.groupBuy)
       .filter((groupBuy) => groupBuy.productType !== "KEYBOARD"),
   ].slice(0, 5);
-  const images = await Promise.all(
+  const imageBuffers = await Promise.all(
     candidates.map(async (item) => {
       const url = normalizeImageUrl(item.imageUrl);
-      return url ? fetchImageDataUri(url) : null;
+      return url ? fetchImageBuffer(url) : null;
     })
   );
+  const galleryImage = await createGalleryDataUri(imageBuffers);
 
   return new ImageResponse(
     (
@@ -318,48 +373,40 @@ export async function GET(
             gap: 8,
           }}
         >
-          <PosterThumbnail
-            item={candidates[0]}
-            image={images[0]}
-            width={256}
-            height={270}
-            showLabel
-          />
-          <div
-            style={{
-              width: 256,
-              height: 270,
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-            }}
-          >
-            {[0, 1].map((row) => (
-            <div
-              key={row}
+          {galleryImage ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={galleryImage}
+              alt=""
+              width={520}
+              height={270}
               style={{
-                width: 256,
-                height: 131,
+                width: 520,
+                height: 270,
+                objectFit: "cover",
+                borderRadius: 14,
+                border: "1px solid rgba(255,255,255,0.13)",
+                boxShadow: "0 14px 30px rgba(0,0,0,0.3)",
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                width: 520,
+                height: 270,
                 display: "flex",
-                gap: 8,
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: 14,
+                border: "1px solid rgba(255,255,255,0.13)",
+                background: "#20262a",
+                color: "rgba(255,255,255,0.22)",
+                fontSize: 48,
               }}
             >
-              {[0, 1].map((column) => {
-                const index = row * 2 + column + 1;
-                const item = candidates[index];
-                return (
-                  <PosterThumbnail
-                    key={item ? `${item.name}-${index}` : `empty-${index}`}
-                    item={item}
-                    image={images[index]}
-                    width={124}
-                    height={131}
-                  />
-                );
-              })}
+              ⌨
             </div>
-            ))}
-          </div>
+          )}
         </div>
 
         <div
@@ -499,89 +546,6 @@ function StatPanel({
           </span>
         )}
       </div>
-    </div>
-  );
-}
-
-function PosterThumbnail({
-  item,
-  image,
-  width,
-  height,
-  showLabel = false,
-}: {
-  item: CollectionGroupBuy | undefined;
-  image: string | null | undefined;
-  width: number;
-  height: number;
-  showLabel?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        width,
-        height,
-        display: "flex",
-        position: "relative",
-        overflow: "hidden",
-        borderRadius: 12,
-        border: "1px solid rgba(255,255,255,0.13)",
-        background: "#20262a",
-        boxShadow: "0 12px 26px rgba(0,0,0,0.26)",
-      }}
-    >
-      {item && image ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={image}
-          alt=""
-          width={width}
-          height={height}
-          style={{ width, height, objectFit: "cover" }}
-        />
-      ) : (
-        <div
-          style={{
-            width,
-            height,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "rgba(255,255,255,0.18)",
-            fontSize: 30,
-          }}
-        >
-          ⌨
-        </div>
-      )}
-      {item && showLabel && (
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            bottom: 0,
-            minHeight: 38,
-            padding: "17px 9px 7px",
-            display: "flex",
-            alignItems: "flex-end",
-            background:
-              "linear-gradient(180deg, transparent 0%, rgba(4,6,8,0.9) 70%)",
-          }}
-        >
-          <span
-            style={{
-              display: "flex",
-              color: "#ffffff",
-              fontSize: 9,
-              fontWeight: 700,
-              lineHeight: 1.15,
-            }}
-          >
-            {item.name.slice(0, 30)}
-          </span>
-        </div>
-      )}
     </div>
   );
 }
