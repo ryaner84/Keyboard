@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "@/context/LocationContext";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
 import { normalizeImageUrl } from "@/lib/utils";
+import { collectionSharePath } from "@/lib/collection-share";
 import type {
   CollectionCatalogItem,
   CollectionItemDetails,
@@ -259,12 +260,14 @@ export default function CollectionContent() {
             }
           : payload.user
       );
-      const url = `${window.location.origin}/collection/${payload.user.collectionSlug}`;
+      const url = `${window.location.origin}${collectionSharePath(
+        payload.user.collectionSlug
+      )}`;
       await navigator.clipboard.writeText(url);
       setSharePickerOpen(false);
       setTab("public");
       setNotice(
-        `Share link copied. Paste it into Discord or chat to show your collection poster. ${selectedSlugs.size} selected piece${
+        `Fresh share link copied. Paste this new link into Discord or chat to load the latest collection poster. ${selectedSlugs.size} selected piece${
           selectedSlugs.size === 1 ? " is" : "s are"
         } visible publicly.`
       );
