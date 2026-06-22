@@ -443,6 +443,7 @@ export async function GET(
       keyboardCount: keyboards.length,
       layoutCounts,
       brandCounts,
+      error,
     });
   }
 }
@@ -613,13 +614,18 @@ function renderFallbackPoster({
   keyboardCount,
   layoutCounts,
   brandCounts,
+  error,
 }: {
   owner: string;
   title: string;
   keyboardCount: number;
   layoutCounts: Array<{ label: string; count: number }>;
   brandCounts: Array<{ label: string; count: number }>;
+  error: unknown;
 }) {
+  const errorSummary = encodeURIComponent(
+    (error instanceof Error ? error.message : String(error)).slice(0, 300)
+  );
   return new ImageResponse(
     (
       <div
@@ -731,6 +737,7 @@ function renderFallbackPoster({
       headers: {
         "Cache-Control":
           "public, max-age=60, s-maxage=60, stale-while-revalidate=600",
+        "X-Collection-Poster-Fallback": errorSummary,
       },
     }
   );
