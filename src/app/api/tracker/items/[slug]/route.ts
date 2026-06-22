@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import { getTrackerSessionUser } from "@/lib/tracker-auth";
+import { cleanCollectionPhoto } from "@/lib/collection-photo";
 import type { CollectionUnit } from "@/types";
 
 const CONDITIONS = new Set(["UNBUILT", "EXCELLENT", "GOOD", "FAIR", "PROJECT"]);
@@ -95,10 +96,25 @@ export async function PATCH(
     data.quantity = Math.max(1, Math.min(99, body.quantity));
   }
   if ("customImageUrl" in body) {
-    data.customImageUrl = cleanImageValue(body.customImageUrl);
+    const photo = cleanCollectionPhoto(body.customImageUrl);
+    if (body.customImageUrl && !photo) {
+      return NextResponse.json({ error: "Invalid keyboard photo" }, { status: 400 });
+    }
+    data.customImageUrl = photo;
   }
   if ("units" in body) {
-    const raw = Array.isArray(body.units) ? body.units.slice(0, 49) : [];
+    const raw: unknown[] = Array.isArray(body.units) ? body.units.slice(0, 49) : [];
+    if (
+      raw.some((unit) => {
+        const imageUrl =
+          unit && typeof unit === "object"
+            ? (unit as Record<string, unknown>).imageUrl
+            : null;
+        return Boolean(imageUrl) && !cleanCollectionPhoto(imageUrl);
+      })
+    ) {
+      return NextResponse.json({ error: "Invalid keyboard photo" }, { status: 400 });
+    }
     data.units = raw.map(cleanUnit) as unknown as Prisma.InputJsonValue;
   }
 
@@ -174,19 +190,6 @@ function cleanOptionalText(value: unknown, maxLength: number): string | null {
   return text || null;
 }
 
-// Accepts an https URL or a (client-resized) data:image URL. Anything else, or
-// a data URL larger than ~1.5MB, is dropped.
-function cleanImageValue(value: unknown): string | null {
-  if (value == null) return null;
-  const s = String(value).trim();
-  if (!s) return null;
-  if (/^https?:\/\//i.test(s)) return s.slice(0, 2048);
-  if (/^data:image\/(png|jpe?g|webp);base64,/i.test(s)) {
-    return s.length <= 2_000_000 ? s : null;
-  }
-  return null;
-}
-
 function cleanCondition(value: unknown): string | null {
   const c = String(value ?? "").toUpperCase();
   return c && CONDITIONS.has(c) ? c : null;
@@ -201,6 +204,6 @@ function cleanUnit(u: unknown): CollectionUnit {
     keycaps: cleanOptionalText(o.keycaps, 160),
     buildDetails: cleanOptionalText(o.buildDetails, 500),
     notes: cleanOptionalText(o.notes, 1000),
-    imageUrl: cleanImageValue(o.imageUrl),
+    imageUrl: cleanCollectionPhoto(o.imageUrl),
   };
 }

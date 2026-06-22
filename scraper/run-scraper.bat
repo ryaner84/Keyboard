@@ -66,7 +66,10 @@ if not !ERRORLEVEL!==0 (
 
 if exist "%CLONE_DIR%\.git" (
     echo [boot] Clone already exists - pulling latest ...
-    git -C "%CLONE_DIR%" -c gc.auto=0 pull origin main
+    REM Some WorkSpace images leave .git\logs owned by the account that created
+    REM the clone. Disabling reflog writes lets a normal fast-forward update
+    REM proceed without needing to take ownership of the whole checkout.
+    git -C "%CLONE_DIR%" -c gc.auto=0 -c core.logAllRefUpdates=false pull --ff-only origin main
 ) else (
     echo [boot] Cloning %REPO_URL% ...
     git clone "%REPO_URL%" "%CLONE_DIR%"
@@ -104,14 +107,16 @@ echo ============================================================
 
 REM --- 1. Terminate any leftover scraper instances ----------------------------
 REM Kills only python/chrome processes whose command line points inside THIS
-REM scraper folder (its venv python running scrape.py, and its Chromium using
-REM .scraper-profile). Filtering by process name means this script's own
+REM scraper folder (its venv python running scrape.py), or Chromium using the
+REM scraper profile under the scheduled account's Local AppData. Filtering by
+REM process name means this script's own
 REM cmd.exe/powershell.exe can never match, and your other Python apps are
 REM untouched (different path). This frees the DB pooler slot and the browser
 REM profile lock left behind by a force-closed run.
 echo [run] Step 1: closing any previous scraper instances ...
 set "KILL_MATCH=%SCRAPER%"
-powershell -NoProfile -Command "$root=$env:KILL_MATCH; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine -like ('*'+$root+'*')) -and ($_.Name -in @('python.exe','pythonw.exe','chrome.exe','headless_shell.exe')) } | ForEach-Object { Write-Host ('  closing PID '+$_.ProcessId+' ('+$_.Name+')'); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" 2>nul
+set "PROFILE_MATCH=%LOCALAPPDATA%\gmk-tracker\scraper-profile"
+powershell -NoProfile -Command "$root=$env:KILL_MATCH; $profile=$env:PROFILE_MATCH; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and (($_.CommandLine -like ('*'+$root+'*')) -or ($_.CommandLine -like ('*'+$profile+'*')) -or ($_.CommandLine -like '*gmk-tracker-browser-profile-*')) -and ($_.Name -in @('python.exe','pythonw.exe','chrome.exe','headless_shell.exe')) } | ForEach-Object { Write-Host ('  closing PID '+$_.ProcessId+' ('+$_.Name+')'); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" 2>nul
 REM Give killed connections a moment to drop so the DB pooler frees the slot.
 timeout /t 3 /nobreak >nul 2>&1
 
@@ -119,7 +124,7 @@ REM --- 2. Pull the latest scraper from GitHub --------------------------------
 where git >nul 2>&1
 if !ERRORLEVEL!==0 (
     echo [run] git pull origin main ...
-    git -C "%REPO%" -c gc.auto=0 pull origin main
+    git -C "%REPO%" -c gc.auto=0 -c core.logAllRefUpdates=false pull --ff-only origin main
     if !ERRORLEVEL! neq 0 (
         echo [run] WARNING: git pull failed - using local copy.
         echo [run]   If prompted for credentials, run from a Command Prompt:
@@ -203,9 +208,13 @@ if exist "%SCHED_TMP%" (
 )
 if defined LOCALTIME (
     echo [run] 00:00 GMT+8 = !LOCALTIME! local time on this PC.
-    schtasks /Create /TN "GMK Scraper" /TR "%SCRAPER%\run-scraper.bat" /SC DAILY /ST !LOCALTIME! /RL HIGHEST /F
+    REM The scraper needs the user's interactive desktop, not administrator
+    REM privileges. A per-user task name also avoids colliding with a task that
+    REM was registered previously by another Windows account.
+    set "TASK_NAME=GMK Scraper - %USERNAME%"
+    schtasks /Create /TN "!TASK_NAME!" /TR "%SCRAPER%\run-scraper.bat" /SC DAILY /ST !LOCALTIME! /RU "%USERDOMAIN%\%USERNAME%" /IT /RL LIMITED /F
     if !ERRORLEVEL!==0 (
-        echo [run] Task "GMK Scraper" scheduled daily at !LOCALTIME! local ^(= 00:00 GMT+8^).
+        echo [run] Task "!TASK_NAME!" scheduled daily at !LOCALTIME! local ^(= 00:00 GMT+8^).
     ) else (
         echo [run] WARNING: schtasks registration failed ^(continuing anyway^).
     )

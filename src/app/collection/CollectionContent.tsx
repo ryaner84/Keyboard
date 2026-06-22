@@ -117,6 +117,72 @@ function BuildSummary({ build, index }: { build: CollectionUnit; index: number }
 // Downscale an uploaded image client-side to keep stored data URLs small.
 const MAX_IMAGE_DIM = 1024;
 const IMAGE_QUALITY = 0.82;
+const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
+
+type KeyboardPrediction = {
+  bbox: [number, number, number, number];
+  class: string;
+  score: number;
+};
+
+type KeyboardDetector = {
+  detect(
+    input: HTMLImageElement,
+    maxNumBoxes?: number,
+    minScore?: number
+  ): Promise<KeyboardPrediction[]>;
+};
+
+let keyboardDetectorPromise: Promise<KeyboardDetector> | null = null;
+
+async function getKeyboardDetector(): Promise<KeyboardDetector> {
+  if (!keyboardDetectorPromise) {
+    keyboardDetectorPromise = (async () => {
+      const [tf, cocoSsd] = await Promise.all([
+        import("@tensorflow/tfjs"),
+        import("@tensorflow-models/coco-ssd"),
+      ]);
+      await tf.ready();
+      return cocoSsd.load({ base: "lite_mobilenet_v2" });
+    })();
+  }
+  return keyboardDetectorPromise;
+}
+
+async function validateKeyboardPhoto(dataUrl: string): Promise<void> {
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const element = new window.Image();
+    element.onload = () => resolve(element);
+    element.onerror = () => reject(new Error("Could not inspect that image."));
+    element.src = dataUrl;
+  });
+
+  let predictions: KeyboardPrediction[];
+  try {
+    const detector = await getKeyboardDetector();
+    predictions = await detector.detect(image, 20, 0.2);
+  } catch {
+    keyboardDetectorPromise = null;
+    throw new Error("The keyboard photo check is unavailable. Please try again.");
+  }
+
+  const imageArea = Math.max(1, image.naturalWidth * image.naturalHeight);
+  const keyboardDetected = predictions.some((prediction) => {
+    const [, , width, height] = prediction.bbox;
+    const coverage = (width * height) / imageArea;
+    return (
+      prediction.class.toLowerCase() === "keyboard" &&
+      prediction.score >= 0.2 &&
+      coverage >= 0.02
+    );
+  });
+
+  if (!keyboardDetected) {
+    throw new Error(
+      "We could not detect a keyboard in this photo. Use a clear image showing most of the board."
+    );
+  }
+}
 
 async function fileToResizedDataUrl(file: File): Promise<string> {
   const readDataUrl = await new Promise<string>((resolve, reject) => {
@@ -169,16 +235,25 @@ function PhotoUploadField({
       onError("Please choose an image file.");
       return;
     }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      onError("That file is too large. Choose a photo under 12 MB.");
+      return;
+    }
     setBusy(true);
     try {
       const dataUrl = await fileToResizedDataUrl(file);
       if (dataUrl.length > 2_000_000) {
         onError("That photo is too large even after resizing — try a smaller one.");
       } else {
+        await validateKeyboardPhoto(dataUrl);
         onChange(dataUrl);
       }
-    } catch {
-      onError("Could not process that image.");
+    } catch (uploadError) {
+      onError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Could not process that image."
+      );
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -212,7 +287,7 @@ function PhotoUploadField({
             onClick={() => inputRef.current?.click()}
             className="rounded-full border border-gray-300 px-3.5 py-1.5 text-xs font-semibold text-gray-700 hover:border-gray-500 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200"
           >
-            {busy ? "Processing…" : hasCustom ? "Replace photo" : "Upload your photo"}
+            {busy ? "Checking photo…" : hasCustom ? "Replace photo" : "Upload your photo"}
           </button>
           {hasCustom && (
             <button
@@ -225,7 +300,9 @@ function PhotoUploadField({
           )}
         </div>
         <p className="mt-1.5 text-[11px] leading-4 text-gray-400">
-          {hasCustom ? "Using your own photo." : "Optional — defaults to the catalog photo."}
+          {hasCustom
+            ? "Using your verified keyboard photo."
+            : "Optional. A private on-device check confirms a keyboard is visible."}
         </p>
       </div>
     </div>

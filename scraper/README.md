@@ -35,7 +35,9 @@ It never overwrites a price you set manually in the admin panel
 - `schedule_time.py` — prints the PC‑local time equal to **00:00 GMT+8**.
 - `run-scraper.bat` — **the file you double‑click.** Each run it: `git pull`s the
   latest `scrape.py`, ensures Python + Playwright are installed, asks for the DB
-  password the first time, registers the nightly schedule, then runs.
+  password the first time, registers a non-elevated per-user nightly schedule,
+  then runs. Git reflog writes are disabled for the pull so a checkout created
+  by a different WorkSpace account cannot block updates solely on `.git/logs`.
 - `run-geekhack-backfill.bat` — a one-time, resumable import of keyboard group
   buys from Geekhack back to 2020. It runs only the history pass with a four-hour
   budget and does not change the nightly scraper's normal 2026 cutoff.
@@ -72,8 +74,11 @@ It never overwrites a price you set manually in the admin panel
      time equal to **00:00 GMT+8**,
    - open a visible Chromium window and start scraping. **If gmk.net or Cloudflare
      shows a "verify you're human" challenge, solve it once in that window.** The
-     browser profile (`.scraper-profile`) remembers the clearance so later runs
-     pass automatically.
+     browser profile under `%LOCALAPPDATA%\gmk-tracker\scraper-profile` remembers
+     the clearance so later runs pass automatically. Keeping it under the
+     scheduled Windows account avoids permission failures when the repository
+     checkout belongs to another account. Set `SCRAPER_PROFILE_DIR` only if you
+     intentionally need a different writable location.
 
 That's the "initial one‑time run." After this, it runs itself nightly.
 

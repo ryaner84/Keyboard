@@ -260,6 +260,7 @@ async function main() {
         await ensurePriceReportTable(client);
         await ensureListingReportTable(client);
         await ensurePersonalTrackerTables(client);
+        await ensureCollectionPhotoReportTable(client);
         await purgeBlockedVendors(client);
         await purgeCancelledSets(client);
         await ensureDiscoveryColumn(client);
@@ -311,6 +312,7 @@ async function main() {
     await ensurePriceReportTable(client);
     await ensureListingReportTable(client);
     await ensurePersonalTrackerTables(client);
+    await ensureCollectionPhotoReportTable(client);
     await purgeBlockedVendors(client);
     await purgeCancelledSets(client);
     await ensureDiscoveryColumn(client);
@@ -1059,6 +1061,37 @@ async function ensurePersonalTrackerTables(client) {
     );
   } catch (err) {
     console.warn(`[db-setup] Personal tracker table setup skipped: ${err.message}`);
+  }
+}
+
+async function ensureCollectionPhotoReportTable(client) {
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS public."CollectionPhotoReport" (
+         id               text NOT NULL PRIMARY KEY,
+         "trackerItemId"  text NOT NULL,
+         "collectionSlug" text NOT NULL,
+         "buildIndex"     integer NOT NULL DEFAULT 0,
+         "imageHash"      text NOT NULL,
+         "issueType"      text NOT NULL,
+         notes             text,
+         "reporterIpHash" text,
+         "reporterUserId" text,
+         "submittedAt"    timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         CONSTRAINT "CollectionPhotoReport_trackerItemId_fkey"
+           FOREIGN KEY ("trackerItemId") REFERENCES public."TrackerItem"(id) ON DELETE CASCADE
+       )`
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS "CollectionPhotoReport_trackerItemId_imageHash_submittedAt_idx"
+       ON public."CollectionPhotoReport" ("trackerItemId", "imageHash", "submittedAt")`
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS "CollectionPhotoReport_submittedAt_idx"
+       ON public."CollectionPhotoReport" ("submittedAt")`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] CollectionPhotoReport table setup skipped: ${err.message}`);
   }
 }
 
