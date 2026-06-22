@@ -2288,6 +2288,8 @@ def _gh_classify_title(title: str) -> str:
     if _GH_META_RE.search(title):
         return "ACCESSORY"
     strong_keyboard = bool(_GH_STRONG_KB.search(title))
+    if strong_keyboard:
+        return "KEYBOARD"
     if _GH_KEYCAP_PROFILE.search(title):
         return "KEYCAPS"
     if _GH_EXPLICIT_KEYCAP.search(title) and not strong_keyboard:
@@ -2322,13 +2324,24 @@ def _gh_status(
     t = title.lower()
     if "[ic]" in t or "interest check" in t:
         return "INTEREST_CHECK"
+    if re.search(r"\bin[\s-]?stock\b", t) or re.search(
+        r"\bextras?\s+(?:are\s+)?(?:in\s+stock|available\s+now)\b", t
+    ):
+        return "IN_STOCK"
     completed = (
         "closed", "fulfilled", "delivered", "completed",
-        "gb finish", "gb ended", "100% sent", "100% shipped",
+        "gb finish", "finished", "gb ended", "gb over",
+        "group buy over", "100% sent", "100% shipped",
+        "replacement keys shipped",
     )
     if any(marker in t for marker in completed) or re.search(r"\bcomplete\b", t):
         return "DELIVERED"
-    if "shipping" in t or "fulfillment" in t:
+    post_gb = (
+        "shipping", "fulfillment", "delivering", "final numbers",
+        "production confirmed", "in production", "queue for production",
+        "in the queue for production", "last day", "final weekend",
+    )
+    if any(marker in t for marker in post_gb):
         if last_post_dt and last_post_dt < datetime.now(timezone.utc) - timedelta(days=365):
             return "DELIVERED"
         return "SHIPPING"
@@ -2349,7 +2362,14 @@ def _update_gh_listing_metadata(
     last_post_dt: datetime | None,
 ) -> None:
     """Repair imported gh-* rows using the current board listing."""
-    status = _gh_status(title, None, last_post_dt)
+    with conn.cursor() as cur:
+        cur.execute(
+            'SELECT "gbEnd" FROM "GroupBuy" WHERE slug = %s',
+            (f"gh-{topic_id}",),
+        )
+        row = cur.fetchone()
+    existing_end = row[0].date() if row and row[0] else None
+    status = _gh_status(title, existing_end, last_post_dt)
     product_type = _gh_classify_title(title)
     with conn.cursor() as cur:
         if product_type == "UNKNOWN":

@@ -283,6 +283,7 @@ async function main() {
         await purgeMispricedListings(client);
         await prioritizePreorderVendors(client);
         await reclassifyMisflaggedKeycaps(client);
+        await reclassifyGeekhackStatuses(client);
         await dropForumDuplicatesOfOfficialSets(client);
       }
     }
@@ -318,6 +319,7 @@ async function main() {
     await backfillShipping(client);
     await cleanupInterestChecks(client);
     await reclassifyMisflaggedKeycaps(client);
+    await reclassifyGeekhackStatuses(client);
     await dropForumDuplicatesOfOfficialSets(client);
   } catch (err) {
     console.warn(`[db-setup] Setup failed: ${err.message}`);
@@ -1468,6 +1470,63 @@ async function reclassifyMisflaggedKeycaps(client) {
     }
   } catch (err) {
     console.warn(`[db-setup] Keycap reclassification skipped: ${err.message}`);
+  }
+}
+
+// RECURRING: Geekhack thread titles are frequently updated after a GB closes
+// (production, shipping, extras, replacement keys). A recent forum reply must
+// not turn those historical threads back into ACTIVE_GB.
+async function reclassifyGeekhackStatuses(client) {
+  try {
+    const inStock = await client.query(
+      `UPDATE public."GroupBuy"
+       SET status = 'IN_STOCK'::"GBStatus", "updatedAt" = now()
+       WHERE slug LIKE 'gh-%'
+         AND name ~* '\\y(in[ -]?stock|extras? (are )?(in stock|available now))\\y'
+         AND status IS DISTINCT FROM 'IN_STOCK'::"GBStatus"`
+    );
+    const interestChecks = await client.query(
+      `UPDATE public."GroupBuy"
+       SET status = 'INTEREST_CHECK'::"GBStatus", "updatedAt" = now()
+       WHERE slug LIKE 'gh-%'
+         AND name ~* '(\\[IC\\]|interest check|checking interest)'
+         AND status IS DISTINCT FROM 'INTEREST_CHECK'::"GBStatus"`
+    );
+    const delivered = await client.query(
+      `UPDATE public."GroupBuy"
+       SET status = 'DELIVERED'::"GBStatus", "updatedAt" = now()
+       WHERE slug LIKE 'gh-%'
+         AND (
+           "gbEnd" < current_date - interval '365 days'
+           OR name ~* '\\y(closed|fulfilled|delivered|completed|finished|gb over|group buy over|100% sent|100% shipped|replacement keys shipped)\\y'
+         )
+         AND status IS DISTINCT FROM 'DELIVERED'::"GBStatus"`
+    );
+    const shipping = await client.query(
+      `UPDATE public."GroupBuy"
+       SET status = 'SHIPPING'::"GBStatus", "updatedAt" = now()
+       WHERE slug LIKE 'gh-%'
+         AND status = 'ACTIVE_GB'::"GBStatus"
+         AND (
+           ("gbEnd" IS NOT NULL AND "gbEnd" < current_date)
+           OR name ~* '\\y(shipping|fulfillment|delivering|final numbers|production confirmed|in production|queue for production|in the queue for production|last day|final weekend)\\y'
+         )`
+    );
+    if (
+      inStock.rowCount +
+        interestChecks.rowCount +
+        delivered.rowCount +
+        shipping.rowCount >
+      0
+    ) {
+      console.log(
+        `[db-setup] Reclassified Geekhack status rows: ${inStock.rowCount} in-stock, ` +
+          `${interestChecks.rowCount} IC, ${shipping.rowCount} shipping, ` +
+          `${delivered.rowCount} delivered.`
+      );
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Geekhack status cleanup skipped: ${err.message}`);
   }
 }
 
