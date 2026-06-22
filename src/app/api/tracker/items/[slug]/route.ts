@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma";
 import { getTrackerSessionUser } from "@/lib/tracker-auth";
+import type { CollectionUnit } from "@/types";
 
 const CONDITIONS = new Set(["UNBUILT", "EXCELLENT", "GOOD", "FAIR", "PROJECT"]);
 
@@ -41,6 +43,8 @@ export async function PATCH(
     displayOrder?: number;
     color?: string | null;
     quantity?: number;
+    customImageUrl?: string | null;
+    units?: Prisma.InputJsonValue;
   } = {};
 
   if (typeof body.isTracking === "boolean") data.isTracking = body.isTracking;
@@ -90,6 +94,13 @@ export async function PATCH(
   if (typeof body.quantity === "number" && Number.isInteger(body.quantity)) {
     data.quantity = Math.max(1, Math.min(99, body.quantity));
   }
+  if ("customImageUrl" in body) {
+    data.customImageUrl = cleanImageValue(body.customImageUrl);
+  }
+  if ("units" in body) {
+    const raw = Array.isArray(body.units) ? body.units.slice(0, 49) : [];
+    data.units = raw.map(cleanUnit) as unknown as Prisma.InputJsonValue;
+  }
 
   const willBeInCollection = data.inCollection ?? item.inCollection;
   if (!willBeInCollection) {
@@ -125,6 +136,8 @@ export async function PATCH(
       displayOrder: updated.displayOrder,
       color: updated.color,
       quantity: updated.quantity,
+      customImageUrl: updated.customImageUrl,
+      units: Array.isArray(updated.units) ? updated.units : [],
     },
   });
 }
@@ -159,4 +172,35 @@ export async function DELETE(
 function cleanOptionalText(value: unknown, maxLength: number): string | null {
   const text = String(value ?? "").trim().slice(0, maxLength);
   return text || null;
+}
+
+// Accepts an https URL or a (client-resized) data:image URL. Anything else, or
+// a data URL larger than ~1.5MB, is dropped.
+function cleanImageValue(value: unknown): string | null {
+  if (value == null) return null;
+  const s = String(value).trim();
+  if (!s) return null;
+  if (/^https?:\/\//i.test(s)) return s.slice(0, 2048);
+  if (/^data:image\/(png|jpe?g|webp);base64,/i.test(s)) {
+    return s.length <= 2_000_000 ? s : null;
+  }
+  return null;
+}
+
+function cleanCondition(value: unknown): string | null {
+  const c = String(value ?? "").toUpperCase();
+  return c && CONDITIONS.has(c) ? c : null;
+}
+
+function cleanUnit(u: unknown): CollectionUnit {
+  const o = (u ?? {}) as Record<string, unknown>;
+  return {
+    color: cleanOptionalText(o.color, 80),
+    condition: cleanCondition(o.condition),
+    switches: cleanOptionalText(o.switches, 160),
+    keycaps: cleanOptionalText(o.keycaps, 160),
+    buildDetails: cleanOptionalText(o.buildDetails, 500),
+    notes: cleanOptionalText(o.notes, 1000),
+    imageUrl: cleanImageValue(o.imageUrl),
+  };
 }

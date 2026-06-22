@@ -1,4 +1,3 @@
-import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
@@ -39,6 +38,10 @@ const getPublicCollection = cache(async (slug: string) =>
           switches: true,
           keycaps: true,
           buildDetails: true,
+          color: true,
+          quantity: true,
+          customImageUrl: true,
+          units: true,
           groupBuy: {
             select: {
               id: true,
@@ -209,6 +212,10 @@ function PublicCollectionCard({
     switches: string | null;
     keycaps: string | null;
     buildDetails: string | null;
+    color: string | null;
+    quantity: number;
+    customImageUrl: string | null;
+    units: unknown;
     groupBuy: {
       id: string;
       slug: string;
@@ -224,25 +231,27 @@ function PublicCollectionCard({
   };
   number: number;
 }) {
-  const imageUrl = normalizeImageUrl(item.groupBuy.imageUrl);
+  const imageUrl = item.customImageUrl || normalizeImageUrl(item.groupBuy.imageUrl);
   const acquiredYear = item.acquiredAt?.getFullYear();
   const specs = [
     item.groupBuy.layout,
     item.groupBuy.mountingStyle,
     item.groupBuy.material,
   ].filter(Boolean);
+  const builds = assemblePublicBuilds(item);
+  const multiBuild = builds.length > 1;
 
   return (
     <article className="group overflow-hidden rounded-2xl border border-black/[0.08] bg-white shadow-[0_14px_45px_rgba(29,25,18,0.07)] dark:border-white/10 dark:bg-[#111417]">
       <Link href={`/sets/${item.groupBuy.slug}`} className="block">
         <div className="relative aspect-[4/3] overflow-hidden bg-[#ddd9cf] dark:bg-gray-900">
           {imageUrl ? (
-            <Image
+            // Plain img so owner-uploaded data: URLs render.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
               src={imageUrl}
               alt={item.groupBuy.name}
-              fill
-              unoptimized
-              className="object-cover transition duration-700 group-hover:scale-[1.03]"
+              className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-[1.03]"
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-5xl text-gray-300 dark:text-gray-700">
@@ -252,6 +261,11 @@ function PublicCollectionCard({
           <span className="absolute left-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 font-serif text-sm text-white backdrop-blur">
             {String(number).padStart(2, "0")}
           </span>
+          {multiBuild && (
+            <span className="absolute right-4 top-4 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur">
+              {builds.length} builds
+            </span>
+          )}
         </div>
       </Link>
 
@@ -273,9 +287,10 @@ function PublicCollectionCard({
             .join(" · ") || "From the private collection"}
         </p>
 
-        {(specs.length > 0 || item.switches || item.keycaps) && (
+        {!multiBuild && (specs.length > 0 || item.switches || item.keycaps || item.color) && (
           <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-gray-100 pt-5 dark:border-white/10">
             {specs.length > 0 && <PublicSpec label="Format" value={specs.join(" · ")} />}
+            {item.color && <PublicSpec label="Colour" value={item.color} />}
             {item.switches && <PublicSpec label="Switches" value={item.switches} />}
             {item.keycaps && <PublicSpec label="Keycaps" value={item.keycaps} />}
             {item.showPurchasePrice && item.purchasePrice != null && (
@@ -286,13 +301,113 @@ function PublicCollectionCard({
             )}
           </dl>
         )}
-        {item.buildDetails && (
+        {!multiBuild && item.buildDetails && (
           <p className="mt-5 border-t border-gray-100 pt-5 text-sm leading-6 text-gray-600 dark:border-white/10 dark:text-gray-300">
             {item.buildDetails}
           </p>
         )}
+
+        {multiBuild && (
+          <div className="mt-5 space-y-3 border-t border-gray-100 pt-5 dark:border-white/10">
+            {builds.map((build, index) => (
+              <PublicBuild key={index} build={build} index={index} />
+            ))}
+          </div>
+        )}
       </div>
     </article>
+  );
+}
+
+type PublicBuildShape = {
+  color: string | null;
+  condition: string | null;
+  switches: string | null;
+  keycaps: string | null;
+  buildDetails: string | null;
+  imageUrl: string | null;
+};
+
+// Expand a public item into per-build rows (build 1 = top-level fields, the
+// rest from the `units` JSON). Returns exactly `quantity` builds.
+function assemblePublicBuilds(item: {
+  color: string | null;
+  condition: string | null;
+  switches: string | null;
+  keycaps: string | null;
+  buildDetails: string | null;
+  customImageUrl: string | null;
+  quantity: number;
+  units: unknown;
+}): PublicBuildShape[] {
+  const qty = Math.max(1, item.quantity || 1);
+  const first: PublicBuildShape = {
+    color: item.color,
+    condition: item.condition,
+    switches: item.switches,
+    keycaps: item.keycaps,
+    buildDetails: item.buildDetails,
+    imageUrl: item.customImageUrl,
+  };
+  const extra = Array.isArray(item.units)
+    ? (item.units as Record<string, unknown>[]).map((u) => ({
+        color: (u?.color as string) ?? null,
+        condition: (u?.condition as string) ?? null,
+        switches: (u?.switches as string) ?? null,
+        keycaps: (u?.keycaps as string) ?? null,
+        buildDetails: (u?.buildDetails as string) ?? null,
+        imageUrl: (u?.imageUrl as string) ?? null,
+      }))
+    : [];
+  const builds = [first, ...extra].slice(0, qty);
+  while (builds.length < qty) {
+    builds.push({
+      color: null,
+      condition: null,
+      switches: null,
+      keycaps: null,
+      buildDetails: null,
+      imageUrl: null,
+    });
+  }
+  return builds;
+}
+
+function PublicBuild({ build, index }: { build: PublicBuildShape; index: number }) {
+  const specs = [
+    build.color,
+    build.condition ? formatCondition(build.condition) : null,
+    build.switches,
+    build.keycaps,
+  ].filter(Boolean) as string[];
+  return (
+    <div className="flex gap-3">
+      {build.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={build.imageUrl}
+          alt={`Build ${index + 1}`}
+          className="h-14 w-14 shrink-0 rounded-lg object-cover"
+        />
+      ) : (
+        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-lg text-gray-300 dark:bg-gray-800 dark:text-gray-600">
+          ⌨
+        </div>
+      )}
+      <div className="min-w-0">
+        <p className="text-xs font-semibold text-gray-900 dark:text-white">
+          Build {index + 1}
+        </p>
+        <p className="mt-0.5 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+          {specs.join(" · ") || "Details coming soon"}
+        </p>
+        {build.buildDetails && (
+          <p className="mt-1 text-[11px] leading-4 text-gray-400 dark:text-gray-500">
+            {build.buildDetails}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 

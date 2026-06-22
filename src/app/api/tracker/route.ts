@@ -40,6 +40,8 @@ export async function GET() {
         displayOrder: item.displayOrder,
         color: item.color,
         quantity: item.quantity ?? 1,
+        customImageUrl: item.customImageUrl ?? null,
+        units: Array.isArray(item.units) ? item.units : [],
       },
     })),
   });

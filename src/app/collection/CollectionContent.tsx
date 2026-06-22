@@ -12,6 +12,7 @@ import type {
   CollectionCatalogItem,
   CollectionItemDetails,
   CollectionProfile,
+  CollectionUnit,
   GroupBuyWithPricing,
 } from "@/types";
 
@@ -33,6 +34,18 @@ const EMPTY_DETAILS: CollectionItemDetails = {
   displayOrder: 0,
   color: null,
   quantity: 1,
+  customImageUrl: null,
+  units: null,
+};
+
+const EMPTY_UNIT: CollectionUnit = {
+  color: null,
+  condition: null,
+  switches: null,
+  keycaps: null,
+  buildDetails: null,
+  notes: null,
+  imageUrl: null,
 };
 
 const CONDITION_LABELS: Record<string, string> = {
@@ -42,6 +55,267 @@ const CONDITION_LABELS: Record<string, string> = {
   FAIR: "Fair",
   PROJECT: "Project board",
 };
+
+// Expand a collection record into per-build rows. Build 1 lives on the record's
+// top-level fields; builds 2..N come from the `units` array. Always returns
+// exactly `quantity` builds, padding with blanks if details are missing.
+function assembleBuilds(c: CollectionItemDetails): CollectionUnit[] {
+  const qty = Math.max(1, c.quantity || 1);
+  const first: CollectionUnit = {
+    color: c.color,
+    condition: c.condition,
+    switches: c.switches,
+    keycaps: c.keycaps,
+    buildDetails: c.buildDetails,
+    notes: c.notes,
+    imageUrl: c.customImageUrl,
+  };
+  const extra = Array.isArray(c.units) ? c.units : [];
+  const builds = [first, ...extra].slice(0, qty);
+  while (builds.length < qty) builds.push({ ...EMPTY_UNIT });
+  return builds;
+}
+
+function BuildSummary({ build, index }: { build: CollectionUnit; index: number }) {
+  const specs = [
+    build.color,
+    build.condition ? CONDITION_LABELS[build.condition] || build.condition : null,
+    build.switches,
+    build.keycaps,
+  ].filter(Boolean) as string[];
+  return (
+    <div className="flex gap-3 rounded-xl bg-gray-50 p-2.5 dark:bg-white/[0.04]">
+      {build.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={build.imageUrl}
+          alt={`Build ${index + 1}`}
+          className="h-12 w-12 shrink-0 rounded-lg object-cover"
+        />
+      ) : (
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-gray-200 text-base text-gray-400 dark:bg-gray-800">
+          ⌨
+        </div>
+      )}
+      <div className="min-w-0">
+        <p className="text-[11px] font-semibold text-gray-900 dark:text-white">
+          Build {index + 1}
+        </p>
+        <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+          {specs.join(" · ") || "No details yet"}
+        </p>
+        {build.buildDetails && (
+          <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-gray-400 dark:text-gray-500">
+            {build.buildDetails}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Downscale an uploaded image client-side to keep stored data URLs small.
+const MAX_IMAGE_DIM = 1024;
+const IMAGE_QUALITY = 0.82;
+
+async function fileToResizedDataUrl(file: File): Promise<string> {
+  const readDataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new window.Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("Could not read image"));
+    el.src = readDataUrl;
+  });
+  let width = img.width;
+  let height = img.height;
+  if (Math.max(width, height) > MAX_IMAGE_DIM) {
+    const scale = MAX_IMAGE_DIM / Math.max(width, height);
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return readDataUrl;
+  ctx.drawImage(img, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", IMAGE_QUALITY);
+}
+
+function PhotoUploadField({
+  value,
+  fallback,
+  onChange,
+  onError,
+}: {
+  value: string | null;
+  fallback: string | null;
+  onChange: (value: string | null) => void;
+  onError: (message: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const preview = value || fallback;
+  const hasCustom = !!value;
+
+  async function handleFile(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      onError("Please choose an image file.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const dataUrl = await fileToResizedDataUrl(file);
+      if (dataUrl.length > 2_000_000) {
+        onError("That photo is too large even after resizing — try a smaller one.");
+      } else {
+        onChange(dataUrl);
+      }
+    } catch {
+      onError("Could not process that image.");
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-4">
+      <div className="relative h-20 w-24 shrink-0 overflow-hidden rounded-xl bg-gray-100 dark:bg-gray-800">
+        {preview ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={preview} alt="Keyboard preview" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-2xl text-gray-300 dark:text-gray-600">
+            ⌨
+          </div>
+        )}
+      </div>
+      <div className="min-w-0">
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(event) => handleFile(event.target.files?.[0])}
+        />
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => inputRef.current?.click()}
+            className="rounded-full border border-gray-300 px-3.5 py-1.5 text-xs font-semibold text-gray-700 hover:border-gray-500 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200"
+          >
+            {busy ? "Processing…" : hasCustom ? "Replace photo" : "Upload your photo"}
+          </button>
+          {hasCustom && (
+            <button
+              type="button"
+              onClick={() => onChange(null)}
+              className="rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-red-600"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+        <p className="mt-1.5 text-[11px] leading-4 text-gray-400">
+          {hasCustom ? "Using your own photo." : "Optional — defaults to the catalog photo."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function BuildFields({
+  build,
+  fallbackImage,
+  onChange,
+  onError,
+}: {
+  build: CollectionUnit;
+  fallbackImage: string | null;
+  onChange: (patch: Partial<CollectionUnit>) => void;
+  onError: (message: string) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <Field label="Photo">
+        <PhotoUploadField
+          value={build.imageUrl}
+          fallback={fallbackImage}
+          onChange={(imageUrl) => onChange({ imageUrl })}
+          onError={onError}
+        />
+      </Field>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Color / variant">
+          <input
+            value={build.color || ""}
+            onChange={(event) => onChange({ color: event.target.value })}
+            placeholder="e.g. E-White, Black, Navy"
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Condition">
+          <select
+            value={build.condition || ""}
+            onChange={(event) => onChange({ condition: event.target.value || null })}
+            className={inputClass}
+          >
+            <option value="">Not specified</option>
+            {Object.entries(CONDITION_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Switches">
+          <input
+            value={build.switches || ""}
+            onChange={(event) => onChange({ switches: event.target.value })}
+            placeholder="e.g. Cherry MX Blacks, lubed"
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Keycaps">
+          <input
+            value={build.keycaps || ""}
+            onChange={(event) => onChange({ keycaps: event.target.value })}
+            placeholder="e.g. GMK Ishtar"
+            className={inputClass}
+          />
+        </Field>
+      </div>
+      <Field label="Build specification">
+        <textarea
+          value={build.buildDetails || ""}
+          onChange={(event) => onChange({ buildDetails: event.target.value })}
+          placeholder="Plate, mounting configuration, stabilizers, foam, artisan details…"
+          rows={3}
+          className={inputClass}
+        />
+      </Field>
+      <Field label="Private notes">
+        <textarea
+          value={build.notes || ""}
+          onChange={(event) => onChange({ notes: event.target.value })}
+          placeholder="Maintenance notes, serial number, provenance, or memories. Never shown publicly."
+          rows={3}
+          className={inputClass}
+        />
+      </Field>
+    </div>
+  );
+}
 
 export default function CollectionContent() {
   const searchParams = useSearchParams();
@@ -684,11 +958,13 @@ function CollectionCard({
   onAdd: () => void;
   onRemove: () => void;
 }) {
-  const imageUrl = normalizeImageUrl(item.imageUrl);
+  const imageUrl =
+    item.collection.customImageUrl || normalizeImageUrl(item.imageUrl);
   const owned = item.collection.inCollection;
+  const builds = assembleBuilds(item.collection);
+  const multiBuild = builds.length > 1;
   const details = [
     item.collection.color && { label: "Color", value: item.collection.color },
-    item.collection.quantity > 1 && { label: "Units", value: String(item.collection.quantity) },
     item.collection.switches && { label: "Switches", value: item.collection.switches },
     item.collection.keycaps && { label: "Keycaps", value: item.collection.keycaps },
   ].filter(Boolean) as Array<{ label: string; value: string }>;
@@ -701,12 +977,12 @@ function CollectionCard({
       <Link href={`/sets/${item.slug}?country=${countryCode}`} className="block">
         <div className="relative aspect-[4/3] overflow-hidden bg-[#e9e7e1] dark:bg-gray-900">
           {imageUrl ? (
-            <Image
+            // Plain img (not next/image) so owner-uploaded data: URLs render.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
               src={imageUrl}
               alt={item.name}
-              fill
-              unoptimized
-              className="object-cover transition duration-500 group-hover:scale-[1.025]"
+              className="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-[1.025]"
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-5xl text-gray-300 dark:text-gray-700">
@@ -767,7 +1043,7 @@ function CollectionCard({
           )}
         </div>
 
-        {owned && details.length > 0 && (
+        {owned && !multiBuild && details.length > 0 && (
           <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-gray-100 pt-4 dark:border-white/10">
             {details.map((detail) => (
               <div key={detail.label} className="min-w-0">
@@ -782,10 +1058,21 @@ function CollectionCard({
           </dl>
         )}
 
-        {owned && item.collection.buildDetails && (
+        {owned && !multiBuild && item.collection.buildDetails && (
           <p className="mt-4 line-clamp-2 border-t border-gray-100 pt-4 text-xs leading-5 text-gray-500 dark:border-white/10 dark:text-gray-400">
             {item.collection.buildDetails}
           </p>
+        )}
+
+        {owned && multiBuild && (
+          <div className="mt-4 space-y-3 border-t border-gray-100 pt-4 dark:border-white/10">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#9a7a42] dark:text-[#c9ab72]">
+              {builds.length} builds
+            </p>
+            {builds.map((build, index) => (
+              <BuildSummary key={index} build={build} index={index} />
+            ))}
+          </div>
         )}
 
         {owned && editable && (
@@ -935,45 +1222,67 @@ function CollectionItemEditor({
   onSave: (changes: Partial<CollectionItemDetails>) => Promise<void>;
   onMoveToTracking: () => Promise<void>;
 }) {
+  const catalogImage = normalizeImageUrl(item.imageUrl);
   const [form, setForm] = useState({
     acquiredAt: item.collection.acquiredAt
       ? new Date(item.collection.acquiredAt).toISOString().slice(0, 10)
       : "",
-    condition: item.collection.condition || "",
-    color: item.collection.color || "",
     quantity: item.collection.quantity ?? 1,
     purchasePrice: item.collection.purchasePrice?.toString() || "",
     purchaseCurrency: item.collection.purchaseCurrency || defaultCurrency || "USD",
     showPurchasePrice: item.collection.showPurchasePrice,
-    switches: item.collection.switches || "",
-    keycaps: item.collection.keycaps || "",
-    buildDetails: item.collection.buildDetails || "",
-    notes: item.collection.notes || "",
     isPublic: item.collection.isPublic,
   });
+  const [builds, setBuilds] = useState<CollectionUnit[]>(() =>
+    assembleBuilds(item.collection)
+  );
+  const [activeBuild, setActiveBuild] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useModalBodyLock();
 
+  function setQuantity(next: number) {
+    const qty = Math.max(1, Math.min(99, next));
+    setForm((f) => ({ ...f, quantity: qty }));
+    setBuilds((prev) => {
+      const arr = prev.slice(0, qty);
+      while (arr.length < qty) arr.push({ ...EMPTY_UNIT });
+      return arr;
+    });
+    setActiveBuild((a) => Math.min(a, qty - 1));
+  }
+
+  function updateBuild(index: number, patch: Partial<CollectionUnit>) {
+    setBuilds((prev) => prev.map((b, i) => (i === index ? { ...b, ...patch } : b)));
+  }
+
   async function submit() {
     setBusy(true);
     setError("");
     try {
+      const qty = form.quantity;
+      const trimmed = builds.slice(0, qty);
+      const first = trimmed[0] || { ...EMPTY_UNIT };
+      const extra = trimmed.slice(1);
       await onSave({
         inCollection: true,
         acquiredAt: form.acquiredAt || null,
-        condition: form.condition || null,
-        color: form.color || null,
-        quantity: form.quantity,
+        quantity: qty,
         purchasePrice: form.purchasePrice === "" ? null : Number(form.purchasePrice),
         purchaseCurrency: form.purchaseCurrency || null,
         showPurchasePrice: form.showPurchasePrice,
-        switches: form.switches || null,
-        keycaps: form.keycaps || null,
-        buildDetails: form.buildDetails || null,
-        notes: form.notes || null,
         isPublic: form.isPublic,
+        // Build 1 lives on the top-level fields.
+        color: first.color || null,
+        condition: first.condition || null,
+        switches: first.switches || null,
+        keycaps: first.keycaps || null,
+        buildDetails: first.buildDetails || null,
+        notes: first.notes || null,
+        customImageUrl: first.imageUrl || null,
+        // Builds 2..N.
+        units: extra,
       });
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save details");
@@ -1003,36 +1312,11 @@ function CollectionItemEditor({
               className={inputClass}
             />
           </Field>
-          <Field label="Condition">
-            <select
-              value={form.condition}
-              onChange={(event) => setForm({ ...form, condition: event.target.value })}
-              className={inputClass}
-            >
-              <option value="">Not specified</option>
-              {Object.entries(CONDITION_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Color / variant">
-            <input
-              value={form.color}
-              onChange={(event) => setForm({ ...form, color: event.target.value })}
-              placeholder="e.g. E-White, Black, Navy"
-              className={inputClass}
-            />
-          </Field>
           <Field label="Units owned">
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setForm((f) => ({ ...f, quantity: Math.max(1, f.quantity - 1) }))}
+                onClick={() => setQuantity(form.quantity - 1)}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-lg font-medium text-gray-600 hover:border-gray-400 hover:text-gray-950 dark:border-gray-700 dark:text-gray-300 dark:hover:text-white"
               >
                 −
@@ -1042,7 +1326,7 @@ function CollectionItemEditor({
               </span>
               <button
                 type="button"
-                onClick={() => setForm((f) => ({ ...f, quantity: Math.min(99, f.quantity + 1) }))}
+                onClick={() => setQuantity(form.quantity + 1)}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-lg font-medium text-gray-600 hover:border-gray-400 hover:text-gray-950 dark:border-gray-700 dark:text-gray-300 dark:hover:text-white"
               >
                 +
@@ -1080,43 +1364,34 @@ function CollectionItemEditor({
           description="Off by default. The amount remains private unless both this and public display are enabled."
         />
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Switches">
-            <input
-              value={form.switches}
-              onChange={(event) => setForm({ ...form, switches: event.target.value })}
-              placeholder="e.g. Cherry MX Blacks, lubed"
-              className={inputClass}
-            />
-          </Field>
-          <Field label="Keycaps">
-            <input
-              value={form.keycaps}
-              onChange={(event) => setForm({ ...form, keycaps: event.target.value })}
-              placeholder="e.g. GMK Ishtar"
-              className={inputClass}
-            />
-          </Field>
+        {/* Per-build details. With multiple units each build keeps its own
+            photo, color, switches, keycaps and condition. */}
+        <div className="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
+          {form.quantity > 1 && (
+            <div className="mb-4 flex flex-wrap gap-2">
+              {builds.map((_, index) => (
+                <button
+                  key={index}
+                  type="button"
+                  onClick={() => setActiveBuild(index)}
+                  className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
+                    activeBuild === index
+                      ? "bg-gray-950 text-white dark:bg-white dark:text-gray-950"
+                      : "border border-gray-200 text-gray-500 hover:text-gray-900 dark:border-gray-700 dark:text-gray-400 dark:hover:text-white"
+                  }`}
+                >
+                  Build {index + 1}
+                </button>
+              ))}
+            </div>
+          )}
+          <BuildFields
+            build={builds[activeBuild] || EMPTY_UNIT}
+            fallbackImage={activeBuild === 0 ? catalogImage : null}
+            onChange={(patch) => updateBuild(activeBuild, patch)}
+            onError={setError}
+          />
         </div>
-
-        <Field label="Build specification">
-          <textarea
-            value={form.buildDetails}
-            onChange={(event) => setForm({ ...form, buildDetails: event.target.value })}
-            placeholder="Plate, mounting configuration, stabilizers, foam, artisan details…"
-            rows={3}
-            className={inputClass}
-          />
-        </Field>
-        <Field label="Private notes">
-          <textarea
-            value={form.notes}
-            onChange={(event) => setForm({ ...form, notes: event.target.value })}
-            placeholder="Maintenance notes, serial number, provenance, or memories. Never shown publicly."
-            rows={3}
-            className={inputClass}
-          />
-        </Field>
 
         <div className="rounded-xl border border-[#ddcfb4] bg-[#faf7f0] p-4 dark:border-[#4a3e29] dark:bg-[#211d16]">
           <CheckRow

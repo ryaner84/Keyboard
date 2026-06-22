@@ -282,6 +282,13 @@ model TrackerItem {
   displayOrder      Int       @default(0)
   color             String?
   quantity          Int       @default(1)
+  // The owner's own photo for this piece (build 1), overriding the catalog
+  // image on their card. Either an https URL or a resized data: URL.
+  customImageUrl    String?
+  // Per-unit build breakdown for quantity > 1. JSON array of builds 2..N
+  // (build 1 lives in the columns above): [{ color, condition, switches,
+  // keycaps, buildDetails, notes, imageUrl }].
+  units             Json?
   lastStatus        String?
   lastBestPriceUsd  Float?
   lastVendorCount   Int       @default(0)

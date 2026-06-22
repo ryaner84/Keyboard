@@ -115,6 +115,18 @@ export interface GroupBuyWithPricing extends Omit<GroupBuyWithKits, "kits"> {
   kits: KitWithVendors[];
 }
 
+// One physical build when the owner has multiple units of the same board.
+// Build 1's specs live on CollectionItemDetails directly; builds 2..N here.
+export interface CollectionUnit {
+  color: string | null;
+  condition: string | null;
+  switches: string | null;
+  keycaps: string | null;
+  buildDetails: string | null;
+  notes: string | null;
+  imageUrl: string | null;
+}
+
 export interface CollectionItemDetails {
   isTracking: boolean;
   inCollection: boolean;
@@ -131,6 +143,10 @@ export interface CollectionItemDetails {
   displayOrder: number;
   color: string | null;
   quantity: number;
+  // Owner's own photo for build 1 (overrides the catalog image).
+  customImageUrl: string | null;
+  // Extra builds (2..N) when quantity > 1.
+  units: CollectionUnit[] | null;
 }
 
 export interface CollectionCatalogItem extends GroupBuyWithPricing {
