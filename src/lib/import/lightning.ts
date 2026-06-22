@@ -168,18 +168,33 @@ export async function importLightning(
   });
   const known = new Set(existing.map((r) => r.slug));
 
+  // Part numbering may not start at 1 (the portfolio currently runs ~5..11) and
+  // may have gaps, so we don't stop at the first missing part. We keep probing
+  // through a pre-start gap, and only stop once we've seen content AND then hit
+  // a few consecutive empty parts (the end of the list).
+  const GAP_LIMIT = 3; // consecutive empty parts after content → end of list
+  const PRESTART_LIMIT = 20; // give up if no part exists this low
+  let foundAny = false;
+  let misses = 0;
+
   for (let part = 1; part <= LK_MAX_PART_PROBE; part++) {
     if (Date.now() > deadline) {
       result.stoppedEarly = true;
       break;
     }
     const gridMarkup = await fetchText(`${LK_BASE}/work-pt-${part}/`);
-    if (gridMarkup == null) {
-      // Network error vs. genuine end is indistinguishable; stop probing.
-      break;
+    const links = gridMarkup ? parseBuildLinks(gridMarkup, part) : [];
+    if (links.length === 0) {
+      misses++;
+      if (foundAny) {
+        if (misses >= GAP_LIMIT) break; // past the last part
+      } else if (part >= PRESTART_LIMIT) {
+        break; // nothing found anywhere — give up
+      }
+      continue;
     }
-    const links = parseBuildLinks(gridMarkup, part);
-    if (links.length === 0) break; // contiguous numbering — first empty part ends it
+    misses = 0;
+    foundAny = true;
     result.parts++;
 
     for (const link of links) {

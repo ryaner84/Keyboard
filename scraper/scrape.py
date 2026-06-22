@@ -2338,15 +2338,31 @@ def run_lightning(conn, context: BrowserContext, deadline: float) -> dict:
     try:
         # First run: discover every part from 1 up. Later: re-scan the latest
         # known part (it may have gained builds) and probe upward for new parts.
+        # Part numbering may not start at 1 and may have gaps, so we don't stop
+        # at the first missing part: we probe through a pre-start gap and only
+        # stop once we've seen content AND then hit a few consecutive empties.
+        GAP_LIMIT = 3       # consecutive empty parts after content → end of list
+        PRESTART_LIMIT = 20  # give up if no part exists this low
         part_n = 1 if first_run else latest_part
         highest = latest_part
+        found_any = not first_run
+        misses = 0
         while part_n <= LK_MAX_PART_PROBE:
             if now_ms() > deadline:
                 log("Lightning pass: deadline reached — resume on next run.")
                 break
             builds = lk_list_builds(page, part_n)
             if not builds:
-                break  # contiguous numbering — first empty part ends pagination
+                misses += 1
+                if found_any:
+                    if misses >= GAP_LIMIT:
+                        break  # past the last part
+                elif part_n >= PRESTART_LIMIT:
+                    break  # nothing found anywhere — give up
+                part_n += 1
+                continue
+            misses = 0
+            found_any = True
             stats["parts"] += 1
             highest = max(highest, part_n)
             for b in builds:
