@@ -55,7 +55,7 @@ It never overwrites a price you set manually in the admin panel
 
 2. **Clone the repo** somewhere on the WorkSpace, e.g.:
    ```
-   git clone https://github.com/ryaner84/keyboard.git C:\GMK\Keyboard
+   git clone https://github.com/ryaner84/keyboard.git "%LOCALAPPDATA%\gmk-tracker\repo"
    ```
    When prompted, sign in with your GitHub username + a **Personal Access Token**
    (Settings → Developer settings → Tokens). Git remembers it via Credential
@@ -66,6 +66,12 @@ It never overwrites a price you set manually in the admin panel
    unless your pooler host is non‑standard.
 
 4. **Double‑click `scraper\run-scraper.bat`.** On this first run it will:
+   - create or reuse a clone under the current Windows account at
+     `%LOCALAPPDATA%\gmk-tracker\repo` (avoids cross-account ACL failures),
+   - automatically preserve and replace that checkout if a future Git pull
+     detects broken permissions or damaged repository metadata,
+   - migrate `credentials.csv`, `config.local.ini`, `gh_seen.json`, and
+     `lk_seen.json` from the old `C:\ryaner84\gmk-tracker` checkout when present,
    - install Python deps + Chromium,
    - **ask for your Supabase database password** (typed hidden). It tests the
      password against the database and keeps asking until it's correct, then saves
