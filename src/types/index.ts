@@ -118,6 +118,9 @@ export interface GroupBuyWithPricing extends Omit<GroupBuyWithKits, "kits"> {
 // One physical build when the owner has multiple units of the same board.
 // Build 1's specs live on CollectionItemDetails directly; builds 2..N here.
 export interface CollectionUnit {
+  acquiredAt: Date | string | null;
+  purchasePrice: number | null;
+  purchaseCurrency: string | null;
   color: string | null;
   condition: string | null;
   switches: string | null;

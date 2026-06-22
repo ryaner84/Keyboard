@@ -115,7 +115,19 @@ export async function PATCH(
     ) {
       return NextResponse.json({ error: "Invalid keyboard photo" }, { status: 400 });
     }
-    data.units = raw.map(cleanUnit) as unknown as Prisma.InputJsonValue;
+    try {
+      data.units = raw.map(cleanUnit) as unknown as Prisma.InputJsonValue;
+    } catch (unitError) {
+      return NextResponse.json(
+        {
+          error:
+            unitError instanceof Error
+              ? unitError.message
+              : "Invalid build purchase details",
+        },
+        { status: 400 }
+      );
+    }
   }
 
   const willBeInCollection = data.inCollection ?? item.inCollection;
@@ -198,6 +210,9 @@ function cleanCondition(value: unknown): string | null {
 function cleanUnit(u: unknown): CollectionUnit {
   const o = (u ?? {}) as Record<string, unknown>;
   return {
+    acquiredAt: cleanUnitDate(o.acquiredAt),
+    purchasePrice: cleanUnitPrice(o.purchasePrice),
+    purchaseCurrency: cleanUnitCurrency(o.purchaseCurrency),
     color: cleanOptionalText(o.color, 80),
     condition: cleanCondition(o.condition),
     switches: cleanOptionalText(o.switches, 160),
@@ -206,4 +221,27 @@ function cleanUnit(u: unknown): CollectionUnit {
     notes: cleanOptionalText(o.notes, 1000),
     imageUrl: cleanCollectionPhoto(o.imageUrl),
   };
+}
+
+function cleanUnitDate(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Invalid acquisition date for one of the builds");
+  }
+  return date.toISOString();
+}
+
+function cleanUnitPrice(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const price = Number(value);
+  if (!Number.isFinite(price) || price < 0 || price > 10_000_000) {
+    throw new Error("Invalid purchase price for one of the builds");
+  }
+  return price;
+}
+
+function cleanUnitCurrency(value: unknown): string | null {
+  const currency = String(value ?? "").trim().toUpperCase().slice(0, 8);
+  return currency || null;
 }

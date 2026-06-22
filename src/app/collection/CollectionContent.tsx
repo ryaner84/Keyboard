@@ -42,6 +42,9 @@ const EMPTY_DETAILS: CollectionItemDetails = {
 };
 
 const EMPTY_UNIT: CollectionUnit = {
+  acquiredAt: null,
+  purchasePrice: null,
+  purchaseCurrency: null,
   color: null,
   condition: null,
   switches: null,
@@ -115,48 +118,48 @@ function calculateCollectionSpending(
   let unconvertedCount = 0;
 
   for (const item of keyboards) {
-    const price = item.collection.purchasePrice;
-    const sourceCurrency = item.collection.purchaseCurrency || targetCurrency;
-    if (price == null) {
-      missingPriceCount++;
-      continue;
-    }
+    for (const build of assembleBuilds(item.collection)) {
+      const price = build.purchasePrice;
+      const sourceCurrency = build.purchaseCurrency || targetCurrency;
+      if (price == null) {
+        missingPriceCount++;
+        continue;
+      }
 
-    const canConvert =
-      sourceCurrency === targetCurrency ||
-      (Number.isFinite(rates[sourceCurrency]) &&
-        Number.isFinite(rates[targetCurrency]));
-    if (!canConvert) {
-      unconvertedCount++;
-      continue;
-    }
+      const canConvert =
+        sourceCurrency === targetCurrency ||
+        (Number.isFinite(rates[sourceCurrency]) &&
+          Number.isFinite(rates[targetCurrency]));
+      if (!canConvert) {
+        unconvertedCount++;
+        continue;
+      }
 
-    const quantity = Math.max(1, item.collection.quantity || 1);
-    const convertedPerUnit =
-      sourceCurrency === targetCurrency
-        ? price
-        : convertCurrency(price, sourceCurrency, targetCurrency, rates);
-    const purchaseTotal = convertedPerUnit * quantity;
-    total += purchaseTotal;
-    pricedEntries++;
-    pricedUnits += quantity;
+      const convertedPrice =
+        sourceCurrency === targetCurrency
+          ? price
+          : convertCurrency(price, sourceCurrency, targetCurrency, rates);
+      total += convertedPrice;
+      pricedEntries++;
+      pricedUnits++;
 
-    if (!item.collection.acquiredAt) {
-      missingDateCount++;
-      continue;
-    }
-    const acquiredAt = new Date(item.collection.acquiredAt);
-    if (Number.isNaN(acquiredAt.getTime())) {
-      missingDateCount++;
-      continue;
-    }
-    const key = `${acquiredAt.getUTCFullYear()}-${String(
-      acquiredAt.getUTCMonth() + 1
-    ).padStart(2, "0")}`;
-    const month = monthByKey.get(key);
-    if (month) {
-      month.amount += purchaseTotal;
-      month.purchases += quantity;
+      if (!build.acquiredAt) {
+        missingDateCount++;
+        continue;
+      }
+      const acquiredAt = new Date(build.acquiredAt);
+      if (Number.isNaN(acquiredAt.getTime())) {
+        missingDateCount++;
+        continue;
+      }
+      const key = `${acquiredAt.getUTCFullYear()}-${String(
+        acquiredAt.getUTCMonth() + 1
+      ).padStart(2, "0")}`;
+      const month = monthByKey.get(key);
+      if (month) {
+        month.amount += convertedPrice;
+        month.purchases++;
+      }
     }
   }
 
@@ -179,6 +182,9 @@ function calculateCollectionSpending(
 function assembleBuilds(c: CollectionItemDetails): CollectionUnit[] {
   const qty = Math.max(1, c.quantity || 1);
   const first: CollectionUnit = {
+    acquiredAt: c.acquiredAt,
+    purchasePrice: c.purchasePrice,
+    purchaseCurrency: c.purchaseCurrency,
     color: c.color,
     condition: c.condition,
     switches: c.switches,
@@ -187,14 +193,42 @@ function assembleBuilds(c: CollectionItemDetails): CollectionUnit[] {
     notes: c.notes,
     imageUrl: c.customImageUrl,
   };
-  const extra = Array.isArray(c.units) ? c.units : [];
+  const extra = Array.isArray(c.units)
+    ? c.units.map((unit) => ({
+        ...unit,
+        // Records saved before per-build pricing used one shared purchase
+        // record. Carry it into legacy extra builds until the owner edits them.
+        acquiredAt:
+          unit.acquiredAt === undefined ? c.acquiredAt : unit.acquiredAt,
+        purchasePrice:
+          unit.purchasePrice === undefined
+            ? c.purchasePrice
+            : unit.purchasePrice,
+        purchaseCurrency:
+          unit.purchaseCurrency === undefined
+            ? c.purchaseCurrency
+            : unit.purchaseCurrency,
+      }))
+    : [];
   const builds = [first, ...extra].slice(0, qty);
   while (builds.length < qty) builds.push({ ...EMPTY_UNIT });
   return builds;
 }
 
+function dateInputValue(value: Date | string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+}
+
 function BuildSummary({ build, index }: { build: CollectionUnit; index: number }) {
   const specs = [
+    build.acquiredAt
+      ? `Acquired ${new Date(build.acquiredAt).getFullYear()}`
+      : null,
+    build.purchasePrice != null
+      ? `${build.purchaseCurrency || "USD"} ${build.purchasePrice.toLocaleString()}`
+      : null,
     build.color,
     build.condition ? CONDITION_LABELS[build.condition] || build.condition : null,
     build.switches,
@@ -429,16 +463,77 @@ function PhotoUploadField({
 function BuildFields({
   build,
   fallbackImage,
+  purchaseCurrencies,
   onChange,
   onError,
 }: {
   build: CollectionUnit;
   fallbackImage: string | null;
+  purchaseCurrencies: Array<{ code: string; name: string }>;
   onChange: (patch: Partial<CollectionUnit>) => void;
   onError: (message: string) => void;
 }) {
   return (
     <div className="space-y-4">
+      <div className="rounded-xl border border-[#ddcfb4] bg-[#faf7f0] p-4 dark:border-[#4a3e29] dark:bg-[#211d16]">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#80632f] dark:text-[#d5b779]">
+          Purchase record
+        </p>
+        <div className="mt-3 grid gap-4 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_190px]">
+          <Field label="Acquired">
+            <input
+              type="date"
+              value={dateInputValue(build.acquiredAt)}
+              onChange={(event) =>
+                onChange({ acquiredAt: event.target.value || null })
+              }
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Purchase price">
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={build.purchasePrice ?? ""}
+              onChange={(event) =>
+                onChange({
+                  purchasePrice:
+                    event.target.value === ""
+                      ? null
+                      : Number(event.target.value),
+                  purchaseCurrency:
+                    build.purchaseCurrency ||
+                    purchaseCurrencies[0]?.code ||
+                    "USD",
+                })
+              }
+              placeholder="Optional"
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Currency">
+            <select
+              value={build.purchaseCurrency || purchaseCurrencies[0]?.code || "USD"}
+              onChange={(event) =>
+                onChange({ purchaseCurrency: event.target.value })
+              }
+              className={inputClass}
+            >
+              {purchaseCurrencies.map((option) => (
+                <option key={option.code} value={option.code}>
+                  {option.code} — {option.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <p className="mt-2 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+          Each build has its own purchase amount and date. These private values
+          power your total and monthly trend.
+        </p>
+      </div>
+
       <Field label="Photo">
         <PhotoUploadField
           value={build.imageUrl}
@@ -654,7 +749,9 @@ export default function CollectionContent() {
       owned.find(
         (item) =>
           item.productType === "KEYBOARD" &&
-          (item.collection.purchasePrice == null || !item.collection.acquiredAt)
+          assembleBuilds(item.collection).some(
+            (build) => build.purchasePrice == null || !build.acquiredAt
+          )
       ) ?? null,
     [owned]
   );
@@ -1131,7 +1228,7 @@ function CollectionSpendingPanel({
   const hasSpend = spending.pricedEntries > 0;
   const completionMessage =
     spending.missingPriceCount > 0
-      ? `${spending.missingPriceCount} keyboard${
+      ? `${spending.missingPriceCount} build${
           spending.missingPriceCount === 1 ? "" : "s"
         } missing a purchase price`
       : spending.missingDateCount > 0
@@ -1173,7 +1270,7 @@ function CollectionSpendingPanel({
               </p>
             )}
             <p className="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
-              Purchase price per unit × quantity, converted to {currency}.
+              Sum of each build’s recorded purchase price, converted to {currency}.
             </p>
           </div>
 
@@ -1672,12 +1769,7 @@ function CollectionItemEditor({
 }) {
   const catalogImage = normalizeImageUrl(item.imageUrl);
   const [form, setForm] = useState({
-    acquiredAt: item.collection.acquiredAt
-      ? new Date(item.collection.acquiredAt).toISOString().slice(0, 10)
-      : "",
     quantity: item.collection.quantity ?? 1,
-    purchasePrice: item.collection.purchasePrice?.toString() || "",
-    purchaseCurrency: item.collection.purchaseCurrency || defaultCurrency || "USD",
     showPurchasePrice: item.collection.showPurchasePrice,
     isPublic: item.collection.isPublic,
   });
@@ -1689,23 +1781,26 @@ function CollectionItemEditor({
   const [error, setError] = useState("");
   const purchaseCurrencies = useMemo(() => {
     const options = [...DISPLAY_CURRENCIES];
-    const savedCurrency = form.purchaseCurrency.trim().toUpperCase();
-    if (
-      savedCurrency &&
-      !options.some((option) => option.code === savedCurrency)
-    ) {
-      options.push({
-        code: savedCurrency,
-        symbol: savedCurrency,
-        name: "Previously saved currency",
-      });
+    const savedCurrencies = new Set(
+      builds
+        .map((build) => build.purchaseCurrency?.trim().toUpperCase())
+        .filter((value): value is string => Boolean(value))
+    );
+    for (const savedCurrency of Array.from(savedCurrencies)) {
+      if (!options.some((option) => option.code === savedCurrency)) {
+        options.push({
+          code: savedCurrency,
+          symbol: savedCurrency,
+          name: "Previously saved currency",
+        });
+      }
     }
     return options.sort((a, b) => {
       if (a.code === defaultCurrency) return -1;
       if (b.code === defaultCurrency) return 1;
       return a.code.localeCompare(b.code);
     });
-  }, [defaultCurrency, form.purchaseCurrency]);
+  }, [builds, defaultCurrency]);
 
   useModalBodyLock();
 
@@ -1714,7 +1809,12 @@ function CollectionItemEditor({
     setForm((f) => ({ ...f, quantity: qty }));
     setBuilds((prev) => {
       const arr = prev.slice(0, qty);
-      while (arr.length < qty) arr.push({ ...EMPTY_UNIT });
+      while (arr.length < qty) {
+        arr.push({
+          ...EMPTY_UNIT,
+          purchaseCurrency: defaultCurrency || "USD",
+        });
+      }
       return arr;
     });
     setActiveBuild((a) => Math.min(a, qty - 1));
@@ -1734,13 +1834,13 @@ function CollectionItemEditor({
       const extra = trimmed.slice(1);
       await onSave({
         inCollection: true,
-        acquiredAt: form.acquiredAt || null,
         quantity: qty,
-        purchasePrice: form.purchasePrice === "" ? null : Number(form.purchasePrice),
-        purchaseCurrency: form.purchaseCurrency || null,
         showPurchasePrice: form.showPurchasePrice,
         isPublic: form.isPublic,
         // Build 1 lives on the top-level fields.
+        acquiredAt: first.acquiredAt || null,
+        purchasePrice: first.purchasePrice,
+        purchaseCurrency: first.purchaseCurrency || null,
         color: first.color || null,
         condition: first.condition || null,
         switches: first.switches || null,
@@ -1770,15 +1870,16 @@ function CollectionItemEditor({
       </div>
 
       <div className="max-h-[68vh] space-y-6 overflow-y-auto px-5 py-6 dark:text-white sm:px-7">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Acquired">
-            <input
-              type="date"
-              value={form.acquiredAt}
-              onChange={(event) => setForm({ ...form, acquiredAt: event.target.value })}
-              className={inputClass}
-            />
-          </Field>
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(240px,0.8fr)]">
+          <div className="rounded-xl bg-gray-50 px-4 py-3 dark:bg-white/[0.04]">
+            <p className="text-xs font-semibold text-gray-900 dark:text-white">
+              One record per physical build
+            </p>
+            <p className="mt-1 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+              Use the Build tabs below to record a different date, price, currency,
+              photo, and specification for every unit.
+            </p>
+          </div>
           <Field label="Units owned">
             <div className="flex items-center gap-2">
               <button
@@ -1802,47 +1903,11 @@ function CollectionItemEditor({
           </Field>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
-          <Field label="Purchase price per unit">
-            <div>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.purchasePrice}
-                onChange={(event) => setForm({ ...form, purchasePrice: event.target.value })}
-                placeholder="Optional"
-                className={inputClass}
-              />
-              <p className="mt-1.5 text-[11px] leading-4 text-gray-400">
-                Used privately for your collection total and monthly spending trend.
-                {form.quantity > 1
-                  ? ` Total recorded spend will be price × ${form.quantity} units.`
-                  : ""}
-              </p>
-            </div>
-          </Field>
-          <Field label="Currency">
-            <select
-              value={form.purchaseCurrency}
-              onChange={(event) =>
-                setForm({ ...form, purchaseCurrency: event.target.value })
-              }
-              className={inputClass}
-            >
-              {purchaseCurrencies.map((option) => (
-                <option key={option.code} value={option.code}>
-                  {option.code} — {option.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
         <CheckRow
           checked={form.showPurchasePrice}
           onChange={(checked) => setForm({ ...form, showPurchasePrice: checked })}
-          title="Show purchase price publicly"
-          description="Off by default. The amount remains private unless both this and public display are enabled."
+          title="Show build purchase prices publicly"
+          description="Off by default. Every build amount remains private unless both this and public display are enabled."
         />
 
         {/* Per-build details. With multiple units each build keeps its own
@@ -1869,6 +1934,7 @@ function CollectionItemEditor({
           <BuildFields
             build={builds[activeBuild] || EMPTY_UNIT}
             fallbackImage={activeBuild === 0 ? catalogImage : null}
+            purchaseCurrencies={purchaseCurrencies}
             onChange={(patch) => updateBuild(activeBuild, patch)}
             onError={setError}
           />
