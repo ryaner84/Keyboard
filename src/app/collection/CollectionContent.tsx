@@ -261,7 +261,8 @@ export default function CollectionContent() {
           : payload.user
       );
       const url = `${window.location.origin}${collectionSharePath(
-        payload.user.collectionSlug
+        payload.user.collectionSlug,
+        Date.now().toString(36)
       )}`;
       await navigator.clipboard.writeText(url);
       setSharePickerOpen(false);

@@ -61,10 +61,13 @@ const getPublicCollection = cache(async (slug: string) =>
 
 export async function generateMetadata({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ share?: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
+  const { share } = await searchParams;
   const collection = await getPublicCollection(slug);
   if (!collection) return { title: "Collection not found" };
 
@@ -75,8 +78,8 @@ export async function generateMetadata({
     `Explore ${owner}'s curated mechanical keyboard collection.`;
   const siteUrl = getSiteUrl();
   const canonicalUrl = `${siteUrl}/collection/${slug}`;
-  const pageUrl = `${siteUrl}${collectionSharePath(slug)}`;
-  const posterUrl = `${siteUrl}${collectionPosterPath(slug)}`;
+  const pageUrl = `${siteUrl}${collectionSharePath(slug, share)}`;
+  const posterUrl = `${siteUrl}${collectionPosterPath(slug, share)}`;
 
   return {
     title,
