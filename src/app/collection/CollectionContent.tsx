@@ -460,6 +460,240 @@ function PhotoUploadField({
   );
 }
 
+type PurchaseCurrencyOption = {
+  code: string;
+  symbol: string;
+  name: string;
+};
+
+function CurrencyCombobox({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: PurchaseCurrencyOption[];
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const active =
+    options.find((option) => option.code === value) ??
+    options[0] ?? {
+      code: value || "USD",
+      symbol: value || "$",
+      name: "Selected currency",
+    };
+  const filteredOptions = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return options;
+    return options.filter((option) =>
+      `${option.code} ${option.name} ${option.symbol}`
+        .toLowerCase()
+        .includes(normalizedQuery)
+    );
+  }, [options, query]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    }
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setHighlightedIndex(0);
+    window.requestAnimationFrame(() => searchRef.current?.focus());
+  }, [open]);
+
+  function selectCurrency(option: PurchaseCurrencyOption) {
+    onChange(option.code);
+    setOpen(false);
+    setQuery("");
+  }
+
+  function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+      setQuery("");
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setHighlightedIndex((current) =>
+        Math.min(current + 1, Math.max(filteredOptions.length - 1, 0))
+      );
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setHighlightedIndex((current) => Math.max(current - 1, 0));
+      return;
+    }
+    if (event.key === "Enter" && filteredOptions[highlightedIndex]) {
+      event.preventDefault();
+      selectCurrency(filteredOptions[highlightedIndex]);
+    }
+  }
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        role="combobox"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-controls="collection-currency-options"
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" && !open) {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
+        className={`${inputClass} flex min-h-[42px] items-center justify-between gap-2 text-left`}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="flex h-7 min-w-7 shrink-0 items-center justify-center rounded-lg bg-[#f4ecdc] px-1.5 text-xs font-bold text-[#80632f] dark:bg-[#362d1e] dark:text-[#dfc284]">
+            {active.symbol}
+          </span>
+          <span className="min-w-0">
+            <span className="block text-xs font-bold leading-4 text-gray-950 dark:text-white">
+              {active.code}
+            </span>
+            <span
+              title={active.name}
+              className="block truncate text-[10px] leading-3 text-gray-500 dark:text-gray-400"
+            >
+              {active.name}
+            </span>
+          </span>
+        </span>
+        <svg
+          className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${
+            open ? "rotate-180" : ""
+          }`}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M19 9l-7 7-7-7"
+          />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-2 w-full min-w-[260px] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-[#15181c] sm:left-auto sm:right-0 sm:w-80">
+          <div className="border-b border-gray-100 p-2 dark:border-gray-700">
+            <div className="relative">
+              <svg
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 21l-4.35-4.35m1.35-5.65a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
+              </svg>
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setHighlightedIndex(0);
+                }}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="Search USD, dollar, SGD..."
+                aria-label="Search currencies"
+                className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2.5 pl-9 pr-3 text-sm text-gray-950 outline-none placeholder:text-gray-400 focus:border-[#9a7a42] focus:ring-2 focus:ring-[#9a7a42]/10 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
+              />
+            </div>
+          </div>
+
+          <div
+            id="collection-currency-options"
+            role="listbox"
+            className="max-h-64 overflow-y-auto p-1.5"
+          >
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((option, index) => {
+                const selected = option.code === active.code;
+                const highlighted = index === highlightedIndex;
+                return (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    key={option.code}
+                    onMouseEnter={() => setHighlightedIndex(index)}
+                    onClick={() => selectCurrency(option)}
+                    className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${
+                      highlighted
+                        ? "bg-[#f7f1e5] dark:bg-[#2b251b]"
+                        : "hover:bg-gray-50 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    <span className="flex h-8 min-w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 px-1.5 text-xs font-bold text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                      {option.symbol}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-gray-950 dark:text-white">
+                        {option.code}
+                      </span>
+                      <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
+                        {option.name}
+                      </span>
+                    </span>
+                    {selected && (
+                      <svg
+                        className="h-4 w-4 shrink-0 text-[#9a7a42]"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2.5}
+                          d="M5 12l4 4 10-10"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })
+            ) : (
+              <p className="px-3 py-6 text-center text-xs text-gray-500 dark:text-gray-400">
+                No matching currency. Try a code such as USD or SGD.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BuildFields({
   build,
   fallbackImage,
@@ -469,7 +703,7 @@ function BuildFields({
 }: {
   build: CollectionUnit;
   fallbackImage: string | null;
-  purchaseCurrencies: Array<{ code: string; name: string }>;
+  purchaseCurrencies: PurchaseCurrencyOption[];
   onChange: (patch: Partial<CollectionUnit>) => void;
   onError: (message: string) => void;
 }) {
@@ -512,21 +746,16 @@ function BuildFields({
               className={inputClass}
             />
           </Field>
-          <Field label="Currency">
-            <select
+          <div>
+            <span className="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-200">
+              Currency
+            </span>
+            <CurrencyCombobox
               value={build.purchaseCurrency || purchaseCurrencies[0]?.code || "USD"}
-              onChange={(event) =>
-                onChange({ purchaseCurrency: event.target.value })
-              }
-              className={inputClass}
-            >
-              {purchaseCurrencies.map((option) => (
-                <option key={option.code} value={option.code}>
-                  {option.code} — {option.name}
-                </option>
-              ))}
-            </select>
-          </Field>
+              options={purchaseCurrencies}
+              onChange={(purchaseCurrency) => onChange({ purchaseCurrency })}
+            />
+          </div>
         </div>
         <p className="mt-2 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
           Each build has its own purchase amount and date. These private values
