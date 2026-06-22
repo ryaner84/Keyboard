@@ -38,11 +38,32 @@ type CollectionGroupBuy = {
   vendorName: string | null;
 };
 
+function posterThumbnailUrl(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    if (url.hostname === "cdn.shopify.com") {
+      url.searchParams.set("width", "480");
+    } else if (url.hostname.endsWith("squarespace.com")) {
+      url.searchParams.set("format", "500w");
+    } else if (url.hostname === "i.imgur.com") {
+      url.pathname = url.pathname.replace(
+        /(\.[a-z]+)$/i,
+        (_, extension: string) => `l${extension}`
+      );
+    }
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 async function fetchImageDataUri(url: string): Promise<string | null> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 6000);
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(posterThumbnailUrl(url), {
+      signal: controller.signal,
+    });
     clearTimeout(timer);
     if (!response.ok) return null;
 
@@ -50,7 +71,7 @@ async function fetchImageDataUri(url: string): Promise<string | null> {
     if (!contentType.startsWith("image/")) return null;
 
     const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length > 4_000_000) return null;
+    if (buffer.length > 1_500_000) return null;
     return `data:${contentType};base64,${buffer.toString("base64")}`;
   } catch {
     return null;
@@ -165,7 +186,8 @@ export async function GET(
     })
   );
 
-  return new ImageResponse(
+  try {
+    const poster = new ImageResponse(
     (
       <div
         style={{
@@ -434,7 +456,26 @@ export async function GET(
           "public, max-age=300, s-maxage=300, stale-while-revalidate=3600",
       },
     }
-  );
+    );
+    const bytes = await poster.arrayBuffer();
+    return new Response(bytes, {
+      status: 200,
+      headers: {
+        "Content-Type": "image/png",
+        "Cache-Control":
+          "public, max-age=300, s-maxage=300, stale-while-revalidate=3600",
+      },
+    });
+  } catch (error) {
+    console.error("[collection-poster] rich poster render failed", error);
+    return renderFallbackPoster({
+      owner,
+      title,
+      keyboardCount: keyboards.length,
+      layoutCounts,
+      brandCounts,
+    });
+  }
 }
 
 function StatPanel({
@@ -511,5 +552,134 @@ function StatPanel({
         )}
       </div>
     </div>
+  );
+}
+
+function renderFallbackPoster({
+  owner,
+  title,
+  keyboardCount,
+  layoutCounts,
+  brandCounts,
+}: {
+  owner: string;
+  title: string;
+  keyboardCount: number;
+  layoutCounts: Array<{ label: string; count: number }>;
+  brandCounts: Array<{ label: string; count: number }>;
+}) {
+  return new ImageResponse(
+    (
+      <div
+        style={{
+          width: WIDTH,
+          height: HEIGHT,
+          display: "flex",
+          flexDirection: "column",
+          padding: 34,
+          background:
+            "radial-gradient(circle at 85% 10%, rgba(201,171,114,0.22), transparent 30%), linear-gradient(145deg, #090c0f, #151a1e)",
+          color: "#ffffff",
+          fontFamily: "Arial, sans-serif",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            color: "#d9bb82",
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: "0.2em",
+            textTransform: "uppercase",
+          }}
+        >
+          Personal keyboard archive
+        </div>
+        <div
+          style={{
+            marginTop: 24,
+            display: "flex",
+            color: "rgba(255,255,255,0.55)",
+            fontSize: 14,
+          }}
+        >
+          Curated by {owner}
+        </div>
+        <div
+          style={{
+            marginTop: 8,
+            display: "flex",
+            color: "#ffffff",
+            fontFamily: "Georgia, serif",
+            fontSize: 43,
+            fontWeight: 700,
+          }}
+        >
+          {title}
+        </div>
+        <div
+          style={{
+            marginTop: 24,
+            display: "flex",
+            alignItems: "baseline",
+          }}
+        >
+          <span
+            style={{
+              display: "flex",
+              color: "#d9bb82",
+              fontFamily: "Georgia, serif",
+              fontSize: 48,
+              fontWeight: 700,
+            }}
+          >
+            {keyboardCount}
+          </span>
+          <span
+            style={{
+              display: "flex",
+              marginLeft: 10,
+              fontSize: 14,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.12em",
+            }}
+          >
+            keyboards on display
+          </span>
+        </div>
+        <div style={{ marginTop: 26, display: "flex", gap: 12 }}>
+          <StatPanel
+            title="Layout mix"
+            values={layoutCounts}
+            emptyLabel="Layout details coming soon"
+          />
+          <StatPanel
+            title="Top brands"
+            values={brandCounts}
+            emptyLabel="Independent collection"
+          />
+        </div>
+        <div
+          style={{
+            marginTop: "auto",
+            display: "flex",
+            color: "#d9bb82",
+            fontSize: 11,
+            fontWeight: 700,
+          }}
+        >
+          Explore this collection · Build yours on GMK Tracker
+        </div>
+      </div>
+    ),
+    {
+      width: WIDTH,
+      height: HEIGHT,
+      headers: {
+        "Cache-Control":
+          "public, max-age=60, s-maxage=60, stale-while-revalidate=600",
+      },
+    }
   );
 }
