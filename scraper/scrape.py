@@ -37,7 +37,9 @@ import json
 import os
 import random
 import re
+import shutil
 import sys
+import tempfile
 import time
 import urllib.parse
 from datetime import datetime, timezone, timedelta
@@ -56,7 +58,25 @@ HERE = Path(__file__).resolve().parent
 CONFIG_PATH = HERE / "config.ini"
 LOCAL_CONFIG_PATH = HERE / "config.local.ini"
 CREDENTIALS_PATH = HERE / "credentials.csv"
-PROFILE_DIR = HERE / ".scraper-profile"
+
+
+def _default_profile_dir() -> Path:
+    override = os.environ.get("SCRAPER_PROFILE_DIR")
+    if override:
+        return Path(os.path.expandvars(override)).expanduser()
+
+    # The checkout can belong to a different Windows account than the account
+    # running Task Scheduler. Chromium needs full write access throughout its
+    # profile (Crashpad, cache, history, password databases), so keep it under
+    # the current account's Local AppData instead of beside the repository.
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if os.name == "nt" and local_app_data:
+        return Path(local_app_data) / "gmk-tracker" / "scraper-profile"
+
+    return HERE / ".scraper-profile"
+
+
+PROFILE_DIR = _default_profile_dir()
 LOG_DIR = HERE / "logs"
 GH_SEEN_PATH = HERE / "gh_seen.json"  # topic_id → last_post_at ISO — never committed
 LK_SEEN_PATH = HERE / "lk_seen.json"  # Lightning Keyboards scrape state — never committed
@@ -3122,6 +3142,48 @@ def parse_args():
     return parser.parse_args()
 
 
+def launch_scraper_context(playwright, *, headless: bool):
+    launch_options = {
+        "headless": headless,
+        "viewport": None,
+        "args": ["--start-maximized"],
+        # A locked/corrupt profile should not stall the entire scheduled run
+        # for Playwright's three-minute default before the clean retry.
+        "timeout": 60_000,
+    }
+
+    try:
+        PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+        probe = PROFILE_DIR / f".write-test-{os.getpid()}"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+        log(f"Browser profile: {PROFILE_DIR}")
+        context = playwright.chromium.launch_persistent_context(
+            user_data_dir=str(PROFILE_DIR),
+            **launch_options,
+        )
+        return context, None
+    except Exception as first_error:
+        log(
+            "Saved browser profile is unavailable "
+            f"({type(first_error).__name__}: {first_error}). "
+            "Retrying with a clean temporary profile."
+        )
+
+    temporary_profile = Path(
+        tempfile.mkdtemp(prefix="gmk-tracker-browser-profile-")
+    ).resolve()
+    try:
+        context = playwright.chromium.launch_persistent_context(
+            user_data_dir=str(temporary_profile),
+            **launch_options,
+        )
+        return context, temporary_profile
+    except Exception:
+        shutil.rmtree(temporary_profile, ignore_errors=True)
+        raise
+
+
 def main() -> int:
     global _LOG_FILE
     args = parse_args()
@@ -3150,14 +3212,11 @@ def main() -> int:
         240 if (args.geekhack_backfill_year or args.lightning_only) else 30
     )
     deadline = now_ms() + budget_minutes * 60 * 1000
-    PROFILE_DIR.mkdir(exist_ok=True)
 
     with sync_playwright() as p:
-        context = p.chromium.launch_persistent_context(
-            user_data_dir=str(PROFILE_DIR),
+        context, temporary_profile = launch_scraper_context(
+            p,
             headless=args.headless,
-            viewport=None,
-            args=["--start-maximized"],
         )
         try:
             if args.geekhack_backfill_year:
@@ -3197,6 +3256,8 @@ def main() -> int:
                 price_stats = run_prices(conn, context, deadline)
         finally:
             context.close()
+            if temporary_profile is not None:
+                shutil.rmtree(temporary_profile, ignore_errors=True)
 
     conn.close()
     if args.geekhack_backfill_year:

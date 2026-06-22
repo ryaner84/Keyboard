@@ -283,7 +283,7 @@ model TrackerItem {
   color             String?
   quantity          Int       @default(1)
   // The owner's own photo for this piece (build 1), overriding the catalog
-  // image on their card. Either an https URL or a resized data: URL.
+  // image on their card. Stored as a resized data: URL.
   customImageUrl    String?
   // Per-unit build breakdown for quantity > 1. JSON array of builds 2..N
   // (build 1 lives in the columns above): [{ color, condition, switches,
@@ -299,9 +299,31 @@ model TrackerItem {
   user          TrackerUser           @relation(fields: [userId], references: [id], onDelete: Cascade)
   groupBuy      GroupBuy              @relation(fields: [groupBuyId], references: [id], onDelete: Cascade)
   notifications TrackerNotification[]
+  photoReports  CollectionPhotoReport[]
 
   @@unique([userId, groupBuyId])
   @@index([groupBuyId])
+}
+
+// Visitor reports tied to the exact owner-uploaded image that was visible when
+// the report was submitted. imageHash prevents a replacement photo from
+// inheriting reports made against the previous upload.
+model CollectionPhotoReport {
+  id             String   @id @default(cuid())
+  trackerItemId  String
+  collectionSlug String
+  buildIndex     Int      @default(0)
+  imageHash      String
+  issueType      String
+  notes          String?
+  reporterIpHash String?
+  reporterUserId String?
+  submittedAt    DateTime @default(now())
+
+  trackerItem TrackerItem @relation(fields: [trackerItemId], references: [id], onDelete: Cascade)
+
+  @@index([trackerItemId, imageHash, submittedAt])
+  @@index([submittedAt])
 }
 
 model TrackerNotification {

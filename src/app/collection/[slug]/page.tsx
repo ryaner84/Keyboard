@@ -5,6 +5,7 @@ import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { normalizeImageUrl } from "@/lib/utils";
 import { getSiteUrl } from "@/lib/site-url";
+import ReportPhotoButton from "@/components/collection/ReportPhotoButton";
 import {
   collectionPosterPath,
   collectionSharePath,
@@ -30,6 +31,7 @@ const getPublicCollection = cache(async (slug: string) =>
         },
         orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
         select: {
+          id: true,
           acquiredAt: true,
           condition: true,
           purchasePrice: true,
@@ -181,7 +183,12 @@ export default async function PublicCollectionPage({
         ) : (
           <div className="mt-8 grid gap-7 sm:grid-cols-2 lg:grid-cols-3">
             {collection.items.map((item, index) => (
-              <PublicCollectionCard key={item.groupBuy.id} item={item} number={index + 1} />
+              <PublicCollectionCard
+                key={item.groupBuy.id}
+                item={item}
+                number={index + 1}
+                collectionSlug={slug}
+              />
             ))}
           </div>
         )}
@@ -202,8 +209,10 @@ export default async function PublicCollectionPage({
 function PublicCollectionCard({
   item,
   number,
+  collectionSlug,
 }: {
   item: {
+    id: string;
     acquiredAt: Date | null;
     condition: string | null;
     purchasePrice: number | null;
@@ -230,6 +239,7 @@ function PublicCollectionCard({
     };
   };
   number: number;
+  collectionSlug: string;
 }) {
   const imageUrl = item.customImageUrl || normalizeImageUrl(item.groupBuy.imageUrl);
   const acquiredYear = item.acquiredAt?.getFullYear();
@@ -243,8 +253,9 @@ function PublicCollectionCard({
 
   return (
     <article className="group overflow-hidden rounded-2xl border border-black/[0.08] bg-white shadow-[0_14px_45px_rgba(29,25,18,0.07)] dark:border-white/10 dark:bg-[#111417]">
-      <Link href={`/sets/${item.groupBuy.slug}`} className="block">
-        <div className="relative aspect-[4/3] overflow-hidden bg-[#ddd9cf] dark:bg-gray-900">
+      <div className="relative">
+        <Link href={`/sets/${item.groupBuy.slug}`} className="block">
+          <div className="relative aspect-[4/3] overflow-hidden bg-[#ddd9cf] dark:bg-gray-900">
           {imageUrl ? (
             // Plain img so owner-uploaded data: URLs render.
             // eslint-disable-next-line @next/next/no-img-element
@@ -266,8 +277,18 @@ function PublicCollectionCard({
               {builds.length} builds
             </span>
           )}
-        </div>
-      </Link>
+          </div>
+        </Link>
+        {item.customImageUrl && (
+          <ReportPhotoButton
+            collectionSlug={collectionSlug}
+            trackerItemId={item.id}
+            buildIndex={0}
+            label={`${item.groupBuy.name}, build 1`}
+            className="absolute bottom-4 right-4"
+          />
+        )}
+      </div>
 
       <div className="p-5 sm:p-6">
         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9a7a42] dark:text-[#c9ab72]">
@@ -310,7 +331,14 @@ function PublicCollectionCard({
         {multiBuild && (
           <div className="mt-5 space-y-3 border-t border-gray-100 pt-5 dark:border-white/10">
             {builds.map((build, index) => (
-              <PublicBuild key={index} build={build} index={index} />
+              <PublicBuild
+                key={index}
+                build={build}
+                index={index}
+                collectionSlug={collectionSlug}
+                trackerItemId={item.id}
+                label={item.groupBuy.name}
+              />
             ))}
           </div>
         )}
@@ -373,7 +401,19 @@ function assemblePublicBuilds(item: {
   return builds;
 }
 
-function PublicBuild({ build, index }: { build: PublicBuildShape; index: number }) {
+function PublicBuild({
+  build,
+  index,
+  collectionSlug,
+  trackerItemId,
+  label,
+}: {
+  build: PublicBuildShape;
+  index: number;
+  collectionSlug: string;
+  trackerItemId: string;
+  label: string;
+}) {
   const specs = [
     build.color,
     build.condition ? formatCondition(build.condition) : null,
@@ -383,12 +423,21 @@ function PublicBuild({ build, index }: { build: PublicBuildShape; index: number 
   return (
     <div className="flex gap-3">
       {build.imageUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={build.imageUrl}
-          alt={`Build ${index + 1}`}
-          className="h-14 w-14 shrink-0 rounded-lg object-cover"
-        />
+        <div className="relative h-14 w-14 shrink-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={build.imageUrl}
+            alt={`Build ${index + 1}`}
+            className="h-full w-full rounded-lg object-cover"
+          />
+          <ReportPhotoButton
+            collectionSlug={collectionSlug}
+            trackerItemId={trackerItemId}
+            buildIndex={index}
+            label={`${label}, build ${index + 1}`}
+            className="absolute -bottom-1.5 -right-1.5 !h-6 !w-6"
+          />
+        </div>
       ) : (
         <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-lg text-gray-300 dark:bg-gray-800 dark:text-gray-600">
           ⌨
