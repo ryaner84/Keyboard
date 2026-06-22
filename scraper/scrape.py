@@ -41,6 +41,7 @@ import sys
 import time
 import urllib.parse
 from datetime import datetime, timezone, timedelta
+from html import unescape as html_unescape
 from pathlib import Path
 
 import psycopg2
@@ -58,6 +59,7 @@ CREDENTIALS_PATH = HERE / "credentials.csv"
 PROFILE_DIR = HERE / ".scraper-profile"
 LOG_DIR = HERE / "logs"
 GH_SEEN_PATH = HERE / "gh_seen.json"  # topic_id → last_post_at ISO — never committed
+LK_SEEN_PATH = HERE / "lk_seen.json"  # Lightning Keyboards scrape state — never committed
 
 # Time budget so a stuck run can't hang the machine forever (no serverless cap).
 SCRAPE_BUDGET_MS = 30 * 60 * 1000  # 30 minutes
@@ -2143,6 +2145,250 @@ def run_keyboards(conn, context: BrowserContext, deadline: float) -> dict:
 
 
 # ----------------------------------------------------------------------------
+# Lightning Keyboards build showcase (lightningkeyboards.com)
+#
+# A Squarespace portfolio of custom builds, paginated as /work-pt-1/ ../work-pt-N/.
+# Each part page is a grid of build cards linking to /work-pt-N/<handle> detail
+# pages (title + photo gallery). Parts freeze once the next one starts — only the
+# latest part keeps gaining new builds. So:
+#   - first run (no state): scrape every part from 1 upward until one is empty;
+#   - later runs: re-scan only the latest known part for newly-added builds and
+#     probe for the next part (N+1). Builds already scraped are skipped.
+# State (latest part + scraped handles) lives in lk_seen.json. Each build becomes
+# a GroupBuy(productType='KEYBOARD', status='DELIVERED') — a no-price showcase
+# entry that's searchable and addable to a collection. Builds are NOT for sale,
+# so vendorName credits the builder and productUrl points at the build page.
+# ----------------------------------------------------------------------------
+LK_BASE = "https://www.lightningkeyboards.com"
+LK_MAX_PART_PROBE = 60  # safety ceiling when probing upward for new parts
+
+# Anchor to a build detail page: /work-pt-<n>/<handle> (relative or absolute).
+_LK_LINK_RE = re.compile(
+    r'href="(?:https://www\.lightningkeyboards\.com)?(/work-pt-(\d+)/([^"#?\s]+))"',
+    re.I,
+)
+_LK_IMG_RE = re.compile(r'https://images\.squarespace-cdn\.com/[^\s"\'<>)\\]+', re.I)
+_LK_OG_TITLE_RE = re.compile(
+    r'<meta[^>]+property="og:title"[^>]+content="([^"]*)"', re.I)
+_LK_OG_IMG_RE = re.compile(
+    r'<meta[^>]+property="og:image"[^>]+content="([^"]*)"', re.I)
+_LK_OG_DESC_RE = re.compile(
+    r'<meta[^>]+property="og:description"[^>]+content="([^"]*)"', re.I)
+
+
+def lk_load_seen() -> dict:
+    try:
+        if LK_SEEN_PATH.exists():
+            return json.loads(LK_SEEN_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def lk_save_seen(seen: dict) -> None:
+    try:
+        LK_SEEN_PATH.write_text(json.dumps(seen, indent=2), encoding="utf-8")
+    except Exception as e:
+        log(f"  lk_seen.json write failed: {e}")
+
+
+def lk_list_builds(page: Page, part_n: int) -> list[dict]:
+    """Return [{handle, url, part}] for build cards on /work-pt-<part_n>/.
+    Empty list means the part doesn't exist (Squarespace 404s render as 200, so
+    'no build links' is our end-of-pagination signal)."""
+    url = f"{LK_BASE}/work-pt-{part_n}/"
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+        page.wait_for_timeout(1200)  # let the lazy grid render
+        markup = page.content()
+    except Exception as e:
+        log(f"  LK part {part_n} nav failed: {e}")
+        return []
+
+    out: list[dict] = []
+    handles: set[str] = set()
+    for m in _LK_LINK_RE.finditer(markup):
+        full_path, part_str, handle = m.group(1), m.group(2), m.group(3)
+        if int(part_str) != part_n:
+            continue  # ignore sidebar/nav links pointing at other parts
+        handle = handle.rstrip("/")
+        if not handle or handle in handles:
+            continue
+        handles.add(handle)
+        out.append({"handle": handle, "url": LK_BASE + full_path, "part": part_n})
+    return out
+
+
+def lk_scrape_build(page: Page, build: dict) -> dict | None:
+    """Open a build detail page and pull its title, photo gallery, description."""
+    try:
+        page.goto(build["url"], wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+        page.wait_for_timeout(1200)
+        # Scroll to force the lazy-loaded gallery to populate real image URLs.
+        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        page.wait_for_timeout(900)
+        markup = page.content()
+    except Exception as e:
+        log(f"  LK build nav failed ({build['handle']}): {e}")
+        return None
+
+    title = build["handle"].replace("-", " ").strip().title()
+    mt = _LK_OG_TITLE_RE.search(markup)
+    if mt and mt.group(1).strip():
+        title = html_unescape(mt.group(1)).strip()
+
+    images: list[str] = []
+    bases: set[str] = set()
+
+    def add_img(raw: str) -> None:
+        base = raw.split("?")[0]
+        if base and base not in bases:
+            bases.add(base)
+            images.append(base)  # base CDN URL is stable; query tokens expire
+
+    mog = _LK_OG_IMG_RE.search(markup)
+    if mog and mog.group(1).strip():
+        add_img(mog.group(1).strip())
+    for m in _LK_IMG_RE.finditer(markup):
+        add_img(m.group(0))
+        if len(images) >= 12:
+            break
+
+    if not images:
+        return None  # no photos — almost certainly not a real build page
+
+    desc = ""
+    md = _LK_OG_DESC_RE.search(markup)
+    if md and md.group(1).strip():
+        desc = html_unescape(md.group(1)).strip()[:1000]
+
+    return {
+        "handle": build["handle"],
+        "title": title[:200],
+        "url": build["url"],
+        "images": images,
+        "description": desc,
+    }
+
+
+def lk_upsert_build(conn, build: dict) -> tuple:
+    """Upsert one showcase build as GroupBuy(productType='KEYBOARD')."""
+    slug = f"lk-{build['handle']}"[:120]
+    image_url = build["images"][0]
+    hay = f"{build['title']} {build['description']}"
+    layout = _kb_detect(_KB_LAYOUTS, hay)
+    material = _kb_detect(_KB_MATERIALS, hay)
+    mount = _kb_detect(_KB_MOUNTS, hay)
+
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute('SELECT id FROM "GroupBuy" WHERE slug = %s', (slug,))
+        existing = cur.fetchone()
+
+    if existing:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE "GroupBuy" SET
+                    name = %s,
+                    status = 'DELIVERED'::"GBStatus",
+                    "productType" = 'KEYBOARD',
+                    "imageUrl" = COALESCE(%s, "imageUrl"),
+                    images = %s,
+                    description = %s,
+                    "productUrl" = %s,
+                    "vendorName" = 'Lightning Keyboards',
+                    layout = COALESCE(layout, %s),
+                    material = COALESCE(material, %s),
+                    "mountingStyle" = COALESCE("mountingStyle", %s),
+                    "updatedAt" = now()
+                WHERE slug = %s
+            """, (build["title"], image_url, build["images"], build["description"],
+                  build["url"], layout, material, mount, slug))
+        return existing["id"], False
+
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("""
+            INSERT INTO "GroupBuy"
+                (id, slug, name, colorway, designer, status, "productType",
+                 "imageUrl", images, description, featured,
+                 "productUrl", "vendorName", layout, material, "mountingStyle",
+                 "createdAt", "updatedAt")
+            VALUES
+                (gen_random_uuid()::text, %s, %s, NULL, '', 'DELIVERED'::"GBStatus",
+                 'KEYBOARD', %s, %s, %s, false,
+                 %s, 'Lightning Keyboards', %s, %s, %s, now(), now())
+            ON CONFLICT (slug) DO NOTHING
+            RETURNING id
+        """, (slug, build["title"], image_url, build["images"],
+              build["description"], build["url"], layout, material, mount))
+        row = cur.fetchone()
+    return (row["id"] if row else None), True
+
+
+def run_lightning(conn, context: BrowserContext, deadline: float) -> dict:
+    stats = {"parts": 0, "new_builds": 0, "created": 0, "updated": 0,
+             "skipped": 0, "failed": 0}
+    log("Lightning Keyboards pass: scanning build showcase ...")
+    ensure_keyboard_columns(conn)
+    seen = lk_load_seen()
+    scraped: set[str] = set(seen.get("scraped_builds", []))
+    latest_part = int(seen.get("latest_part", 0) or 0)
+    first_run = latest_part < 1
+
+    page = context.new_page()
+    try:
+        # First run: discover every part from 1 up. Later: re-scan the latest
+        # known part (it may have gained builds) and probe upward for new parts.
+        part_n = 1 if first_run else latest_part
+        highest = latest_part
+        while part_n <= LK_MAX_PART_PROBE:
+            if now_ms() > deadline:
+                log("Lightning pass: deadline reached — resume on next run.")
+                break
+            builds = lk_list_builds(page, part_n)
+            if not builds:
+                break  # contiguous numbering — first empty part ends pagination
+            stats["parts"] += 1
+            highest = max(highest, part_n)
+            for b in builds:
+                if now_ms() > deadline:
+                    break
+                if b["handle"] in scraped:
+                    stats["skipped"] += 1
+                    continue
+                detail = lk_scrape_build(page, b)
+                if not detail:
+                    stats["failed"] += 1
+                    continue
+                try:
+                    _id, created = lk_upsert_build(conn, detail)
+                    conn.commit()
+                    scraped.add(b["handle"])
+                    stats["new_builds"] += 1
+                    if created:
+                        stats["created"] += 1
+                    else:
+                        stats["updated"] += 1
+                except Exception as e:
+                    conn.rollback()
+                    if stats["failed"] == 0:
+                        log(f"  LK write error ({b['handle']}): {e}")
+                    stats["failed"] += 1
+            log(f"  LK part {part_n}: {len(builds)} cards "
+                f"(new so far={stats['new_builds']} skipped={stats['skipped']})")
+            part_n += 1
+
+        seen["latest_part"] = highest
+        seen["scraped_builds"] = sorted(scraped)
+        lk_save_seen(seen)
+    finally:
+        page.close()
+    log(f"Lightning pass: parts={stats['parts']} new_builds={stats['new_builds']} "
+        f"created={stats['created']} updated={stats['updated']} "
+        f"skipped={stats['skipped']} failed={stats['failed']}")
+    return stats
+
+
+# ----------------------------------------------------------------------------
 # Geekhack board 70.0 scraper
 # Reads the Group Buy listing, opens each thread that has a new last-post,
 # extracts the first post (OP), and upserts into GroupBuy.
@@ -2845,6 +3091,14 @@ def parse_args():
         help="Maximum run time. Defaults to 30 normally and 240 for a backfill.",
     )
     parser.add_argument(
+        "--lightning-only",
+        action="store_true",
+        help=(
+            "Run only the Lightning Keyboards showcase scraper. Resumable — the "
+            "large first-time backfill can be re-run safely until it completes."
+        ),
+    )
+    parser.add_argument(
         "--headless",
         action="store_true",
         help="Run Chromium without a visible window (used by manual GitHub Actions).",
@@ -2876,7 +3130,9 @@ def main() -> int:
         log(f"FATAL: could not connect to the database: {e}")
         return 1
 
-    budget_minutes = args.budget_minutes or (240 if args.geekhack_backfill_year else 30)
+    budget_minutes = args.budget_minutes or (
+        240 if (args.geekhack_backfill_year or args.lightning_only) else 30
+    )
     deadline = now_ms() + budget_minutes * 60 * 1000
     PROFILE_DIR.mkdir(exist_ok=True)
 
@@ -2902,11 +3158,18 @@ def main() -> int:
                     delay_min=2.0,
                     delay_max=4.0,
                 )
+            elif args.lightning_only:
+                log(
+                    f"Lightning Keyboards showcase scrape only; "
+                    f"budget={budget_minutes} minutes."
+                )
+                lk_stats = run_lightning(conn, context, deadline)
             else:
                 # Catalog first so image + price passes have full set coverage
                 catalog_stats = run_catalog(conn, context, deadline)
                 zf_stats = run_zfrontier(conn, context, deadline)
                 kb_stats = run_keyboards(conn, context, deadline)
+                lk_stats = run_lightning(conn, context, deadline)
                 gh_stats = run_geekhack(conn, context, deadline)
                 img_stats = run_images(conn, context, deadline)
                 price_stats = run_prices(conn, context, deadline)
@@ -2925,6 +3188,13 @@ def main() -> int:
         log("Backfill done. Re-run the same command safely if the deadline was reached.")
         return 0
 
+    if args.lightning_only:
+        log(f"Lightning -> parts={lk_stats['parts']} new_builds={lk_stats['new_builds']} "
+            f"created={lk_stats['created']} updated={lk_stats['updated']} "
+            f"skipped={lk_stats['skipped']} failed={lk_stats['failed']}")
+        log("Lightning backfill done. Re-run safely if the deadline was reached.")
+        return 0
+
     log(f"Catalog -> urls={catalog_stats['urls_found']} "
         f"created={catalog_stats['created']} updated={catalog_stats['updated']} "
         f"skipped={catalog_stats['skipped']} failed={catalog_stats['failed']}")
@@ -2933,6 +3203,9 @@ def main() -> int:
         f"failed={zf_stats['failed']}")
     log(f"Keyboards -> fetched={kb_stats['fetched']} created={kb_stats['created']} "
         f"updated={kb_stats['updated']} failed={kb_stats['failed']}")
+    log(f"Lightning -> parts={lk_stats['parts']} new_builds={lk_stats['new_builds']} "
+        f"created={lk_stats['created']} updated={lk_stats['updated']} "
+        f"skipped={lk_stats['skipped']} failed={lk_stats['failed']}")
     log(f"Geekhack -> pages={gh_stats['pages']} scraped={gh_stats['scraped']} "
         f"created={gh_stats['created']} updated={gh_stats['updated']} "
         f"unchanged={gh_stats['skipped_unchanged']} old={gh_stats['skipped_old']} "

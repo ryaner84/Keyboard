@@ -10,6 +10,8 @@ can't fetch because of bot protection:
 - **keyboard vendor stores** → keyboard group buys (NovelKeys, CannonKeys,
   KBDfans, MatrixLab, Prototypist, KLC, Ktechs, Pantheon, ClickClack, iLumKB,
   Geonworks, Oblotzky)
+- **lightningkeyboards.com** → custom build showcase (photos + names) as
+  no‑price, delivered keyboard entries you can add to a collection
 
 It writes straight into the **same Supabase database** the website reads, so updates
 appear on the live site with no deploy. The website reads pages dynamically, so a
@@ -104,6 +106,27 @@ latest code — nothing to re‑install on the WorkSpace.
 The collection's URL slug sets the default stage (`group-buy`/`ongoing-gb` →
 Active, `extra-drop`/`extras` → Extra Drop, `pre-order`/`coming-soon` →
 Pre‑order). Anything under **$300** or any **Keychron** product is dropped.
+
+### Lightning Keyboards showcase
+
+`lightningkeyboards.com` is a Squarespace portfolio of custom builds, paginated
+as `/work-pt-1/` … `/work-pt-N/`. Once a part fills up the next one starts, so
+old parts freeze and only the newest part gains builds. The scraper tracks state
+in `lk_seen.json` (latest part + scraped build handles):
+
+- **first run** discovers every part from 1 upward until one is empty, and scrapes
+  each build (title + photo gallery → a no‑price, `DELIVERED` keyboard entry);
+- **later runs** re‑scan only the latest part for newly‑added builds and probe for
+  the next part (e.g. `work-pt-12`); already‑scraped builds are skipped.
+
+The first backfill is large — run it on its own, resumably:
+
+```bat
+python scrape.py --lightning-only
+```
+
+Re‑run the same command if it hits the time budget; it continues where it left
+off. After the backfill, the nightly run picks up new builds automatically.
 
 **Geekhack board 70.0** is scraped automatically each night. Threads with a
 last‑post older than 2026 are skipped. Each thread's last‑post datetime is
