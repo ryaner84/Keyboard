@@ -3,7 +3,8 @@ REM ===========================================================================
 REM  GMK Scraper launcher (Windows AWS WorkSpace)  -  SELF-BOOTSTRAPPING
 REM
 REM  You can drop THIS FILE ANYWHERE and double-click it. On first run it will
-REM  clone the whole repo from GitHub into a fixed folder, then run from there.
+REM  clone the whole repo into the current Windows user's Local AppData, then
+REM  run from there.
 REM  On later runs it just git-pulls the latest code and runs.
 REM
 REM  Each run it:
@@ -22,7 +23,11 @@ REM ---------------------------------------------------------------------------
 REM  Config: where to clone, and the repo URL.
 REM ---------------------------------------------------------------------------
 set "REPO_URL=https://github.com/ryaner84/Keyboard.git"
-set "CLONE_DIR=C:\ryaner84\gmk-tracker"
+set "LEGACY_CLONE_DIR=C:\ryaner84\gmk-tracker"
+set "NEW_ROOT=%LOCALAPPDATA%\gmk-tracker"
+if not defined LOCALAPPDATA set "NEW_ROOT=%USERPROFILE%\AppData\Local\gmk-tracker"
+set "CLONE_DIR=%NEW_ROOT%\repo"
+set "MIGRATION_SOURCE=%LEGACY_CLONE_DIR%"
 
 REM Windows Defender often holds .git pack files open right after a pull, making
 REM git's cleanup ask "Unlink of file ... failed. Should I try again? (y/n)" -
@@ -42,9 +47,15 @@ REM Check the parent of where this bat lives for a .git folder.
 for %%I in ("%SELF_DIR%\..") do set "MAYBE_REPO=%%~fI"
 
 if exist "%MAYBE_REPO%\.git" (
-    REM We're already inside a clone - use it.
-    set "REPO=%MAYBE_REPO%"
-    goto :have_repo
+    if /I "%MAYBE_REPO%"=="%CLONE_DIR%" (
+        REM We're already inside the supported per-user clone - use it.
+        set "REPO=%MAYBE_REPO%"
+        goto :have_repo
+    )
+    echo [boot] Checkout outside the per-user location detected:
+    echo [boot]   %MAYBE_REPO%
+    echo [boot] Migrating to:
+    echo [boot]   %CLONE_DIR%
 )
 
 REM --- Not inside a clone. We need to clone (or reuse an existing clone). ------
@@ -70,6 +81,31 @@ if exist "%CLONE_DIR%\.git" (
     REM the clone. Disabling reflog writes lets a normal fast-forward update
     REM proceed without needing to take ownership of the whole checkout.
     git -C "%CLONE_DIR%" -c gc.auto=0 -c core.logAllRefUpdates=false pull --ff-only origin main
+    if !ERRORLEVEL! neq 0 (
+        echo [boot] Existing checkout is not writable or is damaged.
+        echo [boot] Rebuilding it under the current Windows account...
+        set "BROKEN_CLONE=%NEW_ROOT%\repo-broken-%RANDOM%-%RANDOM%"
+        move "%CLONE_DIR%" "!BROKEN_CLONE!" >nul 2>&1
+        if !ERRORLEVEL! neq 0 (
+            echo.
+            echo [boot] ERROR: Could not move the damaged checkout.
+            echo [boot] Close any Git, Python, or Chromium process using:
+            echo [boot]   %CLONE_DIR%
+            echo [boot] Then run this file again.
+            pause
+            exit /b 1
+        )
+        set "MIGRATION_SOURCE=!BROKEN_CLONE!"
+        git clone "%REPO_URL%" "%CLONE_DIR%"
+        if !ERRORLEVEL! neq 0 (
+            echo.
+            echo [boot] ERROR: Could not create the replacement checkout.
+            echo [boot] The previous checkout is preserved at:
+            echo [boot]   !BROKEN_CLONE!
+            pause
+            exit /b 1
+        )
+    )
 ) else (
     echo [boot] Cloning %REPO_URL% ...
     git clone "%REPO_URL%" "%CLONE_DIR%"
@@ -84,6 +120,24 @@ if not exist "%CLONE_DIR%\scraper\run-scraper.bat" (
     echo [boot]     git clone %REPO_URL% "%CLONE_DIR%"
     pause
     exit /b 1
+)
+
+REM Preserve private configuration and resumable scrape state from the old
+REM machine-wide checkout when migrating to the per-user clone. Never overwrite
+REM files already created in the new checkout.
+for %%F in (credentials.csv config.local.ini gh_seen.json lk_seen.json) do (
+    if exist "%MIGRATION_SOURCE%\scraper\%%F" (
+        if not exist "%CLONE_DIR%\scraper\%%F" (
+            copy /Y "%MIGRATION_SOURCE%\scraper\%%F" "%CLONE_DIR%\scraper\%%F" >nul 2>&1
+            if !ERRORLEVEL!==0 echo [boot] Migrated scraper\%%F from the previous checkout.
+        )
+    )
+    if exist "%LEGACY_CLONE_DIR%\scraper\%%F" (
+        if not exist "%CLONE_DIR%\scraper\%%F" (
+            copy /Y "%LEGACY_CLONE_DIR%\scraper\%%F" "%CLONE_DIR%\scraper\%%F" >nul 2>&1
+            if !ERRORLEVEL!==0 echo [boot] Migrated scraper\%%F from the legacy checkout.
+        )
+    )
 )
 
 echo [boot] Setup complete. Launching the real scraper from the clone ...
