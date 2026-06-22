@@ -1714,9 +1714,6 @@ KEYBOARD_VENDORS = [
     # so we don't need to guess the exact collection handle.
     ("obl", "Oblotzky Industries",
      ["https://oblotzky.industries/products.json"], "EUR", "EU"),
-    # Lightning Keyboards (US) — broad keyboard catalog with rich product photos.
-    ("lk", "Lightning Keyboards",
-     ["https://lightningkeyboards.com/products.json"], "USD", "US"),
 ]
 
 _KB_LAYOUTS = [
