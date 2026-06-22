@@ -6,6 +6,10 @@ import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { normalizeImageUrl } from "@/lib/utils";
 import { getSiteUrl } from "@/lib/site-url";
+import {
+  collectionPosterPath,
+  collectionSharePath,
+} from "@/lib/collection-share";
 
 export const dynamic = "force-dynamic";
 
@@ -70,13 +74,14 @@ export async function generateMetadata({
     collection.collectionBio ||
     `Explore ${owner}'s curated mechanical keyboard collection.`;
   const siteUrl = getSiteUrl();
-  const pageUrl = `${siteUrl}/collection/${slug}`;
-  const posterUrl = `${siteUrl}/api/collection-poster/${slug}`;
+  const canonicalUrl = `${siteUrl}/collection/${slug}`;
+  const pageUrl = `${siteUrl}${collectionSharePath(slug)}`;
+  const posterUrl = `${siteUrl}${collectionPosterPath(slug)}`;
 
   return {
     title,
     description,
-    alternates: { canonical: pageUrl },
+    alternates: { canonical: canonicalUrl },
     openGraph: {
       title,
       description,
