@@ -11,7 +11,7 @@ REM  Each run it:
 REM    0. (bootstrap) if not already inside a clone, clone the repo and re-launch
 REM    1. terminates any leftover scraper instances (frees DB slot + profile lock)
 REM    2. git-pulls the latest scrape.py from GitHub
-REM    3. ensures Python + a venv + Playwright Chromium are installed
+REM    3. ensures Python + a venv + Playwright/Scrapling browsers are installed
 REM    4. (first run) asks for the Supabase connection + password, validates, saves
 REM    5. registers the nightly 00:00 GMT+8 schedule (re-registers every run so
 REM       it self-corrects across DST changes)
@@ -248,6 +248,21 @@ if !ERRORLEVEL! neq 0 (
     exit /b 1
 )
 "%VENV_PY%" -m playwright install chromium
+set "SCRAPLING_MARKER=%SCRAPER%\.scrapling-browsers-0.4.9"
+if not exist "!SCRAPLING_MARKER!" (
+    echo [run] Installing Scrapling stealth browser ^(one-time for v0.4.9^) ...
+    if exist "%SCRAPER%\.venv\Scripts\scrapling.exe" (
+        "%SCRAPER%\.venv\Scripts\scrapling.exe" install
+        if !ERRORLEVEL!==0 (
+            type nul > "!SCRAPLING_MARKER!"
+        ) else (
+            echo [run] WARNING: Scrapling browser install failed.
+            echo [run]          HTTP impersonation and Playwright fallback will still work.
+        )
+    ) else (
+        echo [run] WARNING: scrapling.exe was not installed; using Playwright only.
+    )
+)
 
 REM --- 5. Register the nightly 00:00 GMT+8 schedule ---------------------------
 REM Compute the local time via schedule_time.py, writing to a temp file. The

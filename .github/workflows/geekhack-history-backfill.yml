@@ -44,6 +44,7 @@ jobs:
           --geekhack-backfill-year 2020
           --budget-minutes 300
           --headless
+          --no-scrapling
 
       - name: Upload import log
         if: always()
