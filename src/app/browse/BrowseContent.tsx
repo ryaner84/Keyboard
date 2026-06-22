@@ -4,12 +4,14 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { SetCard } from "@/components/browse/SetCard";
 import { BrowseFilters } from "@/components/browse/BrowseFilters";
+import { isCrediblyActiveGeekhackListing } from "@/lib/geekhack-listing";
 import type { GroupBuyWithPricing, GBStatus } from "@/types";
 
 const DEFAULT_STATUSES: GBStatus[] = ["INTEREST_CHECK", "ACTIVE_GB"];
 
 function isUsefulKeycapListing(set: GroupBuyWithPricing): boolean {
   if (set.productType !== "KEYCAPS") return false;
+  if (!isCrediblyActiveGeekhackListing(set)) return false;
   const name = set.name.trim();
   if (
     /\b(?:keyboard|macropad|numpad|tkl|hhkb|alice|arisu)\b/i.test(name) &&
