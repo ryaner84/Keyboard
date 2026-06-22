@@ -316,7 +316,7 @@ function PublicCollectionCard({
             {item.keycaps && <PublicSpec label="Keycaps" value={item.keycaps} />}
             {item.showPurchasePrice && item.purchasePrice != null && (
               <PublicSpec
-                label="Acquired for"
+                label={item.quantity > 1 ? "Price per unit" : "Acquired for"}
                 value={`${item.purchaseCurrency || "USD"} ${item.purchasePrice.toLocaleString()}`}
               />
             )}
