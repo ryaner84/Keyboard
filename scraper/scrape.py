@@ -3169,7 +3169,13 @@ def main() -> int:
                 catalog_stats = run_catalog(conn, context, deadline)
                 zf_stats = run_zfrontier(conn, context, deadline)
                 kb_stats = run_keyboards(conn, context, deadline)
-                lk_stats = run_lightning(conn, context, deadline)
+                # Cap the nightly Lightning pass so a first-time full backfill
+                # can't starve the Geekhack/image/price passes that follow. The
+                # large initial backfill should be run once via --lightning-only;
+                # nightly only needs the small incremental scan of the latest
+                # part plus a probe for the next one.
+                lk_deadline = min(deadline, now_ms() + 6 * 60 * 1000)
+                lk_stats = run_lightning(conn, context, lk_deadline)
                 gh_stats = run_geekhack(conn, context, deadline)
                 img_stats = run_images(conn, context, deadline)
                 price_stats = run_prices(conn, context, deadline)
