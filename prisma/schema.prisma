@@ -280,6 +280,8 @@ model TrackerItem {
   buildDetails      String?
   notes             String?
   displayOrder      Int       @default(0)
+  color             String?
+  quantity          Int       @default(1)
   lastStatus        String?
   lastBestPriceUsd  Float?
   lastVendorCount   Int       @default(0)

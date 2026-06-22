@@ -38,6 +38,8 @@ export async function GET() {
         buildDetails: item.buildDetails,
         notes: item.notes,
         displayOrder: item.displayOrder,
+        color: item.color,
+        quantity: item.quantity ?? 1,
       },
     })),
   });

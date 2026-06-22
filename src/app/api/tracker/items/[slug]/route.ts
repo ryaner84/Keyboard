@@ -39,6 +39,8 @@ export async function PATCH(
     buildDetails?: string | null;
     notes?: string | null;
     displayOrder?: number;
+    color?: string | null;
+    quantity?: number;
   } = {};
 
   if (typeof body.isTracking === "boolean") data.isTracking = body.isTracking;
@@ -84,6 +86,10 @@ export async function PATCH(
   if (Number.isInteger(body.displayOrder)) {
     data.displayOrder = Math.max(0, Math.min(10_000, body.displayOrder));
   }
+  if ("color" in body) data.color = cleanOptionalText(body.color, 80);
+  if (typeof body.quantity === "number" && Number.isInteger(body.quantity)) {
+    data.quantity = Math.max(1, Math.min(99, body.quantity));
+  }
 
   const willBeInCollection = data.inCollection ?? item.inCollection;
   if (!willBeInCollection) {
@@ -117,6 +123,8 @@ export async function PATCH(
       buildDetails: updated.buildDetails,
       notes: updated.notes,
       displayOrder: updated.displayOrder,
+      color: updated.color,
+      quantity: updated.quantity,
     },
   });
 }

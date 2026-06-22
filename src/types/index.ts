@@ -129,6 +129,8 @@ export interface CollectionItemDetails {
   buildDetails: string | null;
   notes: string | null;
   displayOrder: number;
+  color: string | null;
+  quantity: number;
 }
 
 export interface CollectionCatalogItem extends GroupBuyWithPricing {

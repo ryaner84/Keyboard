@@ -1026,7 +1026,9 @@ async function ensurePersonalTrackerTables(client) {
          ADD COLUMN IF NOT EXISTS keycaps text,
          ADD COLUMN IF NOT EXISTS "buildDetails" text,
          ADD COLUMN IF NOT EXISTS notes text,
-         ADD COLUMN IF NOT EXISTS "displayOrder" integer NOT NULL DEFAULT 0`
+         ADD COLUMN IF NOT EXISTS "displayOrder" integer NOT NULL DEFAULT 0,
+         ADD COLUMN IF NOT EXISTS color text,
+         ADD COLUMN IF NOT EXISTS quantity integer NOT NULL DEFAULT 1`
     );
     await client.query(
       `CREATE INDEX IF NOT EXISTS "TrackerItem_groupBuyId_idx"

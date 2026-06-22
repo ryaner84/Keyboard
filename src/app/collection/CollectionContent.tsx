@@ -31,6 +31,8 @@ const EMPTY_DETAILS: CollectionItemDetails = {
   buildDetails: null,
   notes: null,
   displayOrder: 0,
+  color: null,
+  quantity: 1,
 };
 
 const CONDITION_LABELS: Record<string, string> = {
@@ -685,6 +687,8 @@ function CollectionCard({
   const imageUrl = normalizeImageUrl(item.imageUrl);
   const owned = item.collection.inCollection;
   const details = [
+    item.collection.color && { label: "Color", value: item.collection.color },
+    item.collection.quantity > 1 && { label: "Units", value: String(item.collection.quantity) },
     item.collection.switches && { label: "Switches", value: item.collection.switches },
     item.collection.keycaps && { label: "Keycaps", value: item.collection.keycaps },
   ].filter(Boolean) as Array<{ label: string; value: string }>;
@@ -741,6 +745,7 @@ function CollectionCard({
             </Link>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {[
+                item.collection.color || null,
                 item.collection.condition
                   ? CONDITION_LABELS[item.collection.condition] || item.collection.condition
                   : null,
@@ -935,6 +940,8 @@ function CollectionItemEditor({
       ? new Date(item.collection.acquiredAt).toISOString().slice(0, 10)
       : "",
     condition: item.collection.condition || "",
+    color: item.collection.color || "",
+    quantity: item.collection.quantity ?? 1,
     purchasePrice: item.collection.purchasePrice?.toString() || "",
     purchaseCurrency: item.collection.purchaseCurrency || defaultCurrency || "USD",
     showPurchasePrice: item.collection.showPurchasePrice,
@@ -957,6 +964,8 @@ function CollectionItemEditor({
         inCollection: true,
         acquiredAt: form.acquiredAt || null,
         condition: form.condition || null,
+        color: form.color || null,
+        quantity: form.quantity,
         purchasePrice: form.purchasePrice === "" ? null : Number(form.purchasePrice),
         purchaseCurrency: form.purchaseCurrency || null,
         showPurchasePrice: form.showPurchasePrice,
@@ -1007,6 +1016,38 @@ function CollectionItemEditor({
                 </option>
               ))}
             </select>
+          </Field>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Color / variant">
+            <input
+              value={form.color}
+              onChange={(event) => setForm({ ...form, color: event.target.value })}
+              placeholder="e.g. E-White, Black, Navy"
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Units owned">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, quantity: Math.max(1, f.quantity - 1) }))}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-lg font-medium text-gray-600 hover:border-gray-400 hover:text-gray-950 dark:border-gray-700 dark:text-gray-300 dark:hover:text-white"
+              >
+                −
+              </button>
+              <span className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-center text-sm font-semibold text-gray-950 dark:border-gray-700 dark:bg-gray-950 dark:text-white">
+                {form.quantity}
+              </span>
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, quantity: Math.min(99, f.quantity + 1) }))}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-lg font-medium text-gray-600 hover:border-gray-400 hover:text-gray-950 dark:border-gray-700 dark:text-gray-300 dark:hover:text-white"
+              >
+                +
+              </button>
+            </div>
           </Field>
         </div>
 

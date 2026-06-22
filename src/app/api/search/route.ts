@@ -11,15 +11,19 @@ export async function GET(req: NextRequest) {
     Math.max(1, Number(req.nextUrl.searchParams.get("limit") ?? 8) || 8)
   );
 
+  const terms = q.split(/\s+/).filter(Boolean);
+  const fieldOR = (term: string) => ({
+    OR: [
+      { name: { contains: term, mode: "insensitive" as const } },
+      { colorway: { contains: term, mode: "insensitive" as const } },
+      { designer: { contains: term, mode: "insensitive" as const } },
+      { vendorName: { contains: term, mode: "insensitive" as const } },
+    ],
+  });
+  const where = terms.length === 1 ? fieldOR(terms[0]) : { AND: terms.map(fieldOR) };
+
   const results = await prisma.groupBuy.findMany({
-    where: {
-      OR: [
-        { name: { contains: q, mode: "insensitive" } },
-        { colorway: { contains: q, mode: "insensitive" } },
-        { designer: { contains: q, mode: "insensitive" } },
-        { vendorName: { contains: q, mode: "insensitive" } },
-      ],
-    },
+    where,
     select: {
       slug: true,
       name: true,
