@@ -9,6 +9,35 @@ export const maxDuration = 30;
 const WIDTH = 800;
 const HEIGHT = 420;
 
+const KNOWN_BRANDS: Array<[RegExp, string]> = [
+  [/\bkeycult\b/i, "Keycult"],
+  [/\btgr\b/i, "TGR"],
+  [/\bmatrix(?:\s*lab)?\b/i, "Matrix Lab"],
+  [/\bgeon(?:works)?\b/i, "Geon"],
+  [/\bowlab\b/i, "OwLab"],
+  [/\brama(?:\s*works)?\b/i, "RAMA"],
+  [/\bmode(?:\s*designs)?\b/i, "Mode"],
+  [/\bsinga\b/i, "Singa"],
+  [/\bmonokei\b/i, "MONOKEI"],
+  [/\bangry\s*miao\b/i, "Angry Miao"],
+  [/\bqwertykeys\b/i, "Qwertykeys"],
+  [/\bkbd\s*fans\b|\bkbdfans\b/i, "KBDfans"],
+  [/\bpercent(?:\s*studio)?\b/i, "Percent Studio"],
+  [/\bnorbauer\b|\bnorbaforce\b/i, "Norbauer"],
+  [/\bsmith\s*(?:\+|&|and)\s*rune\b/i, "Smith + Rune"],
+  [/\bcannon\s*keys\b|\bcannonkeys\b/i, "CannonKeys"],
+  [/\bai03\b/i, "ai03"],
+];
+
+type CollectionGroupBuy = {
+  name: string;
+  designer: string;
+  imageUrl: string | null;
+  productType: string;
+  layout: string | null;
+  vendorName: string | null;
+};
+
 async function fetchImageDataUri(url: string): Promise<string | null> {
   try {
     const controller = new AbortController();
@@ -26,6 +55,55 @@ async function fetchImageDataUri(url: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+function inferLayout(groupBuy: CollectionGroupBuy): string {
+  const text = `${groupBuy.layout ?? ""} ${groupBuy.name}`.toLowerCase();
+  if (/\b(?:f13\s*)?tkl\b|\b80%\b/.test(text)) return "TKL";
+  if (/\b(?:full[\s-]?size|100%|104[\s-]?key)\b/.test(text)) return "Full-size";
+  if (/\b1800\b/.test(text)) return "1800";
+  if (/\b96%\b/.test(text)) return "96%";
+  if (/\b75%\b|\b75[\s-]?key\b/.test(text)) return "75%";
+  if (/\b70%\b/.test(text)) return "70%";
+  if (/\b65%\b|\b6[568][\s-]?key\b/.test(text)) return "65%";
+  if (/\bhhkb\b/.test(text)) return "HHKB";
+  if (/\b60%\b|\b60[\s-]?key\b/.test(text)) return "60%";
+  if (/\b50%\b/.test(text)) return "50%";
+  if (/\b4[05]%\b|\b40s\b/.test(text)) return "40%";
+  if (/\balice\b|\barisu\b/.test(text)) return "Alice";
+  if (/\bsplit\b/.test(text)) return "Split";
+  if (/\bortho(?:linear)?\b/.test(text)) return "Ortho";
+  return "Other";
+}
+
+function inferBrand(groupBuy: CollectionGroupBuy): string | null {
+  const haystack = `${groupBuy.name} ${groupBuy.designer}`;
+  const known = KNOWN_BRANDS.find(([pattern]) => pattern.test(haystack));
+  if (known) return known[1];
+
+  const designer = groupBuy.designer
+    .replace(/\b(?:community group buy|independent design)\b/gi, "")
+    .split(/\s+(?:x|×|by)\s+|\||,/i)[0]
+    .replace(/^\s*(?:\[.*?\]\s*)+/, "")
+    .trim();
+
+  if (designer && designer.length <= 24) return designer;
+  return null;
+}
+
+function rankedCounts(
+  values: Array<string | null>,
+  limit: number
+): Array<{ label: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const value of values) {
+    if (!value) continue;
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, limit);
 }
 
 export async function GET(
@@ -55,6 +133,8 @@ export async function GET(
               designer: true,
               imageUrl: true,
               productType: true,
+              layout: true,
+              vendorName: true,
             },
           },
         },
@@ -66,14 +146,21 @@ export async function GET(
 
   const owner = collection.displayName || "Keyboard collector";
   const title = collection.collectionTitle || `${owner}'s collection`;
-  const keyboardCount = collection.items.filter(
-    (item) => item.groupBuy.productType === "KEYBOARD"
-  ).length;
-  const keycapCount = collection.items.length - keyboardCount;
-  const candidates = collection.items.slice(0, 3);
+  const keyboards = collection.items
+    .map((item) => item.groupBuy)
+    .filter((groupBuy) => groupBuy.productType === "KEYBOARD");
+  const keycapCount = collection.items.length - keyboards.length;
+  const layoutCounts = rankedCounts(keyboards.map(inferLayout), 5);
+  const brandCounts = rankedCounts(keyboards.map(inferBrand), 5);
+  const candidates = [
+    ...keyboards,
+    ...collection.items
+      .map((item) => item.groupBuy)
+      .filter((groupBuy) => groupBuy.productType !== "KEYBOARD"),
+  ].slice(0, 6);
   const images = await Promise.all(
     candidates.map(async (item) => {
-      const url = normalizeImageUrl(item.groupBuy.imageUrl);
+      const url = normalizeImageUrl(item.imageUrl);
       return url ? fetchImageDataUri(url) : null;
     })
   );
@@ -88,7 +175,7 @@ export async function GET(
           position: "relative",
           overflow: "hidden",
           background:
-            "radial-gradient(circle at 80% 15%, rgba(201,171,114,0.24), transparent 30%), linear-gradient(145deg, #0b0d10 0%, #15191d 58%, #090b0d 100%)",
+            "radial-gradient(circle at 88% 6%, rgba(201,171,114,0.19), transparent 28%), linear-gradient(145deg, #090c0f 0%, #11171b 56%, #080a0c 100%)",
           color: "#ffffff",
           fontFamily: "Arial, sans-serif",
         }}
@@ -96,10 +183,10 @@ export async function GET(
         <div
           style={{
             position: "absolute",
-            left: 36,
-            top: 32,
-            width: 335,
-            height: 356,
+            left: 28,
+            top: 24,
+            width: 205,
+            height: 265,
             display: "flex",
             flexDirection: "column",
           }}
@@ -109,17 +196,17 @@ export async function GET(
               display: "flex",
               alignItems: "center",
               color: "#d9bb82",
-              fontSize: 12,
+              fontSize: 10,
               fontWeight: 700,
-              letterSpacing: "0.2em",
+              letterSpacing: "0.19em",
               textTransform: "uppercase",
             }}
           >
             <span
               style={{
-                width: 32,
+                width: 24,
                 height: 1,
-                marginRight: 12,
+                marginRight: 10,
                 display: "flex",
                 background: "#d9bb82",
               }}
@@ -129,103 +216,113 @@ export async function GET(
 
           <div
             style={{
-              marginTop: 36,
+              marginTop: 24,
               display: "flex",
-              color: "rgba(255,255,255,0.58)",
-              fontSize: 14,
+              color: "rgba(255,255,255,0.55)",
+              fontSize: 12,
             }}
           >
-            Curated by {owner}
+            Curated by {owner.slice(0, 34)}
           </div>
           <div
             style={{
-              marginTop: 8,
+              marginTop: 7,
               display: "flex",
-              maxWidth: 330,
+              maxWidth: 205,
               color: "#ffffff",
               fontFamily: "Georgia, serif",
-              fontSize: title.length > 34 ? 37 : 43,
+              fontSize: title.length > 34 ? 27 : 32,
               fontWeight: 700,
-              lineHeight: 1.08,
+              lineHeight: 1.06,
               letterSpacing: "-0.025em",
             }}
           >
-            {title}
-          </div>
-          <div
-            style={{
-              marginTop: 18,
-              display: "flex",
-              maxWidth: 320,
-              color: "rgba(255,255,255,0.57)",
-              fontSize: 14,
-              lineHeight: 1.45,
-            }}
-          >
-            {(collection.collectionBio ||
-              "A considered selection of keyboards, builds, and keycap sets.")
-              .slice(0, 120)}
+            {title.slice(0, 58)}
           </div>
 
           <div
             style={{
               marginTop: "auto",
               display: "flex",
-              alignItems: "center",
-              color: "rgba(255,255,255,0.72)",
-              fontSize: 12,
+              alignItems: "baseline",
             }}
           >
-            <span style={{ display: "flex", fontWeight: 700 }}>
-              {collection.items.length} displayed
+            <span
+              style={{
+                display: "flex",
+                color: "#d9bb82",
+                fontFamily: "Georgia, serif",
+                fontSize: 36,
+                fontWeight: 700,
+              }}
+            >
+              {keyboards.length}
             </span>
-            {keyboardCount > 0 && (
-              <span style={{ display: "flex", marginLeft: 18 }}>
-                {keyboardCount} keyboard{keyboardCount === 1 ? "" : "s"}
-              </span>
-            )}
-            {keycapCount > 0 && (
-              <span style={{ display: "flex", marginLeft: 18 }}>
-                {keycapCount} keycap set{keycapCount === 1 ? "" : "s"}
-              </span>
-            )}
+            <span
+              style={{
+                display: "flex",
+                marginLeft: 8,
+                color: "#ffffff",
+                fontSize: 12,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+              }}
+            >
+              keyboard{keyboards.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div
+            style={{
+              marginTop: 2,
+              display: "flex",
+              color: "rgba(255,255,255,0.46)",
+              fontSize: 10,
+            }}
+          >
+            {collection.items.length} displayed
+            {keycapCount > 0
+              ? ` · ${keycapCount} keycap set${keycapCount === 1 ? "" : "s"}`
+              : ""}
           </div>
         </div>
 
         <div
           style={{
             position: "absolute",
-            right: 28,
-            top: 27,
-            width: 368,
-            height: 315,
+            left: 252,
+            top: 20,
+            width: 520,
+            height: 270,
             display: "flex",
-            gap: 10,
+            flexWrap: "wrap",
+            gap: 8,
           }}
         >
-          {candidates.length > 0 ? (
-            candidates.map((item, index) => (
+          {Array.from({ length: 6 }).map((_, index) => {
+            const item = candidates[index];
+            return (
               <div
-                key={`${item.groupBuy.name}-${index}`}
+                key={item ? `${item.name}-${index}` : `empty-${index}`}
                 style={{
-                  width: index === 0 ? 196 : 76,
-                  height: 315,
+                  width: 168,
+                  height: 131,
                   display: "flex",
                   position: "relative",
                   overflow: "hidden",
-                  borderRadius: 16,
-                  border: "1px solid rgba(255,255,255,0.16)",
-                  background: "#252a2f",
-                  boxShadow: "0 18px 45px rgba(0,0,0,0.35)",
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.13)",
+                  background: "#20262a",
+                  boxShadow: "0 12px 26px rgba(0,0,0,0.26)",
                 }}
               >
-                {images[index] ? (
+                {item && images[index] ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={images[index] as string}
                     alt=""
-                    width={index === 0 ? 196 : 76}
-                    height={315}
+                    width={168}
+                    height={131}
                     style={{ width: "100%", height: "100%", objectFit: "cover" }}
                   />
                 ) : (
@@ -236,86 +333,96 @@ export async function GET(
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      color: "rgba(255,255,255,0.24)",
-                      fontSize: 42,
+                      color: "rgba(255,255,255,0.18)",
+                      fontSize: 30,
                     }}
                   >
                     ⌨
                   </div>
                 )}
-                <div
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    minHeight: index === 0 ? 82 : 0,
-                    padding: index === 0 ? "34px 14px 12px" : 0,
-                    display: index === 0 ? "flex" : "none",
-                    flexDirection: "column",
-                    justifyContent: "flex-end",
-                    background:
-                      "linear-gradient(180deg, transparent 0%, rgba(5,7,9,0.94) 75%)",
-                  }}
-                >
-                  <span
+                {item && (
+                  <div
                     style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      minHeight: 38,
+                      padding: "17px 9px 7px",
                       display: "flex",
-                      color: "#ffffff",
-                      fontSize: 14,
-                      fontWeight: 700,
-                      lineHeight: 1.2,
+                      alignItems: "flex-end",
+                      background:
+                        "linear-gradient(180deg, transparent 0%, rgba(4,6,8,0.9) 70%)",
                     }}
                   >
-                    {item.groupBuy.name.slice(0, 38)}
-                  </span>
-                  {item.groupBuy.designer && (
                     <span
                       style={{
                         display: "flex",
-                        marginTop: 4,
-                        color: "rgba(255,255,255,0.58)",
-                        fontSize: 10,
+                        color: "#ffffff",
+                        fontSize: 9,
+                        fontWeight: 700,
+                        lineHeight: 1.15,
                       }}
                     >
-                      {item.groupBuy.designer.slice(0, 34)}
+                      {item.name.slice(0, 30)}
                     </span>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
-            ))
-          ) : (
-            <div
-              style={{
-                width: "100%",
-                height: "100%",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                borderRadius: 18,
-                border: "1px solid rgba(255,255,255,0.14)",
-                color: "rgba(255,255,255,0.34)",
-                fontSize: 64,
-              }}
-            >
-              ⌨
-            </div>
-          )}
+            );
+          })}
         </div>
 
         <div
           style={{
             position: "absolute",
-            right: 30,
-            bottom: 26,
+            left: 28,
+            right: 28,
+            top: 306,
+            height: 78,
             display: "flex",
-            alignItems: "center",
-            color: "#d9bb82",
-            fontSize: 12,
-            fontWeight: 700,
+            gap: 12,
           }}
         >
-          Explore this collection · Build and share yours on GMK Tracker
+          <StatPanel
+            title="Layout mix"
+            values={layoutCounts}
+            emptyLabel="Layout details coming soon"
+          />
+          <StatPanel
+            title="Top brands"
+            values={brandCounts}
+            emptyLabel="Independent collection"
+          />
+        </div>
+
+        <div
+          style={{
+            position: "absolute",
+            left: 28,
+            right: 28,
+            bottom: 14,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            color: "rgba(255,255,255,0.42)",
+            fontSize: 9,
+          }}
+        >
+          <span style={{ display: "flex" }}>
+            {collection.collectionBio
+              ? collection.collectionBio.slice(0, 72)
+              : "A collector's personal keyboard archive"}
+          </span>
+          <span
+            style={{
+              display: "flex",
+              color: "#d9bb82",
+              fontWeight: 700,
+            }}
+          >
+            Explore · Build yours on GMK Tracker
+          </span>
         </div>
       </div>
     ),
@@ -327,5 +434,82 @@ export async function GET(
           "public, max-age=300, s-maxage=300, stale-while-revalidate=3600",
       },
     }
+  );
+}
+
+function StatPanel({
+  title,
+  values,
+  emptyLabel,
+}: {
+  title: string;
+  values: Array<{ label: string; count: number }>;
+  emptyLabel: string;
+}) {
+  return (
+    <div
+      style={{
+        width: 366,
+        height: 78,
+        display: "flex",
+        flexDirection: "column",
+        padding: "11px 13px",
+        borderRadius: 12,
+        border: "1px solid rgba(255,255,255,0.1)",
+        background: "rgba(255,255,255,0.045)",
+      }}
+    >
+      <span
+        style={{
+          display: "flex",
+          color: "rgba(255,255,255,0.42)",
+          fontSize: 8,
+          fontWeight: 700,
+          letterSpacing: "0.16em",
+          textTransform: "uppercase",
+        }}
+      >
+        {title}
+      </span>
+      <div
+        style={{
+          marginTop: 9,
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 6,
+        }}
+      >
+        {values.length > 0 ? (
+          values.map((value) => (
+            <span
+              key={value.label}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                padding: "5px 8px",
+                borderRadius: 999,
+                background: "rgba(217,187,130,0.11)",
+                border: "1px solid rgba(217,187,130,0.22)",
+                color: "#eee2cb",
+                fontSize: 10,
+                fontWeight: 700,
+              }}
+            >
+              {value.count} {value.label}
+            </span>
+          ))
+        ) : (
+          <span
+            style={{
+              display: "flex",
+              color: "rgba(255,255,255,0.42)",
+              fontSize: 10,
+            }}
+          >
+            {emptyLabel}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
