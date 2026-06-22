@@ -50,6 +50,7 @@ import psycopg2
 from psycopg2 import OperationalError
 from psycopg2.extras import RealDictCursor
 from playwright.sync_api import sync_playwright, Page, BrowserContext
+from scrapling_client import ScraplingClient, response_is_blocked
 
 # ----------------------------------------------------------------------------
 # Paths & config
@@ -420,15 +421,76 @@ def dedupe_keep_order(items) -> list[str]:
 # ----------------------------------------------------------------------------
 # Browser helpers
 # ----------------------------------------------------------------------------
-def gmk_gallery(page: Page, url: str) -> list[str]:
+def fetch_page_html(
+    page: Page,
+    url: str,
+    *,
+    scrapling: ScraplingClient | None = None,
+    wait_selector: str | None = None,
+    wait_ms: int = 0,
+    protected: bool = False,
+) -> str | None:
+    """Use the existing browser first, then Scrapling's isolated stealth path.
+
+    Keeping Playwright first preserves the saved cf_clearance profile. Scrapling
+    becomes the recovery path when the page is blocked, times out, or the saved
+    browser profile is no longer sufficient.
+    """
+    browser_error: Exception | None = None
     try:
-        page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
-        # Give the gallery a chance to render; tolerate timeout.
-        try:
-            page.wait_for_selector('img[src*="/media/"]', timeout=8_000)
-        except Exception:  # noqa: BLE001
-            pass
-        return extract_gmk_images(page.content())
+        response = page.goto(
+            url,
+            wait_until="domcontentloaded",
+            timeout=NAV_TIMEOUT_MS,
+        )
+        if wait_selector:
+            try:
+                page.wait_for_selector(wait_selector, timeout=8_000)
+            except Exception:  # noqa: BLE001
+                pass
+        if wait_ms:
+            page.wait_for_timeout(wait_ms)
+        content = page.content()
+        status = response.status if response is not None else None
+        if content and not response_is_blocked(status, content):
+            return content
+        browser_error = RuntimeError(f"blocked response (status={status})")
+    except Exception as exc:  # noqa: BLE001
+        browser_error = exc
+
+    if scrapling is not None and scrapling.available:
+        content = scrapling.get_html(
+            url,
+            protected=protected,
+            wait_selector=wait_selector,
+            wait_ms=wait_ms,
+        )
+        if content:
+            log(f"  Scrapling recovered page fetch ({url}).")
+            return content
+
+    if browser_error is not None:
+        log(
+            f"  page fetch failed ({url}): "
+            f"{type(browser_error).__name__}: {browser_error}"
+        )
+    return None
+
+
+def gmk_gallery(
+    page: Page,
+    url: str,
+    scrapling: ScraplingClient | None = None,
+) -> list[str]:
+    try:
+        content = fetch_page_html(
+            page,
+            url,
+            scrapling=scrapling,
+            wait_selector='img[src*="/media/"]',
+            protected=True,
+        )
+        return extract_gmk_images(content or "")
     except Exception as e:  # noqa: BLE001
         log(f"  gmk gallery failed for {url}: {e}")
         return []
@@ -594,25 +656,85 @@ def _base_variants_in_stock(
     return any(known) if known else True
 
 
-def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> dict | None:
-    """Navigate to the product (acquires cf_clearance) then fetch its .json from
-    inside the page context so the request carries the clearance cookies."""
+def _structured_variant_stock_from_html(html: str) -> dict[str, bool]:
+    """Extract per-variant availability from JSON-LD product offers."""
+    result: dict[str, bool] = {}
+    blocks = re.findall(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html,
+        re.DOTALL | re.IGNORECASE,
+    )
+
+    def walk(value) -> None:
+        if isinstance(value, list):
+            for item in value:
+                walk(item)
+            return
+        if not isinstance(value, dict):
+            return
+        offers = value.get("offers") if isinstance(value.get("offers"), dict) else {}
+        identity = " ".join(
+            str(candidate)
+            for candidate in (
+                value.get("@id"),
+                value.get("url"),
+                offers.get("@id"),
+                offers.get("url"),
+            )
+            if isinstance(candidate, str)
+        )
+        match = re.search(r"[?&]variant=(\d+)", identity)
+        availability = (
+            offers.get("availability")
+            if isinstance(offers.get("availability"), str)
+            else value.get("availability")
+        )
+        if match and isinstance(availability, str):
+            result[match.group(1)] = not bool(
+                re.search(r"outofstock|soldout|discontinued", availability, re.IGNORECASE)
+            )
+        for child in value.values():
+            walk(child)
+
+    for block in blocks:
+        try:
+            walk(json.loads(html_unescape(block.strip())))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+    return result
+
+
+def shopify_price(
+    page: Page,
+    product_url: str,
+    vendor_currency: str | None,
+    scrapling: ScraplingClient | None = None,
+) -> dict | None:
+    """Fetch Shopify price/stock while preserving application-specific rules.
+
+    Scrapling's browser-impersonated HTTP path is attempted first. The saved
+    Playwright browser remains the fallback for stores that require clearance
+    cookies or JavaScript execution.
+    """
     if "/products/" not in product_url:
         return None
     pinned_id = pinned_variant_id(product_url)
     clean = product_url.split("?")[0].split("#")[0].rstrip("/")
-    try:
+    browser_loaded = False
+
+    def ensure_browser() -> None:
+        nonlocal browser_loaded, clean
+        if browser_loaded:
+            return
         page.goto(product_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
-        # Shopify can redirect an obsolete product handle to its current one.
-        # Build JSON endpoints from the final browser URL, not the stale link.
         final_url = page.url.split("?")[0].split("#")[0].rstrip("/")
         if "/products/" in final_url:
             clean = final_url
-        json_url = clean + ".json"
-        js_url = clean + ".js"
-        origin = urllib.parse.urlsplit(clean)
-        origin_url = f"{origin.scheme}://{origin.netloc}"
-        data = page.evaluate(
+        browser_loaded = True
+
+    def browser_json(url: str):
+        ensure_browser()
+        return page.evaluate(
             """async (u) => {
                 try {
                     const r = await fetch(u, { headers: { 'Accept': 'application/json' } });
@@ -620,10 +742,38 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
                     return await r.json();
                 } catch (e) { return null; }
             }""",
-            json_url,
+            url,
         )
+
+    def fetched_json(
+        url: str,
+        *,
+        cookies: dict[str, str] | None = None,
+        browser_fallback: bool = True,
+    ):
+        if scrapling is not None:
+            result = scrapling.get_json(
+                url,
+                headers={"Accept": "application/json"},
+                cookies=cookies,
+            )
+            if result is not None:
+                return result
+        return browser_json(url) if browser_fallback else None
+
+    try:
+        # The cheap Scrapling HTTP path avoids opening a product page for most
+        # public Shopify APIs. If it fails, Playwright navigates once, follows a
+        # renamed handle, and all remaining browser fetches reuse that page.
+        data = fetched_json(clean + ".json", browser_fallback=False)
+        if not data or "product" not in data:
+            ensure_browser()
+            data = browser_json(clean + ".json")
         if not data or "product" not in data:
             return None
+
+        origin = urllib.parse.urlsplit(clean)
+        origin_url = f"{origin.scheme}://{origin.netloc}"
 
         # Reject pages where the product itself is an accessory / artisan —
         # the URL slug may coincidentally match a set name (e.g. ilumkb lists
@@ -645,15 +795,9 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
             available = variant.get("available")
             if isinstance(available, bool):
                 availability_by_id[str(variant.get("id") or "")] = available
-        stock_data = page.evaluate(
-            """async (u) => {
-                try {
-                    const r = await fetch(u, { headers: { 'Accept': 'application/json' } });
-                    if (!r.ok) return null;
-                    return await r.json();
-                } catch (e) { return null; }
-            }""",
-            js_url,
+        stock_data = fetched_json(
+            clean + ".js",
+            browser_fallback=browser_loaded,
         )
         if stock_data:
             for variant in stock_data.get("variants") or []:
@@ -665,91 +809,69 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
                 variant["id"]
                 for variant in _relevant_base_variants(variants, chosen, pinned_id)
             ]
-            variant_stock = page.evaluate(
-                """async ({ origin, ids }) => {
-                    const result = {};
-                    await Promise.all(ids.map(async (id) => {
-                        try {
-                            const r = await fetch(
-                                `${origin}/variants/${id}.js`,
-                                { headers: { 'Accept': 'application/json' } }
-                            );
-                            if (!r.ok) return;
-                            const data = await r.json();
-                            if (typeof data.available === 'boolean') {
-                                result[id] = data.available;
-                            }
-                        } catch (e) {}
-                    }));
-                    return result;
-                }""",
-                {"origin": origin_url, "ids": relevant_ids},
-            )
-            for variant_id, available in (variant_stock or {}).items():
+            for variant_id in relevant_ids:
+                variant_data = fetched_json(
+                    f"{origin_url}/variants/{variant_id}.js",
+                    browser_fallback=browser_loaded,
+                )
+                available = (
+                    variant_data.get("available")
+                    if isinstance(variant_data, dict)
+                    else None
+                )
                 if isinstance(available, bool):
                     availability_by_id[str(variant_id)] = available
         if not availability_by_id:
-            structured_stock = page.evaluate(
-                """() => {
-                    const result = {};
-                    for (const script of document.querySelectorAll(
-                        'script[type="application/ld+json"]'
-                    )) {
-                        try {
-                            const walk = (node) => {
-                                if (Array.isArray(node)) {
-                                    node.forEach(walk);
-                                    return;
-                                }
-                                if (!node || typeof node !== 'object') return;
-                                const offers =
-                                    node.offers && typeof node.offers === 'object'
-                                        ? node.offers
-                                        : null;
-                                const identity = [
-                                    node['@id'],
-                                    node.url,
-                                    offers && offers['@id'],
-                                    offers && offers.url,
-                                ].filter((value) => typeof value === 'string').join(' ');
-                                const match = identity.match(/[?&]variant=(\\d+)/);
-                                const availability =
-                                    offers && typeof offers.availability === 'string'
-                                        ? offers.availability
-                                        : typeof node.availability === 'string'
-                                            ? node.availability
-                                            : null;
-                                if (match && availability) {
-                                    result[match[1]] =
-                                        !/(outofstock|soldout|discontinued)/i.test(
-                                            availability
-                                        );
-                                }
-                                Object.values(node).forEach(walk);
-                            };
-                            walk(JSON.parse(script.textContent || 'null'));
-                        } catch (e) {}
-                    }
-                    return result;
-                }"""
+            html = (
+                scrapling.get_html(clean)
+                if scrapling is not None and scrapling.available
+                else None
             )
+            if not html and browser_loaded:
+                html = page.content()
+            structured_stock = _structured_variant_stock_from_html(html or "")
             for variant_id, available in (structured_stock or {}).items():
                 if isinstance(available, bool):
                     availability_by_id[str(variant_id)] = available
+        if not availability_by_id:
+            # Accuracy fallback: if every HTTP/structured source omitted stock,
+            # load the real product page and retry the same authoritative
+            # Shopify endpoints with its clearance/session cookies.
+            ensure_browser()
+            stock_data = browser_json(clean + ".js")
+            if isinstance(stock_data, dict):
+                for variant in stock_data.get("variants") or []:
+                    available = variant.get("available")
+                    if isinstance(available, bool):
+                        availability_by_id[str(variant.get("id") or "")] = available
+            if not availability_by_id:
+                for variant in _relevant_base_variants(variants, chosen, pinned_id):
+                    variant_data = browser_json(
+                        f"{origin_url}/variants/{variant['id']}.js"
+                    )
+                    available = (
+                        variant_data.get("available")
+                        if isinstance(variant_data, dict)
+                        else None
+                    )
+                    if isinstance(available, bool):
+                        availability_by_id[variant["id"]] = available
+            if not availability_by_id:
+                availability_by_id.update(
+                    _structured_variant_stock_from_html(page.content())
+                )
 
         # Step 1: try the Shopify /meta.json endpoint (most reliable — this is
         # the store's PRIMARY currency that prices are denominated in).
-        currency = page.evaluate(
-            """async (o) => {
-                try {
-                    const r = await fetch(o + '/meta.json', { headers: { 'Accept': 'application/json' } });
-                    if (!r.ok) return null;
-                    const m = await r.json();
-                    return m.currency || null;
-                } catch (e) { return null; }
-            }""",
-            origin_url,
+        meta = fetched_json(
+            origin_url + "/meta.json",
+            browser_fallback=browser_loaded,
         )
+        currency = meta.get("currency") if isinstance(meta, dict) else None
+        if not currency and not browser_loaded:
+            ensure_browser()
+            meta = browser_json(origin_url + "/meta.json")
+            currency = meta.get("currency") if isinstance(meta, dict) else None
 
         # Step 2: fall back to reading the currency FROM THE PAGE if meta.json
         # failed or returned nothing. Shopify stores expose the active currency
@@ -760,17 +882,18 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
         #   c) The Shopify global variable window.Shopify.currency.active.
         # We try all three in order and take the first ISO-4217 match.
         if not currency:
+            cart = fetched_json(
+                origin_url + "/cart.js",
+                browser_fallback=browser_loaded,
+            )
+            cart_currency = cart.get("currency") if isinstance(cart, dict) else None
+            if isinstance(cart_currency, str) and re.fullmatch(
+                r"[A-Z]{3}", cart_currency
+            ):
+                currency = cart_currency
+        if not currency and browser_loaded:
             currency = page.evaluate(
-                """async (o) => {
-                    // a) Cart API — most Shopify stores allow this unauthenticated
-                    try {
-                        const r = await fetch(o + '/cart.js', { headers: { 'Accept': 'application/json' } });
-                        if (r.ok) {
-                            const c = await r.json();
-                            if (c && c.currency && /^[A-Z]{3}$/.test(c.currency)) return c.currency;
-                        }
-                    } catch (e) {}
-                    // b) window.Shopify.currency — injected by Shopify themes
+                """() => {
                     try {
                         const sc = window.Shopify && window.Shopify.currency && window.Shopify.currency.active;
                         if (sc && /^[A-Z]{3}$/.test(sc)) return sc;
@@ -790,8 +913,7 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
                         }
                     } catch (e) {}
                     return null;
-                }""",
-                origin_url,
+                }"""
             )
 
         # Pin the storefront to the DETECTED primary currency and re-fetch.
@@ -804,21 +926,26 @@ def shopify_price(page: Page, product_url: str, vendor_currency: str | None) -> 
         # genuine ¥20,000 numbers as "USD".
         if currency and currency in _CURRENCY_HOME_COUNTRY:
             try:
-                page.context.add_cookies([
-                    {"name": "cart_currency", "value": currency, "url": origin_url},
-                    {"name": "localization",
-                     "value": _CURRENCY_HOME_COUNTRY[currency], "url": origin_url},
-                ])
-                repin = page.evaluate(
-                    """async (u) => {
-                        try {
-                            const r = await fetch(u, { headers: { 'Accept': 'application/json' } });
-                            if (!r.ok) return null;
-                            return await r.json();
-                        } catch (e) { return null; }
-                    }""",
-                    json_url,
+                cookies = {
+                    "cart_currency": currency,
+                    "localization": _CURRENCY_HOME_COUNTRY[currency],
+                }
+                repin = fetched_json(
+                    clean + ".json",
+                    cookies=cookies,
+                    browser_fallback=False,
                 )
+                if not repin:
+                    ensure_browser()
+                    page.context.add_cookies([
+                        {"name": "cart_currency", "value": currency, "url": origin_url},
+                        {
+                            "name": "localization",
+                            "value": _CURRENCY_HOME_COUNTRY[currency],
+                            "url": origin_url,
+                        },
+                    ])
+                    repin = browser_json(clean + ".json")
                 if repin and "product" in repin:
                     v2 = _parse_shopify_variants(repin["product"].get("variants") or [])
                     c2 = _pick_variant(v2, pinned_id)
@@ -962,7 +1089,7 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
 #   /shop/en/group-buys/   — currently active / recent group buys
 #
 # Product URL pattern: https://www.gmk.net/shop/en/{slug}/{product-id}
-# e.g. https://www.gmk.net/shop/en/gmk-cyl-ramune/gmk10108
+# IDs currently use both legacy gmk10108 and newer fptk5113.0 forms.
 # The slug matches our DB slug format exactly.
 # ----------------------------------------------------------------------------
 
@@ -972,6 +1099,10 @@ GMK_NET_CATALOG_URLS = [
     "https://www.gmk.net/shop/en/group-buys/",
 ]
 GMK_VENDOR_SLUG = "gmk"
+_GMK_PRODUCT_ID_RE = re.compile(
+    r"^(?:gmk\d+|fptk\d+(?:\.\d+)?)$",
+    re.IGNORECASE,
+)
 
 # Map URL path segment / breadcrumb keywords to GBStatus
 _STATUS_MAP = [
@@ -998,12 +1129,11 @@ def extract_gmk_slug_from_url(url: str) -> str | None:
     try:
         path = urllib.parse.urlsplit(url).path.rstrip("/")
         parts = [p for p in path.split("/") if p]
-        # Find the slug: it follows 'en' and precedes the product-id (gmkXXXXX)
+        # Find the slug: it follows 'en' and precedes the product id.
         for i, part in enumerate(parts):
             if part == "en" and i + 1 < len(parts):
                 candidate = parts[i + 1]
-                # The product id (gmk10108 pattern) is the NEXT segment
-                if re.match(r"^gmk[\d]+$", candidate, re.IGNORECASE):
+                if _GMK_PRODUCT_ID_RE.match(candidate):
                     # The URL only has the product id after /en/ — unusual, skip
                     continue
                 return candidate
@@ -1012,7 +1142,48 @@ def extract_gmk_slug_from_url(url: str) -> str | None:
     return None
 
 
-def scrape_catalog_page_urls(page: Page, catalog_url: str) -> list[str]:
+def _html_href(tag: str) -> str | None:
+    match = re.search(r'\bhref\s*=\s*["\']([^"\']+)["\']', tag, re.IGNORECASE)
+    return html_unescape(match.group(1).strip()) if match else None
+
+
+def _catalog_links_from_html(html: str, current_url: str) -> tuple[list[str], str | None]:
+    """Extract GMK product links and a pagination link without page JavaScript."""
+    product_urls: list[str] = []
+    next_url: str | None = None
+    for tag in re.findall(r"<(?:a|link)\b[^>]*>", html, re.IGNORECASE):
+        href = _html_href(tag)
+        if not href:
+            continue
+        absolute = urllib.parse.urljoin(current_url, href)
+        clean = absolute.split("#")[0].rstrip("/")
+        if clean.startswith(GMK_NET_ORIGIN + "/shop/en/"):
+            parts = clean.split("?")[0].rstrip("/").split("/")
+            if len(parts) >= 6 and _GMK_PRODUCT_ID_RE.match(parts[-1]):
+                product_url = clean.split("?")[0]
+                if product_url not in product_urls:
+                    product_urls.append(product_url)
+
+        lowered_tag = tag.lower()
+        if next_url is None and (
+            re.search(r'\brel\s*=\s*["\'][^"\']*\bnext\b', tag, re.IGNORECASE)
+            or re.search(
+                r'\baria-label\s*=\s*["\'][^"\']*next\s+page',
+                tag,
+                re.IGNORECASE,
+            )
+            or "pagination-nav-next" in lowered_tag
+            or "page-item next" in lowered_tag
+        ):
+            next_url = absolute
+    return product_urls, next_url
+
+
+def scrape_catalog_page_urls(
+    page: Page,
+    catalog_url: str,
+    scrapling: ScraplingClient | None = None,
+) -> list[str]:
     """Navigate a GMK.net catalog page (Shopware) and return all product URLs.
 
     Handles pagination via the 'Next page' button.
@@ -1026,53 +1197,21 @@ def scrape_catalog_page_urls(page: Page, catalog_url: str) -> list[str]:
             break
         visited.add(current)
 
-        try:
-            page.goto(current, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
-            try:
-                page.wait_for_selector("a[href]", timeout=8_000)
-            except Exception:
-                pass
-        except Exception as e:
-            log(f"  Catalog page {page_num} ({current}): {e}")
+        content = fetch_page_html(
+            page,
+            current,
+            scrapling=scrapling,
+            wait_selector="a[href]",
+            protected=True,
+        )
+        if not content:
+            log(f"  Catalog page {page_num} returned no usable HTML ({current}).")
             break
 
-        # Extract all same-origin links that look like product URLs
-        links = page.evaluate(f"""() => {{
-            const origin = '{GMK_NET_ORIGIN}';
-            const links = new Set();
-            for (const a of document.querySelectorAll('a[href]')) {{
-                const href = a.href;
-                if (href.startsWith(origin + '/shop/en/') && !href.includes('?') && !href.includes('#')) {{
-                    links.add(href.replace(/\\/$/, ''));
-                }}
-            }}
-            return [...links];
-        }}""")
-
+        links, next_url = _catalog_links_from_html(content, current)
         for link in links:
-            clean = str(link).rstrip("/")
-            # Product URLs have a slug + product-id segment: /shop/en/{slug}/{gmkXXXXX}
-            # Category pages don't have the product-id segment.
-            parts = clean.rstrip("/").split("/")
-            # Must have at least /shop/en/{slug}/{product-id}
-            if len(parts) >= 6 and re.match(r"gmk\d+$", parts[-1], re.IGNORECASE):
-                if clean not in product_urls:
-                    product_urls.append(clean)
-
-        # Next page (Shopware pagination)
-        next_url = page.evaluate("""() => {
-            const candidates = [
-                document.querySelector('a[rel="next"]'),
-                document.querySelector('[aria-label="Next page"]'),
-                document.querySelector('.pagination-nav-next a'),
-                document.querySelector('.page-item.next a'),
-                document.querySelector('link[rel="next"]'),
-            ];
-            for (const el of candidates) {
-                if (el && el.href) return el.href;
-            }
-            return null;
-        }""")
+            if link not in product_urls:
+                product_urls.append(link)
 
         if not next_url or str(next_url).split("?")[0].rstrip("/") in visited:
             break
@@ -1081,16 +1220,22 @@ def scrape_catalog_page_urls(page: Page, catalog_url: str) -> list[str]:
     return product_urls
 
 
-def scrape_gmk_product_metadata(page: Page, url: str) -> dict | None:
+def scrape_gmk_product_metadata(
+    page: Page,
+    url: str,
+    scrapling: ScraplingClient | None = None,
+) -> dict | None:
     """Scrape a single GMK.net product page and return set metadata."""
     try:
-        page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
-        try:
-            page.wait_for_selector("h1", timeout=5_000)
-        except Exception:
-            pass
-
-        content = page.content()
+        content = fetch_page_html(
+            page,
+            url,
+            scrapling=scrapling,
+            wait_selector="h1",
+            protected=True,
+        )
+        if not content:
+            return None
 
         # Try JSON-LD structured data (Shopware 6 often emits this)
         name = None
@@ -1306,7 +1451,12 @@ def upsert_gmk_set(conn, data: dict, vendor_id: str, *,
     return gb_id, created
 
 
-def run_catalog(conn, context: BrowserContext, deadline: float) -> dict:
+def run_catalog(
+    conn,
+    context: BrowserContext,
+    deadline: float,
+    scrapling: ScraplingClient | None = None,
+) -> dict:
     """Discover all GMK sets from gmk.net and upsert them to the DB.
 
     Walks /shop/en/keycaps/ and /shop/en/group-buys/, scrapes each product
@@ -1332,7 +1482,7 @@ def run_catalog(conn, context: BrowserContext, deadline: float) -> dict:
                 log("Catalog pass: deadline reached during URL discovery.")
                 stats["urls_found"] = len(all_urls)
                 return stats
-            urls = scrape_catalog_page_urls(catalog_page, cat_url)
+            urls = scrape_catalog_page_urls(catalog_page, cat_url, scrapling)
             for u in urls:
                 if u not in seen_urls:
                     seen_urls.add(u)
@@ -1351,7 +1501,7 @@ def run_catalog(conn, context: BrowserContext, deadline: float) -> dict:
                 stats["skipped"] += 1
                 continue
 
-            metadata = scrape_gmk_product_metadata(detail_page, url)
+            metadata = scrape_gmk_product_metadata(detail_page, url, scrapling)
             if not metadata:
                 stats["failed"] += 1
                 continue
@@ -1557,7 +1707,12 @@ def run_zfrontier(conn, context: BrowserContext, deadline: float) -> dict:
 # ----------------------------------------------------------------------------
 # Passes
 # ----------------------------------------------------------------------------
-def run_images(conn, context: BrowserContext, deadline: float) -> dict:
+def run_images(
+    conn,
+    context: BrowserContext,
+    deadline: float,
+    scrapling: ScraplingClient | None = None,
+) -> dict:
     stats = {"attempted": 0, "enriched": 0, "failed": 0}
     candidates = fetch_image_candidates(conn)
     log(f"Image pass: {len(candidates)} candidate set(s) with a gmk.net link.")
@@ -1571,7 +1726,7 @@ def run_images(conn, context: BrowserContext, deadline: float) -> dict:
             if not gmk_url:
                 continue
             stats["attempted"] += 1
-            gallery = gmk_gallery(page, gmk_url)
+            gallery = gmk_gallery(page, gmk_url, scrapling)
             if not gallery:
                 # Record the attempt so the rotation moves to the next set.
                 with conn.cursor() as cur:
@@ -1610,7 +1765,12 @@ def run_images(conn, context: BrowserContext, deadline: float) -> dict:
     return stats
 
 
-def run_prices(conn, context: BrowserContext, deadline: float) -> dict:
+def run_prices(
+    conn,
+    context: BrowserContext,
+    deadline: float,
+    scrapling: ScraplingClient | None = None,
+) -> dict:
     stats = {"attempted": 0, "updated": 0, "failed": 0}
     candidates = fetch_price_candidates(conn)
     log(f"Price pass: {len(candidates)} vendor listing(s) to check.")
@@ -1621,7 +1781,12 @@ def run_prices(conn, context: BrowserContext, deadline: float) -> dict:
                 log("Price pass: time budget reached — stopping.")
                 break
             stats["attempted"] += 1
-            result = shopify_price(page, vk["productUrl"], vk.get("vendor_currency"))
+            result = shopify_price(
+                page,
+                vk["productUrl"],
+                vk.get("vendor_currency"),
+                scrapling,
+            )
             if result:
                 with conn.cursor() as cur:
                     cur.execute(
@@ -1978,33 +2143,50 @@ def kb_extract_gb_end_date(product: dict):
     return candidates[0][1]
 
 
-def fetch_collection_products(page: Page, products_json_url: str,
-                              deadline: float) -> list[dict]:
+def fetch_collection_products(
+    page: Page,
+    products_json_url: str,
+    deadline: float,
+    scrapling: ScraplingClient | None = None,
+) -> list[dict]:
     """Navigate to the collection page (acquires cf_clearance) then fetch its
-    paginated products.json from the page context so it carries the cookies."""
+    paginated products.json. Scrapling's browser-TLS HTTP session is tried
+    first; Playwright is opened only when the endpoint is blocked."""
     collection_page = products_json_url.replace("/products.json", "")
-    try:
-        page.goto(collection_page, wait_until="domcontentloaded",
-                  timeout=NAV_TIMEOUT_MS)
-    except Exception as e:
-        log(f"  collection nav failed ({collection_page}): {e}")
-
     products: list[dict] = []
+    browser_loaded = False
     pg = 1
     while pg <= 10:
         if now_ms() > deadline:
             break
         url = f"{products_json_url}?limit=250&page={pg}"
-        data = page.evaluate(
-            """async (u) => {
-                try {
-                    const r = await fetch(u, { headers: { 'Accept': 'application/json' } });
-                    if (!r.ok) return null;
-                    return await r.json();
-                } catch (e) { return null; }
-            }""",
-            url,
+        data = (
+            scrapling.get_json(url, headers={"Accept": "application/json"})
+            if scrapling is not None
+            else None
         )
+        if not data or "products" not in data:
+            if not browser_loaded:
+                try:
+                    page.goto(
+                        collection_page,
+                        wait_until="domcontentloaded",
+                        timeout=NAV_TIMEOUT_MS,
+                    )
+                    browser_loaded = True
+                except Exception as e:
+                    log(f"  collection nav failed ({collection_page}): {e}")
+                    break
+            data = page.evaluate(
+                """async (u) => {
+                    try {
+                        const r = await fetch(u, { headers: { 'Accept': 'application/json' } });
+                        if (!r.ok) return null;
+                        return await r.json();
+                    } catch (e) { return null; }
+                }""",
+                url,
+            )
         if not data or "products" not in data:
             break
         batch = data.get("products") or []
@@ -2092,7 +2274,12 @@ def upsert_keyboard(conn, vendor, product: dict, source_url: str) -> tuple:
     return (row["id"] if row else None), True
 
 
-def run_keyboards(conn, context: BrowserContext, deadline: float) -> dict:
+def run_keyboards(
+    conn,
+    context: BrowserContext,
+    deadline: float,
+    scrapling: ScraplingClient | None = None,
+) -> dict:
     stats = {"fetched": 0, "created": 0, "updated": 0, "skipped": 0, "failed": 0}
     log("Keyboard pass: scraping vendor stores (real browser) ...")
     ensure_keyboard_columns(conn)
@@ -2110,7 +2297,7 @@ def run_keyboards(conn, context: BrowserContext, deadline: float) -> dict:
             for url in urls:
                 if now_ms() > deadline:
                     break
-                for p in fetch_collection_products(page, url, deadline):
+                for p in fetch_collection_products(page, url, deadline, scrapling):
                     pid = p.get("id")
                     if pid not in seen:
                         seen[pid] = url
@@ -3139,6 +3326,11 @@ def parse_args():
         action="store_true",
         help="Run Chromium without a visible window (used by manual GitHub Actions).",
     )
+    parser.add_argument(
+        "--no-scrapling",
+        action="store_true",
+        help="Disable Scrapling acquisition and use the legacy Playwright path only.",
+    )
     return parser.parse_args()
 
 
@@ -3213,51 +3405,59 @@ def main() -> int:
     )
     deadline = now_ms() + budget_minutes * 60 * 1000
 
-    with sync_playwright() as p:
-        context, temporary_profile = launch_scraper_context(
-            p,
-            headless=args.headless,
-        )
-        try:
-            if args.geekhack_backfill_year:
-                log(
-                    f"One-time Geekhack keyboard backfill from "
-                    f"{args.geekhack_backfill_year}; budget={budget_minutes} minutes."
-                )
-                gh_stats = run_geekhack(
-                    conn,
-                    context,
-                    deadline,
-                    min_year=args.geekhack_backfill_year,
-                    keyboards_only=True,
-                    delay_min=2.0,
-                    delay_max=4.0,
-                )
-            elif args.lightning_only:
-                log(
-                    f"Lightning Keyboards showcase scrape only; "
-                    f"budget={budget_minutes} minutes."
-                )
-                lk_stats = run_lightning(conn, context, deadline)
-            else:
-                # Catalog first so image + price passes have full set coverage
-                catalog_stats = run_catalog(conn, context, deadline)
-                zf_stats = run_zfrontier(conn, context, deadline)
-                kb_stats = run_keyboards(conn, context, deadline)
-                # Cap the nightly Lightning pass so a first-time full backfill
-                # can't starve the Geekhack/image/price passes that follow. The
-                # large initial backfill should be run once via --lightning-only;
-                # nightly only needs the small incremental scan of the latest
-                # part plus a probe for the next one.
-                lk_deadline = min(deadline, now_ms() + 6 * 60 * 1000)
-                lk_stats = run_lightning(conn, context, lk_deadline)
-                gh_stats = run_geekhack(conn, context, deadline)
-                img_stats = run_images(conn, context, deadline)
-                price_stats = run_prices(conn, context, deadline)
-        finally:
-            context.close()
-            if temporary_profile is not None:
-                shutil.rmtree(temporary_profile, ignore_errors=True)
+    with ScraplingClient(
+        headless=args.headless,
+        logger=log,
+        enabled=not args.no_scrapling,
+    ) as scrapling:
+        with sync_playwright() as p:
+            context, temporary_profile = launch_scraper_context(
+                p,
+                headless=args.headless,
+            )
+            try:
+                if args.geekhack_backfill_year:
+                    log(
+                        f"One-time Geekhack keyboard backfill from "
+                        f"{args.geekhack_backfill_year}; budget={budget_minutes} minutes."
+                    )
+                    gh_stats = run_geekhack(
+                        conn,
+                        context,
+                        deadline,
+                        min_year=args.geekhack_backfill_year,
+                        keyboards_only=True,
+                        delay_min=2.0,
+                        delay_max=4.0,
+                    )
+                elif args.lightning_only:
+                    log(
+                        f"Lightning Keyboards showcase scrape only; "
+                        f"budget={budget_minutes} minutes."
+                    )
+                    lk_stats = run_lightning(conn, context, deadline)
+                else:
+                    # Catalog first so image + price passes have full set coverage
+                    catalog_stats = run_catalog(conn, context, deadline, scrapling)
+                    zf_stats = run_zfrontier(conn, context, deadline)
+                    kb_stats = run_keyboards(conn, context, deadline, scrapling)
+                    # Cap the nightly Lightning pass so a first-time full backfill
+                    # can't starve the Geekhack/image/price passes that follow. The
+                    # large initial backfill should be run once via --lightning-only;
+                    # nightly only needs the small incremental scan of the latest
+                    # part plus a probe for the next one.
+                    lk_deadline = min(deadline, now_ms() + 6 * 60 * 1000)
+                    lk_stats = run_lightning(conn, context, lk_deadline)
+                    gh_stats = run_geekhack(conn, context, deadline)
+                    img_stats = run_images(conn, context, deadline, scrapling)
+                    price_stats = run_prices(conn, context, deadline, scrapling)
+            finally:
+                context.close()
+                if temporary_profile is not None:
+                    shutil.rmtree(temporary_profile, ignore_errors=True)
+
+        if scrapling.available:
+            log(f"Scrapling acquisition -> {scrapling.stats.summary()}")
 
     conn.close()
     if args.geekhack_backfill_year:

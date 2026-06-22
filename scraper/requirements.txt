@@ -1,2 +1,3 @@
-playwright>=1.44
+playwright==1.60.0
+scrapling[fetchers]==0.4.9
 psycopg2-binary>=2.9

@@ -29,15 +29,22 @@ It never overwrites a price you set manually in the admin panel
 
 ## What runs
 
-- `scrape.py` — the scraper (Playwright + direct Postgres writes). Runs six
+- `scrape.py` — the scraper (Scrapling + Playwright + direct Postgres writes).
+  Scrapling first uses browser-TLS HTTP requests for public Shopify JSON and
+  starts an isolated stealth browser only when a protected GMK/vendor page
+  defeats the saved Playwright session. Runs six
   passes each night: **GMK catalog** → **zFrontier** → **keyboards** →
   **Geekhack** → **images** → **prices**, sharing a 30‑minute time budget.
+- `scrapling_client.py` — the acquisition adapter. It deliberately returns only
+  HTML/JSON; all base-kit, currency, availability, and keyboard/keycap decisions
+  remain in `scrape.py`.
 - `schedule_time.py` — prints the PC‑local time equal to **00:00 GMT+8**.
 - `run-scraper.bat` — **the file you double‑click.** Each run it: `git pull`s the
-  latest `scrape.py`, ensures Python + Playwright are installed, asks for the DB
-  password the first time, registers a non-elevated per-user nightly schedule,
-  then runs. Git reflog writes are disabled for the pull so a checkout created
-  by a different WorkSpace account cannot block updates solely on `.git/logs`.
+  latest `scrape.py`, ensures Python + Playwright/Scrapling are installed, asks
+  for the DB password the first time, registers a non-elevated per-user nightly
+  schedule, then runs. Git reflog writes are disabled for the pull so a checkout
+  created by a different WorkSpace account cannot block updates solely on
+  `.git/logs`.
 - `run-geekhack-backfill.bat` — a one-time, resumable import of keyboard group
   buys from Geekhack back to 2020. It runs only the history pass with a four-hour
   budget and does not change the nightly scraper's normal 2026 cutoff.
@@ -72,7 +79,7 @@ It never overwrites a price you set manually in the admin panel
      detects broken permissions or damaged repository metadata,
    - migrate `credentials.csv`, `config.local.ini`, `gh_seen.json`, and
      `lk_seen.json` from the old `C:\ryaner84\gmk-tracker` checkout when present,
-   - install Python deps + Chromium,
+   - install Python deps, Chromium, and Scrapling's stealth browser,
    - **ask for your Supabase database password** (typed hidden). It tests the
      password against the database and keeps asking until it's correct, then saves
      it to `credentials.csv` so future runs are silent.
@@ -96,6 +103,38 @@ That's the "initial one‑time run." After this, it runs itself nightly.
 - On AWS WorkSpaces, **disconnect** your RDP session (close the window) instead of
   **signing out**. Disconnecting keeps the session — and the scheduled run — alive.
   Signing out ends the session and the nightly job won't run.
+
+### Hybrid fetching and safe fallback
+
+The nightly scraper now uses three acquisition levels:
+
+1. **Scrapling HTTP** for Shopify `product.json`, `product.js`, variant, currency,
+   and collection endpoints. This is faster and presents a real browser TLS
+   fingerprint without opening a tab.
+2. **Saved Playwright profile** for JavaScript pages and stores that require the
+   clearance cookies you solved manually.
+3. **Scrapling stealth browser** when a GMK/vendor page is blocked or times out.
+   It uses a disposable profile, so a corrupt or locked saved Chromium profile
+   cannot block this recovery path.
+
+Scrapling does not choose prices or infer product types. Existing validated
+rules still select the base kit, reject add-ons and implausible prices, pin the
+store currency, and calculate stock from the selected variant.
+
+The GMK catalog matcher also accepts both current `fptk5113.0` and legacy
+`gmk10038` product IDs. Restricting discovery to the legacy format previously
+caused most current catalog products to be skipped.
+
+To temporarily compare against the old behavior:
+
+```bat
+python scrape.py --no-scrapling
+```
+
+The same fallback can be disabled for a scheduled run by setting
+`SCRAPER_SCRAPLING=0`. Every normal run prints a final line such as
+`Scrapling acquisition -> http_ok=... blocked=... stealth_ok=...`, which makes
+it clear whether the new layer is helping.
 
 ---
 
@@ -169,6 +208,7 @@ has no schedule and receives no collection-authentication or email credentials.
   `Images -> attempted=… enriched=…`, `Prices -> attempted=… updated=…`,
   `Keyboards -> fetched=… created=… updated=… failed=…`, and
   `Geekhack -> pages=… scraped=… created=… updated=… unchanged=… old=…`.
+  They also include Scrapling HTTP, block, and stealth-recovery counts.
 - In Supabase SQL editor:
   ```sql
   select slug, array_length(images,1) from "GroupBuy" where slug='gmk-masterpiece-r2';

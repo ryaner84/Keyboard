@@ -45,5 +45,6 @@ next-env.d.ts
 /scraper/logs/
 /scraper/.venv/
 /scraper/__pycache__/
+/scraper/.scrapling-browsers-*
 /scraper/gh_seen.json
 /scraper/lk_seen.json
