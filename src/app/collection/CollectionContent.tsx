@@ -221,7 +221,17 @@ function dateInputValue(value: Date | string | null): string {
   return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
 }
 
-function BuildSummary({ build, index }: { build: CollectionUnit; index: number }) {
+function BuildSummary({
+  build,
+  index,
+  selected = false,
+  onSelect,
+}: {
+  build: CollectionUnit;
+  index: number;
+  selected?: boolean;
+  onSelect?: () => void;
+}) {
   const specs = [
     build.acquiredAt
       ? `Acquired ${new Date(build.acquiredAt).getFullYear()}`
@@ -235,7 +245,16 @@ function BuildSummary({ build, index }: { build: CollectionUnit; index: number }
     build.keycaps,
   ].filter(Boolean) as string[];
   return (
-    <div className="flex gap-3 rounded-xl bg-gray-50 p-2.5 dark:bg-white/[0.04]">
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={`flex w-full gap-3 rounded-xl border p-2.5 text-left transition ${
+        selected
+          ? "border-[#c9ab72] bg-[#faf6ed] shadow-[0_0_0_2px_rgba(201,171,114,0.12)] dark:border-[#80632f] dark:bg-[#2a241a]"
+          : "border-transparent bg-gray-50 hover:border-gray-200 hover:bg-white dark:bg-white/[0.04] dark:hover:border-gray-700 dark:hover:bg-white/[0.07]"
+      }`}
+    >
       {build.imageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -261,7 +280,12 @@ function BuildSummary({ build, index }: { build: CollectionUnit; index: number }
           </p>
         )}
       </div>
-    </div>
+      {selected && (
+        <span className="ml-auto mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#9a7a42] text-white">
+          <CheckIcon />
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -1732,30 +1756,51 @@ function CollectionCard({
   onAdd: () => void;
   onRemove: () => void;
 }) {
-  const imageUrl =
-    item.collection.customImageUrl || normalizeImageUrl(item.imageUrl);
   const owned = item.collection.inCollection;
   const builds = assembleBuilds(item.collection);
   const multiBuild = builds.length > 1;
+  const [activeBuildIndex, setActiveBuildIndex] = useState(0);
+  const visibleBuildIndex = Math.min(activeBuildIndex, builds.length - 1);
+  const activeBuild = builds[visibleBuildIndex];
+  const catalogImageUrl = normalizeImageUrl(item.imageUrl);
+  const imageUrl = multiBuild
+    ? activeBuild?.imageUrl ||
+      (visibleBuildIndex === 0 ? catalogImageUrl : null)
+    : item.collection.customImageUrl || catalogImageUrl;
   const details = [
     item.collection.color && { label: "Color", value: item.collection.color },
     item.collection.switches && { label: "Switches", value: item.collection.switches },
     item.collection.keycaps && { label: "Keycaps", value: item.collection.keycaps },
   ].filter(Boolean) as Array<{ label: string; value: string }>;
-  const acquiredYear = item.collection.acquiredAt
-    ? new Date(item.collection.acquiredAt).getFullYear()
+  const summaryColor = multiBuild ? activeBuild?.color : item.collection.color;
+  const summaryCondition = multiBuild
+    ? activeBuild?.condition
+    : item.collection.condition;
+  const summaryAcquiredAt = multiBuild
+    ? activeBuild?.acquiredAt
+    : item.collection.acquiredAt;
+  const acquiredYear = summaryAcquiredAt
+    ? new Date(summaryAcquiredAt).getFullYear()
     : null;
 
   return (
     <article className="group overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_10px_35px_rgba(25,22,16,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_18px_50px_rgba(25,22,16,0.10)] dark:border-white/10 dark:bg-[#111417]">
-      <Link href={`/sets/${item.slug}?country=${countryCode}`} className="block">
-        <div className="relative aspect-[4/3] overflow-hidden bg-[#e9e7e1] dark:bg-gray-900">
+      <div className="relative aspect-[4/3] overflow-hidden bg-[#e9e7e1] dark:bg-gray-900">
+        <Link
+          href={`/sets/${item.slug}?country=${countryCode}`}
+          aria-label={`View ${item.name}`}
+          className="absolute inset-0 block"
+        >
           {imageUrl ? (
             // Plain img (not next/image) so owner-uploaded data: URLs render.
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={imageUrl}
-              alt={item.name}
+              alt={
+                multiBuild
+                  ? `${item.name}, Build ${visibleBuildIndex + 1}`
+                  : item.name
+              }
               className="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-[1.025]"
             />
           ) : (
@@ -1763,7 +1808,8 @@ function CollectionCard({
               ⌨
             </div>
           )}
-          <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4">
+        </Link>
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 p-4">
             <span className="rounded-full bg-black/65 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur">
               {item.productType === "KEYBOARD" ? "Keyboard" : "Keycap set"}
             </span>
@@ -1778,9 +1824,76 @@ function CollectionCard({
                 {item.collection.isPublic ? "On display" : "Private"}
               </span>
             )}
-          </div>
         </div>
-      </Link>
+
+        {multiBuild && (
+          <>
+            <button
+              type="button"
+              onClick={() =>
+                setActiveBuildIndex(
+                  (visibleBuildIndex - 1 + builds.length) % builds.length
+                )
+              }
+              aria-label="Show previous build photo"
+              className="absolute left-3 top-1/2 z-20 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-black/55 text-white shadow-lg backdrop-blur transition hover:scale-105 hover:bg-black/75"
+            >
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M15 19l-7-7 7-7"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setActiveBuildIndex((visibleBuildIndex + 1) % builds.length)
+              }
+              aria-label="Show next build photo"
+              className="absolute right-3 top-1/2 z-20 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-black/55 text-white shadow-lg backdrop-blur transition hover:scale-105 hover:bg-black/75"
+            >
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 5l7 7-7 7"
+                />
+              </svg>
+            </button>
+            <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/65 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-lg backdrop-blur">
+              <span>
+                Build {visibleBuildIndex + 1} of {builds.length}
+              </span>
+              <span className="flex gap-1">
+                {builds.map((_, index) => (
+                  <span
+                    key={index}
+                    className={`h-1.5 rounded-full transition-all ${
+                      index === visibleBuildIndex
+                        ? "w-4 bg-white"
+                        : "w-1.5 bg-white/45"
+                    }`}
+                  />
+                ))}
+              </span>
+            </div>
+          </>
+        )}
+        </div>
 
       <div className="p-5">
         <div className="flex items-start justify-between gap-3">
@@ -1795,9 +1908,9 @@ function CollectionCard({
             </Link>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {[
-                item.collection.color || null,
-                item.collection.condition
-                  ? CONDITION_LABELS[item.collection.condition] || item.collection.condition
+                summaryColor || null,
+                summaryCondition
+                  ? CONDITION_LABELS[summaryCondition] || summaryCondition
                   : null,
                 acquiredYear ? `Acquired ${acquiredYear}` : null,
                 !owned && item.status ? String(item.status).replaceAll("_", " ") : null,
@@ -1844,7 +1957,13 @@ function CollectionCard({
               {builds.length} builds
             </p>
             {builds.map((build, index) => (
-              <BuildSummary key={index} build={build} index={index} />
+              <BuildSummary
+                key={index}
+                build={build}
+                index={index}
+                selected={index === visibleBuildIndex}
+                onSelect={() => setActiveBuildIndex(index)}
+              />
             ))}
           </div>
         )}
