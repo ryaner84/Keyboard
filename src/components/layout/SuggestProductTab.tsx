@@ -13,14 +13,14 @@ export function SuggestProductTab() {
     <>
       <button
         onClick={() => setOpen(true)}
-        aria-label="Tell us about a new product"
+        aria-label="Recommend a new product"
         className="flex items-center gap-2 px-2 py-3 rounded-l-xl shadow-lg text-xs font-semibold tracking-wide transition-colors bg-sky-600 text-white hover:bg-sky-700"
         style={{ writingMode: "vertical-rl" }}
       >
         <svg className="w-4 h-4 rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
         </svg>
-        Suggest a product
+        Recommend new product
       </button>
 
       <SuggestProductPanel isOpen={open} onClose={() => setOpen(false)} />
@@ -86,7 +86,7 @@ function SuggestProductPanel({ isOpen, onClose }: { isOpen: boolean; onClose: ()
         {/* Header */}
         <div className="flex items-start justify-between p-5 border-b border-gray-100 dark:border-gray-800">
           <div>
-            <h3 className="font-semibold text-gray-900 dark:text-white">Suggest a product</h3>
+            <h3 className="font-semibold text-gray-900 dark:text-white">Recommend a new product</h3>
             <p className="text-xs text-gray-400 mt-0.5">
               Know a keyboard or keycap set we&apos;re missing? Paste its link.
             </p>
