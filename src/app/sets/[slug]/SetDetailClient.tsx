@@ -173,58 +173,58 @@ export function SetDetailClient({ groupBuy }: Props) {
           convert={convert}
         />
       ) : (
-        <>
-          <div className="rounded-2xl border border-gray-100 bg-white p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-semibold text-gray-900">
-                Base kit prices to {countryCode} in {currency}
-              </h2>
-              <span className="hidden text-xs text-gray-400 sm:inline">
-                sorted by total cost
-              </span>
-            </div>
-
-            <VendorTable
-              slug={groupBuy.slug}
-              vendorKits={vendorKitsForRegion as never}
-              userRegion={region as Region}
-              userCurrency={currency}
-              rates={rates}
-              loading={loading}
-              showUnpriced={!RELEASED_STATUSES.has(groupBuy.status ?? "")}
-              onSuggestVendor={() => setSuggestOpen(true)}
-            />
+        <div className="rounded-2xl border border-gray-100 bg-white p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="font-semibold text-gray-900">
+              Base kit prices to {countryCode} in {currency}
+            </h2>
+            <span className="hidden text-xs text-gray-400 sm:inline">
+              sorted by total cost
+            </span>
           </div>
 
-          <button
-            onClick={() => setSuggestOpen(true)}
-            className="fixed bottom-6 right-0 z-30 flex items-center gap-2 rounded-l-xl bg-indigo-600 px-2 py-3 text-xs font-semibold tracking-wide text-white shadow-lg transition-colors hover:bg-indigo-700"
-            style={{ writingMode: "vertical-rl" }}
-            aria-label="Suggest a vendor link"
-          >
-            <svg
-              className="h-4 w-4 rotate-90"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 4v16m8-8H4"
-              />
-            </svg>
-            Add vendor link
-          </button>
-
-          <SuggestVendorPanel
+          <VendorTable
             slug={groupBuy.slug}
-            isOpen={suggestOpen}
-            onClose={() => setSuggestOpen(false)}
+            vendorKits={vendorKitsForRegion as never}
+            userRegion={region as Region}
+            userCurrency={currency}
+            rates={rates}
+            loading={loading}
+            showUnpriced={!RELEASED_STATUSES.has(groupBuy.status ?? "")}
+            onSuggestVendor={() => setSuggestOpen(true)}
           />
-        </>
+        </div>
       )}
+
+      {/* Suggest-vendor tab — visible on both keyboard and keycap set pages so
+          anyone can point us at another store that carries this set/board. */}
+      <button
+        onClick={() => setSuggestOpen(true)}
+        className="fixed bottom-6 right-0 z-30 flex items-center gap-2 rounded-l-xl bg-indigo-600 px-2 py-3 text-xs font-semibold tracking-wide text-white shadow-lg transition-colors hover:bg-indigo-700"
+        style={{ writingMode: "vertical-rl" }}
+        aria-label="Suggest a vendor link"
+      >
+        <svg
+          className="h-4 w-4 rotate-90"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M12 4v16m8-8H4"
+          />
+        </svg>
+        {isKeyboard ? "Add a store link" : "Add vendor link"}
+      </button>
+
+      <SuggestVendorPanel
+        slug={groupBuy.slug}
+        isOpen={suggestOpen}
+        onClose={() => setSuggestOpen(false)}
+      />
     </div>
   );
 }

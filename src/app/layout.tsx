@@ -7,6 +7,7 @@ import { LocationSelector } from "@/components/home/LocationSelector";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ShippingLocationTab } from "@/components/layout/ShippingLocationTab";
+import { SuggestProductTab } from "@/components/layout/SuggestProductTab";
 import { TrackerProvider } from "@/context/TrackerContext";
 
 export const metadata: Metadata = {
@@ -35,7 +36,11 @@ export default function RootLayout({
             <TrackerProvider>
               <LocationSelector />
               <Header />
-              <ShippingLocationTab />
+              {/* Right-edge ribbons, stacked: shipping location + suggest product */}
+              <div className="fixed right-0 top-1/2 -translate-y-1/2 z-30 flex flex-col gap-1.5 items-end">
+                <ShippingLocationTab />
+                <SuggestProductTab />
+              </div>
               <main className="flex-1">{children}</main>
               <Footer />
             </TrackerProvider>

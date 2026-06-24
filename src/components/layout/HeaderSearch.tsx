@@ -6,6 +6,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import { useTrackedSets } from "@/hooks/useTrackedSets";
 
 interface SearchResult {
   slug: string;
@@ -26,6 +27,7 @@ const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
 
 export function HeaderSearch() {
   const router = useRouter();
+  const { isTracked, toggle } = useTrackedSets();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -183,37 +185,59 @@ export function HeaderSearch() {
               ) : (
                 results.map((r, i) => {
                   const badge = STATUS_BADGE[r.status] ?? STATUS_BADGE.DELIVERED;
+                  const tracked = isTracked(r.slug);
                   return (
-                    <button
+                    <div
                       key={r.slug}
-                      onClick={() => go(r.slug)}
                       onMouseEnter={() => setHighlighted(i)}
-                      className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+                      className={`flex items-center gap-1 px-4 py-2.5 transition-colors ${
                         i === highlighted ? "bg-indigo-50 dark:bg-indigo-950/50" : ""
                       }`}
                     >
-                      <div className="w-12 h-8 rounded-md bg-gray-100 dark:bg-gray-800 overflow-hidden flex-shrink-0 relative">
-                        {r.imageUrl && (
-                          <Image
-                            src={r.imageUrl}
-                            alt=""
-                            fill
-                            sizes="48px"
-                            className="object-cover"
-                          />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{r.name}</p>
-                        <p className="text-xs text-gray-400 truncate">
-                          {r.productType === "KEYBOARD" ? "Keyboard" : "Keycap set"}
-                          {r.designer ? ` · ${r.designer}` : ""}
-                        </p>
-                      </div>
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${badge.cls}`}>
-                        {badge.label}
-                      </span>
-                    </button>
+                      {/* Main clickable area — opens the set */}
+                      <button
+                        onClick={() => go(r.slug)}
+                        className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                      >
+                        <div className="w-12 h-8 rounded-md bg-gray-100 dark:bg-gray-800 overflow-hidden flex-shrink-0 relative">
+                          {r.imageUrl && (
+                            <Image
+                              src={r.imageUrl}
+                              alt=""
+                              fill
+                              sizes="48px"
+                              className="object-cover"
+                            />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{r.name}</p>
+                          <p className="text-xs text-gray-400 truncate">
+                            {r.productType === "KEYBOARD" ? "Keyboard" : "Keycap set"}
+                            {r.designer ? ` · ${r.designer}` : ""}
+                          </p>
+                        </div>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${badge.cls}`}>
+                          {badge.label}
+                        </span>
+                      </button>
+
+                      {/* Track toggle — add/remove from My Collection without leaving search */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggle(r.slug); }}
+                        title={tracked ? "Remove from My Collection" : "Add to My Collection"}
+                        aria-label={tracked ? "Remove from My Collection" : "Add to My Collection"}
+                        className={`p-1.5 rounded-lg flex-shrink-0 transition-colors ${
+                          tracked
+                            ? "text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
+                            : "text-gray-300 dark:text-gray-600 hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
+                        }`}
+                      >
+                        <svg className="w-4 h-4" fill={tracked ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                        </svg>
+                      </button>
+                    </div>
                   );
                 })
               )}

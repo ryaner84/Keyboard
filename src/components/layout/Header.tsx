@@ -71,7 +71,7 @@ export function Header() {
   const pathname = usePathname();
 
   const navLinks = [
-    { href: "/released", label: "Released" },
+    { href: "/released", label: "Bargain" },
     { href: "/timeline", label: "Timeline" },
     { href: "/collection", label: "My Collection" },
   ];

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { normalizeImageUrl } from "@/lib/utils";
 import { getSiteUrl } from "@/lib/site-url";
 import ReportPhotoButton from "@/components/collection/ReportPhotoButton";
+import { CollectionCardGallery } from "@/components/collection/CollectionCardGallery";
 import {
   collectionPosterPath,
   collectionSharePath,
@@ -241,7 +242,6 @@ function PublicCollectionCard({
   number: number;
   collectionSlug: string;
 }) {
-  const imageUrl = item.customImageUrl || normalizeImageUrl(item.groupBuy.imageUrl);
   const acquiredYear = item.acquiredAt?.getFullYear();
   const specs = [
     item.groupBuy.layout,
@@ -251,44 +251,26 @@ function PublicCollectionCard({
   const builds = assemblePublicBuilds(item);
   const multiBuild = builds.length > 1;
 
+  // One gallery slide per build. A build with its own uploaded photo shows that
+  // (and can be reported); a build without one falls back to the shared render.
+  const groupImage = normalizeImageUrl(item.groupBuy.imageUrl);
+  const slides = builds.map((build, index) => ({
+    imageUrl: build.imageUrl || groupImage,
+    isCustom: Boolean(build.imageUrl),
+    buildIndex: index,
+  }));
+
   return (
     <article className="group overflow-hidden rounded-2xl border border-black/[0.08] bg-white shadow-[0_14px_45px_rgba(29,25,18,0.07)] dark:border-white/10 dark:bg-[#111417]">
-      <div className="relative">
-        <Link href={`/sets/${item.groupBuy.slug}`} className="block">
-          <div className="relative aspect-[4/3] overflow-hidden bg-[#ddd9cf] dark:bg-gray-900">
-          {imageUrl ? (
-            // Plain img so owner-uploaded data: URLs render.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={imageUrl}
-              alt={item.groupBuy.name}
-              className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-[1.03]"
-            />
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center text-5xl text-gray-300 dark:text-gray-700">
-              ⌨
-            </div>
-          )}
-          <span className="absolute left-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 font-serif text-sm text-white backdrop-blur">
-            {String(number).padStart(2, "0")}
-          </span>
-          {multiBuild && (
-            <span className="absolute right-4 top-4 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur">
-              {builds.length} builds
-            </span>
-          )}
-          </div>
-        </Link>
-        {item.customImageUrl && (
-          <ReportPhotoButton
-            collectionSlug={collectionSlug}
-            trackerItemId={item.id}
-            buildIndex={0}
-            label={`${item.groupBuy.name}, build 1`}
-            className="absolute bottom-4 right-4"
-          />
-        )}
-      </div>
+      <CollectionCardGallery
+        slides={slides}
+        setSlug={item.groupBuy.slug}
+        setName={item.groupBuy.name}
+        number={number}
+        buildsCount={builds.length}
+        collectionSlug={collectionSlug}
+        trackerItemId={item.id}
+      />
 
       <div className="p-5 sm:p-6">
         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9a7a42] dark:text-[#c9ab72]">
