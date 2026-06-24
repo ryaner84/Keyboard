@@ -286,13 +286,25 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     // Preference: the variant the vendor link itself pins (?variant=<id> — exact,
     // survives non-English titles like Yushakobo's) > the variant classified BASE
     // (same classifier the set-page filter uses, so the stored price always
-    // matches what's displayed) > first non-add-on variant (Shopify returns
-    // variants in display order; the primary kit comes first on single-kit
-    // listings titled "Default Title").
+    // matches what's displayed) > the first non-add-on variant that could
+    // plausibly BE a base kit (Shopify returns variants in display order; the
+    // primary kit comes first on single-kit listings titled "Default Title").
+    //
+    // A variant positively classified as a SUBKIT (Alpha/Novelties/Spacebars) is
+    // never the base kit, so it must never win the fallback. When every candidate
+    // is such a subkit we cannot identify the base kit on this listing — return
+    // null (no price) rather than store a subkit price as the base. This stops
+    // pages like Keygem's GMK Rainy Day R2 (only a Novelties variant, no base)
+    // from re-storing the €88 novelty as the "base" price every scrape.
     const pinned = pinnedId ? variants.find((v) => v.id === pinnedId) : undefined;
     const nonAddon = variants.filter((v) => !ADDON_VARIANT_RE.test(v.title));
     const pool = nonAddon.length > 0 ? nonAddon : variants;
-    const chosen = pinned ?? pool.find((v) => classifyVariant(v.title) === "BASE") ?? pool[0];
+    const baseTitled = pool.find((v) => classifyVariant(v.title) === "BASE");
+    // OTHERS = a real but plainly-titled base kit ("Default Title", "GMK XYZ
+    // Keycaps"); a recognized subkit category is excluded here on purpose.
+    const baseFallback = pool.find((v) => classifyVariant(v.title) === "OTHERS");
+    const chosen = pinned ?? baseTitled ?? baseFallback;
+    if (!chosen) return null;
     const baseVariants = pool.filter(
       (variant) => classifyVariant(variant.title) === "BASE"
     );

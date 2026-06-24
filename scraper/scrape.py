@@ -569,9 +569,18 @@ def is_plausible_base_price(price: float, currency: str | None) -> bool:
 
 def choose_kit_variant(variants: list[dict]) -> dict | None:
     """Pick the variant that is actually the BASE kit, NOT the cheapest one.
-    Preference: BASE-classified variant > first non-add-on variant (Shopify
-    returns variants in display order; single-kit listings have one 'Default
-    Title' variant)."""
+    Preference: BASE-classified variant > first non-add-on variant that could
+    plausibly BE a base kit (Shopify returns variants in display order; single-
+    kit listings have one 'Default Title' variant).
+
+    A variant we've POSITIVELY classified as a subkit — Alpha / Novelties /
+    Spacebars — is never the base kit, so it must never be handed back as the
+    fallback. When every remaining candidate is such a subkit we cannot identify
+    the base kit on this listing and return None (no price) rather than store a
+    subkit price as the base. This is what kept Keygem's GMK Rainy Day R2 page —
+    which lists only a Novelties variant, no base — re-storing its €88 novelty as
+    the "base" price on every scrape and generating repeated wrong-price reports.
+    'Default Title' / untitled single-kit listings classify OTHERS and are kept."""
     if not variants:
         return None
     non_addon = [v for v in variants if not _ADDON_VARIANT_RE.search(v["title"])]
@@ -579,7 +588,13 @@ def choose_kit_variant(variants: list[dict]) -> dict | None:
     for v in pool:
         if classify_variant(v["title"]) == "BASE":
             return v
-    return pool[0]
+    # No BASE-titled variant. Fall back to the first candidate that isn't a
+    # positively-classified subkit (OTHERS covers real but plainly-titled base
+    # kits like "Default Title" or "GMK XYZ Keycaps").
+    for v in pool:
+        if classify_variant(v["title"]) == "OTHERS":
+            return v
+    return None
 
 
 # Home country per currency — pins Shopify Markets' geo-localization to the

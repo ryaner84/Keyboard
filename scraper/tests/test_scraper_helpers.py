@@ -91,6 +91,37 @@ class ScraperExtractionTests(unittest.TestCase):
             "https://www.gmk.net/shop/en/keycaps/?p=2",
         )
 
+    def test_choose_kit_variant_prefers_base_title(self):
+        chosen = scrape.choose_kit_variant([
+            {"id": "1", "title": "Novelties", "price": 45},
+            {"id": "2", "title": "Base Kit", "price": 130},
+        ])
+        self.assertEqual(chosen["id"], "2")
+
+    def test_choose_kit_variant_keeps_plain_single_kit(self):
+        # Single-kit listings classify OTHERS ("Default Title") and must price.
+        chosen = scrape.choose_kit_variant([
+            {"id": "1", "title": "Default Title", "price": 120},
+        ])
+        self.assertEqual(chosen["id"], "1")
+
+    def test_choose_kit_variant_skips_subkit_only_listing(self):
+        # Keygem GMK Rainy Day R2: only a Novelties variant, no base kit. The
+        # subkit price must NOT be handed back as the base — refuse instead.
+        self.assertIsNone(scrape.choose_kit_variant([
+            {"id": "1", "title": "Novelties", "price": 88},
+            {"id": "2", "title": "Spacebars", "price": 35},
+        ]))
+
+    def test_choose_kit_variant_picks_base_candidate_over_leading_subkit(self):
+        # A recognized subkit listed first must not beat a plausible base kit
+        # (OTHERS) further down the display order.
+        chosen = scrape.choose_kit_variant([
+            {"id": "1", "title": "Novelties", "price": 45},
+            {"id": "2", "title": "GMK XYZ Keycaps", "price": 135},
+        ])
+        self.assertEqual(chosen["id"], "2")
+
     def test_selected_base_variant_controls_stock(self):
         variants = [
             {"id": "1", "title": "Base Kit", "price": 120},
