@@ -165,8 +165,11 @@ export default function ReleasedContent() {
           }}
         />
         <div className="relative">
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white">
-            {isKeyboard ? "Released Keyboards" : "Released Keycaps"}
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-white backdrop-blur-sm">
+            💸 Bargain
+          </span>
+          <h1 className="mt-3 text-2xl sm:text-3xl font-extrabold text-white">
+            {isKeyboard ? "Keyboard Bargains" : "Keycap Bargains"}
           </h1>
           <p className="mt-2 text-emerald-50 text-sm sm:text-base max-w-2xl">
             {isKeyboard ? (

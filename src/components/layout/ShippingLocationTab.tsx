@@ -12,7 +12,7 @@ export function ShippingLocationTab() {
     <button
       onClick={() => setShowModal(true)}
       aria-label="Change shipping location"
-      className={`fixed right-0 top-1/2 -translate-y-1/2 z-30 flex items-center gap-2 px-2 py-3 rounded-l-xl shadow-lg text-xs font-semibold tracking-wide transition-colors ${
+      className={`flex items-center gap-2 px-2 py-3 rounded-l-xl shadow-lg text-xs font-semibold tracking-wide transition-colors ${
         hasLocation
           ? "bg-green-600 text-white hover:bg-green-700"
           : "bg-amber-500 text-white hover:bg-amber-600 animate-pulse"
