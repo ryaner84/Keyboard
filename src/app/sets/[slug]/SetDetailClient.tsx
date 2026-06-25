@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { KeyboardPurchasePanel } from "@/components/set-detail/KeyboardPurchasePanel";
+import { KeyboardOtherStores } from "@/components/set-detail/KeyboardOtherStores";
 import { SharePosterButton } from "@/components/set-detail/SharePosterButton";
 import { SuggestVendorPanel } from "@/components/set-detail/SuggestVendorPanel";
 import { VendorTable } from "@/components/set-detail/VendorTable";
@@ -207,14 +208,22 @@ export function SetDetailClient({ groupBuy }: Props) {
           </div>
         </section>
       ) : isKeyboard ? (
-        <KeyboardPurchasePanel
-          keyboard={groupBuy}
-          destinationRegion={region}
-          countryCode={countryCode}
-          currency={currency}
-          loading={loading}
-          convert={convert}
-        />
+        <>
+          <KeyboardPurchasePanel
+            keyboard={groupBuy}
+            destinationRegion={region}
+            countryCode={countryCode}
+            currency={currency}
+            loading={loading}
+            convert={convert}
+          />
+          <KeyboardOtherStores
+            vendorKits={vendorKitsForRegion as never}
+            currency={currency}
+            convert={convert}
+            loading={loading}
+          />
+        </>
       ) : (
         <div className="rounded-2xl border border-gray-100 bg-white p-5">
           <div className="mb-4 flex items-center justify-between">

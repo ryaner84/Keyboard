@@ -107,5 +107,45 @@ class ScraperExtractionTests(unittest.TestCase):
         )
 
 
+class ChooseKitVariantTests(unittest.TestCase):
+    def test_prefers_base_over_cheaper_subkits(self):
+        variants = [
+            {"id": "1", "title": "Novelties", "price": 35},
+            {"id": "2", "title": "Base Kit", "price": 135},
+            {"id": "3", "title": "Spacebars", "price": 30},
+        ]
+        self.assertEqual(scrape.choose_kit_variant(variants)["price"], 135)
+
+    def test_single_default_title_variant_is_the_base(self):
+        variants = [{"id": "1", "title": "Default Title", "price": 140}]
+        self.assertEqual(scrape.choose_kit_variant(variants)["price"], 140)
+
+    def test_listing_with_only_subkits_returns_none(self):
+        # Keygem rainy-day-r2 case: the GB listing carries only a cheap novelty
+        # and a spacebar kit — no base kit — so no base price must be stored.
+        variants = [
+            {"id": "1", "title": "GMK Rainy Day Novelties", "price": 38},
+            {"id": "2", "title": "GMK Rainy Day Spacebars", "price": 30},
+        ]
+        self.assertIsNone(scrape.choose_kit_variant(variants))
+
+    def test_unlabeled_base_beats_labeled_subkit(self):
+        # Base kit is not literally titled "Base"; the cheap variant is a labeled
+        # subkit and must never be chosen over the unlabeled (OTHERS) base.
+        variants = [
+            {"id": "1", "title": "GMK Monokai Material Alphas", "price": 40},
+            {"id": "2", "title": "GMK Monokai Material", "price": 139},
+        ]
+        chosen = scrape.choose_kit_variant(variants)
+        self.assertEqual(chosen["price"], 139)
+
+    def test_addons_are_excluded(self):
+        variants = [
+            {"id": "1", "title": "Deskmat", "price": 25},
+            {"id": "2", "title": "Base Kit", "price": 120},
+        ]
+        self.assertEqual(scrape.choose_kit_variant(variants)["price"], 120)
+
+
 if __name__ == "__main__":
     unittest.main()

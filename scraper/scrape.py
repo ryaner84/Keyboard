@@ -569,17 +569,32 @@ def is_plausible_base_price(price: float, currency: str | None) -> bool:
 
 def choose_kit_variant(variants: list[dict]) -> dict | None:
     """Pick the variant that is actually the BASE kit, NOT the cheapest one.
-    Preference: BASE-classified variant > first non-add-on variant (Shopify
-    returns variants in display order; single-kit listings have one 'Default
-    Title' variant)."""
+
+    Preference: BASE-classified variant > first remaining variant in display
+    order (Shopify returns variants in display order; single-kit listings have
+    one 'Default Title' variant, which classifies as OTHERS and is kept).
+
+    Variants classified as a non-base STANDARD subkit (alphas, novelties,
+    spacebars) are excluded outright — those are cheap add-on kits, never the
+    base. When a listing carries ONLY subkits (no base kit on offer — e.g.
+    Keygem listing a rainy-day GB with just novelties/spacebars), there is no
+    base price to store, so return None and let the caller skip it rather than
+    fall through to a misleading subkit price."""
     if not variants:
         return None
     non_addon = [v for v in variants if not _ADDON_VARIANT_RE.search(v["title"])]
     pool = non_addon if non_addon else variants
-    for v in pool:
+    # Drop labeled subkits so an absent base kit can't fall through to a cheap
+    # alpha/novelty/spacebar variant; BASE and unlabeled OTHERS are retained.
+    base_pool = [
+        v for v in pool if classify_variant(v["title"]) in ("BASE", "OTHERS")
+    ]
+    if not base_pool:
+        return None
+    for v in base_pool:
         if classify_variant(v["title"]) == "BASE":
             return v
-    return pool[0]
+    return base_pool[0]
 
 
 # Home country per currency — pins Shopify Markets' geo-localization to the

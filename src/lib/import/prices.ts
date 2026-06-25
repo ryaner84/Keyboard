@@ -286,14 +286,27 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     // Preference: the variant the vendor link itself pins (?variant=<id> — exact,
     // survives non-English titles like Yushakobo's) > the variant classified BASE
     // (same classifier the set-page filter uses, so the stored price always
-    // matches what's displayed) > first non-add-on variant (Shopify returns
+    // matches what's displayed) > first non-subkit candidate (Shopify returns
     // variants in display order; the primary kit comes first on single-kit
-    // listings titled "Default Title").
+    // listings titled "Default Title"). Labeled subkits are excluded below.
     const pinned = pinnedId ? variants.find((v) => v.id === pinnedId) : undefined;
     const nonAddon = variants.filter((v) => !ADDON_VARIANT_RE.test(v.title));
     const pool = nonAddon.length > 0 ? nonAddon : variants;
-    const chosen = pinned ?? pool.find((v) => classifyVariant(v.title) === "BASE") ?? pool[0];
-    const baseVariants = pool.filter(
+    // Drop labeled subkits (alphas/novelties/spacebars) so an absent base kit
+    // can't fall through to a cheap subkit; BASE and unlabeled OTHERS (incl. a
+    // single "Default Title" variant) are kept. A listing left with no base
+    // candidate — e.g. Keygem carrying only novelties/spacebars for a set — has
+    // no base price to store, so skip it rather than store a subkit price.
+    const basePool = pool.filter((v) => {
+      const category = classifyVariant(v.title);
+      return category === "BASE" || category === "OTHERS";
+    });
+    const chosen =
+      pinned ??
+      basePool.find((v) => classifyVariant(v.title) === "BASE") ??
+      basePool[0];
+    if (!chosen) return null;
+    const baseVariants = basePool.filter(
       (variant) => classifyVariant(variant.title) === "BASE"
     );
     const relevantVariants = pinned
@@ -438,6 +451,7 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
         name?: string;
         price?: string | number;
         lowPrice?: string | number;
+        highPrice?: string | number;
         priceCurrency?: string;
         availability?: string;
         offerCount?: string | number;
@@ -485,16 +499,26 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
           offerList[0] ??
           (Array.isArray(rawOffers) ? rawOffers[0] : (rawOffers as LdOffer));
 
-        // A bare AggregateOffer covering several kits exposes only lowPrice —
-        // the CHEAPEST child kit (a spacebars/addon kit, not the base; this is
-        // how GMK.net base kits got stored as 49.82). Without named offers to
-        // pick from, the price is ambiguous — skip rather than store garbage.
+        // A bare AggregateOffer covering several kits exposes lowPrice/highPrice
+        // (and sometimes offerCount) but no single base price. lowPrice is the
+        // CHEAPEST child kit — a spacebars/alpha/addon kit, not the base. This is
+        // how GMK.net base kits got stored as 49.82, and how Latamkeys/STACKS
+        // variable products stored a cheap subkit instead of the base kit. A
+        // spanned price range (lowPrice != highPrice) OR offerCount > 1 means the
+        // aggregate covers multiple kits; without a base-named offer to
+        // disambiguate, skip rather than store the cheapest.
         const agg = !Array.isArray(rawOffers) ? (rawOffers as LdOffer) : null;
+        const aggSpansMultipleKits =
+          agg != null &&
+          (Number(agg.offerCount ?? 1) > 1 ||
+            (agg.lowPrice != null &&
+              agg.highPrice != null &&
+              Number(agg.lowPrice) !== Number(agg.highPrice)));
         if (
           offerList.length === 0 &&
           agg &&
           chosen?.price == null &&
-          Number(agg.offerCount ?? 1) > 1
+          aggSpansMultipleKits
         ) {
           continue;
         }
