@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { verifyAdminToken } from "@/lib/auth";
-import { SHOWCASE_VENDORS } from "@/lib/showcase";
+import { SHOWCASE_VENDORS, cleanDisplayName } from "@/lib/showcase";
 import type { GBStatus } from "@/generated/prisma";
 
 export async function GET(req: NextRequest) {
@@ -97,7 +97,14 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
-  return NextResponse.json({ data, total, page, limit });
+  // Strip the showcase source out of display names (e.g. the scraped
+  // "… — Lightning Keyboards" suffix) before any client renders them.
+  const cleaned = data.map((row) => ({
+    ...row,
+    name: cleanDisplayName(row.name),
+  }));
+
+  return NextResponse.json({ data: cleaned, total, page, limit });
 }
 
 export async function POST(req: NextRequest) {

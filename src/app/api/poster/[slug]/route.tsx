@@ -2,6 +2,7 @@ import { ImageResponse } from "next/og";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { STATUS_LABELS, normalizeImageUrl } from "@/lib/utils";
+import { cleanDisplayName } from "@/lib/showcase";
 import { getSiteUrl } from "@/lib/site-url";
 import QRCode from "qrcode";
 import type { GBStatus } from "@/generated/prisma";
@@ -156,6 +157,9 @@ export async function GET(
 
   if (!groupBuy) return new Response("Not found", { status: 404 });
 
+  // Hide the scraped showcase source (e.g. "… — Lightning Keyboards") on posters.
+  const displayName = cleanDisplayName(groupBuy.name);
+
   // Load exchange rates
   const rateRows = await prisma.currency.findMany({ select: { code: true, exchangeRateToUSD: true } });
   const rates: Record<string, number> = {};
@@ -230,7 +234,7 @@ export async function GET(
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={heroImage}
-                alt={groupBuy.name}
+                alt={displayName}
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
             ) : (
@@ -338,7 +342,7 @@ export async function GET(
                 marginBottom: 12,
               }}
             >
-              {groupBuy.name}
+              {displayName}
             </div>
 
             {/* Top-3 prices, compact */}
@@ -552,7 +556,7 @@ export async function GET(
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={heroImage}
-              alt={groupBuy.name}
+              alt={displayName}
               style={{ width: "100%", height: "100%", objectFit: "cover" }}
             />
           ) : (
@@ -620,7 +624,7 @@ export async function GET(
               marginBottom: 6,
             }}
           >
-            {groupBuy.name}
+            {displayName}
           </div>
 
           <div style={{ color: "#475569", fontSize: 13, marginBottom: 4 }}>
