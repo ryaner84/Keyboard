@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { prisma } from "@/lib/prisma";
+import { notHiddenWhere } from "@/lib/showcase";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { getCountdownLabel, formatDateRange, normalizeImageUrl } from "@/lib/utils";
 import type { GroupBuyWithKits } from "@/types";
@@ -20,6 +21,7 @@ async function getTimelineSets(): Promise<GroupBuyWithKits[]> {
     return (await prisma.groupBuy.findMany({
       where: {
         status: { in: ["INTEREST_CHECK", "ACTIVE_GB", "SHIPPING"] },
+        ...notHiddenWhere,
         OR: [{ gbStart: { gte: start } }, { gbEnd: { gte: now } }],
       },
       include: { kits: { select: { id: true, name: true, type: true } } },

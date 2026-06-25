@@ -3,6 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { normalizeImageUrl } from "@/lib/utils";
+import { HIDDEN_SLUGS } from "@/lib/showcase";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,9 @@ export default async function SearchPage({
       ? await prisma.groupBuy.findMany({
           where: {
             ...(type === "ALL" ? {} : { productType: type }),
+            ...(HIDDEN_SLUGS.length > 0 && {
+              NOT: { slug: { in: HIDDEN_SLUGS } },
+            }),
             OR: [
               { name: { contains: query, mode: "insensitive" } },
               { colorway: { contains: query, mode: "insensitive" } },

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { verifyAdminToken } from "@/lib/auth";
-import { SHOWCASE_VENDORS } from "@/lib/showcase";
+import { SHOWCASE_VENDORS, HIDDEN_SLUGS, cleanDisplayName } from "@/lib/showcase";
 import type { GBStatus } from "@/generated/prisma";
 
 export async function GET(req: NextRequest) {
@@ -24,6 +24,10 @@ export async function GET(req: NextRequest) {
   const layouts = searchParams.getAll("layout");
   const mounts = searchParams.getAll("mount");
   const materialsParam = searchParams.getAll("material");
+  // Maker/designer filter (multi-value). Showcase boards have no stored designer,
+  // so each value matches either the designer column OR the board name (which
+  // leads with the maker, e.g. "Meletrix Zoom65").
+  const designers = searchParams.getAll("designer").filter(Boolean).slice(0, 50);
   const slugs = searchParams.getAll("slug").filter(Boolean).slice(0, 100);
   // Drop browse-only showcase vendors (Lightning Keyboards) at the query level
   // so pagination/counts reflect real group buys — filtering them client-side
@@ -40,6 +44,32 @@ export async function GET(req: NextRequest) {
     dateFilter = { status: "ACTIVE_GB", gbStart: { gte: start, lte: now } };
   }
 
+  // Conditions that must AND together. Kept in one array so multiple
+  // independent filters (showcase exclusion + privacy denylist) compose without
+  // clobbering each other when spread into the same `where` object.
+  const andConditions: Record<string, unknown>[] = [];
+  // NULL-safe exclusion: `notIn` alone drops rows where vendorName is NULL,
+  // so OR it with an explicit null check to keep vendorless group buys.
+  if (excludeShowcase) {
+    andConditions.push({
+      OR: [{ vendorName: null }, { vendorName: { notIn: SHOWCASE_VENDORS } }],
+    });
+  }
+  // Privacy denylist — never surfaced anywhere, in any view.
+  if (HIDDEN_SLUGS.length > 0) {
+    andConditions.push({ slug: { notIn: HIDDEN_SLUGS } });
+  }
+  // Designer filter: OR across selected makers, each matching the stored
+  // designer or the board name (covers showcase boards with no designer column).
+  if (designers.length > 0) {
+    andConditions.push({
+      OR: designers.flatMap((d) => [
+        { designer: { contains: d, mode: "insensitive" as const } },
+        { name: { contains: d, mode: "insensitive" as const } },
+      ]),
+    });
+  }
+
   const where = {
     ...(statuses.length > 0 && { status: { in: statuses } }),
     ...dateFilter,
@@ -48,18 +78,7 @@ export async function GET(req: NextRequest) {
     ...(mounts.length > 0 && { mountingStyle: { in: mounts } }),
     ...(materialsParam.length > 0 && { material: { in: materialsParam } }),
     ...(slugs.length > 0 && { slug: { in: slugs } }),
-    // NULL-safe exclusion: `notIn` alone drops rows where vendorName is NULL,
-    // so OR it with an explicit null check to keep vendorless group buys.
-    ...(excludeShowcase && {
-      AND: [
-        {
-          OR: [
-            { vendorName: null },
-            { vendorName: { notIn: SHOWCASE_VENDORS } },
-          ],
-        },
-      ],
-    }),
+    ...(andConditions.length > 0 && { AND: andConditions }),
     ...(search && {
       OR: [
         { name: { contains: search, mode: "insensitive" as const } },
@@ -97,7 +116,14 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
-  return NextResponse.json({ data, total, page, limit });
+  // Strip the showcase source out of display names (e.g. the scraped
+  // "… — Lightning Keyboards" suffix) before any client renders them.
+  const cleaned = data.map((row) => ({
+    ...row,
+    name: cleanDisplayName(row.name),
+  }));
+
+  return NextResponse.json({ data: cleaned, total, page, limit });
 }
 
 export async function POST(req: NextRequest) {

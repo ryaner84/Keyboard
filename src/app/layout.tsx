@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import { LocationSelector } from "@/components/home/LocationSelector";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
+import { MobileNav } from "@/components/layout/MobileNav";
 import { ShippingLocationTab } from "@/components/layout/ShippingLocationTab";
 import { SuggestProductTab } from "@/components/layout/SuggestProductTab";
 import { TrackerProvider } from "@/context/TrackerContext";
@@ -41,8 +42,9 @@ export default function RootLayout({
                 <ShippingLocationTab />
                 <SuggestProductTab />
               </div>
-              <main className="flex-1">{children}</main>
-              <Footer />
+              <main className="flex-1 pb-14 sm:pb-0">{children}</main>
+              <div className="hidden sm:block"><Footer /></div>
+              <MobileNav />
             </TrackerProvider>
           </LocationProvider>
         </ThemeProvider>
