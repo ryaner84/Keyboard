@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { verifyAdminToken } from "@/lib/auth";
-import { SHOWCASE_VENDORS, cleanDisplayName } from "@/lib/showcase";
+import { SHOWCASE_VENDORS, HIDDEN_SLUGS, cleanDisplayName } from "@/lib/showcase";
 import type { GBStatus } from "@/generated/prisma";
 
 export async function GET(req: NextRequest) {
@@ -40,6 +40,22 @@ export async function GET(req: NextRequest) {
     dateFilter = { status: "ACTIVE_GB", gbStart: { gte: start, lte: now } };
   }
 
+  // Conditions that must AND together. Kept in one array so multiple
+  // independent filters (showcase exclusion + privacy denylist) compose without
+  // clobbering each other when spread into the same `where` object.
+  const andConditions: Record<string, unknown>[] = [];
+  // NULL-safe exclusion: `notIn` alone drops rows where vendorName is NULL,
+  // so OR it with an explicit null check to keep vendorless group buys.
+  if (excludeShowcase) {
+    andConditions.push({
+      OR: [{ vendorName: null }, { vendorName: { notIn: SHOWCASE_VENDORS } }],
+    });
+  }
+  // Privacy denylist — never surfaced anywhere, in any view.
+  if (HIDDEN_SLUGS.length > 0) {
+    andConditions.push({ slug: { notIn: HIDDEN_SLUGS } });
+  }
+
   const where = {
     ...(statuses.length > 0 && { status: { in: statuses } }),
     ...dateFilter,
@@ -48,18 +64,7 @@ export async function GET(req: NextRequest) {
     ...(mounts.length > 0 && { mountingStyle: { in: mounts } }),
     ...(materialsParam.length > 0 && { material: { in: materialsParam } }),
     ...(slugs.length > 0 && { slug: { in: slugs } }),
-    // NULL-safe exclusion: `notIn` alone drops rows where vendorName is NULL,
-    // so OR it with an explicit null check to keep vendorless group buys.
-    ...(excludeShowcase && {
-      AND: [
-        {
-          OR: [
-            { vendorName: null },
-            { vendorName: { notIn: SHOWCASE_VENDORS } },
-          ],
-        },
-      ],
-    }),
+    ...(andConditions.length > 0 && { AND: andConditions }),
     ...(search && {
       OR: [
         { name: { contains: search, mode: "insensitive" as const } },

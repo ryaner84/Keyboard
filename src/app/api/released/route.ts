@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { notHiddenWhere } from "@/lib/showcase";
 
 const RELEASED_STATUSES = ["SHIPPING", "DELIVERED", "IN_STOCK"] as const;
 
@@ -93,6 +94,7 @@ export async function GET(req: NextRequest) {
   const where = {
     status: { in: [...RELEASED_STATUSES] },
     productType,
+    ...notHiddenWhere,
     ...yearFilter,
     ...(effectiveAvailability === "available" && AVAILABLE_FILTER),
     ...(effectiveAvailability === "soldout" && { NOT: AVAILABLE_FILTER }),
@@ -128,7 +130,7 @@ export async function GET(req: NextRequest) {
         ? { gbEnd: { sort: "asc" as const, nulls: "last" as const } }
         : { gbEnd: { sort: "desc" as const, nulls: "last" as const } };
 
-  const releasedWhere = { status: { in: [...RELEASED_STATUSES] }, productType };
+  const releasedWhere = { status: { in: [...RELEASED_STATUSES] }, productType, ...notHiddenWhere };
 
   const needRates = priceSort || savingsSort || page === 1;
   const usdRates: Record<string, number> = {};
@@ -187,7 +189,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Per-category released counts power the Keycaps / Keyboards tab badges.
-  const baseReleased = { status: { in: [...RELEASED_STATUSES] } };
+  const baseReleased = { status: { in: [...RELEASED_STATUSES] }, ...notHiddenWhere };
   const [totalReleased, totalAvailable, countKeycaps, countKeyboards] = await Promise.all([
     prisma.groupBuy.count({ where: releasedWhere }),
     isKeyboard

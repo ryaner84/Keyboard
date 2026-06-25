@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { SHOWCASE_VENDORS } from "@/lib/showcase";
+import { SHOWCASE_VENDORS, HIDDEN_SLUGS } from "@/lib/showcase";
 
 // Slim global search for the header palette: every set, any status, no
 // pricing joins — fast enough to hit on every keystroke (debounced client-side).
@@ -34,6 +34,7 @@ export async function GET(req: NextRequest) {
           { vendorName: { notIn: SHOWCASE_VENDORS } },
         ],
       },
+      ...(HIDDEN_SLUGS.length > 0 ? [{ slug: { notIn: HIDDEN_SLUGS } }] : []),
     ],
   };
 
