@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { COUNTRY_BY_CODE, DEFAULT_COUNTRY } from "@/data/countries";
 import { formatDateRange, normalizeImageUrl } from "@/lib/utils";
+import { cleanDisplayName } from "@/lib/showcase";
 import { getSiteUrl } from "@/lib/site-url";
 import { SetDetailClient } from "./SetDetailClient";
 import { getKeyboardEditionFamily } from "@/data/keyboard-edition-families";
@@ -23,6 +24,7 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
   const groupBuy = await prisma.groupBuy.findUnique({ where: { slug } });
   if (!groupBuy) return { title: "Not Found" };
 
+  const name = cleanDisplayName(groupBuy.name);
   const siteUrl = getSiteUrl();
   const url = `${siteUrl}/sets/${slug}?country=${country}`;
 
@@ -37,23 +39,23 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
   const photoUrl = normalizeImageUrl(groupBuy.imageUrl);
 
   const ogImages = [
-    ...(photoUrl ? [{ url: photoUrl, width: 1200, height: 630, alt: groupBuy.name }] : []),
-    { url: posterUrl, width: 800, height: 420, type: "image/png" as const, alt: groupBuy.name },
+    ...(photoUrl ? [{ url: photoUrl, width: 1200, height: 630, alt: name }] : []),
+    { url: posterUrl, width: 800, height: 420, type: "image/png" as const, alt: name },
   ];
 
   return {
-    title: `${groupBuy.name} — GMK Tracker`,
-    description: groupBuy.subtitle ?? groupBuy.description ?? `Compare prices for ${groupBuy.name} from vendors worldwide.`,
+    title: `${name} — GMK Tracker`,
+    description: groupBuy.subtitle ?? groupBuy.description ?? `Compare prices for ${name} from vendors worldwide.`,
     openGraph: {
-      title: groupBuy.name,
-      description: groupBuy.subtitle ?? `${groupBuy.name} by ${groupBuy.designer}`,
+      title: name,
+      description: groupBuy.subtitle ?? `${name} by ${groupBuy.designer}`,
       url,
       images: ogImages,
     },
     twitter: {
       card: "summary_large_image",
-      title: groupBuy.name,
-      description: groupBuy.subtitle ?? `Compare prices for ${groupBuy.name}`,
+      title: name,
+      description: groupBuy.subtitle ?? `Compare prices for ${name}`,
       images: [photoUrl ?? posterUrl],
     },
   };
@@ -93,6 +95,7 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
 
   if (!groupBuy) notFound();
 
+  const displayName = cleanDisplayName(groupBuy.name);
   const editionFamily = getKeyboardEditionFamily(slug);
   const relatedEditions = editionFamily
     ? await prisma.groupBuy.findMany({
@@ -129,7 +132,7 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
       {/* Hero */}
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden mb-6">
         {heroImages.length > 0 && (
-          <SetImageCarousel images={heroImages} alt={groupBuy.name} />
+          <SetImageCarousel images={heroImages} alt={displayName} />
         )}
         <div className="p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -149,7 +152,7 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
                   </span>
                 )}
               </div>
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900">{groupBuy.name}</h1>
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900">{displayName}</h1>
               {groupBuy.subtitle && (
                 <p className="text-gray-500 mt-1">{groupBuy.subtitle}</p>
               )}
@@ -203,7 +206,7 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
                       {imageUrl ? (
                         <Image
                           src={imageUrl}
-                          alt={edition.name}
+                          alt={cleanDisplayName(edition.name)}
                           fill
                           unoptimized
                           className="object-cover transition duration-500 hover:scale-[1.025]"
@@ -221,7 +224,7 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
                     </div>
                     <div className="p-4">
                       <h3 className="font-semibold text-gray-950 dark:text-white">
-                        {edition.name}
+                        {cleanDisplayName(edition.name)}
                       </h3>
                       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                         {edition.subtitle || "Collector catalog edition"}
@@ -243,7 +246,7 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
 
       {/* Client-side interactive section */}
       <SetDetailClient
-        groupBuy={groupBuy as never}
+        groupBuy={{ ...groupBuy, name: displayName } as never}
         initialCountry={country}
       />
     </div>

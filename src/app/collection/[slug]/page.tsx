@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { normalizeImageUrl } from "@/lib/utils";
+import { cleanDisplayName } from "@/lib/showcase";
 import { getSiteUrl } from "@/lib/site-url";
 import ReportPhotoButton from "@/components/collection/ReportPhotoButton";
 import { CollectionCardGallery } from "@/components/collection/CollectionCardGallery";
@@ -250,6 +251,8 @@ function PublicCollectionCard({
   ].filter(Boolean);
   const builds = assemblePublicBuilds(item);
   const multiBuild = builds.length > 1;
+  // Never surface the scraped showcase source in a saved board's name.
+  const setName = cleanDisplayName(item.groupBuy.name);
 
   // One gallery slide per build. A build with its own uploaded photo shows that
   // (and can be reported); a build without one falls back to the shared render.
@@ -265,7 +268,7 @@ function PublicCollectionCard({
       <CollectionCardGallery
         slides={slides}
         setSlug={item.groupBuy.slug}
-        setName={item.groupBuy.name}
+        setName={setName}
         number={number}
         buildsCount={builds.length}
         collectionSlug={collectionSlug}
@@ -278,7 +281,7 @@ function PublicCollectionCard({
         </p>
         <Link href={`/sets/${item.groupBuy.slug}`}>
           <h3 className="mt-1 text-xl font-semibold tracking-tight text-gray-950 hover:text-[#8b6d38] dark:text-white">
-            {item.groupBuy.name}
+            {setName}
           </h3>
         </Link>
         <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
@@ -319,7 +322,7 @@ function PublicCollectionCard({
                 index={index}
                 collectionSlug={collectionSlug}
                 trackerItemId={item.id}
-                label={item.groupBuy.name}
+                label={setName}
                 showPurchasePrice={item.showPurchasePrice}
               />
             ))}
