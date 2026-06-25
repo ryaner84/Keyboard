@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useLocation } from "@/context/LocationContext";
 import { KeyboardCard } from "@/components/keyboards/KeyboardCard";
+import { isShowcaseSource } from "@/lib/showcase";
 import type { GroupBuyWithPricing } from "@/types";
 
 const BRANDS = [
@@ -29,7 +30,10 @@ export function KeyboardPastContent() {
       const res = await fetch(`/api/group-buys?type=KEYBOARD&status=all&limit=200`);
       const data = await res.json();
       const past = (data.data ?? []).filter(
-        (k: GroupBuyWithPricing) => k.status === "SHIPPING" || k.status === "DELIVERED"
+        (k: GroupBuyWithPricing) =>
+          (k.status === "SHIPPING" || k.status === "DELIVERED") &&
+          // Lightning Keyboards are a browse-only showcase, not group buys.
+          !isShowcaseSource(k.vendorName)
       );
       // Sort by most recently updated first
       past.sort((a: GroupBuyWithPricing, b: GroupBuyWithPricing) =>

@@ -192,6 +192,7 @@ export function KeyboardFilters({
           >
             <option value="closing">Closing soon</option>
             <option value="updated">Recently updated</option>
+            <option value="gbstart">GB year: newest first</option>
             <option value="price-asc">Price: low to high</option>
             <option value="price-desc">Price: high to low</option>
             <option value="name">Name: A to Z</option>
