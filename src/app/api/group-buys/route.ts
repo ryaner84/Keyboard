@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { verifyAdminToken } from "@/lib/auth";
+import { SHOWCASE_VENDORS } from "@/lib/showcase";
 import type { GBStatus } from "@/generated/prisma";
 
 export async function GET(req: NextRequest) {
@@ -24,6 +25,10 @@ export async function GET(req: NextRequest) {
   const mounts = searchParams.getAll("mount");
   const materialsParam = searchParams.getAll("material");
   const slugs = searchParams.getAll("slug").filter(Boolean).slice(0, 100);
+  // Drop browse-only showcase vendors (Lightning Keyboards) at the query level
+  // so pagination/counts reflect real group buys — filtering them client-side
+  // after a limited fetch silently empties pages that are all-showcase rows.
+  const excludeShowcase = searchParams.get("excludeShowcase") === "1";
 
   const now = new Date();
   let dateFilter: Record<string, unknown> = {};
@@ -43,6 +48,18 @@ export async function GET(req: NextRequest) {
     ...(mounts.length > 0 && { mountingStyle: { in: mounts } }),
     ...(materialsParam.length > 0 && { material: { in: materialsParam } }),
     ...(slugs.length > 0 && { slug: { in: slugs } }),
+    // NULL-safe exclusion: `notIn` alone drops rows where vendorName is NULL,
+    // so OR it with an explicit null check to keep vendorless group buys.
+    ...(excludeShowcase && {
+      AND: [
+        {
+          OR: [
+            { vendorName: null },
+            { vendorName: { notIn: SHOWCASE_VENDORS } },
+          ],
+        },
+      ],
+    }),
     ...(search && {
       OR: [
         { name: { contains: search, mode: "insensitive" as const } },

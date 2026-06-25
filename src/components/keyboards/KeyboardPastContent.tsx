@@ -27,12 +27,17 @@ export function KeyboardPastContent() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/group-buys?type=KEYBOARD&status=all&limit=200`);
+      // Ask the API for shipped/delivered boards only and exclude showcase
+      // vendors server-side — otherwise the first page is all Lightning
+      // Keyboards (newest createdAt) and client-side filtering empties it.
+      const res = await fetch(
+        `/api/group-buys?type=KEYBOARD&status=SHIPPING&status=DELIVERED&excludeShowcase=1&limit=800`
+      );
       const data = await res.json();
       const past = (data.data ?? []).filter(
         (k: GroupBuyWithPricing) =>
           (k.status === "SHIPPING" || k.status === "DELIVERED") &&
-          // Lightning Keyboards are a browse-only showcase, not group buys.
+          // Belt-and-suspenders: showcase rows are already excluded server-side.
           !isShowcaseSource(k.vendorName)
       );
       // Sort by most recently updated first
