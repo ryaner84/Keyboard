@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { normalizeImageUrl } from "@/lib/utils";
+import { deriveDesigner } from "@/lib/keyboard-designers";
 import type { GroupBuyWithPricing } from "@/types";
 
 // Browse-only keyboard card for the Showcase gallery. Deliberately has NO track
@@ -12,6 +13,9 @@ import type { GroupBuyWithPricing } from "@/types";
 export function ShowcaseCard({ kb }: { kb: GroupBuyWithPricing }) {
   const img = normalizeImageUrl(kb.imageUrl);
   const specs = [kb.layout, kb.mountingStyle, kb.material].filter(Boolean);
+  // The board name is already cleaned of its scraped source by the API, so the
+  // maker can be read straight off it (falls back to the stored designer).
+  const designer = deriveDesigner(kb.name, kb.designer);
 
   return (
     <Link
@@ -35,6 +39,11 @@ export function ShowcaseCard({ kb }: { kb: GroupBuyWithPricing }) {
       </div>
 
       <div className="p-3.5">
+        {designer && (
+          <p className="mb-0.5 text-[10px] font-bold uppercase tracking-wider text-violet-600 dark:text-violet-400">
+            {designer}
+          </p>
+        )}
         <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-gray-900 group-hover:text-violet-600 dark:text-white dark:group-hover:text-violet-400">
           {kb.name}
         </h3>

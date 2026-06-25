@@ -24,6 +24,10 @@ export async function GET(req: NextRequest) {
   const layouts = searchParams.getAll("layout");
   const mounts = searchParams.getAll("mount");
   const materialsParam = searchParams.getAll("material");
+  // Maker/designer filter (multi-value). Showcase boards have no stored designer,
+  // so each value matches either the designer column OR the board name (which
+  // leads with the maker, e.g. "Meletrix Zoom65").
+  const designers = searchParams.getAll("designer").filter(Boolean).slice(0, 50);
   const slugs = searchParams.getAll("slug").filter(Boolean).slice(0, 100);
   // Drop browse-only showcase vendors (Lightning Keyboards) at the query level
   // so pagination/counts reflect real group buys — filtering them client-side
@@ -54,6 +58,16 @@ export async function GET(req: NextRequest) {
   // Privacy denylist — never surfaced anywhere, in any view.
   if (HIDDEN_SLUGS.length > 0) {
     andConditions.push({ slug: { notIn: HIDDEN_SLUGS } });
+  }
+  // Designer filter: OR across selected makers, each matching the stored
+  // designer or the board name (covers showcase boards with no designer column).
+  if (designers.length > 0) {
+    andConditions.push({
+      OR: designers.flatMap((d) => [
+        { designer: { contains: d, mode: "insensitive" as const } },
+        { name: { contains: d, mode: "insensitive" as const } },
+      ]),
+    });
   }
 
   const where = {
