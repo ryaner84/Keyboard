@@ -162,6 +162,9 @@ model Feedback {
   email       String
   subject     String
   submittedAt DateTime @default(now())
+  // Triage state for the visitor-inbox feed. NULL = unresolved; cleared
+  // manually (feedback has no derivable auto-resolution signal).
+  resolvedAt  DateTime?
 }
 
 // Community-contributed tip for the keyboard database.
@@ -205,6 +208,9 @@ model ListingReport {
   issueType   String // "wrong_category" | "wrong_price" | "inactive" | "duplicate" | "wrong_vendor" | "other"
   notes       String?
   submittedAt DateTime @default(now())
+  // Triage state for the visitor-inbox feed. NULL = unresolved (surfaced to the
+  // owner); set to clear it. No derivable auto-resolution — cleared manually.
+  resolvedAt  DateTime?
 
   @@index([submittedAt])
 }
@@ -218,6 +224,9 @@ model PriceReport {
   vendorName  String
   reason      String?
   submittedAt DateTime @default(now())
+  // Triage state for the visitor-inbox feed. Auto-resolved once the reported
+  // listing's bad price is gone (VendorKit deleted or price nulled).
+  resolvedAt  DateTime?
 }
 
 // Passwordless tracker identity. Email is the only user-facing identifier;
@@ -320,6 +329,10 @@ model CollectionPhotoReport {
   reporterIpHash String?
   reporterUserId String?
   submittedAt    DateTime @default(now())
+  // Triage state for the visitor-inbox feed. NULL = unresolved; cleared
+  // manually. Reports are also auto-removed by the FK cascade if the build
+  // photo's tracker item is deleted.
+  resolvedAt     DateTime?
 
   trackerItem TrackerItem @relation(fields: [trackerItemId], references: [id], onDelete: Cascade)
 

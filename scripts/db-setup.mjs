@@ -875,6 +875,11 @@ async function ensureFeedbackTable(client) {
          "submittedAt" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`
     );
+    // Triage state for the visitor-inbox feed (NULL = unresolved).
+    await client.query(
+      `ALTER TABLE public."Feedback"
+       ADD COLUMN IF NOT EXISTS "resolvedAt" timestamp(3) without time zone`
+    );
   } catch (err) {
     console.warn(`[db-setup] Feedback table setup skipped: ${err.message}`);
   }
@@ -892,6 +897,12 @@ async function ensurePriceReportTable(client) {
          reason         text,
          "submittedAt"  timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`
+    );
+    // Triage state for the visitor-inbox feed (auto-resolved when the reported
+    // listing's bad price is gone — see scripts/visitor-inbox-ci.mjs).
+    await client.query(
+      `ALTER TABLE public."PriceReport"
+       ADD COLUMN IF NOT EXISTS "resolvedAt" timestamp(3) without time zone`
     );
   } catch (err) {
     console.warn(`[db-setup] PriceReport table setup skipped: ${err.message}`);
@@ -913,6 +924,11 @@ async function ensureListingReportTable(client) {
          notes         text,
          "submittedAt" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`
+    );
+    // Triage state for the visitor-inbox feed (NULL = unresolved).
+    await client.query(
+      `ALTER TABLE public."ListingReport"
+       ADD COLUMN IF NOT EXISTS "resolvedAt" timestamp(3) without time zone`
     );
     await client.query(
       `CREATE INDEX IF NOT EXISTS "ListingReport_submittedAt_idx"
@@ -1081,6 +1097,11 @@ async function ensureCollectionPhotoReportTable(client) {
          CONSTRAINT "CollectionPhotoReport_trackerItemId_fkey"
            FOREIGN KEY ("trackerItemId") REFERENCES public."TrackerItem"(id) ON DELETE CASCADE
        )`
+    );
+    // Triage state for the visitor-inbox feed (NULL = unresolved).
+    await client.query(
+      `ALTER TABLE public."CollectionPhotoReport"
+       ADD COLUMN IF NOT EXISTS "resolvedAt" timestamp(3) without time zone`
     );
     await client.query(
       `CREATE INDEX IF NOT EXISTS "CollectionPhotoReport_trackerItemId_imageHash_submittedAt_idx"

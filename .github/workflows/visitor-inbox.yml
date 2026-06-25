@@ -1,0 +1,32 @@
+# Daily visitor-input review feed. Prints UNRESOLVED items from every channel a
+# website visitor can submit through — store-link suggestions, wrong-price
+# reports, listing flags, feedback, and collection-photo reports — grouped by
+# category, one concise line each. The scheduled Claude review session reads
+# these log lines via the GitHub API to triage them.
+#
+# Requires the repository secret DATABASE_URL (Supabase pooler connection
+# string). If it contains the __PASSWORD__ placeholder, DATABASE_PASSWORD must
+# be set too. Without DATABASE_URL the job exits cleanly doing nothing.
+name: Visitor inbox feed
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 1 * * *" # daily at 01:00 UTC
+
+jobs:
+  inbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Unresolved visitor input (by category)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+        run: node scripts/visitor-inbox-ci.mjs
