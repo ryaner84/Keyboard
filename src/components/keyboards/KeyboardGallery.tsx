@@ -56,6 +56,12 @@ const STAGE_META: Record<
       "border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800/90 dark:text-gray-300",
     dot: "bg-gray-400",
   },
+  CANCELLED: {
+    label: "Cancelled",
+    badge:
+      "border-red-200 bg-red-50 text-red-500 dark:border-red-900 dark:bg-red-950/90 dark:text-red-400",
+    dot: "bg-red-400",
+  },
 };
 
 const REGION_LABEL: Record<string, string> = {

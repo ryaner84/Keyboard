@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { SHOWCASE_VENDORS } from "@/lib/showcase";
 
 // Slim global search for the header palette: every set, any status, no
 // pricing joins — fast enough to hit on every keystroke (debounced client-side).
@@ -20,7 +21,21 @@ export async function GET(req: NextRequest) {
       { vendorName: { contains: term, mode: "insensitive" as const } },
     ],
   });
-  const where = terms.length === 1 ? fieldOR(terms[0]) : { AND: terms.map(fieldOR) };
+  const searchWhere =
+    terms.length === 1 ? fieldOR(terms[0]) : { AND: terms.map(fieldOR) };
+  // Keep Lightning Keyboards (showcase-only) out of the global palette, but
+  // preserve rows with no vendor (NULL would otherwise be dropped by notIn).
+  const where = {
+    AND: [
+      searchWhere,
+      {
+        OR: [
+          { vendorName: null },
+          { vendorName: { notIn: SHOWCASE_VENDORS } },
+        ],
+      },
+    ],
+  };
 
   const results = await prisma.groupBuy.findMany({
     where,

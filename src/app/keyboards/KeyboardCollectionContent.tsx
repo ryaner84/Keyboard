@@ -6,6 +6,7 @@ import { KeyboardFilters } from "@/components/keyboards/KeyboardFilters";
 import { KeyboardGallery } from "@/components/keyboards/KeyboardGallery";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useLocation } from "@/context/LocationContext";
+import { isShowcaseSource } from "@/lib/showcase";
 import type { GBStatus, GroupBuyWithPricing } from "@/types";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -31,6 +32,8 @@ function daysLeft(end: Date | string | null): number | null {
 }
 
 function isUsefulKeyboardListing(row: GroupBuyWithPricing): boolean {
+  // Lightning Keyboards are a browse-only showcase source, never a group buy.
+  if (isShowcaseSource(row.vendorName)) return false;
   const name = row.name.trim();
   if (/list of currently running|group buy index|read before posting/i.test(name)) {
     return false;
@@ -57,9 +60,12 @@ export default function KeyboardCollectionContent({
   const search = searchParams.get("search") ?? "";
   const defaultSort = defaultStatuses?.includes("ACTIVE_GB")
     ? "closing"
-    : "updated";
+    : defaultStatuses
+    ? "updated"
+    : "gbstart";
   const sortBy = searchParams.get("sort") ?? defaultSort;
   const closingSoon = searchParams.get("closing") === "1";
+  const showClosingSoonToggle = (defaultStatuses ?? []).includes("ACTIVE_GB");
   const layouts = searchParams.getAll("layout");
   const brands = searchParams.getAll("brand");
   const rawStatuses = searchParams.getAll("status") as GBStatus[];
@@ -183,6 +189,12 @@ export default function KeyboardCollectionContent({
         const dateA = new Date(a.updatedAt ?? a.gbStart ?? 0).getTime();
         const dateB = new Date(b.updatedAt ?? b.gbStart ?? 0).getTime();
         return dateB - dateA;
+      }
+
+      if (sortBy === "gbstart") {
+        const yearA = new Date(a.gbStart ?? a.updatedAt ?? 0).getTime();
+        const yearB = new Date(b.gbStart ?? b.updatedAt ?? 0).getTime();
+        return yearB - yearA;
       }
 
       const remainingA =
@@ -323,7 +335,7 @@ export default function KeyboardCollectionContent({
         availableStatuses={availableStatuses}
         sortBy={sortBy}
         closingSoon={closingSoon}
-        showClosingSoon={availableStatuses.includes("ACTIVE_GB")}
+        showClosingSoon={showClosingSoonToggle}
         layouts={layouts}
         brands={brands}
         statusFilterActive={rawStatuses.length > 0}
