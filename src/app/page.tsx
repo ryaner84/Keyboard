@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { notHiddenWhere } from "@/lib/showcase";
 import { HomeCarousel } from "@/components/home/HomeCarousel";
 import { SetCard } from "@/components/browse/SetCard";
 import { LocationReminder } from "@/components/home/LocationReminder";
@@ -30,7 +31,7 @@ const PRICING_INCLUDE = {
 async function getFeaturedSets(): Promise<GroupBuyWithPricing[]> {
   try {
     return (await prisma.groupBuy.findMany({
-      where: { featured: true },
+      where: { featured: true, ...notHiddenWhere },
       include: PRICING_INCLUDE,
       orderBy: { createdAt: "desc" },
       take: 6,
@@ -45,7 +46,7 @@ async function getFinishingSoon(): Promise<GroupBuyWithPricing[]> {
     const now = new Date();
     const in7 = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     return (await prisma.groupBuy.findMany({
-      where: { status: "ACTIVE_GB", gbEnd: { gte: now, lte: in7 } },
+      where: { status: "ACTIVE_GB", gbEnd: { gte: now, lte: in7 }, ...notHiddenWhere },
       include: PRICING_INCLUDE,
       orderBy: { gbEnd: "asc" },
       take: 5,
@@ -60,7 +61,7 @@ async function getNewGroupBuys(): Promise<GroupBuyWithPricing[]> {
     const now = new Date();
     const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
     return (await prisma.groupBuy.findMany({
-      where: { status: "ACTIVE_GB", gbStart: { gte: twoWeeksAgo, lte: now } },
+      where: { status: "ACTIVE_GB", gbStart: { gte: twoWeeksAgo, lte: now }, ...notHiddenWhere },
       include: PRICING_INCLUDE,
       orderBy: { gbStart: "desc" },
       take: 5,
@@ -73,7 +74,7 @@ async function getNewGroupBuys(): Promise<GroupBuyWithPricing[]> {
 async function getUpcomingSets(): Promise<GroupBuyWithKits[]> {
   try {
     return (await prisma.groupBuy.findMany({
-      where: { productType: "KEYCAPS", status: { in: ["ACTIVE_GB", "INTEREST_CHECK"] } },
+      where: { productType: "KEYCAPS", status: { in: ["ACTIVE_GB", "INTEREST_CHECK"] }, ...notHiddenWhere },
       include: { kits: { select: { id: true, name: true, type: true } } },
       orderBy: [{ featured: "desc" }, { status: "asc" }, { gbEnd: "asc" }],
       take: 5,
@@ -88,7 +89,7 @@ async function getUpcomingSets(): Promise<GroupBuyWithKits[]> {
 async function getKeyboardGBs(): Promise<GroupBuyWithKits[]> {
   try {
     return (await prisma.groupBuy.findMany({
-      where: { productType: "KEYBOARD", status: { in: ["ACTIVE_GB", "IN_STOCK"] } },
+      where: { productType: "KEYBOARD", status: { in: ["ACTIVE_GB", "IN_STOCK"] }, ...notHiddenWhere },
       include: { kits: { select: { id: true, name: true, type: true } } },
       orderBy: [{ featured: "desc" }, { gbEnd: { sort: "asc", nulls: "last" } }],
       take: 6,
@@ -101,7 +102,7 @@ async function getKeyboardGBs(): Promise<GroupBuyWithKits[]> {
 async function getKeyboardReleased(): Promise<GroupBuyWithKits[]> {
   try {
     return (await prisma.groupBuy.findMany({
-      where: { productType: "KEYBOARD", status: { in: ["SHIPPING", "DELIVERED"] } },
+      where: { productType: "KEYBOARD", status: { in: ["SHIPPING", "DELIVERED"] }, ...notHiddenWhere },
       include: { kits: { select: { id: true, name: true, type: true } } },
       orderBy: { updatedAt: "desc" },
       take: 6,
@@ -137,6 +138,7 @@ async function getBestReleasedDeals(): Promise<GroupBuyWithPricing[]> {
       prisma.groupBuy.findMany({
         where: {
           status: { in: ["IN_STOCK", "SHIPPING", "DELIVERED"] },
+          ...notHiddenWhere,
           kits: {
             some: {
               type: "BASE",
@@ -183,6 +185,7 @@ async function getReleasedForCarousel(): Promise<GroupBuyWithPricing[]> {
       prisma.groupBuy.findMany({
         where: {
           status: { in: ["SHIPPING", "DELIVERED", "IN_STOCK"] },
+          ...notHiddenWhere,
           kits: {
             some: {
               type: "BASE",

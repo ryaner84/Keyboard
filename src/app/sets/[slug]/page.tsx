@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { COUNTRY_BY_CODE, DEFAULT_COUNTRY } from "@/data/countries";
 import { formatDateRange, normalizeImageUrl } from "@/lib/utils";
-import { cleanDisplayName } from "@/lib/showcase";
+import { cleanDisplayName, isHiddenSlug } from "@/lib/showcase";
 import { getSiteUrl } from "@/lib/site-url";
 import { SetDetailClient } from "./SetDetailClient";
 import { getKeyboardEditionFamily } from "@/data/keyboard-edition-families";
@@ -20,6 +20,8 @@ interface PageProps {
 export async function generateMetadata({ params, searchParams }: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const { country = "SG" } = await searchParams;
+
+  if (isHiddenSlug(slug)) return { title: "Not Found" };
 
   const groupBuy = await prisma.groupBuy.findUnique({ where: { slug } });
   if (!groupBuy) return { title: "Not Found" };
@@ -64,6 +66,9 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
 export default async function SetDetailPage({ params, searchParams }: PageProps) {
   const { slug } = await params;
   const { country = "SG" } = await searchParams;
+
+  // Privacy denylist — pretend the board doesn't exist even if the row remains.
+  if (isHiddenSlug(slug)) notFound();
 
   const groupBuy = await prisma.groupBuy.findUnique({
     where: { slug },
