@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 const TABS = [
   { href: "/keyboards/active",   label: "Active",   sub: "GB Open + Extra Drop" },
   { href: "/keyboards/upcoming", label: "Upcoming", sub: "Interest Checks" },
-  { href: "/keyboards/past",     label: "Past GBs", sub: "Shipping + Delivered" },
+  { href: "/keyboards/past",     label: "Catalog",  sub: "All keyboards" },
 ];
 
 export function KeyboardSubNav() {
