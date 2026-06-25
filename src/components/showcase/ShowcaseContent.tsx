@@ -34,6 +34,7 @@ export default function ShowcaseContent() {
 
   const search = searchParams.get("search") ?? "";
   const layouts = searchParams.getAll("layout");
+  const designers = searchParams.getAll("designer");
   const sortBy = searchParams.get("sort") ?? "date-desc";
 
   const [boards, setBoards] = useState<GroupBuyWithPricing[]>([]);
@@ -41,6 +42,12 @@ export default function ShowcaseContent() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  // Designer facets (maker + count), fetched once — drives the maker filter.
+  const [designerFacets, setDesignerFacets] = useState<
+    { name: string; count: number }[]
+  >([]);
+  const [showAllDesigners, setShowAllDesigners] = useState(false);
 
   const [searchDraft, setSearchDraft] = useState(search);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -71,6 +78,27 @@ export default function ShowcaseContent() {
     updateParams({ layout: next });
   };
 
+  const toggleDesigner = (designer: string) => {
+    const next = designers.includes(designer)
+      ? designers.filter((d) => d !== designer)
+      : [...designers, designer];
+    updateParams({ designer: next });
+  };
+
+  // Load the maker facets once on mount — independent of the active filters.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/showcase/designers")
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setDesignerFacets(data.designers ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const fetchPage = useCallback(
     async (pageNum: number, append: boolean) => {
       if (append) setLoadingMore(true);
@@ -79,6 +107,7 @@ export default function ShowcaseContent() {
       params.set("type", "KEYBOARD");
       if (search) params.set("search", search);
       layouts.forEach((l) => params.append("layout", l));
+      designers.forEach((d) => params.append("designer", d));
       params.set("sort", sortBy);
       params.set("page", String(pageNum));
       params.set("limit", String(PAGE_SIZE));
@@ -98,16 +127,16 @@ export default function ShowcaseContent() {
         setLoadingMore(false);
       }
     },
-    [search, layouts, sortBy]
+    [search, layouts, designers, sortBy]
   );
 
   useEffect(() => {
     fetchPage(1, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, JSON.stringify(layouts), sortBy]);
+  }, [search, JSON.stringify(layouts), JSON.stringify(designers), sortBy]);
 
   const hasMore = boards.length < total;
-  const hasFilters = !!(search || layouts.length > 0);
+  const hasFilters = !!(search || layouts.length > 0 || designers.length > 0);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -181,6 +210,48 @@ export default function ShowcaseContent() {
           );
         })}
       </div>
+
+      {/* ── Designer / maker filter ──────────────────────────────────────── */}
+      {designerFacets.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="mr-1 text-xs text-gray-400">Designer</span>
+          {(showAllDesigners ? designerFacets : designerFacets.slice(0, 12)).map(
+            (facet) => {
+              const active = designers.includes(facet.name);
+              return (
+                <button
+                  key={facet.name}
+                  onClick={() => toggleDesigner(facet.name)}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    active
+                      ? "border-violet-600 bg-violet-600 text-white"
+                      : "border-gray-200 bg-white text-gray-600 hover:border-violet-300 hover:text-violet-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+                  }`}
+                >
+                  {facet.name}
+                  <span
+                    className={`text-[10px] font-medium ${
+                      active ? "text-violet-100" : "text-gray-400"
+                    }`}
+                  >
+                    {facet.count}
+                  </span>
+                </button>
+              );
+            }
+          )}
+          {designerFacets.length > 12 && (
+            <button
+              onClick={() => setShowAllDesigners((v) => !v)}
+              className="rounded-full px-2.5 py-1.5 text-xs font-semibold text-violet-600 hover:text-violet-700 dark:text-violet-400"
+            >
+              {showAllDesigners
+                ? "Show less"
+                : `+${designerFacets.length - 12} more`}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── Sort pills + clear ───────────────────────────────────────────── */}
       <div className="mb-6 flex flex-wrap items-center gap-2">
