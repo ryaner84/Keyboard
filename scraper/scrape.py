@@ -753,12 +753,19 @@ def shopify_price(
     pinned_id = pinned_variant_id(product_url)
     clean = product_url.split("?")[0].split("#")[0].rstrip("/")
     browser_loaded = False
+    # HTTP status of the browser navigation to the product page, used to tell a
+    # genuinely removed listing (404/410 → clear the stale price) apart from a
+    # transient block (keep the last good price).
+    nav_status: int | None = None
 
     def ensure_browser() -> None:
-        nonlocal browser_loaded, clean
+        nonlocal browser_loaded, clean, nav_status
         if browser_loaded:
             return
-        page.goto(product_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+        response = page.goto(
+            product_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS
+        )
+        nav_status = response.status if response is not None else None
         final_url = page.url.split("?")[0].split("#")[0].rstrip("/")
         if "/products/" in final_url:
             clean = final_url
@@ -802,6 +809,12 @@ def shopify_price(
             ensure_browser()
             data = browser_json(clean + ".json")
         if not data or "product" not in data:
+            # Dead-link audit: a removed product page returns 404/410. That's a
+            # definitively gone listing, so CLEAR the stale price (NO_BASE_KIT)
+            # instead of preserving it the way we do for a transient block.
+            if nav_status in (404, 410):
+                log(f"  dead link ({nav_status}) — clearing price ({product_url})")
+                return NO_BASE_KIT
             return None
 
         origin = urllib.parse.urlsplit(clean)
@@ -1798,6 +1811,237 @@ def run_images(
                     )
     finally:
         page.close()
+    return stats
+
+
+# ----------------------------------------------------------------------------
+# Vendor catalog discovery
+#
+# Python mirror of discoverGmkProducts() in src/lib/import/discovery.ts. Walks
+# each vendor's own Shopify catalog (/products.json), finds every listing titled
+# "GMK …", matches it to a set we already track, and wires it up as a scrapeable
+# VendorKit so the price pass can price it. This is the new-set / vendor-coverage
+# discovery the cloud cron can't do reliably — Shopify Cloudflare blocks Vercel's
+# datacenter IPs, but this WorkSpace browser/Scrapling path gets through.
+#
+# Vendors are scanned oldest-first (Vendor.lastDiscoveredAt), a few per nightly
+# run, so the whole roster re-crawls every few days without blowing the budget.
+# Existing MANUAL prices are never touched; only the productUrl is (re)linked.
+# ----------------------------------------------------------------------------
+
+# Shopify caps products.json at 250/page; 4 pages = 1000 products covers every
+# keyboard store's catalog comfortably.
+_DISCOVERY_MAX_CATALOG_PAGES = 4
+_DISCOVERY_VENDOR_LIMIT = 8
+
+
+def normalize_set_name(name: str) -> str:
+    """Mirror of normalizeSetName in discovery.ts — lowercase, drop bracketed
+    tags / sale-status / keycap filler words, unify 'Round 3' with 'R3'."""
+    s = (name or "").lower()
+    s = re.sub(r"\[[^\]]*\]|\([^)]*\)", " ", s)
+    s = re.sub(
+        r"\b(group\s*buy|groupbuy|gb|pre[- ]?order|in[- ]?stock|extras?|live|launch(ed)?)\b",
+        " ",
+        s,
+    )
+    s = re.sub(r"\b(keycap\s*sets?|keycaps?|keysets?|cherry\s*profile)\b", " ", s)
+    s = re.sub(r"\bround\s*(\d+)\b", r"r\1", s)
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def strip_round(normalized: str) -> str:
+    """'gmk striker r2' -> 'gmk striker'; names without a round tag unchanged."""
+    return re.sub(r"\s+r\d+$", "", normalized).strip()
+
+
+def gmk_products_from_catalog(data: dict, origin: str) -> list[dict]:
+    """Extract [{title, url}] for every 'GMK …' product in a Shopify
+    products.json page. Non-GMK and handle-less products are dropped."""
+    out: list[dict] = []
+    for p in (data or {}).get("products", []) or []:
+        title = str(p.get("title") or "")
+        handle = p.get("handle")
+        if not handle or not re.search(r"\bGMK\b", title, re.IGNORECASE):
+            continue
+        out.append({"title": title, "url": f"{origin}/products/{handle}"})
+    return out
+
+
+def match_product_to_set(
+    title: str,
+    by_full: dict[str, dict],
+    by_base: dict[str, list[dict]],
+) -> dict | None:
+    """Mirror of matchProduct in discovery.ts. Exact (round-aware) name match
+    wins; else fall back to the base name and prefer the ACTIVE_GB round, then
+    the newest. Returns None rather than guessing across different sets."""
+    full = normalize_set_name(title)
+    if not full:
+        return None
+    exact = by_full.get(full)
+    if exact:
+        return exact
+    candidates = by_base.get(strip_round(full))
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    active = [c for c in candidates if c["status"] == "ACTIVE_GB"]
+    if len(active) == 1:
+        return active[0]
+    pool = active if active else candidates
+    # Sort by epoch seconds (0 when undated) so a NULL gbStart can't trigger an
+    # aware-vs-naive datetime comparison error on real DB rows.
+    return max(pool, key=lambda c: c["gbStart"].timestamp() if c["gbStart"] else 0.0)
+
+
+def _build_set_index(conn) -> tuple[dict, dict]:
+    """Index tracked sets (that have a BASE kit) by normalized name, for
+    matching vendor product titles. Returns (by_full, by_base)."""
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("""
+            SELECT gb.id, gb.name, gb.status::text AS status, gb."gbStart",
+                   k.id AS base_kit_id
+              FROM "GroupBuy" gb
+              JOIN "Kit" k ON k."groupBuyId" = gb.id AND k.type = 'BASE'
+        """)
+        rows = cur.fetchall()
+    by_full: dict[str, dict] = {}
+    by_base: dict[str, list[dict]] = {}
+    for row in rows:
+        entry = {
+            "group_buy_id": row["id"],
+            "base_kit_id": row["base_kit_id"],
+            "status": row["status"],
+            "gbStart": row["gbStart"],
+        }
+        full = normalize_set_name(row["name"])
+        if not full:
+            continue
+        by_full.setdefault(full, entry)
+        by_base.setdefault(strip_round(full), []).append(entry)
+    return by_full, by_base
+
+
+def _origin_of(url: str) -> str | None:
+    try:
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme and parts.netloc:
+            return f"{parts.scheme}://{parts.netloc}"
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def run_discovery(
+    conn,
+    context: BrowserContext,
+    deadline: float,
+    scrapling: ScraplingClient | None = None,
+) -> dict:
+    """Crawl vendor catalogs for GMK listings and link them to tracked sets."""
+    stats = {"vendors": 0, "gmk_listings": 0, "linked": 0, "relinked": 0}
+
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("""
+            SELECT id, "websiteUrl", currency
+              FROM "Vendor"
+             WHERE slug <> 'gmk'
+             ORDER BY "lastDiscoveredAt" ASC NULLS FIRST
+             LIMIT %s
+        """, (_DISCOVERY_VENDOR_LIMIT,))
+        vendors = cur.fetchall()
+    if not vendors:
+        return stats
+
+    by_full, by_base = _build_set_index(conn)
+    log(f"Discovery: {len(vendors)} vendor(s) to crawl; "
+        f"{len(by_full)} tracked set name(s) indexed.")
+    page = context.new_page()
+    try:
+        for vendor in vendors:
+            if now_ms() > deadline:
+                log("Discovery: time budget reached — stopping.")
+                break
+            # Stamp the attempt up front so a store that hangs or blocks us
+            # still rotates to the back of the queue instead of being retried
+            # every run.
+            with conn.cursor() as cur:
+                cur.execute(
+                    'UPDATE "Vendor" SET "lastDiscoveredAt" = now() WHERE id = %s',
+                    (vendor["id"],),
+                )
+            conn.commit()
+            stats["vendors"] += 1
+
+            origin = _origin_of(vendor["websiteUrl"] or "")
+            if not origin:
+                continue
+
+            catalog: list[dict] = []
+            for page_num in range(1, _DISCOVERY_MAX_CATALOG_PAGES + 1):
+                url = f"{origin}/products.json?limit=250&page={page_num}"
+                data = scrapling.get_json(url) if scrapling and scrapling.available else None
+                if data is None:
+                    try:
+                        resp = page.goto(url, wait_until="domcontentloaded",
+                                         timeout=NAV_TIMEOUT_MS)
+                        if resp is not None and resp.ok:
+                            data = json.loads(resp.text())
+                    except Exception:  # noqa: BLE001
+                        data = None
+                if not isinstance(data, dict):
+                    break  # not Shopify / blocked / end of catalog
+                products = data.get("products") or []
+                catalog.extend(gmk_products_from_catalog(data, origin))
+                if len(products) < 250:
+                    break  # last page
+
+            if not catalog:
+                continue
+            stats["gmk_listings"] += len(catalog)
+
+            for product in catalog:
+                match = match_product_to_set(product["title"], by_full, by_base)
+                if not match:
+                    continue
+                # Create the link if missing, or refresh a changed productUrl —
+                # but never touch a MANUAL price's row. RETURNING (xmax = 0)
+                # distinguishes an insert (new link) from an update (relink); a
+                # skipped MANUAL/unchanged row returns nothing.
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("""
+                        INSERT INTO "VendorKit"
+                            (id, "kitId", "vendorId", "productUrl", "gbUrl",
+                             "inStock", currency, "updatedAt")
+                        VALUES
+                            (gen_random_uuid()::text, %s, %s, %s, %s, true, %s, now())
+                        ON CONFLICT ("kitId", "vendorId") DO UPDATE SET
+                            "productUrl" = EXCLUDED."productUrl",
+                            "gbUrl" = COALESCE("VendorKit"."gbUrl", EXCLUDED."gbUrl"),
+                            "updatedAt" = now()
+                        WHERE "VendorKit"."priceSource" IS DISTINCT FROM 'MANUAL'
+                          AND "VendorKit"."productUrl" IS DISTINCT FROM EXCLUDED."productUrl"
+                        RETURNING (xmax = 0) AS inserted
+                    """, (
+                        match["base_kit_id"], vendor["id"], product["url"],
+                        product["url"], vendor["currency"],
+                    ))
+                    row = cur.fetchone()
+                conn.commit()
+                if row is None:
+                    continue  # MANUAL or unchanged — nothing to do
+                if row["inserted"]:
+                    stats["linked"] += 1
+                else:
+                    stats["relinked"] += 1
+    finally:
+        page.close()
+    log(f"Discovery -> vendors={stats['vendors']} "
+        f"gmk_listings={stats['gmk_listings']} linked={stats['linked']} "
+        f"relinked={stats['relinked']}")
     return stats
 
 
@@ -3371,6 +3615,14 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--discovery-only",
+        action="store_true",
+        help=(
+            "Run only the vendor-catalog discovery pass (crawl vendor Shopify "
+            "catalogs for GMK listings and link them to tracked sets)."
+        ),
+    )
+    parser.add_argument(
         "--headless",
         action="store_true",
         help="Run Chromium without a visible window (used by manual GitHub Actions).",
@@ -3485,6 +3737,12 @@ def main() -> int:
                         f"budget={budget_minutes} minutes."
                     )
                     lk_stats = run_lightning(conn, context, deadline)
+                elif args.discovery_only:
+                    log(
+                        f"Vendor-catalog discovery only; "
+                        f"budget={budget_minutes} minutes."
+                    )
+                    disc_stats = run_discovery(conn, context, deadline, scrapling)
                 else:
                     # Catalog first so image + price passes have full set coverage
                     catalog_stats = run_catalog(conn, context, deadline, scrapling)
@@ -3499,6 +3757,10 @@ def main() -> int:
                     lk_stats = run_lightning(conn, context, lk_deadline)
                     gh_stats = run_geekhack(conn, context, deadline)
                     img_stats = run_images(conn, context, deadline, scrapling)
+                    # Discovery before pricing so freshly-linked vendor listings
+                    # get a price on the same nightly run. Dead links found by
+                    # the price pass clear themselves (404/410 → price cleared).
+                    disc_stats = run_discovery(conn, context, deadline, scrapling)
                     price_stats = run_prices(conn, context, deadline, scrapling)
             finally:
                 context.close()
@@ -3527,6 +3789,13 @@ def main() -> int:
         log("Lightning backfill done. Re-run safely if the deadline was reached.")
         return 0
 
+    if args.discovery_only:
+        log(f"Discovery -> vendors={disc_stats['vendors']} "
+            f"gmk_listings={disc_stats['gmk_listings']} linked={disc_stats['linked']} "
+            f"relinked={disc_stats['relinked']}")
+        log("Discovery done. Re-run safely to crawl the next batch of vendors.")
+        return 0
+
     log(f"Catalog -> urls={catalog_stats['urls_found']} "
         f"created={catalog_stats['created']} updated={catalog_stats['updated']} "
         f"skipped={catalog_stats['skipped']} failed={catalog_stats['failed']}")
@@ -3544,6 +3813,9 @@ def main() -> int:
         f"failed={gh_stats['failed']}")
     log(f"Images  -> attempted={img_stats['attempted']} "
         f"enriched={img_stats['enriched']} failed={img_stats['failed']}")
+    log(f"Discovery -> vendors={disc_stats['vendors']} "
+        f"gmk_listings={disc_stats['gmk_listings']} linked={disc_stats['linked']} "
+        f"relinked={disc_stats['relinked']}")
     log(f"Prices  -> attempted={price_stats['attempted']} "
         f"updated={price_stats['updated']} failed={price_stats['failed']}")
     log("Done.")
