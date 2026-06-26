@@ -10,7 +10,6 @@ import { useLocation } from "@/context/LocationContext";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
 import { convertCurrency, formatCurrency } from "@/lib/currency-utils";
-import { isShowcaseSource } from "@/lib/showcase";
 import type { Region, VendorKitWithDetails } from "@/types";
 
 interface Kit {
@@ -54,10 +53,8 @@ export function SetDetailClient({ groupBuy }: Props) {
   const { isTracked, toggle } = useTrackedSets();
   const [suggestOpen, setSuggestOpen] = useState(false);
   const isKeyboard = groupBuy.productType === "KEYBOARD";
-  // Showcase boards are scraped from a browse-only catalog (Lightning
-  // Keyboards) — they aren't real group buys, so never surface that vendor's
-  // name or a "buy" link to it. Show a neutral gallery note instead.
-  const isShowcase = isKeyboard && isShowcaseSource(groupBuy.vendorName);
+  // Note: showcase boards (Lightning Keyboards) never reach this component —
+  // the set-detail page renders a dedicated ShowcaseDetail view for them.
 
   const baseKit = groupBuy.kits[0];
   const vendorKitsForRegion = useMemo(() => {
@@ -169,45 +166,7 @@ export function SetDetailClient({ groupBuy }: Props) {
         </div>
       )}
 
-      {isShowcase ? (
-        <section className="overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-          <div className="border-b border-gray-100 bg-gradient-to-r from-gray-950 via-violet-950 to-indigo-900 px-5 py-5 text-white dark:border-gray-800 sm:px-6">
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-violet-200">
-              Community showcase
-            </p>
-            <h2 className="mt-1 text-xl font-bold">A gallery build</h2>
-            <p className="mt-1 text-sm text-indigo-100/75">
-              This board is part of the Showcase — a place to browse and admire
-              other people&apos;s keyboards. No tracking or pricing here.
-            </p>
-          </div>
-          <div className="p-5 sm:p-6">
-            {(() => {
-              const specs = [
-                groupBuy.layout,
-                groupBuy.mountingStyle,
-                groupBuy.material,
-              ].filter(Boolean) as string[];
-              return specs.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {specs.map((spec) => (
-                    <span
-                      key={spec}
-                      className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
-                    >
-                      {spec}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Browse more boards in the Showcase.
-                </p>
-              );
-            })()}
-          </div>
-        </section>
-      ) : isKeyboard ? (
+      {isKeyboard ? (
         <>
           <KeyboardPurchasePanel
             keyboard={groupBuy}
