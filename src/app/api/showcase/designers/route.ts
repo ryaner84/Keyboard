@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { SHOWCASE_VENDORS, HIDDEN_SLUGS, cleanDisplayName } from "@/lib/showcase";
+import { SHOWCASE_VENDORS, HIDDEN_SLUGS, cleanDisplayName, showcaseOnlyWhere } from "@/lib/showcase";
 import { deriveDesigner } from "@/lib/keyboard-designers";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +14,9 @@ export async function GET() {
     const rows = await prisma.groupBuy.findMany({
       where: {
         productType: "KEYBOARD",
+        // Showcase facet = community photo sources only; vendor rows (Oblotzky,
+        // ClickClack, …) must not surface as designer chips here.
+        ...showcaseOnlyWhere,
         ...(HIDDEN_SLUGS.length > 0 && { slug: { notIn: HIDDEN_SLUGS } }),
       },
       select: { name: true, designer: true, vendorName: true },

@@ -33,6 +33,11 @@ export async function GET(req: NextRequest) {
   // so pagination/counts reflect real group buys — filtering them client-side
   // after a limited fetch silently empties pages that are all-showcase rows.
   const excludeShowcase = searchParams.get("excludeShowcase") === "1";
+  // The /showcase gallery sets this to restrict results to showcase sources
+  // (Lightning Keyboards) only. Every other KEYBOARD row is real vendor data
+  // (Oblotzky Industries, ClickClack, …) that belongs in the Keyboard Catalog,
+  // not the community showcase.
+  const showcaseOnly = searchParams.get("showcaseOnly") === "1";
 
   const now = new Date();
   let dateFilter: Record<string, unknown> = {};
@@ -54,6 +59,10 @@ export async function GET(req: NextRequest) {
     andConditions.push({
       OR: [{ vendorName: null }, { vendorName: { notIn: SHOWCASE_VENDORS } }],
     });
+  }
+  // Showcase-only: keep just the community photo sources; drop every vendor row.
+  if (showcaseOnly) {
+    andConditions.push({ vendorName: { in: SHOWCASE_VENDORS } });
   }
   // Privacy denylist — never surfaced anywhere, in any view.
   if (HIDDEN_SLUGS.length > 0) {

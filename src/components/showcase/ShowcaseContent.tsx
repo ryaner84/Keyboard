@@ -105,6 +105,9 @@ export default function ShowcaseContent() {
       else setLoading(true);
       const params = new URLSearchParams();
       params.set("type", "KEYBOARD");
+      // Showcase = community photo sources only (Lightning Keyboards). Vendor
+      // boards (Oblotzky, ClickClack, …) live in the Keyboard Catalog instead.
+      params.set("showcaseOnly", "1");
       if (search) params.set("search", search);
       layouts.forEach((l) => params.append("layout", l));
       designers.forEach((d) => params.append("designer", d));
