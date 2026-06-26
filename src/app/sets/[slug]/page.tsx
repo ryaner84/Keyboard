@@ -6,9 +6,10 @@ import { prisma } from "@/lib/prisma";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { COUNTRY_BY_CODE, DEFAULT_COUNTRY } from "@/data/countries";
 import { formatDateRange, normalizeImageUrl } from "@/lib/utils";
-import { cleanDisplayName, isHiddenSlug } from "@/lib/showcase";
+import { cleanDisplayName, isHiddenSlug, isShowcaseSource } from "@/lib/showcase";
 import { getSiteUrl } from "@/lib/site-url";
 import { SetDetailClient } from "./SetDetailClient";
+import { ShowcaseDetail } from "@/components/showcase/ShowcaseDetail";
 import { getKeyboardEditionFamily } from "@/data/keyboard-edition-families";
 import type { Metadata } from "next";
 
@@ -29,6 +30,12 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
   const name = cleanDisplayName(groupBuy.name);
   const siteUrl = getSiteUrl();
   const url = `${siteUrl}/sets/${slug}?country=${country}`;
+  // Showcase boards are community photo builds — never frame them as something
+  // to "compare prices" for.
+  const isShowcase = isShowcaseSource(groupBuy.vendorName);
+  const showcaseDescription =
+    groupBuy.subtitle ?? groupBuy.description ??
+    `${name} — a custom keyboard build in the Showcase gallery.`;
 
   // WhatsApp / iMessage bots have a ~3s timeout — the dynamic poster API
   // can take longer on cold start (DB query + Firebase image fetch + Satori
@@ -47,17 +54,23 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
 
   return {
     title: `${name} — GMK Tracker`,
-    description: groupBuy.subtitle ?? groupBuy.description ?? `Compare prices for ${name} from vendors worldwide.`,
+    description: isShowcase
+      ? showcaseDescription
+      : groupBuy.subtitle ?? groupBuy.description ?? `Compare prices for ${name} from vendors worldwide.`,
     openGraph: {
       title: name,
-      description: groupBuy.subtitle ?? `${name} by ${groupBuy.designer}`,
+      description: isShowcase
+        ? showcaseDescription
+        : groupBuy.subtitle ?? `${name} by ${groupBuy.designer}`,
       url,
       images: ogImages,
     },
     twitter: {
       card: "summary_large_image",
       title: name,
-      description: groupBuy.subtitle ?? `Compare prices for ${name}`,
+      description: isShowcase
+        ? showcaseDescription
+        : groupBuy.subtitle ?? `Compare prices for ${name}`,
       images: [photoUrl ?? posterUrl],
     },
   };
@@ -131,6 +144,20 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
         .filter((u): u is string => !!u)
     )
   );
+
+  // Showcase boards are community photo builds, not group buys — give them a
+  // purpose-built collector view (gallery + spec sheet) instead of the GB/price
+  // layout, which would only render an empty vendor table and a dead "Track"
+  // button for them.
+  if (isShowcaseSource(groupBuy.vendorName)) {
+    return (
+      <ShowcaseDetail
+        board={groupBuy}
+        images={heroImages}
+        displayName={displayName}
+      />
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
