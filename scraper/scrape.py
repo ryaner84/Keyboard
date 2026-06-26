@@ -545,6 +545,16 @@ _SUPPORTED_CURRENCIES = {
 }
 
 
+# Sentinel distinct from None. None means "couldn't read the listing this run"
+# (blocked / transient) — the caller KEEPS the last good price. NO_BASE_KIT
+# means "read the listing fine, but it carries no identifiable base kit (only
+# subkits)" — the caller CLEARS the stored price. Without this split a listing
+# that scrapes to a wrong subkit price never heals: the fix makes the picker
+# return None, but None preserved the stale wrong number on every run. This is
+# the root cause behind the recurring Keygem rainy-day-r2 reports.
+NO_BASE_KIT = "NO_BASE_KIT"
+
+
 def classify_variant(title: str) -> str:
     """Mirror of classifyVariant in src/lib/kit-variants.ts — order matters."""
     if re.search(r"novelt", title, re.IGNORECASE):
@@ -570,9 +580,13 @@ def is_plausible_base_price(price: float, currency: str | None) -> bool:
 def choose_kit_variant(variants: list[dict]) -> dict | None:
     """Pick the variant that is actually the BASE kit, NOT the cheapest one.
 
-    Preference: BASE-classified variant > first remaining variant in display
-    order (Shopify returns variants in display order; single-kit listings have
-    one 'Default Title' variant, which classifies as OTHERS and is kept).
+    Preference: a variant classified BASE by title > the DEAREST remaining
+    candidate. The base kit is the comprehensive, full-price kit; the other
+    candidates on a GB listing are individual subkits (40s kit, accents, an
+    ex-GST line…) that are cheaper. Reporters repeatedly confirmed this — the
+    picker kept storing a cheap subkit because it took the first variant in
+    display order, so we now take the most expensive candidate instead. A
+    single-kit listing ('Default Title') has one candidate, so the max is it.
 
     Variants classified as a non-base STANDARD subkit (alphas, novelties,
     spacebars) are excluded outright — those are cheap add-on kits, never the
@@ -594,7 +608,10 @@ def choose_kit_variant(variants: list[dict]) -> dict | None:
     for v in base_pool:
         if classify_variant(v["title"]) == "BASE":
             return v
-    return base_pool[0]
+    # No variant is titled "base": the real base is the dearest candidate, not
+    # whichever subkit happens to come first in display order (an out-of-range
+    # bundle is rejected downstream by is_plausible_base_price).
+    return max(base_pool, key=lambda v: v["price"])
 
 
 # Home country per currency — pins Shopify Markets' geo-localization to the
@@ -801,7 +818,11 @@ def shopify_price(
         variants = _parse_shopify_variants(data["product"].get("variants") or [])
         chosen = _pick_variant(variants, pinned_id)
         if chosen is None:
-            return None
+            # We read the product fine but it has no base candidate (only
+            # subkits) and the vendor didn't pin a variant. Signal a CLEAR so a
+            # previously-stored subkit price is removed, not preserved as stale.
+            # An empty variant list is a parse miss (transient) → plain skip.
+            return NO_BASE_KIT if variants else None
 
         # product.json omits stock on some themes; product.js exposes an
         # explicit `available` flag for the same variant IDs.
@@ -1802,7 +1823,20 @@ def run_prices(
                 vk.get("vendor_currency"),
                 scrapling,
             )
-            if result:
+            if result == NO_BASE_KIT:
+                # Listing has no base kit (only subkits) — clear any stale price
+                # so the wrong subkit number stops showing, instead of letting
+                # it persist run after run. Counts as a successful update.
+                with conn.cursor() as cur:
+                    cur.execute(
+                        'UPDATE "VendorKit" SET price = NULL, "inStock" = false, '
+                        'variants = \'[]\'::jsonb, "priceUpdatedAt" = now(), '
+                        '"priceSource" = \'SCRAPED\' WHERE id = %s',
+                        (vk["id"],),
+                    )
+                conn.commit()
+                stats["updated"] += 1
+            elif result:
                 with conn.cursor() as cur:
                     cur.execute(
                         'UPDATE "VendorKit" SET price = %s, currency = %s, '

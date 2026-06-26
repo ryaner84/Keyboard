@@ -146,6 +146,34 @@ class ChooseKitVariantTests(unittest.TestCase):
         ]
         self.assertEqual(scrape.choose_kit_variant(variants)["price"], 120)
 
+    def test_picks_dearest_unlabeled_base_over_unlabeled_subkit(self):
+        # NovelKeys gmk-monokai-material: neither variant is titled "base" and
+        # the cheap one ("40s") is an unlabeled subkit the classifier reads as
+        # OTHERS, so it isn't dropped. Taking the first in display order stored
+        # the $40 subkit; the real base is the dearer kit.
+        variants = [
+            {"id": "1", "title": "GMK Monokai Material 40s", "price": 40},
+            {"id": "2", "title": "GMK Monokai Material", "price": 139},
+        ]
+        self.assertEqual(scrape.choose_kit_variant(variants)["price"], 139)
+
+    def test_dearest_pick_is_order_independent(self):
+        # Same listing, base listed first — selection must not depend on order.
+        variants = [
+            {"id": "1", "title": "GMK Monokai Material", "price": 139},
+            {"id": "2", "title": "GMK Monokai Material 40s", "price": 40},
+        ]
+        self.assertEqual(scrape.choose_kit_variant(variants)["price"], 139)
+
+    def test_explicit_base_title_wins_over_a_dearer_other(self):
+        # A title-classified BASE is ground truth even when some other OTHERS
+        # variant (e.g. a region/bundle line) happens to be priced higher.
+        variants = [
+            {"id": "1", "title": "GMK Set Base Kit", "price": 120},
+            {"id": "2", "title": "GMK Set Region Bundle", "price": 160},
+        ]
+        self.assertEqual(scrape.choose_kit_variant(variants)["price"], 120)
+
 
 if __name__ == "__main__":
     unittest.main()

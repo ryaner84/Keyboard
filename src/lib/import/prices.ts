@@ -35,6 +35,25 @@ export interface PriceResult {
   variants: Array<{ title: string; price: number }>;
 }
 
+// Sentinel distinct from null. `null` means the listing couldn't be read this
+// run (blocked / transient) — the caller KEEPS the last good price. NO_BASE_KIT
+// means the listing was read fine but carries no identifiable base kit (only
+// subkits, or an ambiguous multi-kit aggregate) — the caller CLEARS the stored
+// price. Without this split a listing that scrapes to a wrong subkit price
+// never heals: returning null preserved the stale wrong number every run. This
+// is the root cause behind the recurring Keygem / Latamkeys / STACKS reports.
+export const NO_BASE_KIT = "NO_BASE_KIT" as const;
+export type FetchPriceOutcome = PriceResult | typeof NO_BASE_KIT | null;
+
+// The base kit is the dearest individual kit on a GB listing — subkits (40s,
+// accents, an ex-GST line) are cheaper. Pick the most expensive candidate
+// rather than whichever happens to be first in display order; an out-of-range
+// bundle is rejected downstream by isPlausibleBaseKitPrice.
+function dearestCandidate<T extends { price: number }>(pool: T[]): T | undefined {
+  if (pool.length === 0) return undefined;
+  return pool.reduce((best, v) => (v.price > best.price ? v : best));
+}
+
 async function fetchWithTimeout(url: string, extraHeaders?: Record<string, string>): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -180,7 +199,7 @@ function structuredVariantAvailability(html: string): Map<string, boolean> {
 
 // Shopify exposes a product's data at {productUrl}.json — used by most
 // keyboard vendors (CannonKeys, NovelKeys, KBDfans, Deskhero, Daily Clack...).
-async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): Promise<PriceResult | null> {
+async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): Promise<FetchPriceOutcome> {
   if (!productUrl.includes("/products/")) return null;
 
   // Strip query/hash, then request the .json variant.
@@ -304,8 +323,14 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     const chosen =
       pinned ??
       basePool.find((v) => classifyVariant(v.title) === "BASE") ??
-      basePool[0];
-    if (!chosen) return null;
+      dearestCandidate(basePool);
+    if (!chosen) {
+      // Read the product fine, but it has no base candidate (only subkits) and
+      // the vendor didn't pin a variant. Clear any stale price rather than
+      // preserve a wrong subkit number. variants is non-empty here (the empty
+      // case returned null above), so this is always a definitive no-base.
+      return NO_BASE_KIT;
+    }
     const baseVariants = basePool.filter(
       (variant) => classifyVariant(variant.title) === "BASE"
     );
@@ -427,11 +452,17 @@ async function fetchShopifyCurrency(productUrl: string): Promise<string | null> 
 // live in the `offers` node. OpenGraph product:price:* meta tags are the
 // second fallback. No variant breakdown is available from either, so the
 // variants list stays empty (the UI handles that like legacy rows).
-async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null> {
+async function fetchJsonLdPrice(productUrl: string): Promise<FetchPriceOutcome> {
   try {
     const res = await fetchWithTimeout(productUrl);
     if (!res.ok) return null;
     const html = await res.text();
+
+    // Set when we positively parse a Product whose offers are an ambiguous
+    // multi-kit aggregate (no base-named offer). We skip storing any of its
+    // prices, but having SEEN one means the stale stored price is a wrong
+    // subkit — so we clear it (NO_BASE_KIT) instead of preserving it (null).
+    let sawAmbiguousAggregate = false;
 
     const blocks = Array.from(
       html.matchAll(
@@ -493,7 +524,13 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
         // addon child kit — offers[0] is just the cheapest (how GMK.net base
         // kits got stored as 49.82). Skip rather than guess.
         const namedBase = offerList.find((o) => /\bbase\b/i.test(String(o?.name ?? "")));
-        if (!namedBase && offerList.length > 1) continue;
+        if (!namedBase && offerList.length > 1) {
+          // Multiple named/unnamed offers, none identifiable as the base —
+          // offers[0] would just be the cheapest subkit. Skip, and remember
+          // this so the stale wrong price gets cleared.
+          sawAmbiguousAggregate = true;
+          continue;
+        }
         const chosen: LdOffer | undefined =
           namedBase ??
           offerList[0] ??
@@ -520,6 +557,9 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
           chosen?.price == null &&
           aggSpansMultipleKits
         ) {
+          // A bare AggregateOffer spanning a price range with no single base
+          // price — same story: skip, and mark for clearing the stale value.
+          sawAmbiguousAggregate = true;
           continue;
         }
 
@@ -569,7 +609,10 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
         return { price, currency, inStock, variants: [] };
       }
     }
-    return null;
+    // Read the page but found no usable base price. If that was because the
+    // product is an ambiguous multi-kit aggregate, clear the stale wrong price;
+    // otherwise it's a non-product / unreadable page → keep the last good one.
+    return sawAmbiguousAggregate ? NO_BASE_KIT : null;
   } catch {
     return null;
   }
@@ -579,11 +622,14 @@ async function fetchJsonLdPrice(productUrl: string): Promise<PriceResult | null>
 // JSON first (rich variant data), generic JSON-LD/OpenGraph markup otherwise.
 // Pass vendorCurrency so Shopify geo-localization is pinned to the vendor's
 // base currency rather than whatever the runner's IP geo-detects.
-export async function fetchVendorPrice(productUrl: string, vendorCurrency?: string): Promise<PriceResult | null> {
+export async function fetchVendorPrice(productUrl: string, vendorCurrency?: string): Promise<FetchPriceOutcome> {
   if (!productUrl) return null;
   // GMK is the manufacturer, not a vendor — gmk.net links are catalog/image
   // references and must never produce a price.
   if (/gmk\.net/i.test(productUrl)) return null;
+  // A priced result OR the NO_BASE_KIT sentinel (both truthy) is a definitive
+  // answer from the Shopify path — only a null (transient) falls through to the
+  // JSON-LD reader.
   const shopify = await fetchShopifyPrice(productUrl, vendorCurrency);
   if (shopify) return shopify;
   return fetchJsonLdPrice(productUrl);
@@ -612,7 +658,21 @@ async function refreshOne(
   if (!vk.productUrl) return;
   result.attempted++;
   const priceData = await fetchVendorPrice(vk.productUrl, vk.vendor.currency);
-  if (priceData) {
+  if (priceData === NO_BASE_KIT) {
+    // Listing has no base kit (only subkits / ambiguous aggregate) — clear the
+    // stale wrong price so it stops showing, instead of preserving it forever.
+    await prisma.vendorKit.update({
+      where: { id: vk.id },
+      data: {
+        price: null,
+        inStock: false,
+        priceUpdatedAt: new Date(),
+        priceSource: "SCRAPED",
+        variants: [],
+      },
+    });
+    result.updated++;
+  } else if (priceData) {
     await prisma.vendorKit.update({
       where: { id: vk.id },
       data: {
