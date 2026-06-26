@@ -260,7 +260,12 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
         // Fall through to the existing generic structured-data fallback.
       }
     }
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // Dead-link audit: a removed product (even after canonical-handle retry)
+      // returns 404/410. Clear the stale price instead of preserving it; any
+      // other failure (403 block, 5xx, timeout) is transient → keep last good.
+      return res.status === 404 || res.status === 410 ? NO_BASE_KIT : null;
+    }
     const data = (await res.json()) as {
       product?: {
         variants?: Array<{ id?: number | string; title?: string; price?: string | number; available?: boolean }>;
@@ -455,7 +460,11 @@ async function fetchShopifyCurrency(productUrl: string): Promise<string | null> 
 async function fetchJsonLdPrice(productUrl: string): Promise<FetchPriceOutcome> {
   try {
     const res = await fetchWithTimeout(productUrl);
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // Dead-link audit: a removed page returns 404/410 → clear the stale price;
+      // any other failure is transient → keep the last good price.
+      return res.status === 404 || res.status === 410 ? NO_BASE_KIT : null;
+    }
     const html = await res.text();
 
     // Set when we positively parse a Product whose offers are an ambiguous

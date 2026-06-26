@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 
@@ -173,6 +174,68 @@ class ChooseKitVariantTests(unittest.TestCase):
             {"id": "2", "title": "GMK Set Region Bundle", "price": 160},
         ]
         self.assertEqual(scrape.choose_kit_variant(variants)["price"], 120)
+
+
+class DiscoveryHelpersTests(unittest.TestCase):
+    def test_normalize_drops_tags_status_and_filler(self):
+        self.assertEqual(
+            scrape.normalize_set_name("GMK Striker R2 [GB] Keycap Set (Pre-order)"),
+            "gmk striker r2",
+        )
+
+    def test_normalize_unifies_round_spelling(self):
+        self.assertEqual(
+            scrape.normalize_set_name("GMK Striker Round 2"),
+            scrape.normalize_set_name("GMK Striker R2"),
+        )
+
+    def test_strip_round(self):
+        self.assertEqual(scrape.strip_round("gmk striker r2"), "gmk striker")
+        self.assertEqual(scrape.strip_round("gmk olive"), "gmk olive")
+
+    def test_catalog_keeps_only_gmk_products(self):
+        data = {
+            "products": [
+                {"title": "GMK Striker", "handle": "gmk-striker"},
+                {"title": "PBT Heavy Industry", "handle": "pbt-heavy"},
+                {"title": "GMK Olive", "handle": "gmk-olive"},
+                {"title": "GMK No Handle"},  # dropped: no handle
+            ]
+        }
+        out = scrape.gmk_products_from_catalog(data, "https://shop.test")
+        self.assertEqual(
+            out,
+            [
+                {"title": "GMK Striker", "url": "https://shop.test/products/gmk-striker"},
+                {"title": "GMK Olive", "url": "https://shop.test/products/gmk-olive"},
+            ],
+        )
+
+    def test_match_exact_round_aware(self):
+        e_r1 = {"status": "DELIVERED", "gbStart": datetime(2020, 1, 1)}
+        e_r2 = {"status": "ACTIVE_GB", "gbStart": datetime(2023, 1, 1)}
+        by_full = {"gmk striker r1": e_r1, "gmk striker r2": e_r2}
+        by_base = {"gmk striker": [e_r1, e_r2]}
+        self.assertIs(
+            scrape.match_product_to_set("GMK Striker R1", by_full, by_base), e_r1
+        )
+
+    def test_match_falls_back_to_active_round(self):
+        e_r1 = {"status": "DELIVERED", "gbStart": datetime(2020, 1, 1)}
+        e_r2 = {"status": "ACTIVE_GB", "gbStart": datetime(2023, 1, 1)}
+        by_full = {"gmk striker r1": e_r1, "gmk striker r2": e_r2}
+        by_base = {"gmk striker": [e_r1, e_r2]}
+        # Bare "GMK Striker" (no round) → prefer the round that's actually selling
+        self.assertIs(
+            scrape.match_product_to_set("GMK Striker", by_full, by_base), e_r2
+        )
+
+    def test_match_returns_none_for_untracked(self):
+        by_full = {"gmk striker": {"status": "ACTIVE_GB", "gbStart": None}}
+        by_base = {"gmk striker": [by_full["gmk striker"]]}
+        self.assertIsNone(
+            scrape.match_product_to_set("GMK Nonexistent Set", by_full, by_base)
+        )
 
 
 if __name__ == "__main__":
