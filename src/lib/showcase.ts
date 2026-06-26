@@ -31,6 +31,15 @@ export function isShowcaseSource(
   return !!vendorName && SHOWCASE_VENDORS.includes(vendorName);
 }
 
+// The /showcase gallery is a community photo gallery — the ONLY rows that belong
+// there are the showcase sources in SHOWCASE_VENDORS (Lightning Keyboards).
+// Every other KEYBOARD row is real vendor / group-buy data (Oblotzky Industries,
+// ClickClack, …) and belongs in the Keyboard Catalog, never the showcase.
+// Spread into a groupBuy `where` to restrict a query to showcase rows only.
+// `vendorName: { in }` is null-safe: a NULL or non-showcase vendorName simply
+// doesn't match, so vendor and vendorless boards are both excluded.
+export const showcaseOnlyWhere = { vendorName: { in: SHOWCASE_VENDORS } };
+
 // Scraped showcase board names carry the source as a suffix, e.g.
 // "Meletrix Zoom64 — Lightning Keyboards" or "...&mdash; Lightning Keyboards".
 // Users shouldn't see where the photos came from, so strip that trailing
