@@ -2194,6 +2194,12 @@ KEYBOARD_VENDORS = [
     # so we don't need to guess the exact collection handle.
     ("obl", "Oblotzky Industries",
      ["https://oblotzky.industries/products.json"], "EUR", "EU"),
+    # UniKeys (unikeyboards.com) — Canadian store, prices in USD. The keyboard
+    # classifier keeps the boards and drops the keycap/switch/accessory catalogue.
+    ("uni", "UniKeys", [
+        "https://unikeyboards.com/collections/ongoing-groupbuys-and-pre-orders/products.json",
+        "https://unikeyboards.com/collections/group-buy/products.json",
+    ], "USD", "CA"),
 ]
 
 _KB_LAYOUTS = [

@@ -152,6 +152,20 @@ export const KEYBOARD_VENDORS: VendorConfig[] = [
     currency: "USD",
     region: "US",
   },
+  {
+    id: "uni",
+    displayName: "UniKeys",
+    // UniKeys (unikeyboards.com) — Canadian store, prices in USD. The ongoing
+    // collection carries live GBs + pre-orders; the group-buy collection is the
+    // smaller curated set. The keyboard classifier (price floor + keycap filter)
+    // keeps the boards and drops the keycap/switch/accessory catalogue.
+    collectionUrl: "https://unikeyboards.com/collections/ongoing-groupbuys-and-pre-orders/products.json",
+    extraCollectionUrls: [
+      "https://unikeyboards.com/collections/group-buy/products.json",
+    ],
+    currency: "USD",
+    region: "CA",
+  },
 ];
 
 // ── Shopify product types ────────────────────────────────────────────────────
