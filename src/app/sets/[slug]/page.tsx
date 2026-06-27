@@ -10,6 +10,8 @@ import { cleanDisplayName, isHiddenSlug, isShowcaseSource } from "@/lib/showcase
 import { getSiteUrl } from "@/lib/site-url";
 import { SetDetailClient } from "./SetDetailClient";
 import { ShowcaseDetail } from "@/components/showcase/ShowcaseDetail";
+import { KeyboardDetailsPanel } from "@/components/set-detail/KeyboardDetailsPanel";
+import { parseKeyboardDetails, hasKeyboardDetails } from "@/lib/keyboard-details";
 import { getKeyboardEditionFamily } from "@/data/keyboard-edition-families";
 import type { Metadata } from "next";
 
@@ -159,6 +161,14 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
     );
   }
 
+  // Keyboard group-buy descriptions (esp. Geekhack-scraped boards) bury the
+  // dates, regional vendors, specs and per-edition pricing in one wall of prose.
+  // Parse them out so we can present the key info as structured panels and tuck
+  // the raw text into a collapsible instead of dumping the whole chunk.
+  const isKeyboard = (groupBuy as { productType?: string }).productType === "KEYBOARD";
+  const keyboardDetails = isKeyboard ? parseKeyboardDetails(groupBuy.description) : null;
+  const showStructuredDetails = !!keyboardDetails && hasKeyboardDetails(keyboardDetails);
+
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Hero */}
@@ -199,10 +209,31 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
           </div>
 
           {groupBuy.description && (
-            <p className="mt-4 text-sm text-gray-600 leading-relaxed">{groupBuy.description}</p>
+            showStructuredDetails ? (
+              // Key info is surfaced in the panels below — keep the original
+              // post available but collapsed so it doesn't dominate the page.
+              <details className="group mt-4">
+                <summary className="flex cursor-pointer list-none items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-violet-600">
+                  <svg className="h-4 w-4 transition group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                  Full description
+                </summary>
+                <p className="mt-3 text-sm leading-relaxed text-gray-600 dark:text-gray-300">
+                  {groupBuy.description}
+                </p>
+              </details>
+            ) : (
+              <p className="mt-4 text-sm text-gray-600 leading-relaxed">{groupBuy.description}</p>
+            )
           )}
         </div>
       </div>
+
+      {/* Structured key info extracted from the description */}
+      {showStructuredDetails && keyboardDetails && (
+        <KeyboardDetailsPanel details={keyboardDetails} />
+      )}
 
       {editionFamily && orderedEditions.length > 1 && (
         <section className="mb-6 overflow-hidden rounded-2xl border border-[#dfd2b9] bg-[#faf7f0] dark:border-[#4b402d] dark:bg-[#1d1a15]">
