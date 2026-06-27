@@ -2140,6 +2140,15 @@ _KB_KEYCAP_PROFILE_RE = re.compile(
     re.I,
 )
 
+# A keycap-defining noun ANYWHERE in the title (not just a leading profile) also
+# marks a keycap product — e.g. "Awekeys Viking Antiques Full Metal Keycaps",
+# "Mtbkeys Metal Spacebars". Guarded by the absence of a definitive keyboard
+# word so a real board ("… Electrostatic keyboard …") is never mis-dropped.
+_KB_KEYCAP_NOUN_RE = re.compile(r"\b(?:keycaps?|keysets?|spacebars?|novelties)\b", re.I)
+_KB_KEYBOARD_WORD_RE = re.compile(
+    r"\b(?:keyboard|pcb|barebones|hotswap|gasket|switches?)\b", re.I
+)
+
 # Geekhack meta-threads to ignore (announcements, indexes, sticky posts)
 _GH_META_RE = re.compile(
     r"^\*{2,}|list\s+of\s+(?:current|running|active)|"
@@ -2340,7 +2349,14 @@ def kb_base_price(product: dict):
 
 def kb_is_keycap(product: dict) -> bool:
     """A keycap set that slipped into a keyboard vendor collection (GMK, CYL, SA…)."""
-    return bool(_KB_KEYCAP_PROFILE_RE.search(product.get("title", "")))
+    title = product.get("title", "")
+    if _KB_KEYCAP_PROFILE_RE.search(title):
+        return True
+    # Keycap noun anywhere (Full Metal Keycaps, Metal Spacebars), as long as the
+    # title doesn't also name a board component.
+    if _KB_KEYCAP_NOUN_RE.search(title) and not _KB_KEYBOARD_WORD_RE.search(title):
+        return True
+    return False
 
 
 def kb_is_blocked(product: dict) -> bool:

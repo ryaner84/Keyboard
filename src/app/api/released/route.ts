@@ -68,7 +68,12 @@ export async function GET(req: NextRequest) {
   // Released sets split into two categories. Keycaps keep the multi-vendor
   // price-compare experience; keyboards are single-vendor (price on the row),
   // so the available/savings/deals machinery is skipped for them.
-  const productType = searchParams.get("type") === "KEYBOARD" ? "KEYBOARD" : "KEYCAPS";
+  // Accept the type param case-insensitively and in either spelling — the UI
+  // sends "KEYBOARD", but a hand-typed / shared link uses "keyboards", and that
+  // must NOT silently fall through to keycaps (which is what surfaced GMK
+  // keycap sets under /released?type=keyboards).
+  const typeParam = (searchParams.get("type") ?? "").toLowerCase();
+  const productType = typeParam === "keyboard" || typeParam === "keyboards" ? "KEYBOARD" : "KEYCAPS";
   const isKeyboard = productType === "KEYBOARD";
 
   let yearFilter: Record<string, unknown> = {};
