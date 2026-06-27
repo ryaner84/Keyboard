@@ -29,18 +29,47 @@ export interface KeyboardDetails {
   editions: EditionRow[]; // colourway → price
 }
 
-// Region codes seen in GB posts → friendly labels. Order longest-first isn't
-// needed (we anchor on a trailing colon), but keep CN/CA/CAN distinct.
-const REGION_LABELS: Record<string, string> = {
-  US: "United States", USA: "United States", NA: "North America",
-  UK: "United Kingdom", EU: "Europe", EUR: "Europe",
-  OCE: "Oceania", OCEANIA: "Oceania", AU: "Australia", AUS: "Australia",
-  CN: "China", CHINA: "China", SEA: "Southeast Asia", ASIA: "Asia",
-  CA: "Canada", CAN: "Canada", KR: "Korea", JP: "Japan",
-  ROW: "Rest of World", INTL: "International", INT: "International",
-  MENA: "MENA", LATAM: "Latin America", SA: "South America",
+// Region spelling → friendly label. Covers BOTH the code form ("US: CannonKeys")
+// and the full-name form ("United States - CannonKeys" / "America - Divinikey")
+// that GB posts use interchangeably. Ambiguous two-letter English fragments
+// (IN/ID/SA/NA/MY/OR) are intentionally omitted as codes — the full names are
+// kept — so we don't mis-read prose; a marker only counts when a ":" or "-"
+// separator follows it anyway.
+const REGION_LEXICON: Record<string, string> = {
+  "united states": "United States", usa: "United States", "u.s.a": "United States",
+  "u.s.": "United States", us: "United States", america: "United States",
+  "north america": "North America",
+  "united kingdom": "United Kingdom", uk: "United Kingdom", "u.k.": "United Kingdom",
+  britain: "United Kingdom", "great britain": "United Kingdom", england: "United Kingdom",
+  europe: "Europe", eu: "Europe", eur: "Europe", "european union": "Europe",
+  canada: "Canada", ca: "Canada", can: "Canada",
+  australia: "Australia", au: "Australia", aus: "Australia",
+  oceania: "Oceania", oce: "Oceania", anz: "Oceania",
+  "new zealand": "New Zealand", nz: "New Zealand",
+  china: "China", cn: "China", "mainland china": "China", prc: "China",
+  "hong kong": "Hong Kong", hk: "Hong Kong", taiwan: "Taiwan", tw: "Taiwan",
+  japan: "Japan", jp: "Japan", jpn: "Japan",
+  korea: "Korea", "south korea": "Korea", kr: "Korea", kor: "Korea",
+  singapore: "Singapore", sg: "Singapore", sgp: "Singapore",
+  malaysia: "Malaysia", thailand: "Thailand", th: "Thailand", tha: "Thailand",
+  indonesia: "Indonesia", philippines: "Philippines", ph: "Philippines",
+  vietnam: "Vietnam", "viet nam": "Vietnam", vn: "Vietnam", india: "India",
+  "southeast asia": "Southeast Asia", "se asia": "Southeast Asia", sea: "Southeast Asia",
+  asia: "Asia", international: "International", intl: "International", int: "International",
+  worldwide: "International", global: "International", "rest of world": "International",
+  row: "International", "other regions": "International",
+  mena: "MENA", "middle east": "MENA", "latin america": "Latin America",
+  latam: "Latin America", "south america": "South America",
 };
-const REGION_CODES = Object.keys(REGION_LABELS).sort((a, b) => b.length - a.length);
+// Marker alternation, longest spelling first so "United Kingdom" beats "UK".
+const REGION_MARKERS = Object.keys(REGION_LEXICON)
+  .sort((a, b) => b.length - a.length)
+  .map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  .join("|");
+
+// Sentence-starters that mark the end of a vendor list and the start of prose.
+const VENDOR_PROSE_BREAK =
+  /\s+(?:Due\s+to|Please\b|Therefore|Thanks\b|Thank\s+you|Hello\b|Note:|There\s+may|If\s+you\b|For\s+the\b|Kindly|We\s+will|We\s+have|Our\s|Each\s+vendor)/i;
 
 // Decode the handful of HTML entities the scrape leaves in the text.
 function decodeEntities(s: string): string {
@@ -85,26 +114,37 @@ function grab(text: string, labelPattern: string): string | null {
 }
 
 function parseVendors(text: string): VendorRow[] {
-  const segment = grab(text, "Vendors?");
-  if (!segment) return [];
-  const codeAlt = REGION_CODES.join("|");
-  // "UK: AKB US: CannonKeys OCE: KeebzNCables …" → region/name pairs. Each name
-  // runs until the next region code or the end of the segment.
+  // The label may be "Vendors:" or just "Vendors" before the list. Capture a
+  // generous run after it, then trim where the list gives way to prose.
+  const segMatch = text.match(
+    new RegExp(`\\bVendors?\\s*:?\\s*(.{3,600}?)(?=\\s*${STOP_RE}|$)`, "i")
+  );
+  if (!segMatch) return [];
+  let segment = segMatch[1].split(VENDOR_PROSE_BREAK)[0];
+  segment = segment.replace(/\s+/g, " ").trim();
+
+  // A region marker (code OR full name) followed by ":" or "-" then the vendor
+  // name, which runs until the next marker or the end. Handles both
+  // "US: CannonKeys" and "United States - CannonKeys" / "America - Divinikey".
   const pairRe = new RegExp(
-    `\\b(${codeAlt})\\s*:\\s*(.+?)(?=\\s+\\b(?:${codeAlt})\\s*:|$)`,
+    `\\b(${REGION_MARKERS})\\s*[:\\-–—]\\s*(.+?)(?=\\s+\\b(?:${REGION_MARKERS})\\b\\s*[:\\-–—]|$)`,
     "gi"
   );
   const out: VendorRow[] = [];
   const seen = new Set<string>();
   let m: RegExpExecArray | null;
   while ((m = pairRe.exec(segment)) !== null) {
-    const code = m[1].toUpperCase();
-    const name = m[2].replace(/\s+/g, " ").trim();
-    if (!name || name.length > 60) continue;
-    const key = `${code}:${name.toLowerCase()}`;
+    const region = REGION_LEXICON[m[1].toLowerCase()] ?? m[1];
+    let name = m[2].replace(/\s+/g, " ").replace(/[,;|]+$/, "").trim();
+    // A name that's really a URL isn't a usable store label — skip the pair.
+    if (/^https?:\/\//i.test(name) || !name) continue;
+    // Drop a trailing URL the capture swept in ("iLumkb https://…").
+    name = name.replace(/\s*https?:\/\/\S+$/i, "").trim();
+    if (!name || name.length > 40) continue;
+    const key = `${region}:${name.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ region: REGION_LABELS[code] ?? code, name });
+    out.push({ region, name });
   }
   return out;
 }
@@ -117,10 +157,23 @@ function tidyDate(value: string | null): string | null {
   return head.length ? head : null;
 }
 
+// Prose date range, e.g. "The GB will be open from March 23rd to April 24th".
+function extractOpenRange(text: string): string | null {
+  const date = `([A-Za-z]+\\.?\\s*\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s*\\d{4})?)`;
+  const re = new RegExp(
+    `\\b(?:GB|group\\s*buy|sale)\\b[^.]{0,40}?\\b(?:open|live|run(?:ning|s)?|launch(?:ed|es|ing)?|start(?:s|ing)?)\\b[^.]{0,20}?\\bfrom\\s+${date}\\s*(?:to|until|through|[-–—])\\s*${date}`,
+    "i"
+  );
+  const m = text.match(re);
+  return m ? `${m[1].trim()} – ${m[2].trim()}` : null;
+}
+
 function parseTimeline(text: string): DetailRow[] {
   const rows: DetailRow[] = [];
   const ic = tidyDate(grab(text, "IC|Interest\\s*Check"));
-  const gb = tidyDate(grab(text, "Group\\s*Buys?|GB\\s*dates?|GB"));
+  const gb =
+    tidyDate(grab(text, "Group\\s*Buys?|GB\\s*period|GB\\s*dates?|Sale\\s*period|GB")) ??
+    extractOpenRange(text);
   const eta = tidyDate(grab(text, "ETA|Estimated\\s*Ship(?:ping)?|Shipping\\s*ETA"));
   if (ic && /\d/.test(ic)) rows.push({ label: "Interest check", value: ic });
   if (gb) rows.push({ label: "Group buy", value: gb });
