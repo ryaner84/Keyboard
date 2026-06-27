@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 
 interface Props {
   slug: string;
@@ -59,6 +60,7 @@ export function ReportListingButton({ slug, name, className = "" }: Props) {
     <>
       {/* Trigger: small flag icon, subtle until hovered */}
       <button
+        type="button"
         onClick={open}
         title="Report an issue with this listing"
         className={`inline-flex items-center justify-center w-6 h-6 rounded text-gray-300 hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors ${className}`}
@@ -69,8 +71,13 @@ export function ReportListingButton({ slug, name, className = "" }: Props) {
         </svg>
       </button>
 
-      {/* Modal */}
-      {(phase === "open" || phase === "submitting" || phase === "done" || phase === "error") && (
+      {/* Modal — rendered through a portal to document.body so it escapes the
+          card's hover transform (a fixed element inside a transformed ancestor
+          is positioned relative to that ancestor, which made the dialog jump)
+          and so its clicks never bubble into the card link/handlers. */}
+      {(phase === "open" || phase === "submitting" || phase === "done" || phase === "error") &&
+        typeof document !== "undefined" &&
+        createPortal(
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
           onClick={(e) => { if (e.target === e.currentTarget) close(); }}
@@ -94,6 +101,7 @@ export function ReportListingButton({ slug, name, className = "" }: Props) {
                   {ISSUE_TYPES.map(({ value, label, emoji }) => (
                     <button
                       key={value}
+                      type="button"
                       onClick={() => setSelected(value)}
                       className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-medium transition-all text-left ${
                         selected === value
@@ -123,12 +131,14 @@ export function ReportListingButton({ slug, name, className = "" }: Props) {
 
                 <div className="flex gap-3 justify-end">
                   <button
+                    type="button"
                     onClick={close}
                     className="px-4 py-2 rounded-xl text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                   >
                     Cancel
                   </button>
                   <button
+                    type="button"
                     onClick={submit}
                     disabled={!selected || phase === "submitting"}
                     className="px-4 py-2 rounded-xl text-sm font-semibold bg-red-500 text-white hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
@@ -139,7 +149,8 @@ export function ReportListingButton({ slug, name, className = "" }: Props) {
               </>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
