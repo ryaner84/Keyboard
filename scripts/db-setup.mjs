@@ -95,6 +95,37 @@ async function purgeCancelledSets(client) {
   }
 }
 
+// Some keycap sets get scraped into the KEYBOARD section by mistake (a vendor's
+// "group buy" collection includes a metal-keycap drop, a Geekhack keycap GB is
+// classified as a board, etc.) — so they pollute /released?type=keyboards.
+// Move clearly-keycap rows back to KEYCAPS. High precision: requires a
+// definitive keycap word (GMK / keycaps / keyset / spacebars / novelties) AND
+// the absence of a definitive keyboard word, so real boards are never flipped.
+// Runs every deploy and is idempotent (a flipped row no longer matches).
+async function reclassifyKeycapKeyboards(client) {
+  try {
+    const res = await client.query(
+      `UPDATE public."GroupBuy"
+          SET "productType" = 'KEYCAPS', "updatedAt" = now()
+        WHERE "productType" = 'KEYBOARD'
+          AND (
+                slug LIKE 'gmk-%'
+             OR name ~* '\\mGMK\\M'
+             OR name ~* '\\mkeycaps?\\M'
+             OR name ~* '\\mkeysets?\\M'
+             OR name ~* '\\mspacebars?\\M'
+             OR name ~* '\\mnovelties\\M'
+          )
+          AND name !~* '\\m(keyboard|pcb|barebones|hotswap|gasket|switches?)\\M'`
+    );
+    if (res.rowCount > 0) {
+      console.log(`[db-setup] Reclassified ${res.rowCount} keycap set(s) out of the keyboard section.`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] keycap reclassification skipped: ${err.message}`);
+  }
+}
+
 // Correct known-mislabelled vendors and (re)seed DHL-estimate shipping zones.
 // Runs every deploy. The cost CASE is recalibrated to discounted small-parcel
 // DHL rates (a GMK base kit is compact/light, ~1kg) — anchored to a real
@@ -263,6 +294,7 @@ async function main() {
         await ensureCollectionPhotoReportTable(client);
         await purgeBlockedVendors(client);
         await purgeCancelledSets(client);
+        await reclassifyKeycapKeyboards(client);
         await ensureDiscoveryColumn(client);
         await ensureCurrencies(client);
         await resetPollutedGalleries(client);

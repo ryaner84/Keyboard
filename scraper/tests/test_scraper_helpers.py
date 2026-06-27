@@ -238,5 +238,30 @@ class DiscoveryHelpersTests(unittest.TestCase):
         )
 
 
+class KeycapClassifierTests(unittest.TestCase):
+    def test_leading_profile_is_keycap(self):
+        self.assertTrue(scrape.kb_is_keycap({"title": "GMK Ramune TKL"}))
+        self.assertTrue(scrape.kb_is_keycap({"title": "SA Vilebloom"}))
+
+    def test_keycap_noun_anywhere_is_keycap(self):
+        # These slipped into keyboard vendor collections before.
+        self.assertTrue(
+            scrape.kb_is_keycap(
+                {"title": "[GB] Awekeys Viking Antiques Full Metal Keycaps - Base Kit"}
+            )
+        )
+        self.assertTrue(scrape.kb_is_keycap({"title": "Mtbkeys Metal Spacebars"}))
+
+    def test_real_keyboard_is_not_keycap(self):
+        self.assertFalse(scrape.kb_is_keycap({"title": "Sonic170 v2 Keyboard Kit"}))
+        self.assertFalse(scrape.kb_is_keycap({"title": "Finn 60XT"}))
+        # Mentions PBT keycaps but is an actual board → keyboard word guards it.
+        self.assertFalse(
+            scrape.kb_is_keycap(
+                {"title": "KBDfans Electrostatic keyboard 9009 PBT dye-sub"}
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
