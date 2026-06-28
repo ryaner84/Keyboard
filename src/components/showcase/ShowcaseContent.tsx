@@ -51,6 +51,10 @@ export default function ShowcaseContent() {
 
   const [searchDraft, setSearchDraft] = useState(search);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Monotonic request id: only the most recent fetch may write to state, so a
+  // slow earlier response (e.g. the unfiltered mount fetch) can't land after a
+  // newer one (e.g. "kohaku") and repaint stale, non-matching results.
+  const reqSeq = useRef(0);
 
   const updateParams = useCallback(
     (updates: Record<string, string | string[]>) => {
@@ -101,6 +105,7 @@ export default function ShowcaseContent() {
 
   const fetchPage = useCallback(
     async (pageNum: number, append: boolean) => {
+      const seq = ++reqSeq.current;
       if (append) setLoadingMore(true);
       else setLoading(true);
       const params = new URLSearchParams();
@@ -118,16 +123,20 @@ export default function ShowcaseContent() {
       try {
         const res = await fetch(`/api/group-buys?${params}`);
         const data = await res.json();
+        // Ignore this response if a newer request has since been issued.
+        if (seq !== reqSeq.current) return;
         setBoards((prev) =>
           append ? [...prev, ...(data.data ?? [])] : data.data ?? []
         );
         setTotal(data.total ?? 0);
         setPage(pageNum);
       } catch {
-        if (!append) setBoards([]);
+        if (seq === reqSeq.current && !append) setBoards([]);
       } finally {
-        setLoading(false);
-        setLoadingMore(false);
+        if (seq === reqSeq.current) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
       }
     },
     [search, layouts, designers, sortBy]

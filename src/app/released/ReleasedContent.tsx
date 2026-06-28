@@ -76,6 +76,9 @@ export default function ReleasedContent() {
 
   const [searchDraft, setSearchDraft] = useState(search);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Only the most recent fetch may write to state — guards against a slow
+  // earlier response landing after a newer one and repainting stale results.
+  const reqSeq = useRef(0);
 
   const updateParams = useCallback(
     (updates: Record<string, string>) => {
@@ -106,6 +109,7 @@ export default function ReleasedContent() {
 
   const fetchPage = useCallback(
     async (pageNum: number, append: boolean) => {
+      const seq = ++reqSeq.current;
       if (append) setLoadingMore(true);
       else setLoading(true);
       const params = new URLSearchParams();
@@ -122,6 +126,8 @@ export default function ReleasedContent() {
       try {
         const res = await fetch(`/api/released?${params}`);
         const data = await res.json();
+        // Ignore this response if a newer request has since been issued.
+        if (seq !== reqSeq.current) return;
         setSets((prev) => (append ? [...prev, ...(data.data ?? [])] : (data.data ?? [])));
         if (!append) {
           setDeals(data.deals ?? []);
@@ -137,10 +143,12 @@ export default function ReleasedContent() {
         if (data.countKeyboards != null) setCountKeyboards(data.countKeyboards);
         setPage(pageNum);
       } catch {
-        if (!append) setSets([]);
+        if (seq === reqSeq.current && !append) setSets([]);
       } finally {
-        setLoading(false);
-        setLoadingMore(false);
+        if (seq === reqSeq.current) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
       }
     },
     [isKeyboard, search, availability, year, designer, vendor, sortBy]
