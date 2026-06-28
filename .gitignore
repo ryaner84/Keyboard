@@ -48,3 +48,7 @@ next-env.d.ts
 /scraper/.scrapling-browsers-*
 /scraper/gh_seen.json
 /scraper/lk_seen.json
+
+# Python bytecode (any dir)
+__pycache__/
+*.pyc
