@@ -176,6 +176,59 @@ class ChooseKitVariantTests(unittest.TestCase):
         self.assertEqual(scrape.choose_kit_variant(variants)["price"], 120)
 
 
+class GenericStorefrontTests(unittest.TestCase):
+    # WooCommerce embeds an HTML-escaped JSON blob of every variation.
+    WOO_HTML = (
+        '<form class="variations_form cart" data-product_variations="['
+        "{&quot;variation_id&quot;:11,&quot;display_price&quot;:101414.29,"
+        "&quot;attributes&quot;:{&quot;attribute_kit&quot;:&quot;Alphas&quot;},"
+        "&quot;is_in_stock&quot;:true},"
+        "{&quot;variation_id&quot;:12,&quot;display_price&quot;:184285.71,"
+        "&quot;attributes&quot;:{&quot;attribute_kit&quot;:&quot;Base Kit&quot;},"
+        "&quot;is_in_stock&quot;:true}]\"></form>"
+    )
+
+    def test_woocommerce_variations_parsed_with_titles_and_prices(self):
+        variants = scrape.parse_woocommerce_variations(self.WOO_HTML)
+        self.assertEqual(len(variants), 2)
+        self.assertEqual(
+            {v["title"]: v["price"] for v in variants},
+            {"Alphas": 101414.29, "Base Kit": 184285.71},
+        )
+
+    def test_woocommerce_base_kit_beats_cheaper_subkit(self):
+        # Latamkeys mictlan: stored the ARS 101,414 alpha subkit; the base kit
+        # (ARS 184,285) is dearer and is what choose_kit_variant must select.
+        variants = scrape.parse_woocommerce_variations(self.WOO_HTML)
+        self.assertEqual(scrape.choose_kit_variant(variants)["price"], 184285.71)
+
+    def test_non_woocommerce_html_yields_no_variations(self):
+        self.assertEqual(scrape.parse_woocommerce_variations("<html></html>"), [])
+
+    def test_jsonld_simple_offer_price(self):
+        # STACKS-style simple product: one priced offer in JSON-LD.
+        html = (
+            '<script type="application/ld+json">'
+            '{"@type":"Product","offers":{"@type":"Offer","price":"13999.00",'
+            '"priceCurrency":"INR","availability":"https://schema.org/InStock"}}'
+            "</script>"
+        )
+        offer = scrape.parse_jsonld_offer(html)
+        self.assertEqual(offer["price"], 13999.0)
+        self.assertTrue(offer["available"])
+
+    def test_jsonld_out_of_stock_is_flagged(self):
+        html = (
+            '<script type="application/ld+json">'
+            '{"@type":"Product","offers":{"price":"159.00",'
+            '"availability":"https://schema.org/OutOfStock"}}</script>'
+        )
+        self.assertFalse(scrape.parse_jsonld_offer(html)["available"])
+
+    def test_jsonld_returns_none_without_offer(self):
+        self.assertIsNone(scrape.parse_jsonld_offer("<html>no ld+json</html>"))
+
+
 class DiscoveryHelpersTests(unittest.TestCase):
     def test_normalize_drops_tags_status_and_filler(self):
         self.assertEqual(

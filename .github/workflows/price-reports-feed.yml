@@ -1,6 +1,7 @@
 # Prints the live site's pending wrong-price reports (GET /api/price-reports).
 # Manual-dispatch review feed: GitHub runners can reach the production site,
-# so this needs no DB secret. Used by the report-review routine.
+# so this needs no DB secret. Used by the report-review routine
+# (see docs/price-report-review-routine.md).
 name: Price reports feed
 
 on:

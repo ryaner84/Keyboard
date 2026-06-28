@@ -736,6 +736,123 @@ def _structured_variant_stock_from_html(html: str) -> dict[str, bool]:
     return result
 
 
+# ---- Generic (non-Shopify) storefronts ------------------------------------
+# Latamkeys (/productos/) and STACKS (/store/) are WooCommerce, not Shopify, so
+# shopify_price() bails on the missing /products/ path and the caller KEEPS the
+# stale price — these listings never re-price and reporters keep flagging the
+# wrong (subkit / pre-GST) number. Parsing the WooCommerce variation blob lets
+# choose_kit_variant() pick the real base kit here too, exactly as on Shopify.
+
+# WooCommerce variable products embed every variation as JSON in the add-to-cart
+# form's data-product_variations attribute. The value is HTML-escaped.
+_WOO_VARIATIONS_RE = re.compile(
+    r"""data-product_variations\s*=\s*(["'])(.*?)\1""", re.DOTALL
+)
+
+
+def parse_woocommerce_variations(html: str) -> list[dict]:
+    """WooCommerce variable product → [{id, title, price, available}].
+
+    `display_price` is a plain number already in the store's base currency, so
+    no symbol parsing is needed. The variation's attribute values become the
+    title so classify_variant() can tell a base kit from a subkit. Returns []
+    for simple products or non-WooCommerce pages (caller falls back)."""
+    match = _WOO_VARIATIONS_RE.search(html)
+    if not match:
+        return []
+    try:
+        data = json.loads(html_unescape(match.group(2)))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    out: list[dict] = []
+    for v in data:
+        if not isinstance(v, dict):
+            continue
+        raw_price = v.get("display_price")
+        if raw_price is None:
+            raw_price = v.get("display_regular_price")
+        try:
+            price = float(raw_price)
+        except (TypeError, ValueError):
+            continue
+        if price <= 0:
+            continue
+        attrs = v.get("attributes")
+        title = (
+            " ".join(str(x) for x in attrs.values() if x)
+            if isinstance(attrs, dict)
+            else ""
+        )
+        out.append(
+            {
+                "id": str(v.get("variation_id") or v.get("id") or ""),
+                "title": title,
+                "price": price,
+                "available": bool(v.get("is_in_stock", True)),
+            }
+        )
+    return out
+
+
+def parse_jsonld_offer(html: str) -> dict | None:
+    """Simple (non-variable) product price from JSON-LD Product/Offer.
+
+    Returns {price, available} for the dearest plausible offer (the base kit is
+    the dearest line; an out-of-range bundle is rejected by the bound check
+    downstream), or None when no priced offer is present. Currency is taken
+    from the vendor override, never the page, to match shopify_price()."""
+    blocks = re.findall(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html,
+        re.DOTALL | re.IGNORECASE,
+    )
+    found: list[dict] = []
+
+    def walk(node) -> None:
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        offers = node.get("offers")
+        candidates = (
+            offers if isinstance(offers, list)
+            else [offers] if isinstance(offers, dict)
+            else []
+        )
+        for offer in candidates:
+            if not isinstance(offer, dict):
+                continue
+            raw = offer.get("price") or offer.get("lowPrice") or offer.get("highPrice")
+            try:
+                # INR/ARS use ',' as the thousands separator, '.' as decimal.
+                price = float(str(raw).replace(",", ""))
+            except (TypeError, ValueError):
+                continue
+            if price <= 0:
+                continue
+            availability = offer.get("availability")
+            in_stock = not (
+                isinstance(availability, str)
+                and re.search(r"outofstock|soldout|discontinued", availability, re.IGNORECASE)
+            )
+            found.append({"price": price, "available": in_stock})
+        for child in node.values():
+            walk(child)
+
+    for block in blocks:
+        try:
+            walk(json.loads(html_unescape(block.strip())))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+    if not found:
+        return None
+    return max(found, key=lambda o: o["price"])
+
+
 def shopify_price(
     page: Page,
     product_url: str,
@@ -2045,6 +2162,84 @@ def run_discovery(
     return stats
 
 
+def generic_price(
+    page: Page,
+    product_url: str,
+    vendor_currency: str | None,
+    scrapling: ScraplingClient | None = None,
+) -> dict | None:
+    """Price path for non-Shopify storefronts (WooCommerce: Latamkeys, STACKS).
+
+    Mirrors shopify_price's contract — returns a price dict, NO_BASE_KIT (clear
+    the stale price), or None (transient, keep the last good price). Prefers the
+    WooCommerce variation blob so the base kit is picked over a cheaper subkit;
+    falls back to a single JSON-LD offer for simple products."""
+    status: int | None = None
+    html: str | None = None
+    try:
+        response = page.goto(
+            product_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS
+        )
+        status = response.status if response is not None else None
+        content = page.content()
+        if content and not response_is_blocked(status, content):
+            html = content
+    except Exception as exc:  # noqa: BLE001
+        log(f"  generic fetch error ({product_url}): {type(exc).__name__}: {exc}")
+
+    if html is None and scrapling is not None and scrapling.available:
+        html = scrapling.get_html(product_url, protected=True)
+
+    if not html:
+        # A genuinely removed listing (404/410) clears the stale price; a
+        # transient block keeps the last good price (same split as Shopify).
+        if status in (404, 410):
+            log(f"  dead link ({status}) — clearing price ({product_url})")
+            return NO_BASE_KIT
+        return None
+
+    if vendor_currency and vendor_currency not in _SUPPORTED_CURRENCIES:
+        log(f"  unsupported currency {vendor_currency} — skipped ({product_url})")
+        return None
+
+    # WooCommerce variable product: pick the base kit, not the cheapest subkit.
+    variants = parse_woocommerce_variations(html)
+    if variants:
+        chosen = choose_kit_variant(variants)
+        if chosen is None:
+            # Only subkits on offer — clear so the wrong number stops showing.
+            return NO_BASE_KIT
+        if not is_plausible_base_price(chosen["price"], vendor_currency):
+            log(
+                f"  implausible kit price {chosen['price']} {vendor_currency}"
+                f" — skipped ({product_url})"
+            )
+            return None
+        return {
+            "price": chosen["price"],
+            "currency": vendor_currency,
+            "variants": [{"title": v["title"], "price": v["price"]} for v in variants],
+            "inStock": bool(chosen.get("available", True)),
+        }
+
+    # Simple product: single JSON-LD offer.
+    offer = parse_jsonld_offer(html)
+    if offer is None:
+        return None
+    if not is_plausible_base_price(offer["price"], vendor_currency):
+        log(
+            f"  implausible kit price {offer['price']} {vendor_currency}"
+            f" — skipped ({product_url})"
+        )
+        return None
+    return {
+        "price": offer["price"],
+        "currency": vendor_currency,
+        "variants": [],
+        "inStock": offer["available"],
+    }
+
+
 def run_prices(
     conn,
     context: BrowserContext,
@@ -2061,7 +2256,12 @@ def run_prices(
                 log("Price pass: time budget reached — stopping.")
                 break
             stats["attempted"] += 1
-            result = shopify_price(
+            # Shopify exposes /products/<handle>.json; everything else (Latamkeys
+            # /productos/, STACKS /store/) is a generic WooCommerce storefront.
+            price_fn = (
+                shopify_price if "/products/" in vk["productUrl"] else generic_price
+            )
+            result = price_fn(
                 page,
                 vk["productUrl"],
                 vk.get("vendor_currency"),
