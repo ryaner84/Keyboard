@@ -105,7 +105,9 @@ export function getCountdownLabel(
 ): string | null {
   if (status === "ACTIVE_GB" && gbEnd) {
     const days = daysUntil(new Date(gbEnd));
-    if (days < 0) return "Ending soon";
+    // gbEnd already passed — the GB is over, never "ending soon". (The daily
+    // status sweep flips these to SHIPPING; this guards the window in between.)
+    if (days < 0) return "Ended";
     if (days === 0) return "Ends today";
     if (days === 1) return "Last day";
     return `Remaining ${days} days`;

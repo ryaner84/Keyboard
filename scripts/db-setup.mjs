@@ -126,6 +126,32 @@ async function reclassifyKeycapKeyboards(client) {
   }
 }
 
+// Date-based status transitions so the timeline/cards never show a closed GB as
+// "Active GB / Ending soon": an ACTIVE_GB past its gbEnd moves to SHIPPING, and
+// an interest check whose start date has arrived becomes ACTIVE_GB. The daily
+// cron does the same; running it here too fixes it immediately on deploy.
+async function expireEndedGroupBuys(client) {
+  try {
+    const ended = await client.query(
+      `UPDATE public."GroupBuy" SET status = 'SHIPPING', "updatedAt" = now()
+        WHERE status = 'ACTIVE_GB' AND "gbEnd" IS NOT NULL AND "gbEnd" < now()`
+    );
+    if (ended.rowCount > 0) {
+      console.log(`[db-setup] Expired ${ended.rowCount} ended group buy(s) (ACTIVE_GB → SHIPPING).`);
+    }
+    const startedNow = await client.query(
+      `UPDATE public."GroupBuy" SET status = 'ACTIVE_GB', "updatedAt" = now()
+        WHERE status = 'INTEREST_CHECK' AND "gbStart" IS NOT NULL AND "gbStart" <= now()
+          AND ("gbEnd" IS NULL OR "gbEnd" >= now())`
+    );
+    if (startedNow.rowCount > 0) {
+      console.log(`[db-setup] Promoted ${startedNow.rowCount} started interest check(s) (→ ACTIVE_GB).`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] status sweep skipped: ${err.message}`);
+  }
+}
+
 // Correct known-mislabelled vendors and (re)seed DHL-estimate shipping zones.
 // Runs every deploy. The cost CASE is recalibrated to discounted small-parcel
 // DHL rates (a GMK base kit is compact/light, ~1kg) — anchored to a real
@@ -295,6 +321,7 @@ async function main() {
         await purgeBlockedVendors(client);
         await purgeCancelledSets(client);
         await reclassifyKeycapKeyboards(client);
+        await expireEndedGroupBuys(client);
         await ensureDiscoveryColumn(client);
         await ensureCurrencies(client);
         await resetPollutedGalleries(client);
