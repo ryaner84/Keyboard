@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 import { importFromMatrixzj } from "@/lib/import/matrixzj";
 import { importGmkSets } from "@/lib/import/keycaplendar";
 import { refreshPrices } from "@/lib/import/prices";
@@ -38,6 +39,26 @@ export async function GET(req: NextRequest) {
 
   try {
     const start = Date.now();
+
+    // ── 0. Expire ended group buys (date-based, runs every day) ──────────────
+    // An ACTIVE_GB whose gbEnd has passed is no longer active — move it to
+    // SHIPPING so the timeline/cards stop labelling it "Active GB / Ending soon"
+    // (which is exactly what stale GMK Masterpiece R2 / British Racing Green
+    // were showing days after they closed). Also promote interest checks whose
+    // start date has arrived. Purely date-driven; independent of any re-import.
+    const nowTs = new Date();
+    const expired = await prisma.groupBuy.updateMany({
+      where: { status: "ACTIVE_GB", gbEnd: { lt: nowTs } },
+      data: { status: "SHIPPING" },
+    });
+    const started = await prisma.groupBuy.updateMany({
+      where: {
+        status: "INTEREST_CHECK",
+        gbStart: { not: null, lte: nowTs },
+        OR: [{ gbEnd: null }, { gbEnd: { gte: nowTs } }],
+      },
+      data: { status: "ACTIVE_GB" },
+    });
 
     // ── 1. Primary set catalog: matrixzj.github.io ──────────────────────────
     // Static GitHub Pages site — no bot protection, fetchable from serverless.
@@ -93,6 +114,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      statusSweep: { expired: expired.count, started: started.count },
       matrixzj: matrixzjResult,
       supplement: supplementResult,
       overrides,
