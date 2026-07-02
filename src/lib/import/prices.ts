@@ -451,13 +451,90 @@ async function fetchShopifyCurrency(productUrl: string): Promise<string | null> 
   return null;
 }
 
+// Minimal HTML-entity decoder for the attribute-escaped WooCommerce blob
+// below. The blob only ever contains &quot; (JSON quotes), the occasional
+// numeric entity, and &amp; for literal ampersands — decode &amp; LAST so a
+// double-escaped &amp;quot; survives as &quot; rather than collapsing to a
+// quote. Matches Python's html.unescape() for these cases.
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_m, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_m, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&amp;/g, "&");
+}
+
+// WooCommerce variable products (Latamkeys /productos/, STACKS /store/) embed
+// every variation as JSON in the add-to-cart form's data-product_variations
+// attribute, HTML-escaped. There is no /products/.json equivalent, so without
+// parsing this blob the caller keeps the stale (subkit / pre-GST) price and
+// reporters keep flagging the wrong number. Mirrors parse_woocommerce_variations
+// in scraper/scrape.py so both producers pick the same base kit.
+const WOO_VARIATIONS_RE = /data-product_variations\s*=\s*(["'])([\s\S]*?)\1/;
+
+interface WooVariant {
+  id: string;
+  title: string;
+  price: number;
+  available: boolean;
+}
+
+export function parseWooCommerceVariations(html: string): WooVariant[] {
+  const match = html.match(WOO_VARIATIONS_RE);
+  if (!match) return [];
+  let data: unknown;
+  try {
+    data = JSON.parse(decodeHtmlEntities(match[2]));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(data)) return [];
+  const out: WooVariant[] = [];
+  for (const v of data) {
+    if (typeof v !== "object" || v === null) continue;
+    const row = v as {
+      variation_id?: number | string;
+      id?: number | string;
+      display_price?: number | string;
+      display_regular_price?: number | string;
+      attributes?: Record<string, unknown>;
+      is_in_stock?: boolean;
+    };
+    // display_price is a plain number already in the store's base currency.
+    const price = Number(row.display_price ?? row.display_regular_price);
+    if (isNaN(price) || price <= 0) continue;
+    // The variation's attribute values become the title so classifyVariant()
+    // can tell a base kit from a subkit (attribute_kit: "Base Kit" → "Base Kit").
+    const attrs = row.attributes;
+    const title =
+      attrs && typeof attrs === "object"
+        ? Object.values(attrs).filter(Boolean).map(String).join(" ")
+        : "";
+    out.push({
+      id: String(row.variation_id ?? row.id ?? ""),
+      title,
+      price,
+      available: row.is_in_stock !== false,
+    });
+  }
+  return out;
+}
+
 // Non-Shopify stores (custom platforms, WooCommerce, Magento, BigCommerce…)
-// don't expose a product JSON API, but virtually every e-commerce platform
-// embeds schema.org Product markup as JSON-LD for SEO — price + priceCurrency
-// live in the `offers` node. OpenGraph product:price:* meta tags are the
-// second fallback. No variant breakdown is available from either, so the
-// variants list stays empty (the UI handles that like legacy rows).
-async function fetchJsonLdPrice(productUrl: string): Promise<FetchPriceOutcome> {
+// don't expose a product JSON API. WooCommerce variable products carry a full
+// per-variant blob (parsed first, so the base kit is picked over a cheaper
+// subkit); otherwise virtually every e-commerce platform embeds schema.org
+// Product markup as JSON-LD for SEO — price + priceCurrency live in the
+// `offers` node. OpenGraph product:price:* meta tags are the last fallback.
+// vendorCurrency is used for the WooCommerce blob, whose display_price carries
+// no currency of its own.
+async function fetchJsonLdPrice(
+  productUrl: string,
+  vendorCurrency?: string
+): Promise<FetchPriceOutcome> {
   try {
     const res = await fetchWithTimeout(productUrl);
     if (!res.ok) {
@@ -466,6 +543,37 @@ async function fetchJsonLdPrice(productUrl: string): Promise<FetchPriceOutcome> 
       return res.status === 404 || res.status === 410 ? NO_BASE_KIT : null;
     }
     const html = await res.text();
+
+    // WooCommerce variable product: pick the base kit from the variation blob,
+    // not the cheapest subkit (mirrors generic_price() + choose_kit_variant() in
+    // scraper/scrape.py). display_price has no currency, so use the vendor's.
+    const wooVariants = parseWooCommerceVariations(html);
+    if (wooVariants.length > 0) {
+      const currency = vendorCurrency ?? null;
+      // Refuse currencies the site can't convert (renders as garbage).
+      if (currency && !SUPPORTED_CURRENCIES.has(currency)) return null;
+      const nonAddon = wooVariants.filter((v) => !ADDON_VARIANT_RE.test(v.title));
+      const pool = nonAddon.length > 0 ? nonAddon : wooVariants;
+      // Drop labeled subkits so an absent base kit can't fall through to a cheap
+      // alpha/novelty/spacebar; BASE and unlabeled OTHERS are kept.
+      const basePool = pool.filter((v) => {
+        const category = classifyVariant(v.title);
+        return category === "BASE" || category === "OTHERS";
+      });
+      const chosen =
+        basePool.find((v) => classifyVariant(v.title) === "BASE") ??
+        dearestCandidate(basePool);
+      // Only subkits on offer (no base candidate) — clear the stale wrong price
+      // rather than preserve it forever.
+      if (!chosen) return NO_BASE_KIT;
+      if (!isPlausibleBaseKitPrice(chosen.price, currency)) return null;
+      return {
+        price: chosen.price,
+        currency,
+        inStock: chosen.available,
+        variants: wooVariants.map((v) => ({ title: v.title, price: v.price })),
+      };
+    }
 
     // Set when we positively parse a Product whose offers are an ambiguous
     // multi-kit aggregate (no base-named offer). We skip storing any of its
@@ -641,7 +749,7 @@ export async function fetchVendorPrice(productUrl: string, vendorCurrency?: stri
   // JSON-LD reader.
   const shopify = await fetchShopifyPrice(productUrl, vendorCurrency);
   if (shopify) return shopify;
-  return fetchJsonLdPrice(productUrl);
+  return fetchJsonLdPrice(productUrl, vendorCurrency);
 }
 
 export interface RefreshOptions {
