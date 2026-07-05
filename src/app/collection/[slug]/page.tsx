@@ -448,7 +448,7 @@ function PublicBuild({
           <img
             src={build.imageUrl}
             alt={`Build ${index + 1}`}
-            className="h-full w-full rounded-lg object-cover"
+            className="h-full w-full rounded-lg bg-gray-100 object-contain dark:bg-gray-800"
           />
           {index > 0 && (
             <ReportPhotoButton
