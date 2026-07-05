@@ -87,7 +87,10 @@ function calculateCollectionSpending(
   targetCurrency: string,
   rates: Record<string, number>
 ): CollectionSpending {
-  const keyboards = items.filter((item) => item.productType === "KEYBOARD");
+  // Every collection item counts toward the ledger — keyboards AND keycap
+  // sets. This used to filter productType === "KEYBOARD", which silently
+  // dropped keycap purchases (e.g. a set bought in JPY) from Total spent.
+  const valuedItems = items;
   const now = new Date();
   const months: SpendingMonth[] = Array.from({ length: 12 }, (_, index) => {
     const date = new Date(
@@ -117,7 +120,7 @@ function calculateCollectionSpending(
   let missingDateCount = 0;
   let unconvertedCount = 0;
 
-  for (const item of keyboards) {
+  for (const item of valuedItems) {
     for (const build of assembleBuilds(item.collection)) {
       const price = build.purchasePrice;
       const sourceCurrency = build.purchaseCurrency || targetCurrency;
@@ -999,12 +1002,10 @@ export default function CollectionContent() {
   );
   const firstKeyboardMissingSpend = useMemo(
     () =>
-      owned.find(
-        (item) =>
-          item.productType === "KEYBOARD" &&
-          assembleBuilds(item.collection).some(
-            (build) => build.purchasePrice == null || !build.acquiredAt
-          )
+      owned.find((item) =>
+        assembleBuilds(item.collection).some(
+          (build) => build.purchasePrice == null || !build.acquiredAt
+        )
       ) ?? null,
     [owned]
   );
@@ -1229,7 +1230,7 @@ export default function CollectionContent() {
           </div>
         )}
 
-        {authenticated && owned.some((item) => item.productType === "KEYBOARD") && (
+        {authenticated && owned.length > 0 && (
           <CollectionSpendingPanel
             spending={spending}
             currency={currency}
@@ -1553,7 +1554,7 @@ function CollectionSpendingPanel({
               </p>
               <p className="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-400">
                 {!hasSpend
-                  ? "Add a purchase price and acquisition date from any keyboard’s Edit details panel."
+                  ? "Add a purchase price and acquisition date from any item’s Edit details panel."
                   : completionMessage ||
                     `${spending.unconvertedCount} purchase could not be converted yet.`}
               </p>
