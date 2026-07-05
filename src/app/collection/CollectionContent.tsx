@@ -260,7 +260,7 @@ function BuildSummary({
         <img
           src={build.imageUrl}
           alt={`Build ${index + 1}`}
-          className="h-12 w-12 shrink-0 rounded-lg object-cover"
+          className="h-12 w-12 shrink-0 rounded-lg bg-gray-100 object-contain dark:bg-gray-800"
         />
       ) : (
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-gray-200 text-base text-gray-400 dark:bg-gray-800">
@@ -440,7 +440,7 @@ function PhotoUploadField({
       <div className="relative h-20 w-24 shrink-0 overflow-hidden rounded-xl bg-gray-100 dark:bg-gray-800">
         {preview ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={preview} alt="Keyboard preview" className="h-full w-full object-cover" />
+          <img src={preview} alt="Keyboard preview" className="h-full w-full object-contain" />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-2xl text-gray-300 dark:text-gray-600">
             ⌨
@@ -1767,6 +1767,12 @@ function CollectionCard({
     ? activeBuild?.imageUrl ||
       (visibleBuildIndex === 0 ? catalogImageUrl : null)
     : item.collection.customImageUrl || catalogImageUrl;
+  // Owner-uploaded photos come in arbitrary aspect ratios — show the WHOLE
+  // photo in proportion (object-contain against the card's muted backdrop)
+  // instead of cropping it. Catalog renders are pre-framed, so cover is right.
+  const isUserPhoto = multiBuild
+    ? Boolean(activeBuild?.imageUrl)
+    : Boolean(item.collection.customImageUrl);
   const details = [
     item.collection.color && { label: "Color", value: item.collection.color },
     item.collection.switches && { label: "Switches", value: item.collection.switches },
@@ -1801,7 +1807,9 @@ function CollectionCard({
                   ? `${item.name}, Build ${visibleBuildIndex + 1}`
                   : item.name
               }
-              className="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-[1.025]"
+              className={`absolute inset-0 h-full w-full transition duration-500 group-hover:scale-[1.025] ${
+                isUserPhoto ? "object-contain" : "object-cover"
+              }`}
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-5xl text-gray-300 dark:text-gray-700">

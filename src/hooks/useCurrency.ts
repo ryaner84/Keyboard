@@ -15,10 +15,25 @@ function loadRates(): Promise<ExchangeRates> {
     inflight = fetch("/api/currencies")
       .then((r) => r.json())
       .then((d) => {
-        cachedRates = (d.rates as ExchangeRates) ?? {};
-        return cachedRates;
+        const rates = (d.rates as ExchangeRates) ?? {};
+        if (Object.keys(rates).length > 0) {
+          // Only cache a real result — caching an empty map would freeze the
+          // whole session without conversions.
+          cachedRates = rates;
+        } else {
+          inflight = null; // empty payload — let the next mount retry
+        }
+        return rates;
       })
-      .catch(() => ({}) as ExchangeRates);
+      .catch(() => {
+        // A single failed fetch must NOT poison the session: with the failed
+        // promise cached, every later component saw {} forever, so any
+        // cross-currency amount (e.g. a JPY purchase viewed in SGD) became
+        // "unconvertible" and silently dropped out of the collection's total
+        // spent. Reset so the next useCurrency mount retries.
+        inflight = null;
+        return {} as ExchangeRates;
+      });
   }
   return inflight;
 }
