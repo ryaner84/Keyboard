@@ -328,6 +328,23 @@ async function getKeyboardDetector(): Promise<KeyboardDetector> {
   return keyboardDetectorPromise;
 }
 
+// Keyboard collectors photograph close-ups the object detector can't box as a
+// literal "keyboard" — backplates, weights, switches, artisan keycaps, PCBs.
+// So this check is intentionally lenient: it ALLOWS a keyboard, any
+// keyboard-adjacent desk/tech object it's commonly mislabelled as, and any
+// inconclusive macro shot. It only blocks a photo whose dominant, confident
+// subject is clearly off-topic (a person, pet, or food). A detector failure
+// never blocks an upload.
+const KEYBOARD_LIKE_CLASSES = new Set([
+  "keyboard", "laptop", "mouse", "remote", "cell phone", "tv", "book",
+  "clock", "scissors", "toaster", "microwave", "cup", "bottle",
+]);
+const OFF_TOPIC_CLASSES = new Set([
+  "person", "cat", "dog", "bird", "horse", "sheep", "cow", "elephant",
+  "bear", "zebra", "giraffe", "teddy bear", "pizza", "cake", "sandwich",
+  "donut", "hot dog", "banana", "apple", "orange", "broccoli", "carrot",
+]);
+
 async function validateKeyboardPhoto(dataUrl: string): Promise<void> {
   const image = await new Promise<HTMLImageElement>((resolve, reject) => {
     const element = new window.Image();
@@ -342,23 +359,28 @@ async function validateKeyboardPhoto(dataUrl: string): Promise<void> {
     predictions = await detector.detect(image, 20, 0.2);
   } catch {
     keyboardDetectorPromise = null;
-    throw new Error("The keyboard photo check is unavailable. Please try again.");
+    return; // model unavailable — never block an upload on the check itself
   }
 
   const imageArea = Math.max(1, image.naturalWidth * image.naturalHeight);
-  const keyboardDetected = predictions.some((prediction) => {
-    const [, , width, height] = prediction.bbox;
-    const coverage = (width * height) / imageArea;
+  const confident = predictions.filter((p) => p.score >= 0.45);
+
+  // A keyboard or any keyboard-adjacent object → always fine.
+  if (confident.some((p) => KEYBOARD_LIKE_CLASSES.has(p.class.toLowerCase()))) {
+    return;
+  }
+  // Otherwise, only reject when a confident off-topic subject dominates the
+  // frame; a plain backplate/weight (inconclusive) is allowed through.
+  const dominantOffTopic = confident.some((p) => {
+    const [, , width, height] = p.bbox;
     return (
-      prediction.class.toLowerCase() === "keyboard" &&
-      prediction.score >= 0.2 &&
-      coverage >= 0.02
+      OFF_TOPIC_CLASSES.has(p.class.toLowerCase()) &&
+      (width * height) / imageArea >= 0.4
     );
   });
-
-  if (!keyboardDetected) {
+  if (dominantOffTopic) {
     throw new Error(
-      "We could not detect a keyboard in this photo. Use a clear image showing most of the board."
+      "That looks like a photo of something else. Please upload a photo of your keyboard or one of its parts."
     );
   }
 }
@@ -480,8 +502,8 @@ function PhotoUploadField({
         </div>
         <p className="mt-1.5 text-[11px] leading-4 text-gray-400">
           {hasCustom
-            ? "Using your verified keyboard photo."
-            : "Optional. A private on-device check confirms a keyboard is visible."}
+            ? "Using your uploaded photo."
+            : "Optional. Close-ups of the board or its parts are fine — a private on-device check only screens out clearly off-topic photos."}
         </p>
       </div>
     </div>
