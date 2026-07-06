@@ -328,23 +328,15 @@ async function getKeyboardDetector(): Promise<KeyboardDetector> {
   return keyboardDetectorPromise;
 }
 
-// Keyboard collectors photograph close-ups the object detector can't box as a
-// literal "keyboard" — backplates, weights, switches, artisan keycaps, PCBs.
-// So this check is intentionally lenient: it ALLOWS a keyboard, any
-// keyboard-adjacent desk/tech object it's commonly mislabelled as, and any
-// inconclusive macro shot. It only blocks a photo whose dominant, confident
-// subject is clearly off-topic (a person, pet, or food). A detector failure
-// never blocks an upload.
-const KEYBOARD_LIKE_CLASSES = new Set([
-  "keyboard", "laptop", "mouse", "remote", "cell phone", "tv", "book",
-  "clock", "scissors", "toaster", "microwave", "cup", "bottle",
-]);
-const OFF_TOPIC_CLASSES = new Set([
-  "person", "cat", "dog", "bird", "horse", "sheep", "cow", "elephant",
-  "bear", "zebra", "giraffe", "teddy bear", "pizza", "cake", "sandwich",
-  "donut", "hot dog", "banana", "apple", "orange", "broccoli", "carrot",
-]);
-
+// Keyboard collectors photograph boards, backplates, brass weights, PCBs,
+// switches, and artisan keycaps — and artisans/engravings are frequently
+// animals, food, or scenes (this deck's own weight has a unicorn on it). The
+// object detector can't reliably box any of that, so requiring a "keyboard" —
+// or blocking animal/food classes — produces false rejections of perfectly
+// good photos. The check is therefore minimal: it ONLY rejects a photo that is
+// dominantly a PERSON filling the frame (a selfie), keeping a public collection
+// page on-topic. Everything else — a bare backplate, a hand holding a part, an
+// artisan cat keycap — passes. A detector failure never blocks an upload.
 async function validateKeyboardPhoto(dataUrl: string): Promise<void> {
   const image = await new Promise<HTMLImageElement>((resolve, reject) => {
     const element = new window.Image();
@@ -363,24 +355,17 @@ async function validateKeyboardPhoto(dataUrl: string): Promise<void> {
   }
 
   const imageArea = Math.max(1, image.naturalWidth * image.naturalHeight);
-  const confident = predictions.filter((p) => p.score >= 0.45);
-
-  // A keyboard or any keyboard-adjacent object → always fine.
-  if (confident.some((p) => KEYBOARD_LIKE_CLASSES.has(p.class.toLowerCase()))) {
-    return;
-  }
-  // Otherwise, only reject when a confident off-topic subject dominates the
-  // frame; a plain backplate/weight (inconclusive) is allowed through.
-  const dominantOffTopic = confident.some((p) => {
-    const [, , width, height] = p.bbox;
+  const selfie = predictions.some((prediction) => {
+    const [, , width, height] = prediction.bbox;
     return (
-      OFF_TOPIC_CLASSES.has(p.class.toLowerCase()) &&
-      (width * height) / imageArea >= 0.4
+      prediction.class.toLowerCase() === "person" &&
+      prediction.score >= 0.55 &&
+      (width * height) / imageArea >= 0.6
     );
   });
-  if (dominantOffTopic) {
+  if (selfie) {
     throw new Error(
-      "That looks like a photo of something else. Please upload a photo of your keyboard or one of its parts."
+      "This looks like a photo of a person. Please upload a photo of your keyboard or one of its parts."
     );
   }
 }
@@ -503,7 +488,7 @@ function PhotoUploadField({
         <p className="mt-1.5 text-[11px] leading-4 text-gray-400">
           {hasCustom
             ? "Using your uploaded photo."
-            : "Optional. Close-ups of the board or its parts are fine — a private on-device check only screens out clearly off-topic photos."}
+            : "Optional. Any photo of the board or its parts is fine — backplates, weights, switches, artisans."}
         </p>
       </div>
     </div>
