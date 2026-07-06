@@ -63,3 +63,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+// Deploy trigger: re-run production build so the custom-piece route ships.
