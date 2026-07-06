@@ -3,7 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { normalizeImageUrl } from "@/lib/utils";
-import { HIDDEN_SLUGS } from "@/lib/showcase";
+import { HIDDEN_SLUGS, notCustomWhere } from "@/lib/showcase";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +49,8 @@ export default async function SearchPage({
             ...(HIDDEN_SLUGS.length > 0 && {
               NOT: { slug: { in: HIDDEN_SLUGS } },
             }),
+            // Custom collection pieces are private — never in search results.
+            AND: [notCustomWhere],
             OR: [
               { name: { contains: query, mode: "insensitive" } },
               { colorway: { contains: query, mode: "insensitive" } },

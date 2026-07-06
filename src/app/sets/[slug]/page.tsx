@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { COUNTRY_BY_CODE, DEFAULT_COUNTRY } from "@/data/countries";
 import { formatDateRange, normalizeImageUrl } from "@/lib/utils";
-import { cleanDisplayName, isHiddenSlug, isShowcaseSource } from "@/lib/showcase";
+import { cleanDisplayName, isHiddenSlug, isShowcaseSource, isCustomSlug } from "@/lib/showcase";
 import { getSiteUrl } from "@/lib/site-url";
 import { SetDetailClient } from "./SetDetailClient";
 import { ShowcaseDetail } from "@/components/showcase/ShowcaseDetail";
@@ -24,7 +24,9 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
   const { slug } = await params;
   const { country = "SG" } = await searchParams;
 
-  if (isHiddenSlug(slug)) return { title: "Not Found" };
+  // Custom collection pieces have no public catalog page — they live only in
+  // their owner's collection.
+  if (isHiddenSlug(slug) || isCustomSlug(slug)) return { title: "Not Found" };
 
   const groupBuy = await prisma.groupBuy.findUnique({ where: { slug } });
   if (!groupBuy) return { title: "Not Found" };
@@ -83,7 +85,7 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
   const { country = "SG" } = await searchParams;
 
   // Privacy denylist — pretend the board doesn't exist even if the row remains.
-  if (isHiddenSlug(slug)) notFound();
+  if (isHiddenSlug(slug) || isCustomSlug(slug)) notFound();
 
   const groupBuy = await prisma.groupBuy.findUnique({
     where: { slug },
