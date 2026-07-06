@@ -9,6 +9,7 @@ import { DISPLAY_CURRENCIES } from "@/data/countries";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
 import { normalizeImageUrl } from "@/lib/utils";
+import { isCustomSlug } from "@/lib/showcase";
 import { collectionSharePath } from "@/lib/collection-share";
 import { convertCurrency, formatCurrency } from "@/lib/currency-utils";
 import type {
@@ -1461,6 +1462,30 @@ export default function CollectionContent() {
                 : `${result.name} added to tracking.`
             );
           }}
+          onAddCustom={async (name, productType) => {
+            const response = await fetch("/api/tracker/items/custom", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name, productType }),
+            });
+            const payload = await response.json().catch(() => null);
+            if (!response.ok) {
+              throw new Error(payload?.error || "Could not add this custom piece");
+            }
+            const refreshed = await fetch("/api/tracker", { cache: "no-store" });
+            const refreshedPayload = await refreshed.json();
+            if (!refreshed.ok) throw new Error("Could not refresh collection");
+            const nextItems: CollectionCatalogItem[] = refreshedPayload.data ?? [];
+            setItems(nextItems);
+            setProfile(refreshedPayload.user ?? profile);
+            setTab("collection");
+            setCatalogPickerOpen(false);
+            setNotice(`${name} added to your collection.`);
+            // Open the edit modal on the new piece so they can add the photo,
+            // price, and date straight away.
+            const created = nextItems.find((i) => i.slug === payload?.slug);
+            if (created) setEditingItem(created);
+          }}
         />
       )}
     </main>
@@ -1774,6 +1799,23 @@ function CollectionCard({
   const isUserPhoto = multiBuild
     ? Boolean(activeBuild?.imageUrl)
     : Boolean(item.collection.customImageUrl);
+  // Custom (off-catalog) pieces have no public /sets page — don't link to one.
+  const isCustom = isCustomSlug(item.slug);
+  const cardImage = imageUrl ? (
+    // Plain img (not next/image) so owner-uploaded data: URLs render.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={imageUrl}
+      alt={multiBuild ? `${item.name}, Build ${visibleBuildIndex + 1}` : item.name}
+      className={`absolute inset-0 h-full w-full transition duration-500 group-hover:scale-[1.025] ${
+        isUserPhoto ? "object-contain" : "object-cover"
+      }`}
+    />
+  ) : (
+    <div className="absolute inset-0 flex items-center justify-center text-5xl text-gray-300 dark:text-gray-700">
+      ⌨
+    </div>
+  );
   const details = [
     item.collection.color && { label: "Color", value: item.collection.color },
     item.collection.switches && { label: "Switches", value: item.collection.switches },
@@ -1793,31 +1835,17 @@ function CollectionCard({
   return (
     <article className="group overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_10px_35px_rgba(25,22,16,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_18px_50px_rgba(25,22,16,0.10)] dark:border-white/10 dark:bg-[#111417]">
       <div className="relative aspect-[4/3] overflow-hidden bg-[#e9e7e1] dark:bg-gray-900">
-        <Link
-          href={`/sets/${item.slug}?country=${countryCode}`}
-          aria-label={`View ${item.name}`}
-          className="absolute inset-0 block"
-        >
-          {imageUrl ? (
-            // Plain img (not next/image) so owner-uploaded data: URLs render.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={imageUrl}
-              alt={
-                multiBuild
-                  ? `${item.name}, Build ${visibleBuildIndex + 1}`
-                  : item.name
-              }
-              className={`absolute inset-0 h-full w-full transition duration-500 group-hover:scale-[1.025] ${
-                isUserPhoto ? "object-contain" : "object-cover"
-              }`}
-            />
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center text-5xl text-gray-300 dark:text-gray-700">
-              ⌨
-            </div>
-          )}
-        </Link>
+        {isCustom ? (
+          <div className="absolute inset-0 block">{cardImage}</div>
+        ) : (
+          <Link
+            href={`/sets/${item.slug}?country=${countryCode}`}
+            aria-label={`View ${item.name}`}
+            className="absolute inset-0 block"
+          >
+            {cardImage}
+          </Link>
+        )}
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 p-4">
             <span className="rounded-full bg-black/65 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur">
               {item.productType === "KEYBOARD" ? "Keyboard" : "Keycap set"}
@@ -1910,11 +1938,17 @@ function CollectionCard({
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#9a7a42] dark:text-[#c9ab72]">
               {item.vendorName || item.designer || "Independent design"}
             </p>
-            <Link href={`/sets/${item.slug}?country=${countryCode}`}>
-              <h3 className="mt-1 truncate text-lg font-semibold tracking-tight text-gray-950 hover:text-indigo-600 dark:text-white">
+            {isCustom ? (
+              <h3 className="mt-1 truncate text-lg font-semibold tracking-tight text-gray-950 dark:text-white">
                 {item.name}
               </h3>
-            </Link>
+            ) : (
+              <Link href={`/sets/${item.slug}?country=${countryCode}`}>
+                <h3 className="mt-1 truncate text-lg font-semibold tracking-tight text-gray-950 hover:text-indigo-600 dark:text-white">
+                  {item.name}
+                </h3>
+              </Link>
+            )}
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {[
                 summaryColor || null,
@@ -2502,6 +2536,7 @@ function CollectionCatalogPicker({
   existingItems,
   onClose,
   onAdd,
+  onAddCustom,
 }: {
   initialQuery?: string;
   existingItems: Map<string, CollectionItemDetails>;
@@ -2510,12 +2545,36 @@ function CollectionCatalogPicker({
     result: CatalogPickerResult,
     mode: "collection" | "tracking"
   ) => Promise<void>;
+  onAddCustom: (
+    name: string,
+    productType: "KEYBOARD" | "KEYCAPS"
+  ) => Promise<void>;
 }) {
   const [query, setQuery] = useState(initialQuery || "");
   const [results, setResults] = useState<CatalogPickerResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [error, setError] = useState("");
+  // Off-catalog "add manually" form, revealed when the search finds nothing.
+  const [customName, setCustomName] = useState("");
+  const [customType, setCustomType] = useState<"KEYBOARD" | "KEYCAPS">("KEYBOARD");
+  const [customBusy, setCustomBusy] = useState(false);
+
+  async function submitCustom() {
+    // Fall back to what they searched for if they didn't retype the name.
+    const name = (customName.trim() || query.trim()).slice(0, 120);
+    if (!name || customBusy) return;
+    setCustomBusy(true);
+    setError("");
+    try {
+      await onAddCustom(name, customType);
+    } catch (customError) {
+      setError(
+        customError instanceof Error ? customError.message : "Could not add piece"
+      );
+      setCustomBusy(false);
+    }
+  }
 
   useModalBodyLock();
 
@@ -2613,13 +2672,76 @@ function CollectionCatalogPicker({
         ) : searching && results.length === 0 ? (
           <p className="py-12 text-center text-sm text-gray-400">Searching catalog…</p>
         ) : results.length === 0 ? (
-          <div className="py-12 text-center">
-            <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-              No catalog matches
-            </p>
-            <p className="mt-1 text-xs text-gray-400">
-              Try a shorter product name or the designer.
-            </p>
+          <div className="py-8">
+            <div className="text-center">
+              <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                No catalog matches
+              </p>
+              <p className="mt-1 text-xs text-gray-400">
+                Try a shorter product name or the designer — or add it yourself below.
+              </p>
+            </div>
+
+            {/* Off-catalog: let the user record a piece we don't have. */}
+            <div className="mx-auto mt-6 max-w-md rounded-2xl border border-[#e7dcc8] bg-[#faf7f0] p-5 dark:border-[#4b402d] dark:bg-[#1d1a15]">
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#9a7a42] dark:text-[#d0b278]">
+                Add it manually
+              </p>
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                Record a custom piece you own. It stays private to your collection.
+              </p>
+              <div className="mt-4 space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-200">
+                    Name
+                  </label>
+                  <input
+                    value={customName}
+                    onChange={(event) => setCustomName(event.target.value)}
+                    placeholder={query.trim() || "e.g. My custom TKL build"}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void submitCustom();
+                      }
+                    }}
+                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-950 outline-none focus:border-[#9a7a42] focus:ring-2 focus:ring-[#9a7a42]/10 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <span className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-200">
+                    Type
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(["KEYBOARD", "KEYCAPS"] as const).map((type) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setCustomType(type)}
+                        className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                          customType === type
+                            ? "border-[#9a7a42] bg-[#9a7a42] text-white"
+                            : "border-gray-200 bg-white text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300"
+                        }`}
+                      >
+                        {type === "KEYBOARD" ? "Keyboard" : "Keycap set"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void submitCustom()}
+                  disabled={customBusy || !(customName.trim() || query.trim())}
+                  className="w-full rounded-xl bg-gray-950 px-3 py-2.5 text-sm font-semibold text-white hover:bg-[#9a7a42] disabled:opacity-50 dark:bg-white dark:text-gray-950"
+                >
+                  {customBusy ? "Adding…" : "Add to my collection"}
+                </button>
+                <p className="text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+                  You can add the photo, purchase price, and date next.
+                </p>
+              </div>
+            </div>
           </div>
         ) : (
           <div className="space-y-3">

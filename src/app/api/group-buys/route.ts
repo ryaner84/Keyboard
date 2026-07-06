@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { verifyAdminToken } from "@/lib/auth";
-import { SHOWCASE_VENDORS, HIDDEN_SLUGS, cleanDisplayName } from "@/lib/showcase";
+import { SHOWCASE_VENDORS, HIDDEN_SLUGS, cleanDisplayName, notCustomWhere } from "@/lib/showcase";
 import type { GBStatus } from "@/generated/prisma";
 
 export async function GET(req: NextRequest) {
@@ -68,6 +68,8 @@ export async function GET(req: NextRequest) {
   if (HIDDEN_SLUGS.length > 0) {
     andConditions.push({ slug: { notIn: HIDDEN_SLUGS } });
   }
+  // Custom collection pieces are private to one owner — never in the catalog.
+  andConditions.push(notCustomWhere);
   // Designer filter: OR across selected makers, each matching the stored
   // designer or the board name (covers showcase boards with no designer column).
   if (designers.length > 0) {

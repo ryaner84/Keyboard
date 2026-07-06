@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { normalizeImageUrl } from "@/lib/utils";
-import { cleanDisplayName } from "@/lib/showcase";
+import { cleanDisplayName, isCustomSlug } from "@/lib/showcase";
 import { getSiteUrl } from "@/lib/site-url";
 import ReportPhotoButton from "@/components/collection/ReportPhotoButton";
 import { CollectionCardGallery } from "@/components/collection/CollectionCardGallery";
@@ -279,11 +279,17 @@ function PublicCollectionCard({
         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9a7a42] dark:text-[#c9ab72]">
           {item.groupBuy.vendorName || item.groupBuy.designer || "Independent design"}
         </p>
-        <Link href={`/sets/${item.groupBuy.slug}`}>
-          <h3 className="mt-1 text-xl font-semibold tracking-tight text-gray-950 hover:text-[#8b6d38] dark:text-white">
+        {isCustomSlug(item.groupBuy.slug) ? (
+          <h3 className="mt-1 text-xl font-semibold tracking-tight text-gray-950 dark:text-white">
             {setName}
           </h3>
-        </Link>
+        ) : (
+          <Link href={`/sets/${item.groupBuy.slug}`}>
+            <h3 className="mt-1 text-xl font-semibold tracking-tight text-gray-950 hover:text-[#8b6d38] dark:text-white">
+              {setName}
+            </h3>
+          </Link>
+        )}
         <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
           {[
             item.condition ? formatCondition(item.condition) : null,

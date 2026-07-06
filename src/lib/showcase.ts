@@ -16,12 +16,33 @@ export function isHiddenSlug(slug: string | null | undefined): boolean {
   return !!slug && HIDDEN_SLUGS.includes(slug);
 }
 
-// Prisma where-fragment that drops denylisted boards. Spread into any
-// groupBuy.findMany/count `where` to keep hidden boards out of that listing.
-// Uses `slug: { notIn }` (not a top-level `NOT`) so it never collides with a
-// where-object that already has its own conditional `NOT` clause.
-export const notHiddenWhere =
-  HIDDEN_SLUGS.length > 0 ? { slug: { notIn: HIDDEN_SLUGS } } : {};
+// User-submitted custom collection pieces (a board/set that isn't in the
+// catalog) are backed by a GroupBuy whose slug starts with this prefix. They
+// belong to exactly one owner's private collection and must NEVER appear in any
+// public catalog surface — browse, keyboards, released, search, timeline, home,
+// or the /sets detail page.
+export const CUSTOM_SLUG_PREFIX = "custom-";
+
+export function isCustomSlug(slug: string | null | undefined): boolean {
+  return !!slug && slug.startsWith(CUSTOM_SLUG_PREFIX);
+}
+
+// Standalone fragment that drops custom pieces — push into an AND array (used
+// by the group-buys and search routes, which compose conditions that way).
+export const notCustomWhere = {
+  slug: { not: { startsWith: CUSTOM_SLUG_PREFIX } },
+};
+
+// Public-catalog visibility fragment: drops both privacy-denylisted boards and
+// custom collection pieces. Spread into any groupBuy `where` whose slug isn't
+// otherwise constrained (home, timeline, released). One `slug` object carries
+// both conditions so a spread never collides.
+export const notHiddenWhere = {
+  slug: {
+    not: { startsWith: CUSTOM_SLUG_PREFIX },
+    ...(HIDDEN_SLUGS.length > 0 ? { notIn: HIDDEN_SLUGS } : {}),
+  },
+};
 
 // True when a listing comes from a showcase-only source and must be kept out of
 // the group-buy sections.
