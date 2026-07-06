@@ -79,6 +79,13 @@ const CURRENCY_HOME_COUNTRY: Record<string, string> = {
 const ADDON_VARIANT_RE =
   /(desk\s?mat|mouse\s?pad|wrist\s?rest|cable|artisan|sticker|sample|keychain|coin|tray|deposit|shipping|insurance|add[\s-]?on|extra)/i;
 
+// Standard subkits that are never the base but aren't accessories, so
+// ADDON_VARIANT_RE misses them (e.g. a numpad kit). Excluded from the base
+// pool so a numpad-only listing clears (NO_BASE_KIT) instead of storing the
+// numpad price as the base. A title that also says "base" is classified BASE
+// first and kept. Mirror of _NONBASE_SUBKIT_RE in scraper/scrape.py.
+const NONBASE_SUBKIT_RE = /num(?:ber)?\s*pad/i;
+
 // Per-currency plausibility bounds for a GMK BASE kit. New base kits run
 // roughly USD 90–180, but RELEASED sets are routinely cleared out at USD
 // 40–70 (NovelKeys/CannonKeys clearance sales), so the lower bound must
@@ -323,7 +330,8 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     // no base price to store, so skip it rather than store a subkit price.
     const basePool = pool.filter((v) => {
       const category = classifyVariant(v.title);
-      return category === "BASE" || category === "OTHERS";
+      if (category === "BASE") return true;
+      return category === "OTHERS" && !NONBASE_SUBKIT_RE.test(v.title);
     });
     const chosen =
       pinned ??
@@ -558,7 +566,8 @@ async function fetchJsonLdPrice(
       // alpha/novelty/spacebar; BASE and unlabeled OTHERS are kept.
       const basePool = pool.filter((v) => {
         const category = classifyVariant(v.title);
-        return category === "BASE" || category === "OTHERS";
+        if (category === "BASE") return true;
+        return category === "OTHERS" && !NONBASE_SUBKIT_RE.test(v.title);
       });
       const chosen =
         basePool.find((v) => classifyVariant(v.title) === "BASE") ??

@@ -507,6 +507,14 @@ _ADDON_VARIANT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Standard GMK subkits that are never the base kit but aren't accessories, so
+# the add-on filter above misses them. A numpad is a separate, cheaper kit;
+# a numpad-only listing (e.g. Ktechs gmk-cyl-kitsune, reported as storing the
+# numpad price as the base) must resolve to NO_BASE_KIT rather than keep it.
+# Titles that ALSO say "base" are classified BASE before this filter runs, so
+# a base kit that happens to bundle a numpad is still retained.
+_NONBASE_SUBKIT_RE = re.compile(r"num(?:ber)?\s*pad", re.IGNORECASE)
+
 # Per-currency plausibility bounds for a GMK base kit. The lower bound admits
 # CLEARANCE prices (released sets routinely sell off at USD 40-70); the upper
 # bound rejects bundles/parse errors. MUST stay in sync with KIT_BOUNDS in
@@ -600,8 +608,16 @@ def choose_kit_variant(variants: list[dict]) -> dict | None:
     pool = non_addon if non_addon else variants
     # Drop labeled subkits so an absent base kit can't fall through to a cheap
     # alpha/novelty/spacebar variant; BASE and unlabeled OTHERS are retained.
+    # An OTHERS variant that names a non-base subkit (e.g. a numpad) is dropped
+    # too, so a numpad-only listing yields no base candidate and clears.
     base_pool = [
-        v for v in pool if classify_variant(v["title"]) in ("BASE", "OTHERS")
+        v
+        for v in pool
+        if classify_variant(v["title"]) == "BASE"
+        or (
+            classify_variant(v["title"]) == "OTHERS"
+            and not _NONBASE_SUBKIT_RE.search(v["title"])
+        )
     ]
     if not base_pool:
         return None

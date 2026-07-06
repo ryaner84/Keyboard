@@ -166,6 +166,38 @@ class ChooseKitVariantTests(unittest.TestCase):
         ]
         self.assertEqual(scrape.choose_kit_variant(variants)["price"], 139)
 
+    def test_numpad_only_listing_returns_none(self):
+        # Ktechs gmk-cyl-kitsune: the listing carried only a numpad kit (no
+        # base), so the numpad price must not be stored as the base — the
+        # picker returns None so the caller clears the stale price (NO_BASE_KIT).
+        variants = [{"id": "1", "title": "GMK Kitsune Numpad", "price": 45}]
+        self.assertIsNone(scrape.choose_kit_variant(variants))
+
+    def test_numpad_subkit_never_beats_base(self):
+        # A real base kit is present alongside the numpad — pick the base.
+        variants = [
+            {"id": "1", "title": "GMK Kitsune Numpad", "price": 45},
+            {"id": "2", "title": "GMK Kitsune", "price": 149},
+        ]
+        self.assertEqual(scrape.choose_kit_variant(variants)["price"], 149)
+
+    def test_numpad_and_labeled_subkits_only_returns_none(self):
+        # numpad ("num pad" spacing) + novelties, no base → nothing to store.
+        variants = [
+            {"id": "1", "title": "GMK Set Num Pad", "price": 45},
+            {"id": "2", "title": "GMK Set Novelties", "price": 38},
+        ]
+        self.assertIsNone(scrape.choose_kit_variant(variants))
+
+    def test_base_kit_that_bundles_a_numpad_is_still_base(self):
+        # A title classified BASE is retained even when it mentions a numpad,
+        # so "Base Kit + Numpad" is never dropped by the subkit exclusion.
+        variants = [
+            {"id": "1", "title": "GMK Set Base Kit + Numpad", "price": 135},
+            {"id": "2", "title": "GMK Set Alphas", "price": 40},
+        ]
+        self.assertEqual(scrape.choose_kit_variant(variants)["price"], 135)
+
     def test_explicit_base_title_wins_over_a_dearer_other(self):
         # A title-classified BASE is ground truth even when some other OTHERS
         # variant (e.g. a region/bundle line) happens to be priced higher.
