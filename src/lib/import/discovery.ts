@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { isBlockedVendorSet } from "./vendor-overrides";
 
 // Catalog discovery: instead of trusting the (often stale) per-set product
 // URLs from KeycapLendar, walk each vendor's own Shopify catalog, find every
@@ -175,6 +176,7 @@ function stripRound(normalized: string): string {
 
 interface SetIndexEntry {
   groupBuyId: string;
+  slug: string;
   baseKitId: string;
   status: string;
   gbStart: Date | null;
@@ -189,6 +191,7 @@ async function buildSetIndex(): Promise<SetIndex> {
   const sets = await prisma.groupBuy.findMany({
     select: {
       id: true,
+      slug: true,
       name: true,
       status: true,
       gbStart: true,
@@ -203,6 +206,7 @@ async function buildSetIndex(): Promise<SetIndex> {
     if (!baseKit) continue;
     const entry: SetIndexEntry = {
       groupBuyId: s.id,
+      slug: s.slug,
       baseKitId: baseKit.id,
       status: s.status,
       gbStart: s.gbStart,
@@ -270,7 +274,7 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
   const vendors = await prisma.vendor.findMany({
     orderBy: [{ lastDiscoveredAt: { sort: "asc", nulls: "first" } }],
     take: vendorLimit,
-    select: { id: true, websiteUrl: true },
+    select: { id: true, slug: true, websiteUrl: true },
   });
   if (vendors.length === 0) return result;
 
@@ -314,6 +318,8 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
     for (const product of catalog) {
       const match = matchProduct(product.title, index);
       if (!match) continue;
+      // Owner removed this vendor for this set — don't re-create/relink it.
+      if (isBlockedVendorSet(vendor.slug, match.slug)) continue;
 
       const current = existingByKit.get(match.baseKitId);
       if (!current) {

@@ -95,6 +95,38 @@ async function purgeCancelledSets(client) {
   }
 }
 
+// Per-(vendor, set) listings removed at the owner's request (mirrors
+// BLOCKED_VENDOR_SET_PAIRS in src/lib/import/vendor-overrides.ts). The vendor
+// is legitimate for other sets, so only the named set's VendorKit row is
+// dropped — the vendor, its other listings, and shipping zones stay. Runs every
+// deploy so discovery or a re-submitted suggestion can't resurrect the pair.
+const BLOCKED_VENDOR_SET_PAIRS = [
+  { vendor: "keygem", set: "gmk-rainy-day-r2" },
+  { vendor: "latamkeys", set: "gmk-mictlan-rebirth" },
+  { vendor: "latamkeys", set: "gmk-nervewrecker" },
+  { vendor: "zfrontier", set: "gmk-camping-r3" },
+];
+async function purgeBlockedVendorSetPairs(client) {
+  try {
+    let total = 0;
+    for (const { vendor, set } of BLOCKED_VENDOR_SET_PAIRS) {
+      const res = await client.query(
+        `DELETE FROM public."VendorKit" vk
+          USING public."Kit" k, public."GroupBuy" gb, public."Vendor" v
+         WHERE vk."kitId" = k.id AND k."groupBuyId" = gb.id AND vk."vendorId" = v.id
+           AND v.slug = $1 AND gb.slug = $2`,
+        [vendor, set]
+      );
+      total += res.rowCount;
+    }
+    if (total > 0) {
+      console.log(`[db-setup] Purged ${total} blocked vendor-set listing(s).`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] blocked vendor-set purge skipped: ${err.message}`);
+  }
+}
+
 // Some keycap sets get scraped into the KEYBOARD section by mistake (a vendor's
 // "group buy" collection includes a metal-keycap drop, a Geekhack keycap GB is
 // classified as a board, etc.) — so they pollute /released?type=keyboards.
@@ -320,6 +352,7 @@ async function main() {
         await ensureCollectionPhotoReportTable(client);
         await purgeBlockedVendors(client);
         await purgeCancelledSets(client);
+        await purgeBlockedVendorSetPairs(client);
         await reclassifyKeycapKeyboards(client);
         await expireEndedGroupBuys(client);
         await ensureDiscoveryColumn(client);
@@ -374,6 +407,7 @@ async function main() {
     await ensureCollectionPhotoReportTable(client);
     await purgeBlockedVendors(client);
     await purgeCancelledSets(client);
+    await purgeBlockedVendorSetPairs(client);
     await ensureDiscoveryColumn(client);
     await ensureCurrencies(client);
     await resetPollutedGalleries(client);

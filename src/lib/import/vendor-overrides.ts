@@ -79,6 +79,26 @@ export const BLOCKED_VENDOR_HOSTS = new Set([
   "www.gmk.net",
 ]);
 
+// Per-(vendor, set) listings removed at the owner's request. Unlike
+// BLOCKED_VENDOR_SLUGS (whole vendor banned), these vendors are legitimate for
+// other sets — only the named set's listing is unusable: the vendor carries no
+// resolvable base kit for it (novelties/subkits only, an in-stock reseller
+// page, or a WooCommerce variation blob that never surfaces the base), so the
+// scraper keeps re-storing a wrong price that never heals. Drop just that pair.
+// Keyed `${vendorSlug}::${setSlug}`. Discovery and the suggestion pipeline skip
+// these pairs; db-setup purges any that slip in (mirror the list in
+// scripts/db-setup.mjs → purgeBlockedVendorSetPairs).
+export const BLOCKED_VENDOR_SET_PAIRS = new Set<string>([
+  "keygem::gmk-rainy-day-r2",
+  "latamkeys::gmk-mictlan-rebirth",
+  "latamkeys::gmk-nervewrecker",
+  "zfrontier::gmk-camping-r3",
+]);
+
+export function isBlockedVendorSet(vendorSlug: string, setSlug: string): boolean {
+  return BLOCKED_VENDOR_SET_PAIRS.has(`${vendorSlug}::${setSlug}`);
+}
+
 // ── Hand-curated vendor product links ────────────────────────────────────────
 // Product pages KeycapLendar doesn't know about (e.g. Ktechs carries GMK GBs
 // but isn't listed as a vendor there). Applied on every import/refresh run so
@@ -336,6 +356,11 @@ export async function processVendorSuggestions(): Promise<SuggestionResult> {
           websiteUrl: origin,
         };
     if (!def.slug || BLOCKED_VENDOR_SLUGS.has(def.slug)) {
+      await markDone();
+      continue;
+    }
+    // Owner removed this vendor for this specific set — never re-link it.
+    if (isBlockedVendorSet(def.slug, s.slug)) {
       await markDone();
       continue;
     }
