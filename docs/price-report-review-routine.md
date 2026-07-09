@@ -12,31 +12,42 @@ Work on the `main` branch.
    `ryaner84/Keyboard`, wait for it to complete, and read its execution log.
    Each pending report prints as a `PRICE_REPORT | …` line (date, set, vendor,
    current price, price source, reason, product URL).
-2. For each `PRICE_REPORT` line, assess:
+2. **Re-verify prior "self-healed" items first.** A `self-healed` verdict is
+   provisional — it only holds once the fix survives a later scrape. At the
+   start of every run, before assessing new reports, re-check each listing a
+   previous run marked self-healed:
+   - **Stayed rectified?** The current price is still `null` (or now shows the
+     correct base kit) and the flagged wrong value did not come back. Only then
+     is it truly resolved and can stop being tracked.
+   - **Regressed?** The wrong price returned (a re-scrape re-stored the bad
+     value, or a stock-only complaint keeps recurring). It never actually
+     healed — reclassify it as **needs fix** and treat it as a systematic bug,
+     because a value that reverts is the "never heals" case, not a heal.
+3. For each `PRICE_REPORT` line, assess:
    - **Self-healed?** The current price was re-scraped recently or is now
      `null`. Stock-only complaints ("sold out", "no stock", "ready stock")
      self-heal on the next availability scrape and never need code.
    - **Needs a scraper code fix?** The reason points at a systematic scrape bug
      — wrong currency, wrong product, or wrong variant/subkit. These do **not**
      self-heal: re-scraping pulls the same wrong value every run.
-3. **Investigate and fix proactively.** Do not wait for per-report approval.
+4. **Investigate and fix proactively.** Do not wait for per-report approval.
    Trace each "needs fix" report to its root cause in `scraper/scrape.py`
    (and `src/lib/import/prices.ts` / `vendor-overrides.ts`), implement the fix,
    add/extend unit tests in `scraper/tests/test_scraper_helpers.py`, run the
    suite, then commit on `main`. Only pause for a human decision when a fix is
    genuinely ambiguous or architecturally significant.
-4. Present a results table with these columns:
+5. Present a results table with these columns:
    `report date | set | vendor | current price | reason | verdict
    (self-healed / needs fix) | recommendation | status post-fixing`.
    - **status post-fixing** describes what the listing looks like once the fix
      lands and the queued re-scrape runs (e.g. "base kit ARS 184,285 shown",
      "price cleared (NO_BASE_KIT)", "unchanged — false alarm").
-5. **Remove already-resolved rows.** Reports whose root cause is already fixed
+6. **Remove already-resolved rows.** Reports whose root cause is already fixed
    in the current codebase (the issue no longer exists) are dropped from the
    table. List them in a short "removed / already resolved" note for the audit
    trail instead of leaving them in the main table.
-6. If there are no reports, say "No pending reports" and stop.
-7. Check on any new product/vendor a reporter recommends (a corrected base
+7. If there are no reports, say "No pending reports" and stop.
+8. Check on any new product/vendor a reporter recommends (a corrected base
    price, the correct product URL, or a vendor/currency note in the reason) and
    verify it against the scraper's vendor overrides and plausibility bounds.
 
