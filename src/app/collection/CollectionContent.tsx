@@ -2562,10 +2562,14 @@ function CollectionCatalogPicker({
   const [searching, setSearching] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [error, setError] = useState("");
-  // Off-catalog "add manually" form, revealed when the search finds nothing.
+  // Off-catalog "add manually" form. Auto-shown when the search finds nothing;
+  // reachable from a persistent footer in every other state, because partial
+  // matches are the common miss (searching "keycult" and not seeing YOUR
+  // Keycult must not dead-end).
   const [customName, setCustomName] = useState("");
   const [customType, setCustomType] = useState<"KEYBOARD" | "KEYCAPS">("KEYBOARD");
   const [customBusy, setCustomBusy] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
 
   async function submitCustom() {
     // Fall back to what they searched for if they didn't retype the name.
@@ -2634,6 +2638,69 @@ function CollectionCatalogPicker({
     }
   }
 
+  // The manual-entry card, shared by every picker state.
+  const customForm = (
+    <div className="mx-auto mt-6 max-w-md rounded-2xl border border-[#e7dcc8] bg-[#faf7f0] p-5 dark:border-[#4b402d] dark:bg-[#1d1a15]">
+      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#9a7a42] dark:text-[#d0b278]">
+        Add it manually
+      </p>
+      <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+        Record a custom piece you own. It stays private to your collection.
+      </p>
+      <div className="mt-4 space-y-3">
+        <div>
+          <label className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-200">
+            Name
+          </label>
+          <input
+            value={customName}
+            onChange={(event) => setCustomName(event.target.value)}
+            placeholder={query.trim() || "e.g. My custom TKL build"}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void submitCustom();
+              }
+            }}
+            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-950 outline-none focus:border-[#9a7a42] focus:ring-2 focus:ring-[#9a7a42]/10 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
+          />
+        </div>
+        <div>
+          <span className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-200">
+            Type
+          </span>
+          <div className="grid grid-cols-2 gap-2">
+            {(["KEYBOARD", "KEYCAPS"] as const).map((type) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => setCustomType(type)}
+                className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                  customType === type
+                    ? "border-[#9a7a42] bg-[#9a7a42] text-white"
+                    : "border-gray-200 bg-white text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300"
+                }`}
+              >
+                {type === "KEYBOARD" ? "Keyboard" : "Keycap set"}
+              </button>
+            ))}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void submitCustom()}
+          disabled={customBusy || !(customName.trim() || query.trim())}
+          className="w-full rounded-xl bg-gray-950 px-3 py-2.5 text-sm font-semibold text-white hover:bg-[#9a7a42] disabled:opacity-50 dark:bg-white dark:text-gray-950"
+        >
+          {customBusy ? "Adding…" : "Add to my collection"}
+        </button>
+        <p className="text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+          You can add the photo, purchase price, and date next.
+        </p>
+      </div>
+    </div>
+  );
+
   return (
     <ModalShell onClose={onClose} label="Search and add to collection">
       <div className="border-b border-gray-100 px-5 py-5 dark:border-gray-800 sm:px-7">
@@ -2668,13 +2735,28 @@ function CollectionCatalogPicker({
 
       <div className="max-h-[58vh] overflow-y-auto px-5 py-5 sm:px-7">
         {query.trim().length < 2 ? (
-          <div className="py-12 text-center">
-            <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-              Search by the name you remember
-            </p>
-            <p className="mt-1 text-xs text-gray-400">
-              Results include images and product type so you can identify the right item.
-            </p>
+          <div className="py-8">
+            <div className="text-center">
+              <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                Search by the name you remember
+              </p>
+              <p className="mt-1 text-xs text-gray-400">
+                Results include images and product type so you can identify the right item.
+              </p>
+            </div>
+            {customOpen ? (
+              customForm
+            ) : (
+              <p className="mt-8 text-center">
+                <button
+                  type="button"
+                  onClick={() => setCustomOpen(true)}
+                  className="text-xs font-semibold text-[#80632f] underline decoration-[#c9ab72]/60 underline-offset-4 hover:text-gray-950 dark:text-[#d0b278] dark:hover:text-white"
+                >
+                  Not in the catalog? Add a piece manually
+                </button>
+              </p>
+            )}
           </div>
         ) : searching && results.length === 0 ? (
           <p className="py-12 text-center text-sm text-gray-400">Searching catalog…</p>
@@ -2690,65 +2772,7 @@ function CollectionCatalogPicker({
             </div>
 
             {/* Off-catalog: let the user record a piece we don't have. */}
-            <div className="mx-auto mt-6 max-w-md rounded-2xl border border-[#e7dcc8] bg-[#faf7f0] p-5 dark:border-[#4b402d] dark:bg-[#1d1a15]">
-              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#9a7a42] dark:text-[#d0b278]">
-                Add it manually
-              </p>
-              <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-                Record a custom piece you own. It stays private to your collection.
-              </p>
-              <div className="mt-4 space-y-3">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-200">
-                    Name
-                  </label>
-                  <input
-                    value={customName}
-                    onChange={(event) => setCustomName(event.target.value)}
-                    placeholder={query.trim() || "e.g. My custom TKL build"}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void submitCustom();
-                      }
-                    }}
-                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-950 outline-none focus:border-[#9a7a42] focus:ring-2 focus:ring-[#9a7a42]/10 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <span className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-200">
-                    Type
-                  </span>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(["KEYBOARD", "KEYCAPS"] as const).map((type) => (
-                      <button
-                        key={type}
-                        type="button"
-                        onClick={() => setCustomType(type)}
-                        className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${
-                          customType === type
-                            ? "border-[#9a7a42] bg-[#9a7a42] text-white"
-                            : "border-gray-200 bg-white text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300"
-                        }`}
-                      >
-                        {type === "KEYBOARD" ? "Keyboard" : "Keycap set"}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void submitCustom()}
-                  disabled={customBusy || !(customName.trim() || query.trim())}
-                  className="w-full rounded-xl bg-gray-950 px-3 py-2.5 text-sm font-semibold text-white hover:bg-[#9a7a42] disabled:opacity-50 dark:bg-white dark:text-gray-950"
-                >
-                  {customBusy ? "Adding…" : "Add to my collection"}
-                </button>
-                <p className="text-[11px] leading-4 text-gray-500 dark:text-gray-400">
-                  You can add the photo, purchase price, and date next.
-                </p>
-              </div>
-            </div>
+            {customForm}
           </div>
         ) : (
           <div className="space-y-3">
@@ -2824,6 +2848,25 @@ function CollectionCatalogPicker({
                 </article>
               );
             })}
+
+            {/* Persistent escape hatch: partial matches are the common miss —
+                the user may see five Keycults and still not THEIR Keycult. */}
+            {customOpen ? (
+              customForm
+            ) : (
+              <div className="flex flex-col items-center justify-between gap-2 rounded-xl border border-dashed border-gray-300 px-4 py-3 text-center sm:flex-row sm:text-left dark:border-gray-600">
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Don&apos;t see the exact one you own?
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setCustomOpen(true)}
+                  className="shrink-0 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:border-[#9a7a42] hover:text-[#80632f] dark:border-gray-600 dark:text-gray-200 dark:hover:text-[#d0b278]"
+                >
+                  Add “{query.trim()}” manually
+                </button>
+              </div>
+            )}
           </div>
         )}
         {error && <p className="mt-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
