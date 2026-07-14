@@ -83,8 +83,10 @@ export const BLOCKED_VENDOR_HOSTS = new Set([
 // BLOCKED_VENDOR_SLUGS (whole vendor banned), these vendors are legitimate for
 // other sets — only the named set's listing is unusable: the vendor carries no
 // resolvable base kit for it (novelties/subkits only, an in-stock reseller
-// page, or a WooCommerce variation blob that never surfaces the base), so the
-// scraper keeps re-storing a wrong price that never heals. Drop just that pair.
+// page, a WooCommerce variation blob that never surfaces the base, or an
+// ended/removed GB product page whose fetch fails so the last-scraped price
+// sticks), so the scraper keeps re-storing a wrong price that never heals.
+// Drop just that pair.
 // Keyed `${vendorSlug}::${setSlug}`. Discovery and the suggestion pipeline skip
 // these pairs; db-setup purges any that slip in (mirror the list in
 // scripts/db-setup.mjs → purgeBlockedVendorSetPairs).
@@ -93,6 +95,9 @@ export const BLOCKED_VENDOR_SET_PAIRS = new Set<string>([
   "latamkeys::gmk-mictlan-rebirth",
   "latamkeys::gmk-nervewrecker",
   "zfrontier::gmk-camping-r3",
+  // GB ended; the novelkeys.xyz product page no longer exists, so the fetch
+  // fails and the stale $70 base price never clears. Reported "item dun exist".
+  "novelkeys::gmk-awaken",
 ]);
 
 export function isBlockedVendorSet(vendorSlug: string, setSlug: string): boolean {
