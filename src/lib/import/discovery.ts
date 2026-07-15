@@ -162,7 +162,9 @@ export function normalizeSetName(name: string): string {
     .toLowerCase()
     .replace(/\[[^\]]*\]|\([^)]*\)/g, " ")
     .replace(/\b(group\s*buy|groupbuy|gb|pre[- ]?order|in[- ]?stock|extras?|live|launch(ed)?)\b/g, " ")
-    .replace(/\b(keycap\s*sets?|keycaps?|keysets?|cherry\s*profile)\b/g, " ")
+    // "cyl"/"mtnu" are GMK profile tokens, not set identity: "GMK CYL Seafarer"
+    // is the same set as "GMK Seafarer" (vendor outlets and gmk.net both add it).
+    .replace(/\b(keycap\s*sets?|keycaps?|keysets?|cherry\s*profile|cyl|mtnu)\b/g, " ")
     .replace(/\bround\s*(\d+)\b/g, "r$1")
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")

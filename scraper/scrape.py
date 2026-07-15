@@ -1978,7 +1978,9 @@ def normalize_set_name(name: str) -> str:
         " ",
         s,
     )
-    s = re.sub(r"\b(keycap\s*sets?|keycaps?|keysets?|cherry\s*profile)\b", " ", s)
+    # "cyl"/"mtnu" are GMK profile tokens, not set identity: "GMK CYL Seafarer"
+    # is the same set as "GMK Seafarer" (vendor outlets and gmk.net both add it).
+    s = re.sub(r"\b(keycap\s*sets?|keycaps?|keysets?|cherry\s*profile|cyl|mtnu)\b", " ", s)
     s = re.sub(r"\bround\s*(\d+)\b", r"r\1", s)
     s = re.sub(r"[^a-z0-9]+", " ", s)
     return re.sub(r"\s+", " ", s).strip()
@@ -2032,13 +2034,21 @@ def match_product_to_set(
 
 def _build_set_index(conn) -> tuple[dict, dict]:
     """Index tracked sets (that have a BASE kit) by normalized name, for
-    matching vendor product titles. Returns (by_full, by_base)."""
+    matching vendor product titles. Returns (by_full, by_base).
+
+    Two DB rows can normalize to the same name (gmk.net's catalog created
+    "GMK CYL Kitsune Keycaps" alongside the canonical "GMK Kitsune"). Rows are
+    ordered most-vendor-linked first so setdefault keeps the canonical set —
+    the one price comparison actually lives on — not the orphan duplicate."""
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute("""
             SELECT gb.id, gb.name, gb.status::text AS status, gb."gbStart",
-                   k.id AS base_kit_id
+                   k.id AS base_kit_id,
+                   (SELECT count(*) FROM "VendorKit" vk
+                     WHERE vk."kitId" = k.id) AS vendor_links
               FROM "GroupBuy" gb
               JOIN "Kit" k ON k."groupBuyId" = gb.id AND k.type = 'BASE'
+             ORDER BY vendor_links DESC, gb."createdAt" ASC
         """)
         rows = cur.fetchall()
     by_full: dict[str, dict] = {}
@@ -2254,6 +2264,116 @@ def generic_price(
         "variants": [],
         "inStock": offer["available"],
     }
+
+
+# ----------------------------------------------------------------------------
+# Vendor outlet / clearance collections
+#
+# Discounted GMK restocks live in dedicated vendor collections (e.g. iLumKB's
+# "🔥 GMK Outlet"). Each outlet product carries labeled Base/Novelties/...
+# variants at the discounted price, so the regular price pass prices them
+# correctly — the missing link is pointing the set's VendorKit at the OUTLET
+# listing instead of the (often dead or full-price) regular one. This pass
+# matches each outlet product to a tracked set, relinks the vendor's kit row,
+# and clears priceUpdatedAt so the same night's price pass re-prices it at the
+# discount (main() runs discovery → outlets → prices in that order, so the
+# outlet link always wins the night). MANUAL prices are never touched.
+# ----------------------------------------------------------------------------
+OUTLET_COLLECTIONS = [
+    ("ilumkb",
+     "https://ilumkb.com/collections/%F0%9F%94%A5-gmk-outlet/products.json"),
+]
+
+
+def run_outlets(
+    conn,
+    context: BrowserContext,
+    deadline: float,
+    scrapling: ScraplingClient | None = None,
+) -> dict:
+    """Relink VendorKits to vendors' outlet/clearance listings."""
+    stats = {"collections": 0, "products": 0, "linked": 0}
+    by_full, by_base = _build_set_index(conn)
+    page = context.new_page()
+    try:
+        for vendor_slug, url in OUTLET_COLLECTIONS:
+            if now_ms() > deadline:
+                log("Outlets: time budget reached — stopping.")
+                break
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    'SELECT id, currency FROM "Vendor" WHERE slug = %s',
+                    (vendor_slug,),
+                )
+                vendor = cur.fetchone()
+            if not vendor:
+                log(f"Outlets: vendor '{vendor_slug}' not in DB — skipped.")
+                continue
+
+            fetch_url = f"{url}?limit=250"
+            data = (
+                scrapling.get_json(fetch_url)
+                if scrapling and scrapling.available
+                else None
+            )
+            if data is None:
+                try:
+                    resp = page.goto(fetch_url, wait_until="domcontentloaded",
+                                     timeout=NAV_TIMEOUT_MS)
+                    if resp is not None and resp.ok:
+                        data = json.loads(resp.text())
+                except Exception:  # noqa: BLE001
+                    data = None
+            if not isinstance(data, dict):
+                log(f"Outlets: could not read {url} — skipped.")
+                continue
+            stats["collections"] += 1
+
+            origin = _origin_of(url) or ""
+            for product in data.get("products") or []:
+                title = str(product.get("title") or "")
+                handle = product.get("handle")
+                if not handle:
+                    continue
+                stats["products"] += 1
+                match = match_product_to_set(title, by_full, by_base)
+                if not match:
+                    log(f"  outlet product not matched to a set: {title[:60]}")
+                    continue
+                product_url = f"{origin}/products/{handle}"
+                # Relink to the outlet listing and clear priceUpdatedAt so the
+                # price pass (which runs after this) re-prices it tonight. The
+                # base/subkit split is the price pass's job — its variant
+                # classifier picks the labeled Base kit off the outlet listing.
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("""
+                        INSERT INTO "VendorKit"
+                            (id, "kitId", "vendorId", "productUrl", "gbUrl",
+                             "inStock", currency, "updatedAt")
+                        VALUES
+                            (gen_random_uuid()::text, %s, %s, %s, %s, true, %s, now())
+                        ON CONFLICT ("kitId", "vendorId") DO UPDATE SET
+                            "productUrl" = EXCLUDED."productUrl",
+                            "gbUrl" = COALESCE("VendorKit"."gbUrl", EXCLUDED."gbUrl"),
+                            "priceUpdatedAt" = NULL,
+                            "updatedAt" = now()
+                        WHERE "VendorKit"."priceSource" IS DISTINCT FROM 'MANUAL'
+                          AND "VendorKit"."productUrl" IS DISTINCT FROM EXCLUDED."productUrl"
+                        RETURNING id
+                    """, (
+                        match["base_kit_id"], vendor["id"], product_url,
+                        product_url, vendor["currency"],
+                    ))
+                    row = cur.fetchone()
+                conn.commit()
+                if row is not None:
+                    stats["linked"] += 1
+                    log(f"  outlet linked: {title[:60]} -> {product_url}")
+    finally:
+        page.close()
+    log(f"Outlets -> collections={stats['collections']} "
+        f"products={stats['products']} linked={stats['linked']}")
+    return stats
 
 
 def run_prices(
@@ -3999,6 +4119,9 @@ def main() -> int:
                     # get a price on the same nightly run. Dead links found by
                     # the price pass clear themselves (404/410 → price cleared).
                     disc_stats = run_discovery(conn, context, deadline, scrapling)
+                    # Outlets AFTER discovery (outlet links win the night) and
+                    # BEFORE prices (discounted listings priced tonight).
+                    out_stats = run_outlets(conn, context, deadline, scrapling)
                     price_stats = run_prices(conn, context, deadline, scrapling)
             finally:
                 context.close()
@@ -4054,6 +4177,8 @@ def main() -> int:
     log(f"Discovery -> vendors={disc_stats['vendors']} "
         f"gmk_listings={disc_stats['gmk_listings']} linked={disc_stats['linked']} "
         f"relinked={disc_stats['relinked']}")
+    log(f"Outlets -> collections={out_stats['collections']} "
+        f"products={out_stats['products']} linked={out_stats['linked']}")
     log(f"Prices  -> attempted={price_stats['attempted']} "
         f"updated={price_stats['updated']} failed={price_stats['failed']}")
     log("Done.")

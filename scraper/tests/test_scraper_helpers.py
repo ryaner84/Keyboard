@@ -274,6 +274,34 @@ class DiscoveryHelpersTests(unittest.TestCase):
             scrape.normalize_set_name("GMK Striker R2"),
         )
 
+    def test_normalize_drops_profile_tokens(self):
+        # "CYL"/"MTNU" are GMK profile names, not set identity — vendor outlet
+        # listings ("[In Stock] GMK CYL Seafarer") must match "GMK Seafarer".
+        self.assertEqual(
+            scrape.normalize_set_name("[In Stock] GMK CYL Seafarer"),
+            scrape.normalize_set_name("GMK Seafarer"),
+        )
+        self.assertEqual(
+            scrape.normalize_set_name("GMK CYL Kitsune Keycaps"),
+            "gmk kitsune",
+        )
+        # The profile token must not merge across brands: MTNU 9009 ≠ GMK 9009.
+        self.assertNotEqual(
+            scrape.normalize_set_name("MTNU 9009"),
+            scrape.normalize_set_name("GMK 9009"),
+        )
+
+    def test_outlet_title_matches_tracked_set(self):
+        entry = {"status": "IN_STOCK", "gbStart": None}
+        by_full = {"gmk seafarer": entry}
+        by_base = {"gmk seafarer": [entry]}
+        self.assertIs(
+            scrape.match_product_to_set(
+                "[In Stock] GMK CYL Seafarer", by_full, by_base
+            ),
+            entry,
+        )
+
     def test_strip_round(self):
         self.assertEqual(scrape.strip_round("gmk striker r2"), "gmk striker")
         self.assertEqual(scrape.strip_round("gmk olive"), "gmk olive")
