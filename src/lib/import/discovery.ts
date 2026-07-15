@@ -1,5 +1,18 @@
 import { prisma } from "@/lib/prisma";
 import { isBlockedVendorSet } from "./vendor-overrides";
+import { NONBASE_SUBKIT_RE, PRODUCT_ACCESSORY_RE } from "@/lib/kit-variants";
+
+// A catalog product whose RAW title names a subkit or accessory must never be
+// linked as a set's VendorKit: normalizeSetName strips bracketed qualifiers,
+// so "GMK Foo (Novelties)" would otherwise collide with the set name and the
+// relink branch would overwrite the base product's URL — the price pass then
+// stores the subkit's lone "Default Title" variant as the base price.
+// "alphas" is matched plural-only so a set legitimately named "… Alpha" still
+// links. ("extras" is NOT in this list — extras listings sell the base kit.)
+const SUBKIT_PRODUCT_RE = new RegExp(
+  `novelt|space\\s*bars?|\\balphas\\b|${NONBASE_SUBKIT_RE.source}|${PRODUCT_ACCESSORY_RE.source}`,
+  "i"
+);
 
 // Catalog discovery: instead of trusting the (often stale) per-set product
 // URLs from KeycapLendar, walk each vendor's own Shopify catalog, find every
@@ -318,6 +331,9 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
     const existingByKit = new Map(existing.map((e) => [e.kitId, e]));
 
     for (const product of catalog) {
+      // Subkit/accessory products (novelties, spacebars, deskmats…) are never
+      // the set's base listing — skip before matching.
+      if (SUBKIT_PRODUCT_RE.test(product.title)) continue;
       const match = matchProduct(product.title, index);
       if (!match) continue;
       // Owner removed this vendor for this set — don't re-create/relink it.

@@ -303,6 +303,120 @@ class DiscoveryHelpersTests(unittest.TestCase):
         )
 
 
+class BaseKitIdentificationTests(unittest.TestCase):
+    """Regression suite for the base-vs-subkit audit: every case here stored a
+    wrong base price (or wrongly cleared a right one) before the fix."""
+
+    def test_japanese_variant_titles_classify(self):
+        # The Python scraper is the producer that reaches Yushakobo — without
+        # the JP keywords a ノベルティ variant classified OTHERS and could be
+        # stored as the base price.
+        self.assertEqual(scrape.classify_variant("ベースキット"), "BASE")
+        self.assertEqual(scrape.classify_variant("ノベルティ"), "NOVELTIES")
+        self.assertEqual(scrape.classify_variant("スペースバー"), "SPACEBARS")
+        self.assertEqual(scrape.classify_variant("アルファ"), "ALPHA")
+
+    def test_japanese_subkit_only_listing_clears(self):
+        variants = [
+            {"id": "1", "title": "ノベルティ", "price": 4800},
+            {"id": "2", "title": "スペースバー", "price": 3300},
+        ]
+        self.assertIsNone(scrape.choose_kit_variant(variants))
+
+    def test_named_nonbase_subkits_do_not_become_the_base(self):
+        # Base sold out and delisted; accent + 40s remain. The old picker took
+        # the dearest OTHERS (€45 accent) as the base.
+        variants = [
+            {"id": "1", "title": "GMK Foo Accent Kit", "price": 45},
+            {"id": "2", "title": "GMK Foo 40s", "price": 30},
+        ]
+        self.assertIsNone(scrape.choose_kit_variant(variants))
+
+    def test_legends_variants_are_not_the_base(self):
+        for title in ("Hiragana Kit", "Katakana", "NorDe Kit", "ISO Kit",
+                      "Extension Kit", "Forties"):
+            self.assertIsNone(
+                scrape.choose_kit_variant([{"id": "1", "title": title, "price": 55}]),
+                title,
+            )
+
+    def test_hiragana_base_still_counts_as_base(self):
+        variants = [{"id": "1", "title": "Hiragana Base", "price": 120}]
+        self.assertEqual(scrape.choose_kit_variant(variants)["price"], 120)
+
+    def test_accessory_only_listing_clears(self):
+        # Every variant is an addon: the old fallback readmitted them and
+        # stored a deskmat price as the base kit.
+        variants = [
+            {"id": "1", "title": "GMK Foo Deskmat", "price": 32},
+            {"id": "2", "title": "GMK Foo Deskmat XL", "price": 38},
+        ]
+        self.assertIsNone(scrape.choose_kit_variant(variants))
+
+    def test_base_deposit_variant_never_wins(self):
+        variants = [
+            {"id": "1", "title": "Base Kit", "price": 110},
+            {"id": "2", "title": "Base Kit Deposit", "price": 35},
+        ]
+        self.assertEqual(scrape.choose_kit_variant(variants)["price"], 110)
+
+    def test_base_novelties_bundle_is_not_the_base(self):
+        # A bundle's price is not the standalone base price; a bundle-only
+        # listing clears rather than storing the bundle number.
+        variants = [{"id": "1", "title": "Base Kit + Novelties Bundle", "price": 155}]
+        self.assertIsNone(scrape.choose_kit_variant(variants))
+
+    def test_subkit_product_titles_are_skipped_by_discovery(self):
+        for title in ("GMK Foo (Novelties)", "GMK Foo [Spacebars]",
+                      "GMK Bento Alphas", "GMK Foo Deskmat",
+                      "GMK Lavender x RAMA Artisan Keycap", "GMK Foo Numpad"):
+            self.assertIsNotNone(scrape._SUBKIT_PRODUCT_RE.search(title), title)
+        # Real base listings must NOT be skipped: extras rounds sell the base,
+        # and a set named "... Alpha" (singular) is a set, not an alphas kit.
+        for title in ("GMK Foo Extras", "GMK Alpha", "GMK Foo",
+                      "[In Stock] GMK CYL Seafarer"):
+            self.assertIsNone(scrape._SUBKIT_PRODUCT_RE.search(title), title)
+
+    @staticmethod
+    def _jsonld(offers: str) -> str:
+        return (
+            '<script type="application/ld+json">'
+            '{"@type":"Product","offers":[' + offers + "]}"
+            "</script>"
+        )
+
+    def test_jsonld_multi_offer_without_base_clears(self):
+        # Shopware aggregate left with novelties + spacebars: the old Python
+        # picker stored the dearest (€39 novelties) as the base nightly.
+        html = self._jsonld(
+            '{"name":"Novelties","price":"39"},{"name":"Spacebars","price":"29"}'
+        )
+        self.assertIs(scrape.parse_jsonld_offer(html), scrape.NO_BASE_KIT)
+
+    def test_jsonld_named_base_wins_over_dearer_subkit(self):
+        html = self._jsonld(
+            '{"name":"Base Kit","price":"120"},{"name":"Novelties","price":"139"}'
+        )
+        self.assertEqual(scrape.parse_jsonld_offer(html)["price"], 120.0)
+
+    def test_jsonld_single_subkit_offer_clears(self):
+        html = self._jsonld('{"name":"Novelties","price":"39"}')
+        self.assertIs(scrape.parse_jsonld_offer(html), scrape.NO_BASE_KIT)
+
+    def test_jsonld_single_unnamed_offer_is_the_base(self):
+        html = self._jsonld('{"price":"120"}')
+        self.assertEqual(scrape.parse_jsonld_offer(html)["price"], 120.0)
+
+    def test_jsonld_bundle_named_base_is_excluded(self):
+        # "Base + Novelties Bundle" contains "base" but classifies NOVELTIES —
+        # the old \bbase\b test picked the bundle price as the base.
+        html = self._jsonld(
+            '{"name":"Base Kit + Novelties Bundle","price":"155"},'
+            '{"name":"Spacebars","price":"29"}'
+        )
+        self.assertIs(scrape.parse_jsonld_offer(html), scrape.NO_BASE_KIT)
+
+
 class GmkDirectTests(unittest.TestCase):
     # Trimmed live markup from gmk.net's Warehouse Finds configurator: a
     # disabled (sold out) Base Set radio and an enabled one.

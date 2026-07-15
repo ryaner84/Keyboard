@@ -32,6 +32,59 @@ export function classifyVariant(title: string): VariantCategory {
   return "OTHERS";
 }
 
+// Accessory lines bundled onto GB listings (deskmats, artisans, deposits…) —
+// never the keycap kit itself. Shared by the price pickers and the audit so
+// every consumer excludes the same titles. (Moved here from prices.ts so the
+// audit can apply the exact same filter the scraper applied.)
+export const ADDON_VARIANT_RE =
+  /(desk\s?mat|mouse\s?pad|wrist\s?rest|cable|artisan|sticker|sample|keychain|coin|tray|deposit|shipping|insurance|add[\s-]?on|extra)/i;
+
+// Accessory words safe to test against PRODUCT titles (vs variant titles):
+// ADDON_VARIANT_RE's "extra"/"shipping"/"insurance" must NOT be here — a
+// product legitimately titled "GMK Foo Extras" or "… Free Shipping" is a
+// real base listing, while a product titled "… Deskmat" or "… Artisan" never
+// is. Used by the product-title guards and catalog-discovery skip.
+export const PRODUCT_ACCESSORY_RE =
+  /(desk\s?mat|mouse\s?pad|wrist\s?rest|cable|artisan|sticker|sample|keychain|coin|tray|deposit|add[\s-]?on)/i;
+
+// Standard NON-BASE subkits that classifyVariant files under OTHERS because
+// they aren't alphas/novelties/spacebars: numpads, 40s, accents, extensions,
+// legends variants (hiragana/katakana/hangul/cyrillic/NorDe/nordic/ISO),
+// icon and macro kits. Excluded from the base pool so a listing left with
+// only these clears (NO_BASE_KIT) instead of storing a subkit price as the
+// base — a title that also says "base" classifies BASE first and is kept
+// (e.g. "Hiragana Base"). Mirror of _NONBASE_SUBKIT_RE in scraper/scrape.py.
+export const NONBASE_SUBKIT_RE =
+  /num(?:ber)?\s*pad|\b40s\b|forties|accents?\b|extension|hiragana|katakana|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b/i;
+
+// THE canonical base-kit pick, used by every consumer that must agree on
+// which variant is the base: the Shopify/Woo price pickers and the nightly
+// price audit. Order: drop accessories; drop labeled subkits (alphas/
+// novelties/spacebars and the NONBASE vocabulary); then the first variant
+// titled "base" wins, else the DEAREST remaining candidate (subkits are the
+// cheaper lines). Returns null when the listing has no base candidate —
+// including when it carries ONLY accessories — so callers clear rather than
+// store a wrong price.
+export function pickBaseVariant<T extends { title: string; price: number }>(
+  variants: T[]
+): T | null {
+  if (variants.length === 0) return null;
+  const nonAddon = variants.filter((v) => !ADDON_VARIANT_RE.test(v.title));
+  // Accessory-only listing (deskmats/artisans): there is no base kit here.
+  // Falling back to the raw list — the old behavior — stored a deskmat price
+  // as the base whenever every variant was an accessory.
+  if (nonAddon.length === 0) return null;
+  const basePool = nonAddon.filter((v) => {
+    const category = classifyVariant(v.title);
+    if (category === "BASE") return true;
+    return category === "OTHERS" && !NONBASE_SUBKIT_RE.test(v.title);
+  });
+  if (basePool.length === 0) return null;
+  const titledBase = basePool.find((v) => classifyVariant(v.title) === "BASE");
+  if (titledBase) return titledBase;
+  return basePool.reduce((best, v) => (v.price > best.price ? v : best));
+}
+
 // Parse the raw Json column (unknown shape at the type level) into KitVariant[].
 export function parseVariants(raw: unknown): KitVariant[] {
   if (!Array.isArray(raw)) return [];
