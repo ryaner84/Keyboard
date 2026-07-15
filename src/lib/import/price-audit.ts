@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { categoryPrice } from "@/lib/kit-variants";
+import { parseVariants, pickBaseVariant } from "@/lib/kit-variants";
 import { isPlausibleBaseKitPrice } from "./prices";
 
 // Nightly accuracy check over every stored scraped price. Two invariants:
@@ -53,13 +53,19 @@ export async function auditPrices(opts: AuditOptions = {}): Promise<AuditResult>
       break;
     }
 
-    // What the price SHOULD be: the cheapest BASE-classified variant if the
-    // listing has one, otherwise whatever is stored (single-kit listings have
-    // a lone "Default Title" variant that classifies as OTHERS). Vendor links
-    // that pin an exact variant (?variant=<id>) are ground truth — the scraper
-    // already stored that variant's price, so don't second-guess it here.
+    // What the price SHOULD be: the SAME pick the scraper makes —
+    // pickBaseVariant (accessories excluded, labeled subkits excluded, first
+    // BASE-titled variant, else dearest candidate). The audit previously took
+    // the CHEAPEST BASE-classified variant with no accessory filter, so a
+    // "Base Kit Deposit" line ($35) overwrote the scraper's correct $110
+    // nightly, forever. Fall back to the stored price when the pick yields
+    // nothing (single "Default Title" listings). Vendor links that pin an
+    // exact variant (?variant=<id>) are ground truth — the scraper already
+    // stored that variant's price, so don't second-guess it here.
     const isPinned = !!row.productUrl && /[?&]variant=/.test(row.productUrl);
-    const basePrice = isPinned ? null : categoryPrice(row.variants, "BASE");
+    const basePrice = isPinned
+      ? null
+      : pickBaseVariant(parseVariants(row.variants))?.price ?? null;
     const target = basePrice ?? (row.price as number);
 
     if (!isPlausibleBaseKitPrice(target, row.currency)) {

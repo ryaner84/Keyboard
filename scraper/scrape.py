@@ -513,7 +513,40 @@ _ADDON_VARIANT_RE = re.compile(
 # numpad price as the base) must resolve to NO_BASE_KIT rather than keep it.
 # Titles that ALSO say "base" are classified BASE before this filter runs, so
 # a base kit that happens to bundle a numpad is still retained.
-_NONBASE_SUBKIT_RE = re.compile(r"num(?:ber)?\s*pad", re.IGNORECASE)
+# Standard NON-BASE subkits that classify as OTHERS (not alphas/novelties/
+# spacebars): numpads, 40s, accents, extensions, legends variants, icon and
+# macro kits. Excluded from the base pool so a listing left with only these
+# clears instead of storing a subkit price as the base. A title that also says
+# "base" classifies BASE first and is kept (e.g. "Hiragana Base").
+# Mirror of NONBASE_SUBKIT_RE in src/lib/kit-variants.ts — keep in sync.
+_NONBASE_SUBKIT_RE = re.compile(
+    r"num(?:ber)?\s*pad|\b40s\b|forties|accents?\b|extension|hiragana|katakana"
+    r"|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b",
+    re.IGNORECASE,
+)
+
+# Accessory words safe against PRODUCT titles (vs variant titles): no
+# "extra" — a product titled "GMK Foo Extras" is a real base listing — and no
+# "shipping"/"insurance" ("… Free Shipping" suffixes). Mirror of
+# PRODUCT_ACCESSORY_RE in src/lib/kit-variants.ts — keep in sync.
+_TITLE_ACCESSORY_RE = re.compile(
+    r"desk\s?mat|mouse\s?pad|wrist\s?rest|cable|artisan|sticker|sample"
+    r"|keychain|coin|tray|deposit|add[\s-]?on",
+    re.IGNORECASE,
+)
+
+# A catalog product whose RAW title names a subkit or accessory must never be
+# linked as a set's VendorKit — normalize_set_name strips bracketed
+# qualifiers, so "GMK Foo (Novelties)" would otherwise collide with the set
+# name and overwrite the base product's URL; the price pass would then store
+# the subkit's lone "Default Title" variant as the base price. "alphas" is
+# plural-only so a set legitimately named "… Alpha" still links. Mirror of
+# SUBKIT_PRODUCT_RE in src/lib/import/discovery.ts — keep in sync.
+_SUBKIT_PRODUCT_RE = re.compile(
+    r"novelt|space\s*bars?|\balphas\b|" + _NONBASE_SUBKIT_RE.pattern + r"|"
+    + _TITLE_ACCESSORY_RE.pattern,
+    re.IGNORECASE,
+)
 
 # Per-currency plausibility bounds for a GMK base kit. The lower bound admits
 # CLEARANCE prices (released sets routinely sell off at USD 40-70); the upper
@@ -564,14 +597,19 @@ NO_BASE_KIT = "NO_BASE_KIT"
 
 
 def classify_variant(title: str) -> str:
-    """Mirror of classifyVariant in src/lib/kit-variants.ts — order matters."""
-    if re.search(r"novelt", title, re.IGNORECASE):
+    """Mirror of classifyVariant in src/lib/kit-variants.ts — order matters.
+
+    The Japanese alternates are REQUIRED here, not just in the TS mirror: this
+    scraper is the one that actually reaches Yushakobo (real browser), and
+    without them a JP-titled subkit (ノベルティ) classified OTHERS and could be
+    stored as the base price when the base kit had sold out."""
+    if re.search(r"novelt|ノベルティ", title, re.IGNORECASE):
         return "NOVELTIES"
-    if re.search(r"space\s*bar", title, re.IGNORECASE):
+    if re.search(r"space\s*bar|スペースバー", title, re.IGNORECASE):
         return "SPACEBARS"
-    if re.search(r"alpha", title, re.IGNORECASE):
+    if re.search(r"alpha|アルファ", title, re.IGNORECASE):
         return "ALPHA"
-    if re.search(r"base", title, re.IGNORECASE):
+    if re.search(r"base|ベース", title, re.IGNORECASE):
         return "BASE"
     return "OTHERS"
 
@@ -605,7 +643,12 @@ def choose_kit_variant(variants: list[dict]) -> dict | None:
     if not variants:
         return None
     non_addon = [v for v in variants if not _ADDON_VARIANT_RE.search(v["title"])]
-    pool = non_addon if non_addon else variants
+    if not non_addon:
+        # EVERY variant is an accessory (deskmats/artisans): the listing sells
+        # no base kit at all. Falling back to the raw list — the old behavior —
+        # stored a deskmat price as the base. Mirrors pickBaseVariant (TS).
+        return None
+    pool = non_addon
     # Drop labeled subkits so an absent base kit can't fall through to a cheap
     # alpha/novelty/spacebar variant; BASE and unlabeled OTHERS are retained.
     # An OTHERS variant that names a non-base subkit (e.g. a numpad) is dropped
@@ -812,13 +855,19 @@ def parse_woocommerce_variations(html: str) -> list[dict]:
     return out
 
 
-def parse_jsonld_offer(html: str) -> dict | None:
+def parse_jsonld_offer(html: str):
     """Simple (non-variable) product price from JSON-LD Product/Offer.
 
-    Returns {price, available} for the dearest plausible offer (the base kit is
-    the dearest line; an out-of-range bundle is rejected by the bound check
-    downstream), or None when no priced offer is present. Currency is taken
-    from the vendor override, never the page, to match shopify_price()."""
+    Name-aware, mirroring fetchJsonLdPrice (prices.ts): an offer whose name
+    classifies BASE wins; multiple offers with no identifiable base is an
+    ambiguous multi-kit aggregate (the dearest child could be a bundle, the
+    cheapest a spacebars kit — either guess poisons the base price), and a
+    single offer NAMED as a subkit/accessory is not the base either — both
+    return NO_BASE_KIT so a stale wrong price heals instead of persisting.
+    Unnamed single/simple offers return the dearest candidate as before.
+    Returns {price, available}, NO_BASE_KIT, or None (nothing priced).
+    Currency is taken from the vendor override, never the page, to match
+    shopify_price()."""
     blocks = re.findall(
         r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
         html,
@@ -855,7 +904,8 @@ def parse_jsonld_offer(html: str) -> dict | None:
                 isinstance(availability, str)
                 and re.search(r"outofstock|soldout|discontinued", availability, re.IGNORECASE)
             )
-            found.append({"price": price, "available": in_stock})
+            name = str(offer.get("name") or "")
+            found.append({"price": price, "available": in_stock, "name": name})
         for child in node.values():
             walk(child)
 
@@ -866,7 +916,25 @@ def parse_jsonld_offer(html: str) -> dict | None:
             continue
     if not found:
         return None
-    return max(found, key=lambda o: o["price"])
+
+    # An offer named as the base kit is authoritative (dearest of them, in
+    # case regional base lines coexist).
+    named_base = [o for o in found if classify_variant(o["name"]) == "BASE"]
+    if named_base:
+        return max(named_base, key=lambda o: o["price"])
+    if len(found) > 1:
+        # Multi-kit aggregate with no identifiable base — do not guess.
+        return NO_BASE_KIT
+    only = found[0]
+    name = only["name"]
+    if name and (
+        classify_variant(name) in ("NOVELTIES", "SPACEBARS", "ALPHA")
+        or _NONBASE_SUBKIT_RE.search(name)
+        or _TITLE_ACCESSORY_RE.search(name)
+    ):
+        # The single remaining offer IS a subkit/accessory — no base on offer.
+        return NO_BASE_KIT
+    return only
 
 
 def shopify_price(
@@ -953,13 +1021,28 @@ def shopify_price(
         origin = urllib.parse.urlsplit(clean)
         origin_url = f"{origin.scheme}://{origin.netloc}"
 
-        # Reject pages where the product itself is an accessory / artisan —
-        # the URL slug may coincidentally match a set name (e.g. ilumkb lists
-        # a "Lavender x RAMA Artisan Keycap" at /products/gmk-lavender).
+        # Reject pages where the PRODUCT itself is a subkit or accessory — the
+        # kit identity of a single-variant product lives in the product title
+        # (its lone variant is Shopify's literal "Default Title", which
+        # classifies OTHERS and would be stored as the base). Vendors sell
+        # novelties/spacebars/artisans as separate products ("GMK Foo
+        # Novelties"; ilumkb's "Lavender x RAMA Artisan Keycap" at
+        # /products/gmk-lavender). Clearing (NO_BASE_KIT) beats keeping: a
+        # mislinked row's stale price must heal, not persist. A vendor-pinned
+        # ?variant= link is ground truth and bypasses the guard.
         product_title = str(data["product"].get("title") or "")
-        if _ADDON_VARIANT_RE.search(product_title):
-            log(f"  product title is an accessory — skipped ({product_url})")
-            return None
+        if not pinned_id and product_title:
+            title_category = classify_variant(product_title)
+            if (
+                title_category in ("NOVELTIES", "SPACEBARS")
+                or _NONBASE_SUBKIT_RE.search(product_title)
+                # Product-title-safe accessory set: _ADDON_VARIANT_RE's
+                # "extra"/"shipping" would wrongly clear real "GMK Foo
+                # Extras" / "... Free Shipping" listings.
+                or _TITLE_ACCESSORY_RE.search(product_title)
+            ):
+                log(f"  product is a subkit/accessory — clearing ({product_url})")
+                return NO_BASE_KIT
 
         variants = _parse_shopify_variants(data["product"].get("variants") or [])
         chosen = _pick_variant(variants, pinned_id)
@@ -2147,6 +2230,10 @@ def run_discovery(
             stats["gmk_listings"] += len(catalog)
 
             for product in catalog:
+                # Subkit/accessory products (novelties, spacebars, deskmats…)
+                # are never the set's base listing — skip before matching.
+                if _SUBKIT_PRODUCT_RE.search(product["title"]):
+                    continue
                 match = match_product_to_set(product["title"], by_full, by_base)
                 if not match:
                     continue
@@ -2252,6 +2339,10 @@ def generic_price(
     offer = parse_jsonld_offer(html)
     if offer is None:
         return None
+    if offer is NO_BASE_KIT:
+        # Ambiguous multi-kit aggregate or a lone subkit/accessory offer —
+        # clear the stale price rather than store/keep a non-base number.
+        return NO_BASE_KIT
     if not is_plausible_base_price(offer["price"], vendor_currency):
         log(
             f"  implausible kit price {offer['price']} {vendor_currency}"
@@ -2552,6 +2643,10 @@ def run_outlets(
                 if not handle:
                     continue
                 stats["products"] += 1
+                # Outlet collections list base and subkits as separate
+                # products — only the base listing may take over the link.
+                if _SUBKIT_PRODUCT_RE.search(title):
+                    continue
                 match = match_product_to_set(title, by_full, by_base)
                 if not match:
                     log(f"  outlet product not matched to a set: {title[:60]}")

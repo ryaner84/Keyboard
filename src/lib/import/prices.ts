@@ -1,5 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { classifyVariant } from "@/lib/kit-variants";
+import {
+  classifyVariant,
+  pickBaseVariant,
+  ADDON_VARIANT_RE,
+  NONBASE_SUBKIT_RE,
+  PRODUCT_ACCESSORY_RE,
+} from "@/lib/kit-variants";
 
 const BROWSER_HEADERS = {
   "User-Agent":
@@ -45,15 +51,6 @@ export interface PriceResult {
 export const NO_BASE_KIT = "NO_BASE_KIT" as const;
 export type FetchPriceOutcome = PriceResult | typeof NO_BASE_KIT | null;
 
-// The base kit is the dearest individual kit on a GB listing — subkits (40s,
-// accents, an ex-GST line) are cheaper. Pick the most expensive candidate
-// rather than whichever happens to be first in display order; an out-of-range
-// bundle is rejected downstream by isPlausibleBaseKitPrice.
-function dearestCandidate<T extends { price: number }>(pool: T[]): T | undefined {
-  if (pool.length === 0) return undefined;
-  return pool.reduce((best, v) => (v.price > best.price ? v : best));
-}
-
 async function fetchWithTimeout(url: string, extraHeaders?: Record<string, string>): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -76,15 +73,9 @@ const CURRENCY_HOME_COUNTRY: Record<string, string> = {
 
 // Variant titles that are clearly NOT the keycap kit itself — GB listings
 // often bundle add-ons (deskmats, samples, deposits...) as cheap variants.
-const ADDON_VARIANT_RE =
-  /(desk\s?mat|mouse\s?pad|wrist\s?rest|cable|artisan|sticker|sample|keychain|coin|tray|deposit|shipping|insurance|add[\s-]?on|extra)/i;
-
-// Standard subkits that are never the base but aren't accessories, so
-// ADDON_VARIANT_RE misses them (e.g. a numpad kit). Excluded from the base
-// pool so a numpad-only listing clears (NO_BASE_KIT) instead of storing the
-// numpad price as the base. A title that also says "base" is classified BASE
-// first and kept. Mirror of _NONBASE_SUBKIT_RE in scraper/scrape.py.
-const NONBASE_SUBKIT_RE = /num(?:ber)?\s*pad/i;
+// ADDON_VARIANT_RE and NONBASE_SUBKIT_RE now live in @/lib/kit-variants (with
+// classifyVariant and pickBaseVariant) so the price pickers and the nightly
+// audit apply the exact same exclusions.
 
 // Per-currency plausibility bounds for a GMK BASE kit. New base kits run
 // roughly USD 90–180, but RELEASED sets are routinely cleared out at USD
@@ -275,6 +266,7 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     }
     const data = (await res.json()) as {
       product?: {
+        title?: string;
         variants?: Array<{ id?: number | string; title?: string; price?: string | number; available?: boolean }>;
       };
     };
@@ -283,6 +275,29 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
       .map((v) => ({ id: String(v.id ?? ""), title: String(v.title ?? ""), price: Number(v.price) }))
       .filter((v) => !isNaN(v.price) && v.price > 0);
     if (variants.length === 0) return null;
+
+    // The kit identity of a SINGLE-variant product lives in the PRODUCT title
+    // (its only variant is Shopify's literal "Default Title"): vendors sell
+    // novelties/spacebars/artisans as separate products, and without this
+    // guard such a product's lone variant classifies OTHERS and gets stored
+    // as the set's base price. A vendor-pinned ?variant= link stays ground
+    // truth and bypasses the guard. Mirrors the scraper's title guard.
+    const productTitle = String(data.product?.title ?? "");
+    if (!pinnedId && productTitle) {
+      const titleCategory = classifyVariant(productTitle);
+      const isSubkitProduct =
+        titleCategory === "NOVELTIES" ||
+        titleCategory === "SPACEBARS" ||
+        NONBASE_SUBKIT_RE.test(productTitle) ||
+        // Product-title-safe accessory set: ADDON_VARIANT_RE's "extra"/
+        // "shipping" would wrongly clear real "GMK Foo Extras" listings.
+        PRODUCT_ACCESSORY_RE.test(productTitle);
+      if (isSubkitProduct) {
+        // The linked product IS a subkit/accessory — it has no base price, so
+        // clear any stale stored number rather than preserve it.
+        return NO_BASE_KIT;
+      }
+    }
 
     // Shopify's product.json omits availability on some themes. product.js
     // exposes the same variant IDs with an explicit `available` boolean.
@@ -321,31 +336,23 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     // variants in display order; the primary kit comes first on single-kit
     // listings titled "Default Title"). Labeled subkits are excluded below.
     const pinned = pinnedId ? variants.find((v) => v.id === pinnedId) : undefined;
-    const nonAddon = variants.filter((v) => !ADDON_VARIANT_RE.test(v.title));
-    const pool = nonAddon.length > 0 ? nonAddon : variants;
-    // Drop labeled subkits (alphas/novelties/spacebars) so an absent base kit
-    // can't fall through to a cheap subkit; BASE and unlabeled OTHERS (incl. a
-    // single "Default Title" variant) are kept. A listing left with no base
-    // candidate — e.g. Keygem carrying only novelties/spacebars for a set — has
-    // no base price to store, so skip it rather than store a subkit price.
-    const basePool = pool.filter((v) => {
-      const category = classifyVariant(v.title);
-      if (category === "BASE") return true;
-      return category === "OTHERS" && !NONBASE_SUBKIT_RE.test(v.title);
-    });
-    const chosen =
-      pinned ??
-      basePool.find((v) => classifyVariant(v.title) === "BASE") ??
-      dearestCandidate(basePool);
+    // pickBaseVariant is THE canonical base pick (shared with the nightly
+    // audit): accessories dropped (an accessory-only list yields null instead
+    // of falling back to a deskmat price), labeled subkits dropped, first
+    // BASE-titled variant wins, else the dearest remaining candidate.
+    const chosen = pinned ?? pickBaseVariant(variants);
     if (!chosen) {
-      // Read the product fine, but it has no base candidate (only subkits) and
-      // the vendor didn't pin a variant. Clear any stale price rather than
-      // preserve a wrong subkit number. variants is non-empty here (the empty
-      // case returned null above), so this is always a definitive no-base.
+      // Read the product fine, but it has no base candidate (only subkits or
+      // accessories) and the vendor didn't pin a variant. Clear any stale
+      // price rather than preserve a wrong subkit number. variants is
+      // non-empty here (the empty case returned null above), so this is
+      // always a definitive no-base.
       return NO_BASE_KIT;
     }
-    const baseVariants = basePool.filter(
-      (variant) => classifyVariant(variant.title) === "BASE"
+    const baseVariants = variants.filter(
+      (variant) =>
+        !ADDON_VARIANT_RE.test(variant.title) &&
+        classifyVariant(variant.title) === "BASE"
     );
     const relevantVariants = pinned
       ? [pinned]
@@ -560,18 +567,9 @@ async function fetchJsonLdPrice(
       const currency = vendorCurrency ?? null;
       // Refuse currencies the site can't convert (renders as garbage).
       if (currency && !SUPPORTED_CURRENCIES.has(currency)) return null;
-      const nonAddon = wooVariants.filter((v) => !ADDON_VARIANT_RE.test(v.title));
-      const pool = nonAddon.length > 0 ? nonAddon : wooVariants;
-      // Drop labeled subkits so an absent base kit can't fall through to a cheap
-      // alpha/novelty/spacebar; BASE and unlabeled OTHERS are kept.
-      const basePool = pool.filter((v) => {
-        const category = classifyVariant(v.title);
-        if (category === "BASE") return true;
-        return category === "OTHERS" && !NONBASE_SUBKIT_RE.test(v.title);
-      });
-      const chosen =
-        basePool.find((v) => classifyVariant(v.title) === "BASE") ??
-        dearestCandidate(basePool);
+      // Same canonical pick as the Shopify path and the audit; an
+      // accessory-only variation list yields null → NO_BASE_KIT below.
+      const chosen = pickBaseVariant(wooVariants);
       // Only subkits on offer (no base candidate) — clear the stale wrong price
       // rather than preserve it forever.
       if (!chosen) return NO_BASE_KIT;
@@ -649,13 +647,36 @@ async function fetchJsonLdPrice(
         // offer arrays) means we cannot tell the base kit from a spacebars/
         // addon child kit — offers[0] is just the cheapest (how GMK.net base
         // kits got stored as 49.82). Skip rather than guess.
-        const namedBase = offerList.find((o) => /\bbase\b/i.test(String(o?.name ?? "")));
+        // Classify offer names with the SHARED classifier, not a bare
+        // \bbase\b test — "Base + Novelties Bundle" contains "base" but
+        // classifies NOVELTIES, and a bundle's price is not the base price.
+        const namedBase = offerList.find(
+          (o) => classifyVariant(String(o?.name ?? "")) === "BASE"
+        );
         if (!namedBase && offerList.length > 1) {
           // Multiple named/unnamed offers, none identifiable as the base —
           // offers[0] would just be the cheapest subkit. Skip, and remember
           // this so the stale wrong price gets cleared.
           sawAmbiguousAggregate = true;
           continue;
+        }
+        if (!namedBase && offerList.length === 1) {
+          // A single NAMED offer that is a subkit/accessory (the base sold out
+          // and was delisted, leaving e.g. "Novelties — €39") must not be
+          // stored as the base price.
+          const name = String(offerList[0]?.name ?? "");
+          const category = classifyVariant(name);
+          if (
+            name &&
+            (category === "NOVELTIES" ||
+              category === "SPACEBARS" ||
+              category === "ALPHA" ||
+              NONBASE_SUBKIT_RE.test(name) ||
+              PRODUCT_ACCESSORY_RE.test(name))
+          ) {
+            sawAmbiguousAggregate = true;
+            continue;
+          }
         }
         const chosen: LdOffer | undefined =
           namedBase ??
