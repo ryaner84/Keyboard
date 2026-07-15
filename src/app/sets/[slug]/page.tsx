@@ -96,11 +96,17 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
           vendorKits: {
             // GMK is the manufacturer, not a vendor — its rows only carry the
             // gmk.net catalog/image URL and are never shown as a place to buy.
+            // EXCEPT gmk-direct: GMK's own Warehouse Finds sale, a real
+            // purchasable vendor whose listings legitimately live on gmk.net.
             // The OR keeps NULL-productUrl rows (manual prices) visible: a bare
             // NOT-contains would drop them under SQL three-valued logic.
             where: {
               vendor: { slug: { not: "gmk" } },
-              OR: [{ productUrl: null }, { NOT: { productUrl: { contains: "gmk.net" } } }],
+              OR: [
+                { vendor: { slug: "gmk-direct" } },
+                { productUrl: null },
+                { NOT: { productUrl: { contains: "gmk.net" } } },
+              ],
             },
             include: {
               vendor: {

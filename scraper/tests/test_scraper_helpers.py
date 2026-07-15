@@ -302,6 +302,77 @@ class DiscoveryHelpersTests(unittest.TestCase):
             entry,
         )
 
+
+class GmkDirectTests(unittest.TestCase):
+    # Trimmed live markup from gmk.net's Warehouse Finds configurator: a
+    # disabled (sold out) Base Set radio and an enabled one.
+    WF_HTML = (
+        '<form data-variant-switch="true" data-variant-switch-options="'
+        '{&quot;url&quot;:&quot;https:\\/\\/www.gmk.net\\/shop\\/en\\/detail\\/019c\\/switch&quot;,'
+        '&quot;pageType&quot;:&quot;product_detail&quot;}">'
+        '<input type="radio" name="aa11" value="bb22" '
+        'class="product-detail-configurator-option-input not-combinable disabled btn-check" '
+        'id="x"> <label title="Arctic Base Set ">Arctic Base Set</label>'
+        '<input type="radio" name="aa11" value="cc33" '
+        'class="product-detail-configurator-option-input btn-check" '
+        'id="y"> <label title="Lazurite Base Set ">Lazurite Base Set</label>'
+        "</form>"
+    )
+
+    def test_parse_options_and_switch_url(self):
+        switch_url, options = scrape.gmk_wf_parse_options(self.WF_HTML)
+        self.assertEqual(switch_url, "https://www.gmk.net/shop/en/detail/019c/switch")
+        self.assertEqual(len(options), 2)
+        arctic, lazurite = options
+        self.assertEqual(arctic["label"], "Arctic Base Set")
+        self.assertFalse(arctic["available"])  # disabled = sold out
+        self.assertEqual(lazurite["option_id"], "cc33")
+        self.assertTrue(lazurite["available"])
+
+    def test_base_set_label_mapping(self):
+        self.assertEqual(scrape.gmk_wf_base_set_name("Lazurite Base Set"), "GMK Lazurite")
+        self.assertEqual(
+            scrape.gmk_wf_base_set_name("Nightrunner R2 Base Set"),
+            "GMK Nightrunner R2",
+        )
+        # Legends qualifier dropped: the set is GMK Zen Pond.
+        self.assertEqual(
+            scrape.gmk_wf_base_set_name("Zen Pond Latin Base Set"), "GMK Zen Pond"
+        )
+        # Subkits are not base sets.
+        self.assertIsNone(scrape.gmk_wf_base_set_name("Moonlight Spacebars Kit"))
+        self.assertIsNone(scrape.gmk_wf_base_set_name("Blossom Accent Kit"))
+        self.assertIsNone(scrape.gmk_wf_base_set_name("Hazakura Hiragana Set"))
+
+    def test_price_from_buy_box_only(self):
+        doc = (
+            '<span class="header-cart-total">€0.00</span>'
+            '<span class="product-detail-price-container">'
+            '<meta itemprop="price" content="129">'
+            '<p class="product-detail-price"> €129.00 </p></span>'
+        )
+        self.assertEqual(scrape.gmk_wf_price_from_html(doc), 129.0)
+        # No buy box → no price (the €0.00 header must never match).
+        self.assertIsNone(
+            scrape.gmk_wf_price_from_html('<span class="header-cart-total">€0.00</span>')
+        )
+        # Implausible values are rejected.
+        self.assertIsNone(
+            scrape.gmk_wf_price_from_html(
+                '<span class="product-detail-price-container">'
+                '<meta itemprop="price" content="9999"></span>'
+            )
+        )
+
+    def test_warehouse_label_matches_set_index(self):
+        entry = {"status": "IN_STOCK", "gbStart": None}
+        by_full = {"gmk lazurite": entry}
+        by_base = {"gmk lazurite": [entry]}
+        name = scrape.gmk_wf_base_set_name("Lazurite Base Set")
+        self.assertIs(
+            scrape.match_product_to_set(name, by_full, by_base), entry
+        )
+
     def test_strip_round(self):
         self.assertEqual(scrape.strip_round("gmk striker r2"), "gmk striker")
         self.assertEqual(scrape.strip_round("gmk olive"), "gmk olive")

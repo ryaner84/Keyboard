@@ -2267,6 +2267,222 @@ def generic_price(
 
 
 # ----------------------------------------------------------------------------
+# GMK direct sale (gmk.net Warehouse Finds)
+#
+# GMK now sells discounted sets DIRECTLY on gmk.net: the "GMK Warehouse Finds"
+# Shopware product carries an "Available Sets" variant configurator where each
+# option is a specific kit ("Lazurite Base Set", "Moonlight Spacebars Kit", …)
+# with its own price; sold-out options are rendered disabled. The 'gmk' vendor
+# row stays the never-priced MANUFACTURER, so these purchasable listings live
+# under a separate real vendor, 'gmk-direct' (EUR), whose prices this pass
+# writes itself — gmk.net is Shopware, so the Shopify price pass can't touch it
+# (fetch_price_candidates already skips gmk.net URLs).
+#
+# Flow, all plain HTTP (validated live): parent page → parse options → variant
+# switch endpoint (?switched=<group>&options={group:option}) → variant URL →
+# variant page's buy-box price. Only "... Base Set" options are priced; subkit
+# options are ignored, and a sold-out Base Set clears the price (inStock=false).
+# ----------------------------------------------------------------------------
+GMK_DIRECT_PAGES = [
+    "https://www.gmk.net/shop/en/gmk-warehouse-finds/fptk1339",
+]
+GMK_DIRECT_VENDOR_SLUG = "gmk-direct"
+
+_GMK_WF_OPTION_RE = re.compile(
+    r'<input type="radio"\s+name="([0-9a-f]+)"\s+value="([0-9a-f]+)"\s+'
+    r'class="([^"]*)"[\s\S]{0,900}?title="([^"]+)"'
+)
+_GMK_WF_SWITCH_RE = re.compile(r'data-variant-switch-options="([^"]+)"')
+# Price inside the buy box only — the header cart also renders €0.00 amounts.
+_GMK_WF_PRICE_RE = re.compile(
+    r'product-detail-price-container[\s\S]{0,300}?itemprop="price"\s+content="([0-9][0-9.]*)"'
+)
+_GMK_WF_PRICE_TEXT_RE = re.compile(
+    r'product-detail-price"\s*>\s*€\s*([0-9][0-9,.]*)'
+)
+_GMK_WF_BASE_RE = re.compile(r"^(.+?)\s+(?:Latin\s+)?Base\s+Set$", re.IGNORECASE)
+
+
+def gmk_wf_parse_options(html_doc: str) -> tuple[str | None, list[dict]]:
+    """Parse the Warehouse Finds configurator.
+
+    Returns (switch_url, options); each option is
+    {group, option_id, label, available}. A disabled radio means the kit is
+    sold out at GMK."""
+    switch_url = None
+    m = _GMK_WF_SWITCH_RE.search(html_doc)
+    if m:
+        try:
+            switch_url = json.loads(html_unescape(m.group(1))).get("url")
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            switch_url = None
+    options = []
+    for group, option_id, cls, title in _GMK_WF_OPTION_RE.findall(html_doc):
+        options.append({
+            "group": group,
+            "option_id": option_id,
+            "label": html_unescape(title).strip(),
+            "available": "disabled" not in cls,
+        })
+    return switch_url, options
+
+
+def gmk_wf_base_set_name(label: str) -> str | None:
+    """'Lazurite Base Set' -> 'GMK Lazurite'; subkit labels -> None.
+
+    'Zen Pond Latin Base Set' drops the legends qualifier too. The GMK prefix
+    is added because gmk.net options omit the brand our set names carry."""
+    m = _GMK_WF_BASE_RE.match(label.strip())
+    return f"GMK {m.group(1)}" if m else None
+
+
+def gmk_wf_price_from_html(html_doc: str) -> float | None:
+    """The variant page's buy-box price in EUR, sanity-bounded."""
+    m = _GMK_WF_PRICE_RE.search(html_doc)
+    if not m:
+        m = _GMK_WF_PRICE_TEXT_RE.search(html_doc)
+    if not m:
+        return None
+    try:
+        price = float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+    # A GMK base kit, even clearance-priced, lives well inside this window.
+    return price if 10 <= price <= 500 else None
+
+
+def ensure_gmk_direct_vendor(conn) -> str:
+    """Upsert the purchasable GMK Direct vendor (distinct from the 'gmk'
+    manufacturer row). Shipping zones are seeded by the daily cron's
+    ensureShippingZonesForAllVendors, same as every scraper-created vendor."""
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("""
+            INSERT INTO "Vendor"
+                (id, slug, name, region, country, currency, "websiteUrl", "createdAt", "updatedAt")
+            VALUES
+                (gen_random_uuid()::text, %s, 'GMK Direct', 'EU', 'DE', 'EUR',
+                 'https://www.gmk.net/shop/en/', now(), now())
+            ON CONFLICT (slug) DO UPDATE SET "websiteUrl" = EXCLUDED."websiteUrl"
+            RETURNING id
+        """, (GMK_DIRECT_VENDOR_SLUG,))
+        row = cur.fetchone()
+    conn.commit()
+    return row["id"]
+
+
+def run_gmk_direct(
+    conn,
+    context: BrowserContext,
+    deadline: float,
+    scrapling: ScraplingClient | None = None,
+) -> dict:
+    """Price gmk.net Warehouse Finds base sets under the GMK Direct vendor."""
+    stats = {"pages": 0, "base_options": 0, "priced": 0,
+             "out_of_stock": 0, "unmatched": 0}
+    vendor_id = ensure_gmk_direct_vendor(conn)
+    by_full, by_base = _build_set_index(conn)
+    page = context.new_page()
+
+    def fetch_text(url: str) -> str | None:
+        if scrapling and scrapling.available:
+            body = scrapling.get_html(url)
+            if body:
+                return body
+        try:
+            resp = page.goto(url, wait_until="domcontentloaded",
+                             timeout=NAV_TIMEOUT_MS)
+            if resp is not None and resp.ok:
+                return page.content()
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+    def upsert(kit_id: str, price: float | None, in_stock: bool, url: str) -> None:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO "VendorKit"
+                    (id, "kitId", "vendorId", price, currency, "inStock",
+                     "productUrl", "gbUrl", "priceUpdatedAt", "priceSource", "updatedAt")
+                VALUES
+                    (gen_random_uuid()::text, %s, %s, %s, 'EUR', %s, %s, %s, now(), 'SCRAPED', now())
+                ON CONFLICT ("kitId", "vendorId") DO UPDATE SET
+                    price = EXCLUDED.price,
+                    currency = 'EUR',
+                    "inStock" = EXCLUDED."inStock",
+                    "productUrl" = EXCLUDED."productUrl",
+                    "gbUrl" = COALESCE("VendorKit"."gbUrl", EXCLUDED."gbUrl"),
+                    "priceUpdatedAt" = now(),
+                    "priceSource" = 'SCRAPED',
+                    "updatedAt" = now()
+                WHERE "VendorKit"."priceSource" IS DISTINCT FROM 'MANUAL'
+            """, (kit_id, vendor_id, price, in_stock, url, url))
+        conn.commit()
+
+    try:
+        for parent_url in GMK_DIRECT_PAGES:
+            if now_ms() > deadline:
+                log("GMK Direct: time budget reached — stopping.")
+                break
+            doc = fetch_text(parent_url)
+            if not doc:
+                log(f"GMK Direct: could not read {parent_url} — skipped.")
+                continue
+            stats["pages"] += 1
+            switch_url, options = gmk_wf_parse_options(doc)
+
+            for opt in options:
+                if now_ms() > deadline:
+                    break
+                set_name = gmk_wf_base_set_name(opt["label"])
+                if not set_name:
+                    continue  # novelties/spacebars/etc — base sets only
+                stats["base_options"] += 1
+                match = match_product_to_set(set_name, by_full, by_base)
+                if not match:
+                    stats["unmatched"] += 1
+                    log(f"  warehouse option not matched to a set: {opt['label']}")
+                    continue
+
+                if not opt["available"]:
+                    # Sold out at GMK — keep the row but clear the price.
+                    upsert(match["base_kit_id"], None, False, parent_url)
+                    stats["out_of_stock"] += 1
+                    continue
+
+                variant_url = parent_url
+                if switch_url:
+                    params = urllib.parse.urlencode({
+                        "switched": opt["group"],
+                        "options": json.dumps({opt["group"]: opt["option_id"]}),
+                    })
+                    body = fetch_text(f"{switch_url}?{params}")
+                    if body:
+                        try:
+                            m = re.search(r'\{[^{}]*"url"[^{}]*\}', body)
+                            switched = json.loads(html_unescape(m.group(0))) if m else None
+                            if switched and switched.get("url"):
+                                variant_url = switched["url"]
+                        except (json.JSONDecodeError, AttributeError):
+                            pass
+
+                vdoc = doc if variant_url == parent_url else fetch_text(variant_url)
+                price = gmk_wf_price_from_html(vdoc or "")
+                if price is None:
+                    log(f"  no price found for {opt['label']} ({variant_url})")
+                    continue
+                upsert(match["base_kit_id"], price, True, variant_url)
+                stats["priced"] += 1
+                log(f"  GMK Direct priced: {opt['label']} -> EUR {price} ({variant_url})")
+    finally:
+        page.close()
+
+    log(f"GMK Direct -> pages={stats['pages']} base_options={stats['base_options']} "
+        f"priced={stats['priced']} out_of_stock={stats['out_of_stock']} "
+        f"unmatched={stats['unmatched']}")
+    return stats
+
+
+# ----------------------------------------------------------------------------
 # Vendor outlet / clearance collections
 #
 # Discounted GMK restocks live in dedicated vendor collections (e.g. iLumKB's
@@ -4122,6 +4338,9 @@ def main() -> int:
                     # Outlets AFTER discovery (outlet links win the night) and
                     # BEFORE prices (discounted listings priced tonight).
                     out_stats = run_outlets(conn, context, deadline, scrapling)
+                    # GMK's own Warehouse Finds sale — prices itself (Shopware,
+                    # outside the Shopify price pass).
+                    gd_stats = run_gmk_direct(conn, context, deadline, scrapling)
                     price_stats = run_prices(conn, context, deadline, scrapling)
             finally:
                 context.close()
@@ -4179,6 +4398,8 @@ def main() -> int:
         f"relinked={disc_stats['relinked']}")
     log(f"Outlets -> collections={out_stats['collections']} "
         f"products={out_stats['products']} linked={out_stats['linked']}")
+    log(f"GMK Direct -> pages={gd_stats['pages']} priced={gd_stats['priced']} "
+        f"out_of_stock={gd_stats['out_of_stock']} unmatched={gd_stats['unmatched']}")
     log(f"Prices  -> attempted={price_stats['attempted']} "
         f"updated={price_stats['updated']} failed={price_stats['failed']}")
     log("Done.")
