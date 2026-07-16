@@ -68,11 +68,23 @@ model GroupBuy {
   productUrl      String? // direct link to the product/GB page to actually buy
   vendorName      String? // store running the GB, e.g. "NovelKeys", "Prototypist"
   vendorRegion    String? // origin region for shipping estimate: US/EU/SG/ASIA/...
+  // Source/trust metadata. Geekhack forum threads can go stale without the
+  // title changing, so lifecycle status and data confidence are tracked
+  // separately.
+  sourceType           String? // "GEEKHACK" | "KEYCAPLENDAR" | "VENDOR" | null
+  sourceUrl            String?
+  sourceLastCheckedAt  DateTime?
+  sourceLastActivityAt DateTime?
+  dataTrustLevel       String        @default("TRUSTED") // TRUSTED | CAUTION | STALE | DEAD
+  dataTrustReason      String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   kits            Kit[]
   devUpdates      DevUpdate[]
   trackerItems    TrackerItem[]
+
+  @@index([dataTrustLevel])
+  @@index([sourceType])
 }
 
 model Kit {

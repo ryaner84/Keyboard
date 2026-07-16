@@ -12,6 +12,7 @@ import { normalizeImageUrl } from "@/lib/utils";
 import { isCustomSlug } from "@/lib/showcase";
 import { collectionSharePath } from "@/lib/collection-share";
 import { convertCurrency, formatCurrency } from "@/lib/currency-utils";
+import { DataTrustBadge } from "@/components/ui/DataTrustBadge";
 import type {
   CollectionCatalogItem,
   CollectionItemDetails,
@@ -1854,20 +1855,23 @@ function CollectionCard({
           </Link>
         )}
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 p-4">
+          <div className="flex flex-wrap gap-2">
             <span className="rounded-full bg-black/65 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur">
               {item.productType === "KEYBOARD" ? "Keyboard" : "Keycap set"}
             </span>
-            {owned && (
-              <span
-                className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider backdrop-blur ${
-                  item.collection.isPublic
-                    ? "bg-emerald-500/90 text-white"
-                    : "bg-white/85 text-gray-800"
-                }`}
-              >
-                {item.collection.isPublic ? "On display" : "Private"}
-              </span>
-            )}
+            <DataTrustBadge item={item} compact />
+          </div>
+          {owned && (
+            <span
+              className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider backdrop-blur ${
+                item.collection.isPublic
+                  ? "bg-emerald-500/90 text-white"
+                  : "bg-white/85 text-gray-800"
+              }`}
+            >
+              {item.collection.isPublic ? "On display" : "Private"}
+            </span>
+          )}
         </div>
 
         {multiBuild && (

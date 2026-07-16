@@ -3809,16 +3809,31 @@ def _update_gh_listing_metadata(
     existing_end = row[0].date() if row and row[0] else None
     status = _gh_status(title, existing_end, last_post_dt)
     product_type = _gh_classify_title(title)
+    trust_level, trust_reason = _gh_data_trust(status, existing_end, last_post_dt)
+    topic_url = f"https://geekhack.org/index.php?topic={topic_id}.0"
     with conn.cursor() as cur:
         if product_type == "UNKNOWN":
             cur.execute(
                 """
                 UPDATE "GroupBuy"
-                SET status = %s::"GBStatus", "updatedAt" = now()
+                SET status = %s::"GBStatus",
+                    "sourceType" = 'GEEKHACK',
+                    "sourceUrl" = COALESCE("sourceUrl", %s),
+                    "sourceLastCheckedAt" = now(),
+                    "sourceLastActivityAt" = COALESCE(%s, "sourceLastActivityAt"),
+                    "dataTrustLevel" = %s,
+                    "dataTrustReason" = %s,
+                    "updatedAt" = now()
                 WHERE slug = %s
-                  AND status IS DISTINCT FROM %s::"GBStatus"
                 """,
-                (status, f"gh-{topic_id}", status),
+                (
+                    status,
+                    topic_url,
+                    last_post_dt,
+                    trust_level,
+                    trust_reason,
+                    f"gh-{topic_id}",
+                ),
             )
         else:
             cur.execute(
@@ -3826,21 +3841,55 @@ def _update_gh_listing_metadata(
                 UPDATE "GroupBuy"
                 SET status = %s::"GBStatus",
                     "productType" = %s,
+                    "sourceType" = 'GEEKHACK',
+                    "sourceUrl" = COALESCE("sourceUrl", %s),
+                    "sourceLastCheckedAt" = now(),
+                    "sourceLastActivityAt" = COALESCE(%s, "sourceLastActivityAt"),
+                    "dataTrustLevel" = %s,
+                    "dataTrustReason" = %s,
                     "updatedAt" = now()
                 WHERE slug = %s
-                  AND (
-                    status IS DISTINCT FROM %s::"GBStatus"
-                    OR "productType" IS DISTINCT FROM %s
-                  )
                 """,
                 (
                     status,
                     product_type,
+                    topic_url,
+                    last_post_dt,
+                    trust_level,
+                    trust_reason,
                     f"gh-{topic_id}",
-                    status,
-                    product_type,
                 ),
             )
+
+
+def _gh_data_trust(status: str, gb_end_date, last_post_dt: datetime | None) -> tuple[str, str | None]:
+    """Classify Geekhack source confidence separately from GB lifecycle status."""
+    now = datetime.now(timezone.utc)
+    days_since_activity = (now - last_post_dt).days if last_post_dt else None
+
+    if gb_end_date:
+        return "TRUSTED", None
+
+    if status in ("ACTIVE_GB", "INTEREST_CHECK"):
+        if days_since_activity is not None and days_since_activity > 120:
+            return (
+                "DEAD",
+                "Geekhack thread appears inactive and has no confirmed group-buy end date.",
+            )
+        if days_since_activity is None or days_since_activity > 45:
+            return (
+                "STALE",
+                "Geekhack thread has no confirmed GB end date and has not shown recent source activity.",
+            )
+        return "CAUTION", "Geekhack source is missing a confirmed group-buy end date."
+
+    if days_since_activity is None or days_since_activity > 365:
+        return (
+            "STALE",
+            "Geekhack lifecycle status is inferred from an inactive source with no confirmed GB end date.",
+        )
+
+    return "CAUTION", "Geekhack source is missing a confirmed group-buy end date."
 
 
 def _gh_extract_images(html: str) -> list[str]:
@@ -3982,11 +4031,15 @@ def _upsert_gh_set(conn, data: dict) -> tuple[str | None, bool]:
     gb_end_ts = data.get("gb_end_ts")
     topic_url = data["topic_url"]
     title = data["title"]
+    source_type = data.get("source_type") or "GEEKHACK"
+    source_last_activity_at = data.get("source_last_activity_at")
+    data_trust_level = data.get("data_trust_level") or "TRUSTED"
+    data_trust_reason = data.get("data_trust_reason")
 
     # Try to match existing row
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
-            'SELECT id, slug, "productUrl", description FROM "GroupBuy" WHERE slug = ANY(%s)',
+            'SELECT id, slug, "productUrl", "sourceType", description FROM "GroupBuy" WHERE slug = ANY(%s)',
             (variants,),
         )
         existing = cur.fetchone()
@@ -3995,35 +4048,81 @@ def _upsert_gh_set(conn, data: dict) -> tuple[str | None, bool]:
         # Enrich conservatively: only fill blank image fields; never overwrite
         # productUrl (that's the vendor buy-link). Re-running a previously empty
         # thread can therefore repair its card without replacing curated data.
+        is_forum_record = (
+            str(existing["slug"]).startswith("gh-")
+            or "geekhack.org/index.php?topic=" in (existing.get("productUrl") or "")
+            or existing.get("sourceType") == "GEEKHACK"
+        )
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE "GroupBuy" SET
-                    description = CASE WHEN (description IS NULL OR description = '') THEN %s ELSE description END,
-                    "gbEnd"     = COALESCE("gbEnd", %s),
-                    "imageUrl" = CASE
-                        WHEN ("imageUrl" IS NULL OR "imageUrl" = '') AND %s IS NOT NULL
-                        THEN %s ELSE "imageUrl"
-                    END,
-                    images = CASE
-                        WHEN COALESCE(cardinality(images), 0) = 0
-                             AND cardinality(%s::text[]) > 0
-                        THEN %s::text[] ELSE images
-                    END,
-                    "imagesUpdatedAt" = now(),
-                    "updatedAt" = now()
-                WHERE slug = %s
-                """,
-                (
-                    description,
-                    gb_end_ts,
-                    image_url,
-                    image_url,
-                    images,
-                    images,
-                    existing["slug"],
-                ),
-            )
+            if is_forum_record:
+                cur.execute(
+                    """
+                    UPDATE "GroupBuy" SET
+                        description = CASE WHEN (description IS NULL OR description = '') THEN %s ELSE description END,
+                        "gbEnd"     = COALESCE("gbEnd", %s),
+                        "imageUrl" = CASE
+                            WHEN ("imageUrl" IS NULL OR "imageUrl" = '') AND %s IS NOT NULL
+                            THEN %s ELSE "imageUrl"
+                        END,
+                        images = CASE
+                            WHEN COALESCE(cardinality(images), 0) = 0
+                                 AND cardinality(%s::text[]) > 0
+                            THEN %s::text[] ELSE images
+                        END,
+                        "imagesUpdatedAt" = now(),
+                        "sourceType" = %s,
+                        "sourceUrl" = COALESCE("sourceUrl", %s),
+                        "sourceLastCheckedAt" = now(),
+                        "sourceLastActivityAt" = COALESCE(%s, "sourceLastActivityAt"),
+                        "dataTrustLevel" = %s,
+                        "dataTrustReason" = %s,
+                        "updatedAt" = now()
+                    WHERE slug = %s
+                    """,
+                    (
+                        description,
+                        gb_end_ts,
+                        image_url,
+                        image_url,
+                        images,
+                        images,
+                        source_type,
+                        topic_url,
+                        source_last_activity_at,
+                        data_trust_level,
+                        data_trust_reason,
+                        existing["slug"],
+                    ),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE "GroupBuy" SET
+                        description = CASE WHEN (description IS NULL OR description = '') THEN %s ELSE description END,
+                        "gbEnd"     = COALESCE("gbEnd", %s),
+                        "imageUrl" = CASE
+                            WHEN ("imageUrl" IS NULL OR "imageUrl" = '') AND %s IS NOT NULL
+                            THEN %s ELSE "imageUrl"
+                        END,
+                        images = CASE
+                            WHEN COALESCE(cardinality(images), 0) = 0
+                                 AND cardinality(%s::text[]) > 0
+                            THEN %s::text[] ELSE images
+                        END,
+                        "imagesUpdatedAt" = now(),
+                        "updatedAt" = now()
+                    WHERE slug = %s
+                    """,
+                    (
+                        description,
+                        gb_end_ts,
+                        image_url,
+                        image_url,
+                        images,
+                        images,
+                        existing["slug"],
+                    ),
+                )
         return existing["id"], False
 
     # No match — create new row with gh- slug
@@ -4041,11 +4140,16 @@ def _upsert_gh_set(conn, data: dict) -> tuple[str | None, bool]:
             INSERT INTO "GroupBuy"
                 (id, slug, name, colorway, designer, status, "productType",
                  "imageUrl", images, "imagesUpdatedAt", description, featured,
-                 "productUrl", "gbEnd", "createdAt", "updatedAt")
+                 "productUrl", "gbEnd",
+                 "sourceType", "sourceUrl", "sourceLastCheckedAt",
+                 "sourceLastActivityAt", "dataTrustLevel", "dataTrustReason",
+                 "createdAt", "updatedAt")
             VALUES
                 (gen_random_uuid()::text, %s, %s, '', %s, %s::"GBStatus", %s,
                  %s, %s, now(), %s, false,
-                 %s, %s, now(), now())
+                 %s, %s,
+                 %s, %s, now(), %s, %s, %s,
+                 now(), now())
             ON CONFLICT (slug) DO NOTHING
             RETURNING id
             """,
@@ -4053,6 +4157,8 @@ def _upsert_gh_set(conn, data: dict) -> tuple[str | None, bool]:
                 insert_slug, title, designer, status, product_type,
                 image_url, images, description,
                 topic_url, gb_end_ts,
+                source_type, topic_url, source_last_activity_at,
+                data_trust_level, data_trust_reason,
             ),
         )
         row = cur.fetchone()
@@ -4202,6 +4308,7 @@ def run_geekhack(
                 )
 
                 status = _gh_status(title, gb_end_date, last_post_dt)
+                trust_level, trust_reason = _gh_data_trust(status, gb_end_date, last_post_dt)
 
                 # Clean description: strip HTML tags
                 description = re.sub(r"<[^>]+>", " ", body_html)
@@ -4219,6 +4326,10 @@ def run_geekhack(
                     "images": images,
                     "gb_end_ts": gb_end_ts,
                     "topic_url": topic_url,
+                    "source_type": "GEEKHACK",
+                    "source_last_activity_at": last_post_dt,
+                    "data_trust_level": trust_level,
+                    "data_trust_reason": trust_reason,
                 }
 
                 _id, created = _upsert_gh_set(conn, upsert_data)

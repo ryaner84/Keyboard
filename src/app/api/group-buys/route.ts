@@ -29,6 +29,7 @@ export async function GET(req: NextRequest) {
   // leads with the maker, e.g. "Meletrix Zoom65").
   const designers = searchParams.getAll("designer").filter(Boolean).slice(0, 50);
   const slugs = searchParams.getAll("slug").filter(Boolean).slice(0, 100);
+  const includeLowTrust = searchParams.get("includeLowTrust") === "1";
   // Drop browse-only showcase vendors (Lightning Keyboards) at the query level
   // so pagination/counts reflect real group buys — filtering them client-side
   // after a limited fetch silently empties pages that are all-showcase rows.
@@ -53,6 +54,11 @@ export async function GET(req: NextRequest) {
   // independent filters (showcase exclusion + privacy denylist) compose without
   // clobbering each other when spread into the same `where` object.
   const andConditions: Record<string, unknown>[] = [];
+  // Dead Geekhack threads are hidden from browse/search surfaces by default,
+  // but direct slug lookups keep working for existing tracker/share URLs.
+  if (!includeLowTrust && slugs.length === 0) {
+    andConditions.push({ dataTrustLevel: { not: "DEAD" } });
+  }
   // NULL-safe exclusion: `notIn` alone drops rows where vendorName is NULL,
   // so OR it with an explicit null check to keep vendorless group buys.
   if (excludeShowcase) {

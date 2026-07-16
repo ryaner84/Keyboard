@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { notHiddenWhere } from "@/lib/showcase";
 
 const RELEASED_STATUSES = ["SHIPPING", "DELIVERED", "IN_STOCK"] as const;
+const VISIBLE_LISTING_WHERE = { dataTrustLevel: { not: "DEAD" } } as const;
 
 // "Available" means at least one vendor has a current price and its selected
 // base-kit variant is currently purchasable.
@@ -97,6 +98,7 @@ export async function GET(req: NextRequest) {
       : availability;
 
   const where = {
+    ...VISIBLE_LISTING_WHERE,
     status: { in: [...RELEASED_STATUSES] },
     productType,
     ...notHiddenWhere,
@@ -135,7 +137,7 @@ export async function GET(req: NextRequest) {
         ? { gbEnd: { sort: "asc" as const, nulls: "last" as const } }
         : { gbEnd: { sort: "desc" as const, nulls: "last" as const } };
 
-  const releasedWhere = { status: { in: [...RELEASED_STATUSES] }, productType, ...notHiddenWhere };
+  const releasedWhere = { ...VISIBLE_LISTING_WHERE, status: { in: [...RELEASED_STATUSES] }, productType, ...notHiddenWhere };
 
   const needRates = priceSort || savingsSort || page === 1;
   const usdRates: Record<string, number> = {};
@@ -194,7 +196,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Per-category released counts power the Keycaps / Keyboards tab badges.
-  const baseReleased = { status: { in: [...RELEASED_STATUSES] }, ...notHiddenWhere };
+  const baseReleased = { ...VISIBLE_LISTING_WHERE, status: { in: [...RELEASED_STATUSES] }, ...notHiddenWhere };
   const [totalReleased, totalAvailable, countKeycaps, countKeyboards] = await Promise.all([
     prisma.groupBuy.count({ where: releasedWhere }),
     isKeyboard

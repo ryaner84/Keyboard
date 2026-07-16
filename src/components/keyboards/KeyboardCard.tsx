@@ -5,6 +5,7 @@ import Image from "next/image";
 import { normalizeImageUrl } from "@/lib/utils";
 import type { GroupBuyWithPricing } from "@/types";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
+import { DataTrustBadge } from "@/components/ui/DataTrustBadge";
 
 const STAGE_META: Record<string, { label: string; cls: string; dot: string }> = {
   ACTIVE_GB: { label: "GB Open", cls: "text-green-700 bg-green-50 border-green-200 dark:text-green-300 dark:bg-green-950 dark:border-green-800", dot: "bg-green-500" },
@@ -66,6 +67,9 @@ export function KeyboardCard({
         ) : (
           <span className="absolute inset-0 flex items-center justify-center text-4xl text-gray-300">⌨</span>
         )}
+        <div className="absolute left-2 top-2">
+          <DataTrustBadge item={kb} compact />
+        </div>
         </div>
 
         <div className="p-3">

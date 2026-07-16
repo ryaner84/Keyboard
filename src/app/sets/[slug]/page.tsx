@@ -13,6 +13,7 @@ import { ShowcaseDetail } from "@/components/showcase/ShowcaseDetail";
 import { KeyboardDetailsPanel } from "@/components/set-detail/KeyboardDetailsPanel";
 import { parseKeyboardDetails, hasKeyboardDetails } from "@/lib/keyboard-details";
 import { getKeyboardEditionFamily } from "@/data/keyboard-edition-families";
+import { DataTrustBadge, DataTrustNotice } from "@/components/ui/DataTrustBadge";
 import type { Metadata } from "next";
 
 interface PageProps {
@@ -189,6 +190,7 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <StatusBadge status={groupBuy.status} />
+                <DataTrustBadge item={groupBuy} />
                 {/* Product type chip — subtle, tells the user what they're looking at */}
                 {(groupBuy as { productType?: string }).productType === "KEYBOARD" ? (
                   <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-violet-700 bg-violet-50 border border-violet-200 px-2 py-0.5 rounded-full">
@@ -235,6 +237,7 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
               <p className="mt-4 text-sm text-gray-600 leading-relaxed">{groupBuy.description}</p>
             )
           )}
+          <DataTrustNotice item={groupBuy} />
         </div>
       </div>
 

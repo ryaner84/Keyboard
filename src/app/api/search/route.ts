@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
   const where = {
     AND: [
       searchWhere,
+      { dataTrustLevel: { not: "DEAD" } },
       {
         OR: [
           { vendorName: null },

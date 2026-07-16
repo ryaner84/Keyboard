@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { DataTrustBadge } from "@/components/ui/DataTrustBadge";
 import { getCountdownLabel, formatDateRange, normalizeImageUrl } from "@/lib/utils";
 import { useLocation } from "@/context/LocationContext";
 import type { GroupBuyWithKits } from "@/types";
@@ -87,8 +88,9 @@ export function UpcomingCarousel({
                 })()}
 
                 {/* Status badge — top-left */}
-                <div className="absolute top-3 left-3">
+                <div className="absolute top-3 left-3 flex flex-col items-start gap-1">
                   <StatusBadge status={current.status} size="sm" />
+                  <DataTrustBadge item={current} compact />
                 </div>
               </div>
             </Link>
@@ -177,7 +179,10 @@ export function UpcomingCarousel({
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-gray-900 truncate">{set.name}</p>
-                      <p className="text-xs text-gray-400">{label ?? set.designer}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs text-gray-400 truncate">{label ?? set.designer}</p>
+                        <DataTrustBadge item={set} compact />
+                      </div>
                     </div>
                   </Link>
                 );

@@ -42,6 +42,12 @@ export interface GroupBuyWithKits {
   productUrl?: string | null;
   vendorName?: string | null;
   vendorRegion?: string | null;
+  sourceType?: string | null;
+  sourceUrl?: string | null;
+  sourceLastCheckedAt?: Date | string | null;
+  sourceLastActivityAt?: Date | string | null;
+  dataTrustLevel?: string | null;
+  dataTrustReason?: string | null;
   kits: KitSummary[];
 }
 

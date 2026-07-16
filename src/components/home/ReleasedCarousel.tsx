@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { DataTrustBadge } from "@/components/ui/DataTrustBadge";
 import { normalizeImageUrl } from "@/lib/utils";
 import { formatCurrency } from "@/lib/currency-utils";
 import { computeCheapest, computeSavings, type Savings } from "@/lib/pricing";
@@ -79,8 +80,9 @@ export function ReleasedCarousel({ sets }: ReleasedCarouselProps) {
                   </div>
                 )}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                <div className="absolute top-3 left-3">
+                <div className="absolute top-3 left-3 flex flex-col items-start gap-1">
                   <StatusBadge status={current.status} size="sm" />
+                  <DataTrustBadge item={current} compact />
                 </div>
                 {/* Discount badge — vendors price this set differently */}
                 {currentDeal.savings && (
@@ -186,6 +188,7 @@ export function ReleasedCarousel({ sets }: ReleasedCarouselProps) {
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-gray-900 truncate">{set.name}</p>
+                      <DataTrustBadge item={set} compact />
                       <p className="text-xs text-gray-400">
                         {deal.savings ? (
                           <span className="text-amber-600 font-semibold">

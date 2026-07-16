@@ -356,6 +356,7 @@ async function main() {
         await reclassifyKeycapKeyboards(client);
         await expireEndedGroupBuys(client);
         await ensureDiscoveryColumn(client);
+        await ensureDataTrustLayer(client);
         await ensureCurrencies(client);
         await resetPollutedGalleries(client);
         await backfillShipping(client);
@@ -409,6 +410,7 @@ async function main() {
     await purgeCancelledSets(client);
     await purgeBlockedVendorSetPairs(client);
     await ensureDiscoveryColumn(client);
+    await ensureDataTrustLayer(client);
     await ensureCurrencies(client);
     await resetPollutedGalleries(client);
     await backfillShipping(client);
@@ -911,6 +913,157 @@ async function ensureDiscoveryColumn(client) {
     );
   } catch (err) {
     console.warn(`[db-setup] lastDiscoveredAt column setup skipped: ${err.message}`);
+  }
+}
+
+// Data-trust metadata lets the UI distinguish product lifecycle from source
+// confidence. This matters most for Geekhack forum imports: old threads can
+// keep "[GB]" in the title long after the buy died, and some never receive a
+// closing/status update.
+async function ensureDataTrustLayer(client) {
+  const currentYear = new Date().getUTCFullYear();
+  const oldYears = [];
+  for (let year = 2010; year < currentYear; year++) oldYears.push(String(year));
+  const oldYearRegex = oldYears.length > 0 ? `\\m(${oldYears.join("|")})\\M` : "\\m0000\\M";
+  const currentYearRegex = `\\m${currentYear}\\M`;
+
+  try {
+    await client.query(
+      `ALTER TABLE public."GroupBuy"
+       ADD COLUMN IF NOT EXISTS "sourceType" text,
+       ADD COLUMN IF NOT EXISTS "sourceUrl" text,
+       ADD COLUMN IF NOT EXISTS "sourceLastCheckedAt" timestamp(3) without time zone,
+       ADD COLUMN IF NOT EXISTS "sourceLastActivityAt" timestamp(3) without time zone,
+       ADD COLUMN IF NOT EXISTS "dataTrustLevel" text NOT NULL DEFAULT 'TRUSTED',
+       ADD COLUMN IF NOT EXISTS "dataTrustReason" text`
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS "GroupBuy_dataTrustLevel_idx"
+       ON public."GroupBuy" ("dataTrustLevel")`
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS "GroupBuy_sourceType_idx"
+       ON public."GroupBuy" ("sourceType")`
+    );
+
+    const backfilled = await client.query(
+      `UPDATE public."GroupBuy"
+       SET
+         "sourceType" = COALESCE("sourceType", 'GEEKHACK'),
+         "sourceUrl" = COALESCE("sourceUrl", "productUrl"),
+         "sourceLastCheckedAt" = COALESCE("sourceLastCheckedAt", "updatedAt")
+       WHERE slug LIKE 'gh-%'
+          OR "productUrl" ILIKE '%geekhack.org/index.php?topic=%'`
+    );
+
+    const restored = await client.query(
+      `UPDATE public."GroupBuy" gb
+       SET "dataTrustLevel" = 'TRUSTED',
+           "dataTrustReason" = NULL
+       WHERE gb."dataTrustLevel" <> 'TRUSTED'
+         AND EXISTS (
+           SELECT 1
+           FROM public."Kit" k
+           JOIN public."VendorKit" vk ON vk."kitId" = k.id
+           WHERE k."groupBuyId" = gb.id
+             AND vk.price IS NOT NULL
+         )`
+    );
+
+    const dead = await client.query(
+      `UPDATE public."GroupBuy" gb
+       SET "dataTrustLevel" = 'DEAD',
+           "dataTrustReason" = 'Geekhack thread appears inactive and has no live priced vendor listing.'
+       WHERE gb."sourceType" = 'GEEKHACK'
+         AND gb.status::text IN ('ACTIVE_GB', 'INTEREST_CHECK')
+         AND NOT EXISTS (
+           SELECT 1
+           FROM public."Kit" k
+           JOIN public."VendorKit" vk ON vk."kitId" = k.id
+           WHERE k."groupBuyId" = gb.id
+             AND vk.price IS NOT NULL
+         )
+         AND (
+           (gb."sourceLastActivityAt" IS NOT NULL AND gb."sourceLastActivityAt" < now() - interval '120 days')
+           OR (gb."gbEnd" IS NOT NULL AND gb."gbEnd" < now() - interval '21 days')
+           OR (
+             gb."gbEnd" IS NULL
+             AND gb."sourceLastActivityAt" IS NULL
+             AND (gb.name || ' ' || COALESCE(gb.description, '')) ~* $1
+             AND (gb.name || ' ' || COALESCE(gb.description, '')) !~* $2
+           )
+         )`,
+      [oldYearRegex, currentYearRegex]
+    );
+
+    const stale = await client.query(
+      `UPDATE public."GroupBuy" gb
+       SET "dataTrustLevel" = 'STALE',
+           "dataTrustReason" = 'Geekhack thread has no confirmed GB end date and has not shown recent source activity.'
+       WHERE gb."sourceType" = 'GEEKHACK'
+         AND gb."dataTrustLevel" <> 'DEAD'
+         AND gb.status::text IN ('ACTIVE_GB', 'INTEREST_CHECK')
+         AND gb."gbEnd" IS NULL
+         AND NOT EXISTS (
+           SELECT 1
+           FROM public."Kit" k
+           JOIN public."VendorKit" vk ON vk."kitId" = k.id
+           WHERE k."groupBuyId" = gb.id
+             AND vk.price IS NOT NULL
+         )
+         AND (
+           gb."sourceLastActivityAt" IS NULL
+           OR gb."sourceLastActivityAt" < now() - interval '45 days'
+         )`
+    );
+
+    const inferredStale = await client.query(
+      `UPDATE public."GroupBuy" gb
+       SET "dataTrustLevel" = 'STALE',
+           "dataTrustReason" = 'Geekhack lifecycle status is inferred from an inactive source with no confirmed GB end date.'
+       WHERE gb."sourceType" = 'GEEKHACK'
+         AND gb."dataTrustLevel" = 'TRUSTED'
+         AND gb.status::text NOT IN ('ACTIVE_GB', 'INTEREST_CHECK')
+         AND gb."gbEnd" IS NULL
+         AND NOT EXISTS (
+           SELECT 1
+           FROM public."Kit" k
+           JOIN public."VendorKit" vk ON vk."kitId" = k.id
+           WHERE k."groupBuyId" = gb.id
+             AND vk.price IS NOT NULL
+         )
+         AND (
+           gb."sourceLastActivityAt" IS NULL
+           OR gb."sourceLastActivityAt" < now() - interval '365 days'
+         )`
+    );
+
+    const caution = await client.query(
+      `UPDATE public."GroupBuy" gb
+       SET "dataTrustLevel" = 'CAUTION',
+           "dataTrustReason" = 'Geekhack source is missing a confirmed group-buy end date.'
+       WHERE gb."sourceType" = 'GEEKHACK'
+         AND gb."dataTrustLevel" = 'TRUSTED'
+         AND gb.status::text IN ('ACTIVE_GB', 'INTEREST_CHECK')
+         AND gb."gbEnd" IS NULL
+         AND NOT EXISTS (
+           SELECT 1
+           FROM public."Kit" k
+           JOIN public."VendorKit" vk ON vk."kitId" = k.id
+           WHERE k."groupBuyId" = gb.id
+             AND vk.price IS NOT NULL
+         )`
+    );
+
+    const changed = restored.rowCount + dead.rowCount + stale.rowCount + inferredStale.rowCount + caution.rowCount;
+    if (backfilled.rowCount > 0 || changed > 0) {
+      console.log(
+        `[db-setup] Data trust: backfilled ${backfilled.rowCount} Geekhack row(s); ` +
+          `restored ${restored.rowCount}, dead ${dead.rowCount}, stale ${stale.rowCount + inferredStale.rowCount}, caution ${caution.rowCount}.`
+      );
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Data-trust setup skipped: ${err.message}`);
   }
 }
 

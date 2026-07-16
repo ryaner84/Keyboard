@@ -8,6 +8,7 @@ import { getImageCandidates } from "@/lib/utils";
 import { estimateKeyboardShippingUSD } from "@/lib/keyboard-shipping";
 import { ReportListingButton } from "@/components/ui/ReportListingButton";
 import { ShareSetButton } from "@/components/ui/ShareSetButton";
+import { DataTrustBadge } from "@/components/ui/DataTrustBadge";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
 
 interface Props {
@@ -260,6 +261,7 @@ export function KeyboardGallery({
                     <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
                     {meta.label}
                   </span>
+                  <DataTrustBadge item={row} compact />
                 </div>
 
                 <div className="pointer-events-none absolute bottom-3 left-3">

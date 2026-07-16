@@ -20,6 +20,7 @@ async function getTimelineSets(): Promise<GroupBuyWithKits[]> {
     const start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     return (await prisma.groupBuy.findMany({
       where: {
+        dataTrustLevel: { not: "DEAD" },
         status: { in: ["INTEREST_CHECK", "ACTIVE_GB", "SHIPPING"] },
         ...notHiddenWhere,
         OR: [{ gbStart: { gte: start } }, { gbEnd: { gte: now } }],

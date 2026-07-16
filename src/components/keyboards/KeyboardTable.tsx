@@ -8,6 +8,7 @@ import { normalizeImageUrl } from "@/lib/utils";
 import { estimateKeyboardShippingUSD } from "@/lib/keyboard-shipping";
 import { ReportListingButton } from "@/components/ui/ReportListingButton";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
+import { DataTrustBadge } from "@/components/ui/DataTrustBadge";
 
 interface Props {
   rows: GroupBuyWithPricing[];
@@ -212,6 +213,11 @@ export function KeyboardTable({ rows, currency, destRegion, countryCode, convert
                         </div>
                         {specLine && (
                           <div className="text-[11px] text-gray-400 truncate max-w-[200px]">{specLine}</div>
+                        )}
+                        {row.dataTrustLevel && row.dataTrustLevel !== "TRUSTED" && (
+                          <div className="mt-1">
+                            <DataTrustBadge item={row} compact />
+                          </div>
                         )}
                       </div>
                     </Link>

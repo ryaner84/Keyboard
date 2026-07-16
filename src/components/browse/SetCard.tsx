@@ -16,6 +16,7 @@ import { useLocation } from "@/context/LocationContext";
 import { useCurrency } from "@/hooks/useCurrency";
 import type { GroupBuyWithPricing, Region } from "@/types";
 import { ReportListingButton } from "@/components/ui/ReportListingButton";
+import { DataTrustBadge } from "@/components/ui/DataTrustBadge";
 
 interface SetCardProps {
   set: GroupBuyWithPricing;
@@ -107,8 +108,9 @@ export function SetCard({ set }: SetCardProps) {
               <span className="text-[11px] text-gray-400 font-medium">{set.name}</span>
             </div>
           )}
-          <div className="absolute top-3 left-3">
+          <div className="absolute top-3 left-3 flex flex-col items-start gap-1">
             <StatusBadge status={set.status} size="sm" />
+            <DataTrustBadge item={set} compact />
           </div>
           {savings && (
             <div
