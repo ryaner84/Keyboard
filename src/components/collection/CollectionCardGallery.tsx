@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import ReportPhotoButton from "@/components/collection/ReportPhotoButton";
+import { isCustomSlug } from "@/lib/showcase";
 
 export interface GallerySlide {
   // The image to show for this build. May be the build's own uploaded photo
@@ -45,38 +46,51 @@ export function CollectionCardGallery({
     setActive((next + total) % total);
   };
 
+  const media = (
+    <div className="relative aspect-[4/3] overflow-hidden bg-[#ddd9cf] dark:bg-gray-900">
+      {current?.imageUrl ? (
+        // Plain img so owner-uploaded data: URLs render. Uploaded photos show
+        // whole and in proportion (contain); catalog renders fill the frame.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={current.imageUrl}
+          alt={
+            hasMultiple
+              ? `${setName}, build ${current.buildIndex + 1}`
+              : setName
+          }
+          className={`absolute inset-0 h-full w-full transition duration-700 group-hover:scale-[1.03] ${
+            current.isCustom ? "object-contain" : "object-cover"
+          }`}
+        />
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center text-5xl text-gray-300 dark:text-gray-700">
+          ⌨
+        </div>
+      )}
+
+      <span className="absolute left-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 font-serif text-sm text-white backdrop-blur">
+        {String(number).padStart(2, "0")}
+      </span>
+      {buildsCount > 1 && (
+        <span className="absolute right-4 top-4 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur">
+          {buildsCount} builds
+        </span>
+      )}
+    </div>
+  );
+
   return (
     <div className="relative">
-      <Link href={`/sets/${setSlug}`} className="block">
-        <div className="relative aspect-[4/3] overflow-hidden bg-[#ddd9cf] dark:bg-gray-900">
-          {current?.imageUrl ? (
-            // Plain img so owner-uploaded data: URLs render.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={current.imageUrl}
-              alt={
-                hasMultiple
-                  ? `${setName}, build ${current.buildIndex + 1}`
-                  : setName
-              }
-              className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-[1.03]"
-            />
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center text-5xl text-gray-300 dark:text-gray-700">
-              ⌨
-            </div>
-          )}
-
-          <span className="absolute left-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 font-serif text-sm text-white backdrop-blur">
-            {String(number).padStart(2, "0")}
-          </span>
-          {buildsCount > 1 && (
-            <span className="absolute right-4 top-4 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur">
-              {buildsCount} builds
-            </span>
-          )}
-        </div>
-      </Link>
+      {/* Custom (off-catalog) pieces have no /sets page — linking there would
+          land viewers on a 404. Render the media unlinked for them. */}
+      {isCustomSlug(setSlug) ? (
+        <div className="block">{media}</div>
+      ) : (
+        <Link href={`/sets/${setSlug}`} className="block">
+          {media}
+        </Link>
+      )}
 
       {hasMultiple && (
         <>
