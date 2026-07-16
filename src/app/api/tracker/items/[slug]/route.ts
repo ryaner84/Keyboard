@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import { getTrackerSessionUser } from "@/lib/tracker-auth";
 import { cleanCollectionPhoto } from "@/lib/collection-photo";
+import { isCustomSlug } from "@/lib/showcase";
 import type { CollectionUnit } from "@/types";
 
 const CONDITIONS = new Set(["UNBUILT", "EXCELLENT", "GOOD", "FAIR", "PROJECT"]);
@@ -182,9 +183,18 @@ export async function DELETE(
   const { slug } = await params;
   const item = await prisma.trackerItem.findFirst({
     where: { userId: user.id, groupBuy: { slug } },
-    select: { id: true, inCollection: true },
+    select: { id: true, inCollection: true, groupBuyId: true },
   });
   if (!item) return NextResponse.json({ ok: true });
+
+  // A custom (off-catalog) piece exists solely for this owner: deleting it
+  // removes the backing private GroupBuy too (the TrackerItem goes with it via
+  // cascade). Without this, "removing" a custom piece left it orphaned — not
+  // tracked, not in the collection, but forever occupying its name in the DB.
+  if (isCustomSlug(slug)) {
+    await prisma.groupBuy.delete({ where: { id: item.groupBuyId } });
+    return NextResponse.json({ ok: true });
+  }
 
   if (item.inCollection) {
     await prisma.trackerItem.update({

@@ -1390,6 +1390,24 @@ export default function CollectionContent() {
               setNotice(error instanceof Error ? error.message : "Could not move this item");
             }
           }}
+          onDeletePiece={async () => {
+            try {
+              const response = await fetch(
+                `/api/tracker/items/${encodeURIComponent(editingItem.slug)}`,
+                { method: "DELETE" }
+              );
+              if (!response.ok) throw new Error("Could not delete this piece");
+              setItems((current) =>
+                current.filter((candidate) => candidate.slug !== editingItem.slug)
+              );
+              setEditingItem(null);
+              setNotice("Custom piece deleted.");
+            } catch (error) {
+              setNotice(
+                error instanceof Error ? error.message : "Could not delete this piece"
+              );
+            }
+          }}
         />
       )}
 
@@ -2158,12 +2176,14 @@ function CollectionItemEditor({
   onClose,
   onSave,
   onMoveToTracking,
+  onDeletePiece,
 }: {
   item: CollectionCatalogItem;
   defaultCurrency: string;
   onClose: () => void;
   onSave: (changes: Partial<CollectionItemDetails>) => Promise<void>;
   onMoveToTracking: () => Promise<void>;
+  onDeletePiece: () => Promise<void>;
 }) {
   const catalogImage = normalizeImageUrl(item.imageUrl);
   const [form, setForm] = useState({
@@ -2351,12 +2371,15 @@ function CollectionItemEditor({
       </div>
 
       <div className="flex flex-col-reverse gap-3 border-t border-gray-100 px-5 py-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+        {/* Catalog pieces demote to Tracking; a custom (off-catalog) piece has
+            nothing to track — "removing" it used to strand it invisibly (not
+            tracked, not owned), so custom pieces delete outright instead. */}
         <button
-          onClick={onMoveToTracking}
+          onClick={isCustomSlug(item.slug) ? onDeletePiece : onMoveToTracking}
           disabled={busy}
           className="text-sm font-medium text-gray-500 hover:text-red-600 disabled:opacity-50"
         >
-          Remove from collection
+          {isCustomSlug(item.slug) ? "Delete this piece" : "Remove from collection"}
         </button>
         <div className="flex gap-2">
           <button onClick={onClose} className={secondaryButtonClass}>
