@@ -3,7 +3,7 @@
 import { useMemo, useState, useRef, useEffect } from "react";
 import { convertCurrency, formatCurrency } from "@/lib/currency-utils";
 import { dhlShippingUsd, dhlEstimatedDays } from "@/lib/import/shipping";
-import { formatRelativeDate } from "@/lib/utils";
+import { priceFreshness } from "@/lib/utils";
 import { variantsInCategory, type KitVariant } from "@/lib/kit-variants";
 import type { VendorKitWithDetails, ExchangeRates } from "@/types";
 import type { Region } from "@/types";
@@ -338,10 +338,28 @@ export function VendorTable({
               <p className={`text-base font-bold ${isBest ? "text-green-700" : "text-gray-900"}`}>
                 {formatCurrency(row.totalLocal, userCurrency)}
               </p>
-              {row.vk.priceUpdatedAt && (
-                <p className="text-[10px] text-gray-400 mt-0.5">
-                  Updated {formatRelativeDate(row.vk.priceUpdatedAt)}
-                </p>
+              {/* Freshness: MANUAL prices are curated and deliberately never
+                  re-scraped, so they'd read "stale" forever — label them
+                  verified instead of aging them. */}
+              {row.vk.priceSource === "MANUAL" ? (
+                <p className="text-[10px] text-gray-400 mt-0.5">Verified price</p>
+              ) : (
+                (() => {
+                  const freshness = priceFreshness(row.vk.priceUpdatedAt);
+                  if (!freshness) return null;
+                  return freshness.stale ? (
+                    <p
+                      className="mt-0.5 text-[10px] font-medium text-amber-600"
+                      title="This price hasn't been re-checked recently and may be outdated."
+                    >
+                      ⚠ checked {freshness.label}
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      checked {freshness.label}
+                    </p>
+                  );
+                })()
               )}
             </div>
 

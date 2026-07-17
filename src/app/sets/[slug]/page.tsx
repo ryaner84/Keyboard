@@ -6,7 +6,10 @@ import { prisma } from "@/lib/prisma";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { COUNTRY_BY_CODE, DEFAULT_COUNTRY } from "@/data/countries";
 import { formatDateRange, normalizeImageUrl } from "@/lib/utils";
-import { cleanDisplayName, isHiddenSlug, isShowcaseSource, isCustomSlug } from "@/lib/showcase";
+import { cleanDisplayName, isHiddenSlug, isShowcaseSource, isCustomSlug, notHiddenWhere } from "@/lib/showcase";
+import { normalizeSetName, stripRound, roundNumber } from "@/lib/set-name";
+import { RoundFamilyStrip, type RoundEntry } from "@/components/set-detail/RoundFamilyStrip";
+import { MissedItRail, type MissedItCard } from "@/components/set-detail/MissedItRail";
 import { getSiteUrl } from "@/lib/site-url";
 import { SetDetailClient } from "./SetDetailClient";
 import { ShowcaseDetail } from "@/components/showcase/ShowcaseDetail";
@@ -178,6 +181,114 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
   const keyboardDetails = isKeyboard ? parseKeyboardDetails(groupBuy.description) : null;
   const showStructuredDetails = !!keyboardDetails && hasKeyboardDetails(keyboardDetails);
 
+  // ── Keycap round-family cross-links ("GMK Striker" ↔ "GMK Striker R2") ────
+  // The `contains` query is only a cheap prefilter; the normalized post-filter
+  // is what makes membership exact. Keyboards keep their edition-family UI.
+  let familyRounds: RoundEntry[] = [];
+  if (!isKeyboard) {
+    const normalized = normalizeSetName(groupBuy.name);
+    const base = stripRound(normalized);
+    const token = base
+      .split(" ")
+      .filter((word) => word !== "gmk")
+      .sort((a, b) => b.length - a.length)[0];
+    if (token && token.length >= 3) {
+      const candidates = await prisma.groupBuy.findMany({
+        where: {
+          productType: "KEYCAPS",
+          name: { contains: token, mode: "insensitive" },
+          ...notHiddenWhere,
+        },
+        select: { slug: true, name: true, status: true, imageUrl: true, gbEnd: true },
+        take: 50,
+      });
+      familyRounds = candidates
+        .filter((c) => stripRound(normalizeSetName(c.name)) === base)
+        .map((c) => ({
+          slug: c.slug,
+          name: cleanDisplayName(c.name),
+          status: c.status,
+          imageUrl: c.imageUrl,
+          gbEnd: c.gbEnd,
+          round: roundNumber(normalizeSetName(c.name)),
+        }))
+        .sort(
+          (a, b) =>
+            a.round - b.round ||
+            (a.gbEnd?.getTime() ?? 0) - (b.gbEnd?.getTime() ?? 0)
+        );
+    }
+  }
+
+  // ── "Missed it?" recovery rail ─────────────────────────────────────────────
+  // Only when this set has no purchasable vendor: purchasable rounds of the
+  // same family first, then other available sets by the same designer.
+  const purchasable = groupBuy.kits.some((kit) =>
+    kit.vendorKits.some((vk) => vk.price != null && vk.inStock)
+  );
+  let missedItCards: MissedItCard[] = [];
+  if (!isKeyboard && !purchasable) {
+    const availableWhere = {
+      kits: {
+        some: {
+          type: "BASE" as const,
+          vendorKits: { some: { price: { not: null }, inStock: true } },
+        },
+      },
+    };
+    const roundSlugs = familyRounds
+      .filter((round) => round.slug !== slug)
+      .map((round) => round.slug);
+    const [availableRounds, designerSets] = await Promise.all([
+      roundSlugs.length > 0
+        ? prisma.groupBuy.findMany({
+            where: { slug: { in: roundSlugs }, ...availableWhere },
+            select: { slug: true, name: true, status: true, imageUrl: true },
+            take: 4,
+          })
+        : Promise.resolve([]),
+      groupBuy.designer?.trim()
+        ? prisma.groupBuy.findMany({
+            where: {
+              productType: "KEYCAPS",
+              id: { not: groupBuy.id },
+              designer: { equals: groupBuy.designer, mode: "insensitive" },
+              ...notHiddenWhere,
+              ...availableWhere,
+            },
+            select: { slug: true, name: true, status: true, imageUrl: true },
+            orderBy: { gbEnd: { sort: "desc", nulls: "last" } },
+            take: 4,
+          })
+        : Promise.resolve([]),
+    ]);
+    const seen = new Set<string>([slug]);
+    for (const row of availableRounds) {
+      if (seen.has(row.slug)) continue;
+      seen.add(row.slug);
+      missedItCards.push({
+        slug: row.slug,
+        name: cleanDisplayName(row.name),
+        status: row.status,
+        imageUrl: row.imageUrl,
+        reason: "round",
+      });
+    }
+    for (const row of designerSets) {
+      if (missedItCards.length >= 4) break;
+      if (seen.has(row.slug)) continue;
+      seen.add(row.slug);
+      missedItCards.push({
+        slug: row.slug,
+        name: cleanDisplayName(row.name),
+        status: row.status,
+        imageUrl: row.imageUrl,
+        reason: "designer",
+      });
+    }
+    missedItCards = missedItCards.slice(0, 4);
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Hero */}
@@ -318,10 +429,24 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
         </section>
       )}
 
+      {/* Keycap round family — collectors jump between rounds of a colorway */}
+      <RoundFamilyStrip
+        rounds={familyRounds}
+        currentSlug={slug}
+        countryCode={country}
+      />
+
       {/* Client-side interactive section */}
       <SetDetailClient
         groupBuy={{ ...groupBuy, name: displayName } as never}
         initialCountry={country}
+      />
+
+      {/* Recovery path when nothing is purchasable */}
+      <MissedItRail
+        cards={missedItCards}
+        designer={groupBuy.designer?.trim() || null}
+        countryCode={country}
       />
     </div>
   );

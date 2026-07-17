@@ -6,10 +6,12 @@ import { KeyboardOtherStores } from "@/components/set-detail/KeyboardOtherStores
 import { SharePosterButton } from "@/components/set-detail/SharePosterButton";
 import { SuggestVendorPanel } from "@/components/set-detail/SuggestVendorPanel";
 import { VendorTable } from "@/components/set-detail/VendorTable";
+import { KitAvailability } from "@/components/set-detail/KitAvailability";
 import { useLocation } from "@/context/LocationContext";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
 import { convertCurrency, formatCurrency } from "@/lib/currency-utils";
+import { priceFreshness } from "@/lib/utils";
 import type { Region, VendorKitWithDetails } from "@/types";
 
 interface Kit {
@@ -84,6 +86,7 @@ export function SetDetailClient({ groupBuy }: Props) {
     if (available.length === 0) return null;
 
     let minimum = Infinity;
+    let winner: (typeof available)[number] | null = null;
     for (const vendorKit of available) {
       const zone = vendorKit.vendor.shippingZones[0];
       const kit = convertCurrency(
@@ -100,9 +103,19 @@ export function SetDetailClient({ groupBuy }: Props) {
             rates
           )
         : 0;
-      minimum = Math.min(minimum, kit + shipping);
+      if (kit + shipping < minimum) {
+        minimum = kit + shipping;
+        winner = vendorKit;
+      }
     }
-    return minimum < Infinity ? formatCurrency(minimum, currency) : null;
+    if (!(minimum < Infinity) || !winner) return null;
+    return {
+      formatted: formatCurrency(minimum, currency),
+      // Freshness of the WINNING vendor's price, so the banner can say how
+      // recently the headline number was actually checked.
+      priceUpdatedAt: winner.priceUpdatedAt ?? null,
+      isManual: winner.priceSource === "MANUAL",
+    };
   }, [currency, isKeyboard, rates, vendorKitsForRegion]);
 
   const tracked = isTracked(groupBuy.slug);
@@ -148,7 +161,24 @@ export function SetDetailClient({ groupBuy }: Props) {
             <p className="text-xs font-medium text-green-600">
               Best price to {countryCode}
             </p>
-            <p className="text-xl font-bold text-green-800">{bestPrice}</p>
+            <p className="text-xl font-bold text-green-800">{bestPrice.formatted}</p>
+            {(() => {
+              if (bestPrice.isManual) {
+                return <p className="text-[10px] text-green-600/80">Verified price</p>;
+              }
+              const freshness = priceFreshness(bestPrice.priceUpdatedAt);
+              if (!freshness) return null;
+              return freshness.stale ? (
+                <p
+                  className="text-[10px] font-medium text-amber-600"
+                  title="This price hasn't been re-checked recently and may be outdated."
+                >
+                  ⚠ checked {freshness.label}
+                </p>
+              ) : (
+                <p className="text-[10px] text-green-600/80">checked {freshness.label}</p>
+              );
+            })()}
           </div>
           <svg
             className="h-5 w-5 text-green-400"
@@ -184,27 +214,38 @@ export function SetDetailClient({ groupBuy }: Props) {
           />
         </>
       ) : (
-        <div className="rounded-2xl border border-gray-100 bg-white p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-semibold text-gray-900">
-              Base kit prices to {countryCode} in {currency}
-            </h2>
-            <span className="hidden text-xs text-gray-400 sm:inline">
-              sorted by total cost
-            </span>
+        <>
+          <div className="rounded-2xl border border-gray-100 bg-white p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="font-semibold text-gray-900">
+                Base kit prices to {countryCode} in {currency}
+              </h2>
+              <span className="hidden text-xs text-gray-400 sm:inline">
+                sorted by total cost
+              </span>
+            </div>
+
+            <VendorTable
+              slug={groupBuy.slug}
+              vendorKits={vendorKitsForRegion as never}
+              userRegion={region as Region}
+              userCurrency={currency}
+              rates={rates}
+              loading={loading}
+              showUnpriced={!RELEASED_STATUSES.has(groupBuy.status ?? "")}
+              onSuggestVendor={() => setSuggestOpen(true)}
+            />
           </div>
 
-          <VendorTable
-            slug={groupBuy.slug}
+          {/* Subkit availability across vendors — the inverse of the base
+              table, for collectors completing a set. */}
+          <KitAvailability
             vendorKits={vendorKitsForRegion as never}
             userRegion={region as Region}
             userCurrency={currency}
             rates={rates}
-            loading={loading}
-            showUnpriced={!RELEASED_STATUSES.has(groupBuy.status ?? "")}
-            onSuggestVendor={() => setSuggestOpen(true)}
           />
-        </div>
+        </>
       )}
 
       {/* Suggest-vendor tab — visible on both keyboard and keycap set pages so

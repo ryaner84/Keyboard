@@ -75,6 +75,28 @@ export function formatDateRange(
   return `${formatDate(start)} – ${formatDate(end)}`;
 }
 
+// Hour-granular freshness for scraped prices: how long since the scraper last
+// checked this listing, and whether that's stale. The nightly refresher
+// re-checks every priced row roughly daily (maxAgeHours=20), so anything past
+// 48h has missed a full cycle and the shown price may be outdated.
+export function priceFreshness(
+  date: Date | string | null | undefined
+): { label: string; stale: boolean } | null {
+  if (!date) return null;
+  const t = new Date(date).getTime();
+  if (Number.isNaN(t)) return null;
+  const hours = Math.floor((Date.now() - t) / (1000 * 60 * 60));
+  const stale = hours >= 48;
+  if (hours < 1) return { label: "just now", stale };
+  if (hours < 24) return { label: `${hours}h ago`, stale };
+  const days = Math.floor(hours / 24);
+  if (days < 14) return { label: `${days}d ago`, stale };
+  return {
+    label: new Date(t).toLocaleDateString("en-SG", { day: "numeric", month: "short" }),
+    stale,
+  };
+}
+
 // Short relative date for "Updated …" labels, e.g. "today", "3 Jun".
 export function formatRelativeDate(date: Date | string | null): string {
   if (!date) return "never";

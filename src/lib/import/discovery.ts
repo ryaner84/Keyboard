@@ -167,27 +167,10 @@ async function fetchGmkCatalog(origin: string): Promise<CatalogProduct[]> {
   return fetchGmkCatalogHtml(origin);
 }
 
-// Normalize a set/product name for matching: drop bracketed tags ("[GB]",
-// "(Pre-order)"), sales-status words, keycap filler words; unify "Round 3"
-// with "R3"; strip punctuation.
-export function normalizeSetName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\[[^\]]*\]|\([^)]*\)/g, " ")
-    .replace(/\b(group\s*buy|groupbuy|gb|pre[- ]?order|in[- ]?stock|extras?|live|launch(ed)?)\b/g, " ")
-    // "cyl"/"mtnu" are GMK profile tokens, not set identity: "GMK CYL Seafarer"
-    // is the same set as "GMK Seafarer" (vendor outlets and gmk.net both add it).
-    .replace(/\b(keycap\s*sets?|keycaps?|keysets?|cherry\s*profile|cyl|mtnu)\b/g, " ")
-    .replace(/\bround\s*(\d+)\b/g, "r$1")
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-// "gmk striker r2" -> "gmk striker"; names without a round tag are unchanged.
-function stripRound(normalized: string): string {
-  return normalized.replace(/\s+r\d+$/, "").trim();
-}
+// Name normalization now lives in src/lib/set-name.ts (shared with the set
+// page's round-family links); re-exported here for existing callers.
+export { normalizeSetName, stripRound } from "@/lib/set-name";
+import { normalizeSetName, stripRound } from "@/lib/set-name";
 
 interface SetIndexEntry {
   groupBuyId: string;
