@@ -134,6 +134,28 @@ async function purgeBlockedVendorSetPairs(client) {
 // definitive keycap word (GMK / keycaps / keyset / spacebars / novelties) AND
 // the absence of a definitive keyboard word, so real boards are never flipped.
 // Runs every deploy and is idempotent (a flipped row no longer matches).
+// KeycapLendar storeLinks can be empty strings, and until the import guard
+// landed they were written to VendorKit.productUrl/gbUrl verbatim — "" passes
+// an IS NOT NULL filter, so the price scraper tried to navigate to "" (one
+// nightly run failed 87/87 on this). Normalize blanks to NULL so the queues
+// and UI treat them as the missing links they are. Idempotent.
+async function healBlankVendorUrls(client) {
+  try {
+    const res = await client.query(
+      `UPDATE public."VendorKit"
+          SET "productUrl" = NULLIF(btrim(coalesce("productUrl", '')), ''),
+              "gbUrl" = NULLIF(btrim(coalesce("gbUrl", '')), '')
+        WHERE btrim(coalesce("productUrl", '')) = '' AND "productUrl" IS NOT NULL
+           OR btrim(coalesce("gbUrl", '')) = '' AND "gbUrl" IS NOT NULL`
+    );
+    if (res.rowCount > 0) {
+      console.log(`[db-setup] Normalized ${res.rowCount} blank vendor URL(s) to NULL.`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] blank-URL heal skipped: ${err.message}`);
+  }
+}
+
 async function reclassifyKeycapKeyboards(client) {
   try {
     const res = await client.query(
@@ -354,6 +376,7 @@ async function main() {
         await purgeCancelledSets(client);
         await purgeBlockedVendorSetPairs(client);
         await reclassifyKeycapKeyboards(client);
+        await healBlankVendorUrls(client);
         await expireEndedGroupBuys(client);
         await ensureDiscoveryColumn(client);
         await ensureDataTrustLayer(client);

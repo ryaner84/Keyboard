@@ -311,7 +311,11 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
 
       const key = `${baseKitId}:${vendor.id}`;
       const existingVk = vkByKey.get(key);
-      const gbUrl = v.storeLink ?? null;
+      // KeycapLendar storeLinks can be the EMPTY STRING — `?? null` keeps ""
+      // (it's not nullish), and "" passed the price queue's IS NOT NULL filter,
+      // sending the scraper to navigate to "" (a whole nightly price pass
+      // failed 87/87 this way). Normalize blanks to null.
+      const gbUrl = v.storeLink?.trim() || null;
 
       if (!existingVk) {
         // Price stays null until the price scraper fills it in.
@@ -321,17 +325,26 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
         });
         vkByKey.set(key, { id: created.id, kitId: baseKitId, vendorId: vendor.id, inStock, gbUrl, productUrl: gbUrl });
         result.vendorKits++;
-      } else if (
-        existingVk.inStock !== inStock ||
-        existingVk.gbUrl !== gbUrl ||
-        existingVk.productUrl !== gbUrl
-      ) {
-        await prisma.vendorKit.update({
-          where: { id: existingVk.id },
-          data: { inStock, gbUrl, productUrl: gbUrl },
-        });
-        Object.assign(existingVk, { inStock, gbUrl, productUrl: gbUrl });
-        result.vendorKits++;
+      } else {
+        // KeycapLendar is the COARSEST link source: its storeLink may only fill
+        // a MISSING productUrl, never replace one. The scraper's discovery /
+        // outlet passes own productUrl (they point at the live, sometimes
+        // discounted listing) — the old unconditional overwrite re-clobbered
+        // their relinks every daily import.
+        const currentProductUrl = existingVk.productUrl?.trim() || null;
+        const nextProductUrl = currentProductUrl ?? gbUrl;
+        if (
+          existingVk.inStock !== inStock ||
+          existingVk.gbUrl !== gbUrl ||
+          existingVk.productUrl !== nextProductUrl
+        ) {
+          await prisma.vendorKit.update({
+            where: { id: existingVk.id },
+            data: { inStock, gbUrl, productUrl: nextProductUrl },
+          });
+          Object.assign(existingVk, { inStock, gbUrl, productUrl: nextProductUrl });
+          result.vendorKits++;
+        }
       }
     }
 
