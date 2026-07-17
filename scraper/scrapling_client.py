@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Callable
@@ -101,6 +102,12 @@ class ScraplingClient:
         self._stealth_context: Any = None
         self._stealth: Any = None
         self._stealth_profile: str | None = None
+        # The stealth browser is Playwright-sync under the hood; starting or
+        # using it on a thread that has a RUNNING asyncio event loop raises
+        # "Playwright Sync API inside the asyncio loop" (this killed every
+        # stealth fallback in one nightly run). A dedicated single worker
+        # thread has no loop and also satisfies Playwright's same-thread rule.
+        self._stealth_executor: ThreadPoolExecutor | None = None
         self._import_error: Exception | None = None
 
     @property
@@ -150,9 +157,15 @@ class ScraplingClient:
     def __exit__(self, exc_type, exc, traceback) -> None:
         if self._stealth_context is not None:
             try:
-                self._stealth_context.__exit__(exc_type, exc, traceback)
+                # Same thread that created it must tear it down.
+                self._stealth_call(
+                    self._stealth_context.__exit__, exc_type, exc, traceback
+                )
             except Exception:  # noqa: BLE001
                 pass
+        if self._stealth_executor is not None:
+            self._stealth_executor.shutdown(wait=False)
+            self._stealth_executor = None
         if self._http_context is not None:
             try:
                 self._http_context.__exit__(exc_type, exc, traceback)
@@ -160,6 +173,14 @@ class ScraplingClient:
                 pass
         if self._stealth_profile:
             shutil.rmtree(self._stealth_profile, ignore_errors=True)
+
+    def _stealth_call(self, fn: Callable, *args: Any, **kwargs: Any) -> Any:
+        """Run fn on the dedicated stealth thread (created lazily)."""
+        if self._stealth_executor is None:
+            self._stealth_executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="scrapling-stealth"
+            )
+        return self._stealth_executor.submit(fn, *args, **kwargs).result()
 
     def _ensure_stealth(self) -> Any:
         if not self.available or self._stealth_session_type is None:
@@ -173,17 +194,20 @@ class ScraplingClient:
             self._stealth_profile = tempfile.mkdtemp(
                 prefix="gmk-tracker-browser-profile-scrapling-"
             )
-            self._stealth_context = self._stealth_session_type(
-                headless=self.headless,
-                solve_cloudflare=False,
-                block_ads=True,
-                timeout=75_000,
-                retries=2,
-                retry_delay=2,
-                google_search=True,
-                user_data_dir=self._stealth_profile,
-            )
-            self._stealth = self._stealth_context.__enter__()
+            def start() -> Any:
+                self._stealth_context = self._stealth_session_type(
+                    headless=self.headless,
+                    solve_cloudflare=False,
+                    block_ads=True,
+                    timeout=75_000,
+                    retries=2,
+                    retry_delay=2,
+                    google_search=True,
+                    user_data_dir=self._stealth_profile,
+                )
+                return self._stealth_context.__enter__()
+
+            self._stealth = self._stealth_call(start)
             self.log("Scrapling stealth browser started for protected-page fallback.")
             return self._stealth
         except Exception as exc:  # noqa: BLE001
@@ -274,14 +298,14 @@ class ScraplingClient:
             if wait_selector:
                 kwargs["wait_selector"] = wait_selector
                 kwargs["wait_selector_state"] = "attached"
-            response = stealth.fetch(url, **kwargs)
+            response = self._stealth_call(stealth.fetch, url, **kwargs)
             body = decode_response_body(response)
             status = getattr(response, "status", None)
             if response_is_blocked(status, body):
                 self.stats.blocked += 1
                 kwargs["solve_cloudflare"] = True
                 kwargs["timeout"] = 75_000
-                response = stealth.fetch(url, **kwargs)
+                response = self._stealth_call(stealth.fetch, url, **kwargs)
                 body = decode_response_body(response)
                 status = getattr(response, "status", None)
                 if response_is_blocked(status, body):

@@ -870,7 +870,10 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
   const candidates = await prisma.vendorKit.findMany({
     where: {
       ...(ids && ids.length > 0 && { id: { in: ids } }),
-      productUrl: { not: null },
+      // Blank ("") productUrls are bad import data, not scrapeable listings —
+      // they pass a bare IS NOT NULL filter and once sent a whole nightly
+      // price pass to navigate to "".
+      productUrl: { not: null, notIn: [""] },
       // GMK is the manufacturer, not a vendor — its rows only carry the
       // gmk.net URL for the image pass and must never enter the price queue.
       vendor: { slug: { not: "gmk" } },

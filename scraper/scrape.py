@@ -1331,6 +1331,7 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
           JOIN "Kit" k ON k.id = vk."kitId"
           JOIN "Vendor" v ON v.id = vk."vendorId"
          WHERE vk."productUrl" IS NOT NULL
+           AND btrim(vk."productUrl") <> ''
            AND k.type = 'BASE'
            AND v.slug <> 'gmk'
            AND vk."productUrl" NOT ILIKE '%%gmk.net%%'
@@ -2703,14 +2704,29 @@ def run_prices(
                 log("Price pass: time budget reached — stopping.")
                 break
             stats["attempted"] += 1
+            # Defensive: a blank productUrl (bad import data) would send the
+            # browser to "" and fail the whole row loudly — the SQL filter
+            # excludes them, but guard here too and rotate the row onward.
+            product_url = (vk["productUrl"] or "").strip()
+            if not product_url:
+                log(f"  blank productUrl — skipped (VendorKit {vk['id']})")
+                with conn.cursor() as cur:
+                    cur.execute(
+                        'UPDATE "VendorKit" SET "productUrl" = NULL, '
+                        '"priceUpdatedAt" = now() WHERE id = %s',
+                        (vk["id"],),
+                    )
+                conn.commit()
+                stats["failed"] += 1
+                continue
             # Shopify exposes /products/<handle>.json; everything else (Latamkeys
             # /productos/, STACKS /store/) is a generic WooCommerce storefront.
             price_fn = (
-                shopify_price if "/products/" in vk["productUrl"] else generic_price
+                shopify_price if "/products/" in product_url else generic_price
             )
             result = price_fn(
                 page,
-                vk["productUrl"],
+                product_url,
                 vk.get("vendor_currency"),
                 scrapling,
             )
