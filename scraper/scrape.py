@@ -1585,9 +1585,9 @@ def ensure_gmk_vendor(conn) -> str:
         else:
             cur.execute("""
                 INSERT INTO "Vendor"
-                    (id, slug, name, region, country, currency, "websiteUrl", "logoUrl", "createdAt", "updatedAt")
+                    (id, slug, name, region, country, currency, "websiteUrl", "logoUrl")
                 VALUES
-                    (gen_random_uuid()::text, %s, 'GMK', 'EU', 'DE', 'EUR', %s, NULL, now(), now())
+                    (gen_random_uuid()::text, %s, 'GMK', 'EU', 'DE', 'EUR', %s, NULL)
                 ON CONFLICT (slug) DO UPDATE SET "websiteUrl" = EXCLUDED."websiteUrl"
                 RETURNING id
             """, (GMK_VENDOR_SLUG, GMK_NET_ORIGIN))
@@ -1842,9 +1842,9 @@ def ensure_zfrontier_vendor(conn) -> str:
             # Region/currency mirror vendor-overrides.ts (ASIA / CN / USD).
             cur.execute("""
                 INSERT INTO "Vendor"
-                    (id, slug, name, region, country, currency, "websiteUrl", "logoUrl", "createdAt", "updatedAt")
+                    (id, slug, name, region, country, currency, "websiteUrl", "logoUrl")
                 VALUES
-                    (gen_random_uuid()::text, %s, 'zFrontier', 'ASIA', 'CN', 'USD', %s, NULL, now(), now())
+                    (gen_random_uuid()::text, %s, 'zFrontier', 'ASIA', 'CN', 'USD', %s, NULL)
                 ON CONFLICT (slug) DO UPDATE SET "websiteUrl" = EXCLUDED."websiteUrl"
                 RETURNING id
             """, (ZFRONTIER_VENDOR_SLUG, ZFRONTIER_ORIGIN))
@@ -2449,10 +2449,10 @@ def ensure_gmk_direct_vendor(conn) -> str:
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute("""
             INSERT INTO "Vendor"
-                (id, slug, name, region, country, currency, "websiteUrl", "createdAt", "updatedAt")
+                (id, slug, name, region, country, currency, "websiteUrl")
             VALUES
                 (gen_random_uuid()::text, %s, 'GMK Direct', 'EU', 'DE', 'EUR',
-                 'https://www.gmk.net/shop/en/', now(), now())
+                 'https://www.gmk.net/shop/en/')
             ON CONFLICT (slug) DO UPDATE SET "websiteUrl" = EXCLUDED."websiteUrl"
             RETURNING id
         """, (GMK_DIRECT_VENDOR_SLUG,))
