@@ -8,6 +8,8 @@
 export interface KitVariant {
   title: string;
   price: number;
+  // Present only when the store reported per-variant stock at scrape time.
+  available?: boolean;
 }
 
 export type VariantCategory = "BASE" | "ALPHA" | "NOVELTIES" | "SPACEBARS" | "OTHERS";
@@ -93,7 +95,14 @@ export function parseVariants(raw: unknown): KitVariant[] {
       (v): v is { title: unknown; price: unknown } =>
         typeof v === "object" && v !== null && "title" in v && "price" in v
     )
-    .map((v) => ({ title: String(v.title), price: Number(v.price) }))
+    .map((v) => {
+      const available = (v as { available?: unknown }).available;
+      return {
+        title: String(v.title),
+        price: Number(v.price),
+        ...(typeof available === "boolean" ? { available } : {}),
+      };
+    })
     .filter((v) => v.title.length > 0 && !isNaN(v.price) && v.price > 0);
 }
 

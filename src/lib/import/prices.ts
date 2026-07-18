@@ -36,9 +36,10 @@ export interface PriceResult {
   // null when the store's /meta.json is blocked — caller must fall back to the
   // vendor's own currency, never assume USD.
   currency: string | null;
-  // Every variant on the product page, in display order: feeds the
-  // Base / Alpha / Novelties / Spacebars / Others filter on the set page.
-  variants: Array<{ title: string; price: number }>;
+  // Every variant on the product page, in display order: feeds the set
+  // page's kit sections. `available` present only when the store reported
+  // per-variant stock.
+  variants: Array<{ title: string; price: number; available?: boolean }>;
 }
 
 // Sentinel distinct from null. `null` means the listing couldn't be read this
@@ -431,7 +432,14 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
       price: chosen.price,
       currency,
       inStock,
-      variants: variants.map(({ title, price }) => ({ title, price })),
+      // Persist per-variant availability when Shopify reported it, so the set
+      // page's "Complete the set" section can show subkit stock the same way
+      // the base table does. Unknown stock is omitted, not guessed.
+      variants: variants.map((v) => ({
+        title: v.title,
+        price: v.price,
+        ...(availableById.has(v.id) ? { available: availableById.get(v.id)! } : {}),
+      })),
     };
   } catch {
     return null;
@@ -578,7 +586,11 @@ async function fetchJsonLdPrice(
         price: chosen.price,
         currency,
         inStock: chosen.available,
-        variants: wooVariants.map((v) => ({ title: v.title, price: v.price })),
+        variants: wooVariants.map((v) => ({
+          title: v.title,
+          price: v.price,
+          available: v.available,
+        })),
       };
     }
 

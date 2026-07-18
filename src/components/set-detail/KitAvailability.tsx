@@ -26,6 +26,9 @@ interface KitOffer {
   priceLocal: number;
   priceOriginal: number;
   currencyOriginal: string;
+  // true/false when the store reported this variant's stock; undefined when
+  // the listing didn't expose per-variant availability.
+  available?: boolean;
 }
 
 // Friendly label for a named non-base subkit title (first matching keyword).
@@ -92,6 +95,7 @@ export function KitAvailability({
           priceLocal: convertCurrency(variant.price, kitCurrency, userCurrency, rates),
           priceOriginal: variant.price,
           currencyOriginal: kitCurrency,
+          available: variant.available,
         });
         byLabel.set(label, list);
       }
@@ -99,7 +103,15 @@ export function KitAvailability({
     // Cheapest first within each kit; standard kits first, named others after.
     const entries = Array.from(byLabel.entries()).map(([label, offers]) => ({
       label,
-      offers: offers.sort((a, b) => a.priceLocal - b.priceLocal),
+      // Same ordering convention as the base-kit table: purchasable listings
+      // rank first (sold-out sinks), then cheapest within each group. Unknown
+      // stock sorts with purchasable — it's a lead worth showing.
+      offers: offers.sort((a, b) => {
+        const aOut = a.available === false ? 1 : 0;
+        const bOut = b.available === false ? 1 : 0;
+        if (aOut !== bOut) return aOut - bOut;
+        return a.priceLocal - b.priceLocal;
+      }),
     }));
     entries.sort((a, b) => {
       const ai = STANDARD_ORDER.indexOf(a.label);
@@ -121,8 +133,9 @@ export function KitAvailability({
         <span className="text-xs text-gray-400">prices exclude shipping</span>
       </div>
       <p className="mb-4 text-xs leading-5 text-gray-500">
-        Add-on kits vendors list alongside the base kit. Subkit stock isn&apos;t
-        tracked — check the vendor&apos;s product page before ordering.
+        Add-on kits vendors list alongside the base kit. A green dot means the
+        vendor reports it in stock, a gray dot sold out; kits without a dot
+        don&apos;t report stock — check the product page before ordering.
       </p>
 
       <div className="space-y-3">
@@ -136,30 +149,62 @@ export function KitAvailability({
             </span>
             <div className="flex min-w-0 flex-1 flex-wrap gap-2">
               {offers.map((offer, index) => {
+                const soldOut = offer.available === false;
+                const isCheapest = index === 0 && !soldOut && offers.length > 1;
                 const chip = (
                   <>
-                    <span className="truncate font-medium text-gray-700">
+                    {/* Same stock language as the base-kit rows: emerald dot =
+                        in stock, gray dot = sold out; no dot when the store
+                        didn't report per-variant stock. */}
+                    {offer.available !== undefined && (
+                      <span
+                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                          soldOut ? "bg-gray-400" : "bg-emerald-500"
+                        }`}
+                      />
+                    )}
+                    <span
+                      className={`truncate font-medium ${
+                        soldOut ? "text-gray-400" : "text-gray-700"
+                      }`}
+                    >
                       {offer.vendorName}
                     </span>
                     <span
                       className={`shrink-0 font-semibold ${
-                        index === 0 ? "text-emerald-700" : "text-gray-900"
+                        soldOut
+                          ? "text-gray-400"
+                          : isCheapest
+                            ? "text-emerald-700"
+                            : "text-gray-900"
                       }`}
                     >
                       {formatCurrency(offer.priceLocal, userCurrency)}
                     </span>
-                    {index === 0 && offers.length > 1 && (
+                    {isCheapest && (
                       <span className="shrink-0 rounded bg-emerald-100 px-1 text-[9px] font-bold uppercase tracking-wide text-emerald-700">
                         Cheapest
+                      </span>
+                    )}
+                    {soldOut && (
+                      <span className="shrink-0 rounded bg-gray-100 px-1 text-[9px] font-bold uppercase tracking-wide text-gray-500">
+                        Sold out
                       </span>
                     )}
                   </>
                 );
                 const chipClass =
                   "inline-flex max-w-full items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 text-xs " +
-                  (index === 0
-                    ? "border-emerald-200"
-                    : "border-gray-200");
+                  (soldOut
+                    ? "border-gray-200 opacity-75"
+                    : isCheapest
+                      ? "border-emerald-200"
+                      : "border-gray-200");
+                const stockTitle = soldOut
+                  ? "sold out at this vendor"
+                  : offer.available === true
+                    ? "in stock at this vendor"
+                    : "stock not reported — check the product page";
                 return offer.url ? (
                   <a
                     key={`${offer.vendorName}-${index}`}
@@ -167,12 +212,16 @@ export function KitAvailability({
                     target="_blank"
                     rel="noopener noreferrer"
                     className={`${chipClass} transition-colors hover:border-indigo-300`}
-                    title={`${offer.vendorName}: ${formatCurrency(offer.priceOriginal, offer.currencyOriginal)} — open product page`}
+                    title={`${offer.vendorName}: ${formatCurrency(offer.priceOriginal, offer.currencyOriginal)} (${stockTitle}) — open product page`}
                   >
                     {chip}
                   </a>
                 ) : (
-                  <span key={`${offer.vendorName}-${index}`} className={chipClass}>
+                  <span
+                    key={`${offer.vendorName}-${index}`}
+                    className={chipClass}
+                    title={stockTitle}
+                  >
                     {chip}
                   </span>
                 );

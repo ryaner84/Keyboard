@@ -1236,7 +1236,21 @@ def shopify_price(
             variants, chosen, pinned_id, availability_by_id
         )
         # Stored variants carry title+price only (what the UI parses).
-        variants = [{"title": v["title"], "price": v["price"]} for v in variants]
+        # Persist per-variant availability when Shopify reported it, so the
+        # set page's "Complete the set" section can show subkit stock the same
+        # way the base table does. Unknown stock is omitted, not guessed.
+        variants = [
+            {
+                "title": v["title"],
+                "price": v["price"],
+                **(
+                    {"available": availability_by_id[v["id"]]}
+                    if v["id"] in availability_by_id
+                    else {}
+                ),
+            }
+            for v in variants
+        ]
         return {
             "price": chosen["price"],
             "currency": currency,
@@ -1280,8 +1294,11 @@ def fetch_frozen_catalog_slugs(conn) -> set[str]:
            AND EXISTS (
                 SELECT 1 FROM "VendorKit" vk
                   JOIN "Kit" k ON k.id = vk."kitId"
+                  JOIN "Vendor" v ON v.id = vk."vendorId"
                  WHERE k."groupBuyId" = gb.id
-                   AND vk."productUrl" ILIKE '%%gmk.net%%')
+                   AND v.slug = 'gmk'
+                   AND vk."productUrl" ILIKE '%%gmk.net%%'
+                   AND vk."productUrl" NOT ILIKE '%%warehouse-finds%%')
     """
     with conn.cursor() as cur:
         cur.execute(sql, (list(TERMINAL_STATUSES),))
@@ -1291,11 +1308,17 @@ def fetch_frozen_catalog_slugs(conn) -> set[str]:
 def fetch_image_candidates(conn, limit: int = 200) -> list[dict]:
     sql = """
         SELECT gb.id, gb.slug, gb."imageUrl", gb.images,
+               -- Manufacturer link ONLY (vendor slug 'gmk'): the gmk-direct
+               -- Warehouse Finds URL is a shared multi-set sale page — scraping
+               -- it filled galleries with OTHER sets' photos (gmk-lazurite).
                (SELECT vk."productUrl"
                   FROM "VendorKit" vk
                   JOIN "Kit" k ON k.id = vk."kitId"
+                  JOIN "Vendor" v ON v.id = vk."vendorId"
                  WHERE k."groupBuyId" = gb.id
+                   AND v.slug = 'gmk'
                    AND vk."productUrl" ILIKE '%%gmk.net%%'
+                   AND vk."productUrl" NOT ILIKE '%%warehouse-finds%%'
                  LIMIT 1) AS gmk_url
           FROM "GroupBuy" gb
          WHERE (gb."imagesUpdatedAt" IS NULL
@@ -1309,8 +1332,11 @@ def fetch_image_candidates(conn, limit: int = 200) -> list[dict]:
            AND EXISTS (
                 SELECT 1 FROM "VendorKit" vk
                   JOIN "Kit" k ON k.id = vk."kitId"
+                  JOIN "Vendor" v ON v.id = vk."vendorId"
                  WHERE k."groupBuyId" = gb.id
-                   AND vk."productUrl" ILIKE '%%gmk.net%%')
+                   AND v.slug = 'gmk'
+                   AND vk."productUrl" ILIKE '%%gmk.net%%'
+                   AND vk."productUrl" NOT ILIKE '%%warehouse-finds%%')
          ORDER BY gb."imagesUpdatedAt" ASC NULLS FIRST
          LIMIT %s
     """
@@ -2332,7 +2358,14 @@ def generic_price(
         return {
             "price": chosen["price"],
             "currency": vendor_currency,
-            "variants": [{"title": v["title"], "price": v["price"]} for v in variants],
+            "variants": [
+                {
+                    "title": v["title"],
+                    "price": v["price"],
+                    "available": bool(v.get("available", True)),
+                }
+                for v in variants
+            ],
             "inStock": bool(chosen.get("available", True)),
         }
 
