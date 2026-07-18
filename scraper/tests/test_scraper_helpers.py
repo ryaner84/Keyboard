@@ -234,6 +234,12 @@ class GenericStorefrontTests(unittest.TestCase):
         variants = scrape.parse_woocommerce_variations(self.WOO_HTML)
         self.assertEqual(scrape.choose_kit_variant(variants)["price"], 184285.71)
 
+    def test_woocommerce_variations_carry_availability(self):
+        # Per-variant stock feeds the set page's "Complete the set" dots — it
+        # must survive parsing so generic_price can persist it.
+        variants = scrape.parse_woocommerce_variations(self.WOO_HTML)
+        self.assertTrue(all(isinstance(v.get("available"), bool) for v in variants))
+
     def test_non_woocommerce_html_yields_no_variations(self):
         self.assertEqual(scrape.parse_woocommerce_variations("<html></html>"), [])
 

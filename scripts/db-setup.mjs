@@ -139,6 +139,28 @@ async function purgeBlockedVendorSetPairs(client) {
 // an IS NOT NULL filter, so the price scraper tried to navigate to "" (one
 // nightly run failed 87/87 on this). Normalize blanks to NULL so the queues
 // and UI treat them as the missing links they are. Idempotent.
+// The image pass briefly scraped gmk.net's SHARED Warehouse Finds sale page
+// for sets linked by the gmk-direct vendor, filling their galleries with other
+// sets' photos (gmk-lazurite showed Blossom/Moonlight/Arctic images). The
+// warehouse hero image is a reliable marker for contamination: wipe those
+// galleries and clear the stamp so the (now manufacturer-only) image pass
+// rebuilds them from the set's own product page. Idempotent.
+async function healWarehouseGalleries(client) {
+  try {
+    const res = await client.query(
+      `UPDATE public."GroupBuy"
+          SET images = '{}', "imagesUpdatedAt" = NULL
+        WHERE EXISTS (SELECT 1 FROM unnest(images) AS img
+                       WHERE img ILIKE '%warehouse-find%')`
+    );
+    if (res.rowCount > 0) {
+      console.log(`[db-setup] Reset ${res.rowCount} warehouse-contaminated gallery(ies).`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] warehouse-gallery heal skipped: ${err.message}`);
+  }
+}
+
 async function healBlankVendorUrls(client) {
   try {
     const res = await client.query(
@@ -377,6 +399,7 @@ async function main() {
         await purgeBlockedVendorSetPairs(client);
         await reclassifyKeycapKeyboards(client);
         await healBlankVendorUrls(client);
+        await healWarehouseGalleries(client);
         await expireEndedGroupBuys(client);
         await ensureDiscoveryColumn(client);
         await ensureDataTrustLayer(client);
