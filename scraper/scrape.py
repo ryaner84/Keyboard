@@ -2114,29 +2114,44 @@ def gmk_products_from_catalog(data: dict, origin: str) -> list[dict]:
     return out
 
 
-def match_product_to_set(
-    title: str,
-    by_full: dict[str, dict],
-    by_base: dict[str, list[dict]],
-) -> dict | None:
-    """Mirror of matchProduct in discovery.ts. Exact (round-aware) name match
-    wins; else fall back to the base name and prefer the ACTIVE_GB round, then
-    the newest. Returns None rather than guessing across different sets."""
-    full = normalize_set_name(title)
-    if not full:
-        return None
-    exact = by_full.get(full)
-    if exact:
-        return exact
-    candidates = by_base.get(strip_round(full))
-    if not candidates:
-        return None
+def _pick_from_family(candidates: list[dict]) -> dict:
+    """ACTIVE round wins, else the newest — vendors sell the current round."""
     if len(candidates) == 1:
         return candidates[0]
     active = [c for c in candidates if c["status"] == "ACTIVE_GB"]
     if len(active) == 1:
         return active[0]
     pool = active if active else candidates
+    return max(pool, key=lambda c: c["gbStart"].timestamp() if c["gbStart"] else 0.0)
+
+
+def match_product_to_set(
+    title: str,
+    by_full: dict[str, dict],
+    by_base: dict[str, list[dict]],
+) -> dict | None:
+    """Mirror of matchProduct in discovery.ts.
+
+    A title WITH an explicit round ("GMK Striker R2") is unambiguous — exact
+    match wins. A BARE title is ambiguous between the ORIGINAL run (whose DB
+    row is also unsuffixed) and the CURRENT round: vendors sell the current
+    round under the bare name, and exact-matching first attached R2/R3
+    listings (and their prices) to the round-1 row. Bare titles therefore
+    resolve within the round FAMILY — the round that's selling wins, else the
+    newest. Returns None rather than guessing across different sets."""
+    full = normalize_set_name(title)
+    if not full:
+        return None
+    if re.search(r"\br\d+$", full):
+        exact = by_full.get(full)
+        if exact:
+            return exact
+        candidates = by_base.get(strip_round(full))
+        return _pick_from_family(candidates) if candidates else None
+    candidates = by_base.get(full)
+    if candidates:
+        return _pick_from_family(candidates)
+    return by_full.get(full)
     # Sort by epoch seconds (0 when undated) so a NULL gbStart can't trigger an
     # aware-vs-naive datetime comparison error on real DB rows.
     return max(pool, key=lambda c: c["gbStart"].timestamp() if c["gbStart"] else 0.0)
