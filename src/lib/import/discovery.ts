@@ -225,24 +225,37 @@ async function buildSetIndex(): Promise<SetIndex> {
 // wins; otherwise fall back to the base name and prefer the round that's
 // actually selling (ACTIVE_GB), then the newest round. Returns null rather
 // than guessing across genuinely different sets.
-function matchProduct(title: string, index: SetIndex): SetIndexEntry | null {
-  const full = normalizeSetName(title);
-  if (!full) return null;
-
-  const exact = index.byFull.get(full);
-  if (exact) return exact;
-
-  const candidates = index.byBase.get(stripRound(full));
-  if (!candidates || candidates.length === 0) return null;
+function pickFromFamily(candidates: SetIndexEntry[]): SetIndexEntry {
   if (candidates.length === 1) return candidates[0];
-
   const active = candidates.filter((c) => c.status === "ACTIVE_GB");
   if (active.length === 1) return active[0];
-
   const pool = active.length > 0 ? active : candidates;
   return [...pool].sort(
     (a, b) => (b.gbStart?.getTime() ?? 0) - (a.gbStart?.getTime() ?? 0)
   )[0];
+}
+
+function matchProduct(title: string, index: SetIndex): SetIndexEntry | null {
+  const full = normalizeSetName(title);
+  if (!full) return null;
+
+  // A title WITH an explicit round ("GMK Striker R2") is unambiguous: exact
+  // match wins, family fallback only when the DB lacks that exact round.
+  if (/r\d+$/.test(full)) {
+    const exact = index.byFull.get(full);
+    if (exact) return exact;
+    const candidates = index.byBase.get(stripRound(full));
+    return candidates && candidates.length > 0 ? pickFromFamily(candidates) : null;
+  }
+
+  // A BARE title is ambiguous between the ORIGINAL run (whose DB row is also
+  // unsuffixed) and the CURRENT round — vendors sell the current round under
+  // the bare name. Exact-matching first attached R2/R3 listings (and their
+  // prices) to the round-1 row. Resolve within the round family instead: the
+  // round that's actually selling wins, else the newest.
+  const candidates = index.byBase.get(full);
+  if (candidates && candidates.length > 0) return pickFromFamily(candidates);
+  return index.byFull.get(full) ?? null;
 }
 
 export interface DiscoveryOptions {

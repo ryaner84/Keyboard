@@ -534,6 +534,31 @@ class GmkDirectTests(unittest.TestCase):
             scrape.match_product_to_set("GMK Striker", by_full, by_base), e_r2
         )
 
+    def test_bare_title_prefers_active_round_over_original_run(self):
+        # Original runs are stored WITHOUT a round suffix, and vendors sell the
+        # CURRENT round under the bare name. The old exact-first match attached
+        # a bare-titled R2 listing (and its price) to the round-1 row.
+        r1 = {"status": "DELIVERED", "gbStart": datetime(2020, 1, 1)}
+        r2 = {"status": "ACTIVE_GB", "gbStart": datetime(2026, 6, 1)}
+        by_full = {"gmk striker": r1, "gmk striker r2": r2}
+        by_base = {"gmk striker": [r1, r2]}
+        self.assertIs(
+            scrape.match_product_to_set("GMK Striker", by_full, by_base), r2
+        )
+        # An explicit round stays an exact match.
+        self.assertIs(
+            scrape.match_product_to_set("GMK Striker R2", by_full, by_base), r2
+        )
+
+    def test_bare_title_all_rounds_delivered_prefers_newest(self):
+        r1 = {"status": "DELIVERED", "gbStart": datetime(2019, 3, 1)}
+        r2 = {"status": "DELIVERED", "gbStart": datetime(2023, 9, 1)}
+        by_full = {"gmk olive": r1, "gmk olive r2": r2}
+        by_base = {"gmk olive": [r1, r2]}
+        self.assertIs(
+            scrape.match_product_to_set("GMK Olive", by_full, by_base), r2
+        )
+
     def test_match_returns_none_for_untracked(self):
         by_full = {"gmk striker": {"status": "ACTIVE_GB", "gbStart": None}}
         by_base = {"gmk striker": [by_full["gmk striker"]]}
