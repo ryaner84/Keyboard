@@ -92,8 +92,12 @@ try {
   console.log(`VISITOR INBOX — unresolved items by category (generated ${new Date().toISOString()})`);
 
   // ── Auto-resolve what's derivable ─────────────────────────────────────────
-  // A price report's job is done once the bad price it flagged is gone: the
-  // VendorKit was deleted, or its price was nulled (the 2nd-report auto-repair).
+  // A price report's job is done once the bad price it flagged is gone (the
+  // VendorKit was deleted, or its price was nulled by the 2nd-report
+  // auto-repair) — or once the listing was re-scraped AFTER the report was
+  // filed: the report's re-queue worked and a fresh scrape re-verified the
+  // price. A still-wrong fresh price gets re-reported as a new case. Same
+  // rule as GET /api/price-reports, so both feeds stay in step.
   try {
     const healed = await client.query(`
       UPDATE "PriceReport" pr
@@ -101,7 +105,10 @@ try {
        WHERE pr."resolvedAt" IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM "VendorKit" vk
-            WHERE vk.id = pr."vendorKitId" AND vk.price IS NOT NULL
+            WHERE vk.id = pr."vendorKitId"
+              AND vk.price IS NOT NULL
+              AND (vk."priceUpdatedAt" IS NULL
+                   OR vk."priceUpdatedAt" <= pr."submittedAt")
          )
       RETURNING pr.id
     `);

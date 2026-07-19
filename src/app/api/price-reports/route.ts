@@ -15,12 +15,23 @@ export const dynamic = "force-dynamic";
 const CONFIRM_REPORTS = 2;
 const REPORT_WINDOW_DAYS = 7;
 
-// Review feed: recent reports with the listing's current state, so the
+// Review feed: PENDING reports with the listing's current state, so the
 // report-review routine (or a workflow log step) can read them through the
 // live site even when GitHub has no direct DB credentials. Reports contain
 // nothing sensitive — set slug, vendor name, optional reason.
+//
+// A report drops out of this feed once its job is done, so each scheduled
+// review only sees genuinely open items instead of every historical report:
+//  • the flagged bad price is gone (listing deleted or price nulled), or
+//  • the listing was re-scraped AFTER the report was filed — the re-queue
+//    worked and a fresh scrape re-verified the price. If that fresh price is
+//    still wrong, a visitor re-report opens a new case (and its 2nd-report
+//    auto-null still fires), so nothing wrong stays hidden for long.
+// Resolution is stamped in resolvedAt — the same flag the visitor-inbox
+// feed reads — rather than filtered per-read, so both feeds stay in step.
 export async function GET() {
   const reports = await prisma.priceReport.findMany({
+    where: { resolvedAt: null },
     orderBy: { submittedAt: "desc" },
     take: 50,
   });
@@ -36,14 +47,38 @@ export async function GET() {
     },
   });
   const vkById = new Map(vendorKits.map((vk) => [vk.id, vk]));
+
+  const resolvedIds = new Set(
+    reports
+      .filter((r) => {
+        const vk = vkById.get(r.vendorKitId);
+        if (!vk || vk.price == null) return true;
+        return vk.priceUpdatedAt != null && vk.priceUpdatedAt > r.submittedAt;
+      })
+      .map((r) => r.id)
+  );
+  if (resolvedIds.size > 0) {
+    try {
+      await prisma.priceReport.updateMany({
+        where: { id: { in: Array.from(resolvedIds) } },
+        data: { resolvedAt: new Date() },
+      });
+    } catch {
+      // The feed must render even if the resolution write fails; the same
+      // reports simply resolve on the next read.
+    }
+  }
+
   return NextResponse.json({
-    reports: reports.map((r) => ({
-      submittedAt: r.submittedAt,
-      setSlug: r.setSlug,
-      vendorName: r.vendorName,
-      reason: r.reason,
-      listing: vkById.get(r.vendorKitId) ?? null,
-    })),
+    reports: reports
+      .filter((r) => !resolvedIds.has(r.id))
+      .map((r) => ({
+        submittedAt: r.submittedAt,
+        setSlug: r.setSlug,
+        vendorName: r.vendorName,
+        reason: r.reason,
+        listing: vkById.get(r.vendorKitId) ?? null,
+      })),
   });
 }
 

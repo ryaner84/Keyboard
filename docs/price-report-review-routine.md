@@ -57,6 +57,17 @@ Work on the `main` branch.
   production, local sessions usually cannot. The log line omits `priceUpdatedAt`
   — judge "re-scraped recently" from the current price, reason, and how often
   the same listing recurs across reports.
+- The feed returns only PENDING reports. A report auto-resolves (sets
+  `resolvedAt`, drops out of the feed and out of the next run's table) once its
+  bad price is gone or the listing was re-scraped after the report was filed —
+  so issues fixed on a previous run do not reappear. A still-wrong fresh price
+  comes back only via a new visitor report.
+- To inspect a reported listing's REAL live variants (titles/prices/stock)
+  before concluding anything, dispatch the **Vendor probe** workflow
+  (`vendor-probe.yml`) with the product URL(s) — runners reach vendor stores
+  that block this session's egress. Reporter reasons can be wrong: e.g. an
+  EU store's ex-VAT display (Oblotzky "116" vs the correct DE-market 139 EUR
+  base) or a mislabeled complaint against a correct base-kit price.
 - Self-heal mechanics live in `src/app/api/price-reports/route.ts`: a report
   re-queues the listing (clears `priceUpdatedAt`); a second report within 7 days
   nulls the price. A buggy scraper that re-stores the wrong value on the next
