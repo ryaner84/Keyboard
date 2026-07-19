@@ -1,0 +1,41 @@
+# Prints a vendor product's live variant list (title / price / availability)
+# from a GitHub runner. Vendor Shopify stores block many datacenter IPs but
+# serve runner IPs fine — this is the read-only debugging companion to
+# refresh-prices.yml, used by the price-report review routine to inspect a
+# reported listing's real variants before fixing the kit picker.
+name: Vendor probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: Space-separated Shopify product URLs (/products/<handle>)
+        required: true
+        type: string
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch product variants
+        env:
+          URLS: ${{ inputs.urls }}
+        run: |
+          for u in $URLS; do
+            base="${u%%\?*}"
+            echo "=== PROBE $base"
+            curl -sf -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36" \
+              "${base}.js" | node -e "
+                let s='';
+                process.stdin.on('data', d => s += d).on('end', () => {
+                  const p = JSON.parse(s);
+                  console.log('PRODUCT | ' + p.title + ' | handle=' + p.handle + ' | type=' + (p.type ?? '') + ' | tags=' + JSON.stringify(p.tags ?? []));
+                  for (const v of p.variants ?? []) {
+                    console.log('VARIANT | id=' + v.id + ' | title=' + JSON.stringify(v.title) +
+                      ' | price=' + (v.price / 100).toFixed(2) +
+                      ' | available=' + v.available +
+                      ' | opts=' + JSON.stringify([v.option1, v.option2, v.option3].filter(Boolean)));
+                  }
+                });
+              " || echo "PROBE_FAILED ${base}"
+          done
