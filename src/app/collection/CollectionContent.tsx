@@ -2382,7 +2382,11 @@ function CollectionItemEditor({
                   })
                 }
                 title={`Show Build ${activeBuild + 1} on your public page`}
-                description="Applies when this piece is displayed publicly — unchecked builds stay private while the rest of the piece is shown."
+                description={
+                  form.isPublic
+                    ? "This piece is displayed publicly — unchecked builds stay private while the rest is shown."
+                    : "Takes effect only once “Display this piece publicly” is on — right now the whole piece is private."
+                }
               />
             </div>
           )}
@@ -2393,15 +2397,19 @@ function CollectionItemEditor({
             checked={form.isPublic}
             onChange={(checked) => setForm({ ...form, isPublic: checked })}
             title="Display this piece publicly"
-            description={
-              form.quantity > 1
-                ? `Only owned items with this enabled appear at your shared collection URL. ${
-                    form.quantity -
-                    Array.from(hiddenBuilds).filter((i) => i < form.quantity)
-                      .length
-                  } of ${form.quantity} builds will be shown — use the Build tabs to choose.`
-                : "Only owned items with this enabled appear at your shared collection URL."
-            }
+            description={(() => {
+              const visible =
+                form.quantity -
+                Array.from(hiddenBuilds).filter((i) => i < form.quantity).length;
+              if (form.quantity <= 1) {
+                return "Only owned items with this enabled appear at your shared collection URL.";
+              }
+              // State-aware phrasing: with the switch OFF, "will be shown"
+              // read as if something was being published right now.
+              return form.isPublic
+                ? `${visible} of ${form.quantity} builds are shown on your public page — choose per build in the Build tabs.`
+                : `Currently private — nothing is shown. If you enable this, ${visible} of ${form.quantity} builds would appear (choose per build in the Build tabs).`;
+            })()}
           />
         </div>
 
