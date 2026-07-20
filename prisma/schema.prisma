@@ -306,6 +306,10 @@ model TrackerItem {
   // The owner's own photo for this piece (build 1), overriding the catalog
   // image on their card. Stored as a resized data: URL.
   customImageUrl    String?
+  // Build indexes (0-based) EXCLUDED from the public collection page — lets
+  // an owner publish only selected units of a multi-unit piece. Null/empty
+  // means every build is shown.
+  hiddenBuilds      Json?
   // Per-unit build breakdown for quantity > 1. JSON array of builds 2..N
   // (build 1 lives in the columns above): [{ acquiredAt, purchasePrice,
   // purchaseCurrency, color, condition, switches, keycaps, buildDetails,

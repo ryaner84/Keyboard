@@ -2199,6 +2199,13 @@ function CollectionItemEditor({
     assembleBuilds(item.collection)
   );
   const [activeBuild, setActiveBuild] = useState(0);
+  // 0-based build indexes the owner keeps OFF the public page.
+  const [hiddenBuilds, setHiddenBuilds] = useState<Set<number>>(
+    () =>
+      new Set(
+        (item.collection.hiddenBuilds ?? []).filter((n) => Number.isInteger(n))
+      )
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const purchaseCurrencies = useMemo(() => {
@@ -2272,6 +2279,8 @@ function CollectionItemEditor({
         customImageUrl: first.imageUrl || null,
         // Builds 2..N.
         units: extra,
+        // 0-based build indexes kept off the public page (bounded to qty).
+        hiddenBuilds: Array.from(hiddenBuilds).filter((i) => i < qty),
       });
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save details");
@@ -2360,6 +2369,23 @@ function CollectionItemEditor({
             onChange={(patch) => updateBuild(activeBuild, patch)}
             onError={setError}
           />
+          {form.quantity > 1 && (
+            <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800">
+              <CheckRow
+                checked={!hiddenBuilds.has(activeBuild)}
+                onChange={(checked) =>
+                  setHiddenBuilds((current) => {
+                    const next = new Set(current);
+                    if (checked) next.delete(activeBuild);
+                    else next.add(activeBuild);
+                    return next;
+                  })
+                }
+                title={`Show Build ${activeBuild + 1} on your public page`}
+                description="Applies when this piece is displayed publicly — unchecked builds stay private while the rest of the piece is shown."
+              />
+            </div>
+          )}
         </div>
 
         <div className="rounded-xl border border-[#ddcfb4] bg-[#faf7f0] p-4 dark:border-[#4a3e29] dark:bg-[#211d16]">
@@ -2367,7 +2393,15 @@ function CollectionItemEditor({
             checked={form.isPublic}
             onChange={(checked) => setForm({ ...form, isPublic: checked })}
             title="Display this piece publicly"
-            description="Only owned items with this enabled appear at your shared collection URL."
+            description={
+              form.quantity > 1
+                ? `Only owned items with this enabled appear at your shared collection URL. ${
+                    form.quantity -
+                    Array.from(hiddenBuilds).filter((i) => i < form.quantity)
+                      .length
+                  } of ${form.quantity} builds will be shown — use the Build tabs to choose.`
+                : "Only owned items with this enabled appear at your shared collection URL."
+            }
           />
         </div>
 

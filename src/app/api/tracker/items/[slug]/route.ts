@@ -38,6 +38,7 @@ export async function PATCH(
     purchasePrice?: number | null;
     purchaseCurrency?: string | null;
     showPurchasePrice?: boolean;
+    hiddenBuilds?: Prisma.InputJsonValue | typeof Prisma.JsonNull;
     switches?: string | null;
     keycaps?: string | null;
     buildDetails?: string | null;
@@ -84,6 +85,22 @@ export async function PATCH(
   }
   if (typeof body.showPurchasePrice === "boolean") {
     data.showPurchasePrice = body.showPurchasePrice;
+  }
+  if ("hiddenBuilds" in body) {
+    // Build indexes (0-based) excluded from the public page — lets an owner
+    // publish only selected units of a multi-unit piece. Owner-supplied;
+    // sanitize to a bounded, deduped int list. Empty → null (all shown).
+    const cleaned = Array.isArray(body.hiddenBuilds)
+      ? Array.from(
+          new Set(
+            (body.hiddenBuilds as unknown[])
+              .map((n) => Number(n))
+              .filter((n) => Number.isInteger(n) && n >= 0 && n < 99)
+          )
+        ).sort((a, b) => a - b)
+      : [];
+    data.hiddenBuilds =
+      cleaned.length > 0 ? (cleaned as unknown as Prisma.InputJsonValue) : Prisma.JsonNull;
   }
   if ("switches" in body) data.switches = cleanOptionalText(body.switches, 160);
   if ("keycaps" in body) data.keycaps = cleanOptionalText(body.keycaps, 160);
@@ -167,6 +184,7 @@ export async function PATCH(
       quantity: updated.quantity,
       customImageUrl: updated.customImageUrl,
       units: Array.isArray(updated.units) ? updated.units : [],
+      hiddenBuilds: Array.isArray(updated.hiddenBuilds) ? updated.hiddenBuilds : [],
     },
   });
 }
