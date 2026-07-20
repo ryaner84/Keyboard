@@ -42,6 +42,7 @@ export async function GET() {
         quantity: item.quantity ?? 1,
         customImageUrl: item.customImageUrl ?? null,
         units: Array.isArray(item.units) ? item.units : [],
+        hiddenBuilds: Array.isArray(item.hiddenBuilds) ? item.hiddenBuilds : [],
       },
     })),
   });

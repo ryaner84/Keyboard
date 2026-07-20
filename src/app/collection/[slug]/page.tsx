@@ -46,6 +46,7 @@ const getPublicCollection = cache(async (slug: string) =>
           quantity: true,
           customImageUrl: true,
           units: true,
+          hiddenBuilds: true,
           groupBuy: {
             select: {
               id: true,
@@ -127,10 +128,23 @@ export default async function PublicCollectionPage({
 
   const owner = collection.displayName || "Private collector";
   const title = collection.collectionTitle || `${owner}'s keyboard collection`;
-  const keyboardCount = collection.items.filter(
+  // A piece whose builds are ALL hidden is effectively private — drop it from
+  // the page and the counts entirely.
+  const visibleItems = collection.items.filter((item) => {
+    const qty = Math.max(1, item.quantity || 1);
+    const hidden = new Set(
+      Array.isArray(item.hiddenBuilds)
+        ? (item.hiddenBuilds as unknown[]).map((n) => Number(n))
+        : []
+    );
+    let visible = 0;
+    for (let i = 0; i < qty; i++) if (!hidden.has(i)) visible++;
+    return visible > 0;
+  });
+  const keyboardCount = visibleItems.filter(
     (item) => item.groupBuy.productType === "KEYBOARD"
   ).length;
-  const keycapCount = collection.items.length - keyboardCount;
+  const keycapCount = visibleItems.length - keyboardCount;
 
   return (
     <main className="min-h-screen bg-[#efede7] pb-20 dark:bg-[#080a0c]">
@@ -151,7 +165,7 @@ export default async function PublicCollectionPage({
             </p>
           )}
           <div className="mt-10 flex flex-wrap gap-x-8 gap-y-3 text-xs uppercase tracking-[0.14em] text-white/45">
-            <span>{collection.items.length} displayed pieces</span>
+            <span>{visibleItems.length} displayed pieces</span>
             {keyboardCount > 0 && <span>{keyboardCount} keyboards</span>}
             {keycapCount > 0 && <span>{keycapCount} keycap sets</span>}
           </div>
@@ -176,7 +190,7 @@ export default async function PublicCollectionPage({
           </Link>
         </div>
 
-        {collection.items.length === 0 ? (
+        {visibleItems.length === 0 ? (
           <div className="py-24 text-center">
             <p className="font-serif text-3xl text-gray-500 dark:text-gray-400">
               This display case is being prepared.
@@ -184,7 +198,7 @@ export default async function PublicCollectionPage({
           </div>
         ) : (
           <div className="mt-8 grid gap-7 sm:grid-cols-2 lg:grid-cols-3">
-            {collection.items.map((item, index) => (
+            {visibleItems.map((item, index) => (
               <PublicCollectionCard
                 key={item.groupBuy.id}
                 item={item}
@@ -227,6 +241,7 @@ function PublicCollectionCard({
     quantity: number;
     customImageUrl: string | null;
     units: unknown;
+    hiddenBuilds: unknown;
     groupBuy: {
       id: string;
       slug: string;
@@ -249,7 +264,18 @@ function PublicCollectionCard({
     item.groupBuy.mountingStyle,
     item.groupBuy.material,
   ].filter(Boolean);
-  const builds = assemblePublicBuilds(item);
+  // Per-unit visibility: the owner can publish only selected units of a
+  // multi-unit piece. hiddenBuilds holds the 0-based ORIGINAL build indexes to
+  // exclude — keep the original index on each visible build so photo reports
+  // still reference the right unit.
+  const hiddenBuilds = new Set(
+    Array.isArray(item.hiddenBuilds)
+      ? (item.hiddenBuilds as unknown[]).map((n) => Number(n))
+      : []
+  );
+  const builds = assemblePublicBuilds(item)
+    .map((build, originalIndex) => ({ build, originalIndex }))
+    .filter(({ originalIndex }) => !hiddenBuilds.has(originalIndex));
   const multiBuild = builds.length > 1;
   // Never surface the scraped showcase source in a saved board's name.
   const setName = cleanDisplayName(item.groupBuy.name);
@@ -257,10 +283,10 @@ function PublicCollectionCard({
   // One gallery slide per build. A build with its own uploaded photo shows that
   // (and can be reported); a build without one falls back to the shared render.
   const groupImage = normalizeImageUrl(item.groupBuy.imageUrl);
-  const slides = builds.map((build, index) => ({
+  const slides = builds.map(({ build, originalIndex }) => ({
     imageUrl: build.imageUrl || groupImage,
     isCustom: Boolean(build.imageUrl),
-    buildIndex: index,
+    buildIndex: originalIndex,
   }));
 
   return (
@@ -321,11 +347,11 @@ function PublicCollectionCard({
 
         {multiBuild && (
           <div className="mt-5 space-y-3 border-t border-gray-100 pt-5 dark:border-white/10">
-            {builds.map((build, index) => (
+            {builds.map(({ build, originalIndex }) => (
               <PublicBuild
-                key={index}
+                key={originalIndex}
                 build={build}
-                index={index}
+                index={originalIndex}
                 collectionSlug={collectionSlug}
                 trackerItemId={item.id}
                 label={setName}

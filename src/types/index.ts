@@ -156,6 +156,8 @@ export interface CollectionItemDetails {
   customImageUrl: string | null;
   // Extra builds (2..N) when quantity > 1.
   units: CollectionUnit[] | null;
+  // 0-based build indexes excluded from the public collection page.
+  hiddenBuilds?: number[] | null;
 }
 
 export interface CollectionCatalogItem extends GroupBuyWithPricing {

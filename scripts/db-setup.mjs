@@ -161,6 +161,18 @@ async function healWarehouseGalleries(client) {
   }
 }
 
+// Per-build public visibility: build indexes hidden from the shared page.
+async function ensureHiddenBuildsColumn(client) {
+  try {
+    await client.query(
+      `ALTER TABLE public."TrackerItem"
+       ADD COLUMN IF NOT EXISTS "hiddenBuilds" jsonb`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] hiddenBuilds column setup skipped: ${err.message}`);
+  }
+}
+
 async function healBlankVendorUrls(client) {
   try {
     const res = await client.query(
@@ -399,6 +411,7 @@ async function main() {
         await purgeBlockedVendorSetPairs(client);
         await reclassifyKeycapKeyboards(client);
         await healBlankVendorUrls(client);
+        await ensureHiddenBuildsColumn(client);
         await healWarehouseGalleries(client);
         await expireEndedGroupBuys(client);
         await ensureDiscoveryColumn(client);
