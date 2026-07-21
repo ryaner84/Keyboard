@@ -231,11 +231,18 @@ function BuildSummary({
   index,
   selected = false,
   onSelect,
+  showVisibility = false,
+  hidden = false,
 }: {
   build: CollectionUnit;
   index: number;
   selected?: boolean;
   onSelect?: () => void;
+  // When the piece is publicly displayed, each build carries its own
+  // shown/hidden state so the owner can see at a glance which units reach
+  // their public page.
+  showVisibility?: boolean;
+  hidden?: boolean;
 }) {
   const specs = [
     build.acquiredAt
@@ -273,9 +280,23 @@ function BuildSummary({
         </div>
       )}
       <div className="min-w-0">
-        <p className="text-[11px] font-semibold text-gray-900 dark:text-white">
-          Build {index + 1}
-        </p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-[11px] font-semibold text-gray-900 dark:text-white">
+            Build {index + 1}
+          </p>
+          {showVisibility &&
+            (hidden ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+                <BuildHiddenIcon />
+                Hidden
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">
+                <BuildShownIcon />
+                Public
+              </span>
+            ))}
+        </div>
         <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
           {specs.join(" · ") || "No details yet"}
         </p>
@@ -1814,6 +1835,25 @@ function CollectionCard({
   const [activeBuildIndex, setActiveBuildIndex] = useState(0);
   const visibleBuildIndex = Math.min(activeBuildIndex, builds.length - 1);
   const activeBuild = builds[visibleBuildIndex];
+  // Which builds are excluded from the public collection page. hiddenBuilds is
+  // 0-based over the same order assembleBuilds returns, so an index maps 1:1 to
+  // a build row. A build's public/hidden state only means anything when the
+  // whole piece is on display AND it has more than one build (single-build or
+  // fully-private pieces can't hide an individual build).
+  const piecePublic = item.collection.isPublic;
+  const hiddenSet = new Set(
+    (item.collection.hiddenBuilds ?? []).filter(
+      (n) => Number.isInteger(n) && n >= 0 && n < builds.length
+    )
+  );
+  const hiddenCount = hiddenSet.size;
+  const shownCount = builds.length - hiddenCount;
+  const showBuildVisibility = owned && piecePublic && multiBuild;
+  const activeBuildHidden = showBuildVisibility && hiddenSet.has(visibleBuildIndex);
+  // A public piece with EVERY build hidden shows nothing on the public page —
+  // the public page drops all-hidden pieces — so the badge must not claim it's
+  // on display (holds for single- and multi-build alike).
+  const nothingPublic = owned && piecePublic && shownCount === 0;
   const catalogImageUrl = normalizeImageUrl(item.imageUrl);
   const imageUrl = multiBuild
     ? activeBuild?.imageUrl ||
@@ -1882,12 +1922,20 @@ function CollectionCard({
           {owned && (
             <span
               className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider backdrop-blur ${
-                item.collection.isPublic
-                  ? "bg-emerald-500/90 text-white"
-                  : "bg-white/85 text-gray-800"
+                !piecePublic
+                  ? "bg-white/85 text-gray-800"
+                  : nothingPublic
+                    ? "bg-amber-500/90 text-white"
+                    : "bg-emerald-500/90 text-white"
               }`}
             >
-              {item.collection.isPublic ? "On display" : "Private"}
+              {!piecePublic
+                ? "Private"
+                : nothingPublic
+                  ? "Not shown"
+                  : hiddenCount > 0
+                    ? `On display · ${shownCount}/${builds.length}`
+                    : "On display"}
             </span>
           )}
         </div>
@@ -1944,17 +1992,30 @@ function CollectionCard({
               <span>
                 Build {visibleBuildIndex + 1} of {builds.length}
               </span>
+              {activeBuildHidden && (
+                <span className="flex items-center gap-1 text-amber-200">
+                  <BuildHiddenIcon />
+                  Hidden
+                </span>
+              )}
               <span className="flex gap-1">
-                {builds.map((_, index) => (
-                  <span
-                    key={index}
-                    className={`h-1.5 rounded-full transition-all ${
-                      index === visibleBuildIndex
-                        ? "w-4 bg-white"
-                        : "w-1.5 bg-white/45"
-                    }`}
-                  />
-                ))}
+                {builds.map((_, index) => {
+                  const dotHidden = showBuildVisibility && hiddenSet.has(index);
+                  return (
+                    <span
+                      key={index}
+                      className={`h-1.5 rounded-full transition-all ${
+                        index === visibleBuildIndex
+                          ? dotHidden
+                            ? "w-4 bg-amber-300"
+                            : "w-4 bg-white"
+                          : dotHidden
+                            ? "w-1.5 bg-transparent ring-1 ring-amber-200/80"
+                            : "w-1.5 bg-white/45"
+                      }`}
+                    />
+                  );
+                })}
               </span>
             </div>
           </>
@@ -2025,9 +2086,32 @@ function CollectionCard({
 
         {owned && multiBuild && (
           <div className="mt-4 space-y-3 border-t border-gray-100 pt-4 dark:border-white/10">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#9a7a42] dark:text-[#c9ab72]">
-              {builds.length} builds
-            </p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-[#9a7a42] dark:text-[#c9ab72]">
+                {builds.length} builds
+              </p>
+              {showBuildVisibility && (
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                    hiddenCount > 0
+                      ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+                      : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                  }`}
+                >
+                  {hiddenCount > 0
+                    ? `${shownCount} of ${builds.length} public`
+                    : "All public"}
+                </span>
+              )}
+            </div>
+            {showBuildVisibility && hiddenCount > 0 && (
+              <p className="flex items-center gap-1.5 text-[11px] leading-4 text-amber-700 dark:text-amber-300/90">
+                <BuildHiddenIcon />
+                {hiddenCount === 1
+                  ? "1 build is hidden from your public collection page."
+                  : `${hiddenCount} builds are hidden from your public collection page.`}
+              </p>
+            )}
             {builds.map((build, index) => (
               <BuildSummary
                 key={index}
@@ -2035,6 +2119,8 @@ function CollectionCard({
                 index={index}
                 selected={index === visibleBuildIndex}
                 onSelect={() => setActiveBuildIndex(index)}
+                showVisibility={showBuildVisibility}
+                hidden={hiddenSet.has(index)}
               />
             ))}
           </div>
@@ -3222,6 +3308,48 @@ function SearchSmallIcon() {
     <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <circle cx="11" cy="11" r="7" strokeWidth={1.8} />
       <path strokeLinecap="round" strokeWidth={1.8} d="M16.5 16.5L21 21" />
+    </svg>
+  );
+}
+
+// Small eye / eye-off marks for per-build public visibility badges.
+function BuildShownIcon() {
+  return (
+    <svg
+      className="h-3 w-3"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6z"
+      />
+      <circle cx="12" cy="12" r="2.5" strokeWidth={1.8} />
+    </svg>
+  );
+}
+
+function BuildHiddenIcon() {
+  return (
+    <svg
+      className="h-3 w-3"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6z"
+      />
+      <circle cx="12" cy="12" r="2.5" strokeWidth={1.8} />
+      <path strokeLinecap="round" strokeWidth={1.8} d="M4 4l16 16" />
     </svg>
   );
 }
