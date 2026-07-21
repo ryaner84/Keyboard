@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { notHiddenWhere } from "@/lib/showcase";
+import { notHiddenWhere, notShowcaseWhere } from "@/lib/showcase";
 
 const RELEASED_STATUSES = ["SHIPPING", "DELIVERED", "IN_STOCK"] as const;
 const VISIBLE_LISTING_WHERE = { dataTrustLevel: { not: "DEAD" } } as const;
@@ -102,6 +102,9 @@ export async function GET(req: NextRequest) {
     status: { in: [...RELEASED_STATUSES] },
     productType,
     ...notHiddenWhere,
+    // Lightning showcase boards are DELIVERED community builds, not keyboards
+    // for sale — they must never appear in the released/bargain lists.
+    ...notShowcaseWhere,
     ...yearFilter,
     ...(effectiveAvailability === "available" && AVAILABLE_FILTER),
     ...(effectiveAvailability === "soldout" && { NOT: AVAILABLE_FILTER }),
@@ -137,7 +140,7 @@ export async function GET(req: NextRequest) {
         ? { gbEnd: { sort: "asc" as const, nulls: "last" as const } }
         : { gbEnd: { sort: "desc" as const, nulls: "last" as const } };
 
-  const releasedWhere = { ...VISIBLE_LISTING_WHERE, status: { in: [...RELEASED_STATUSES] }, productType, ...notHiddenWhere };
+  const releasedWhere = { ...VISIBLE_LISTING_WHERE, status: { in: [...RELEASED_STATUSES] }, productType, ...notHiddenWhere, ...notShowcaseWhere };
 
   const needRates = priceSort || savingsSort || page === 1;
   const usdRates: Record<string, number> = {};
@@ -196,7 +199,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Per-category released counts power the Keycaps / Keyboards tab badges.
-  const baseReleased = { ...VISIBLE_LISTING_WHERE, status: { in: [...RELEASED_STATUSES] }, ...notHiddenWhere };
+  const baseReleased = { ...VISIBLE_LISTING_WHERE, status: { in: [...RELEASED_STATUSES] }, ...notHiddenWhere, ...notShowcaseWhere };
   const [totalReleased, totalAvailable, countKeycaps, countKeyboards] = await Promise.all([
     prisma.groupBuy.count({ where: releasedWhere }),
     isKeyboard
