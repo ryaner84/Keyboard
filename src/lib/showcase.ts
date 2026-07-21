@@ -44,6 +44,16 @@ export const notHiddenWhere = {
   },
 };
 
+// Where-fragment that drops showcase-source rows (Lightning Keyboards) from a
+// commerce surface, null-safe: a bare notIn would also drop rows whose
+// vendorName is NULL. AND-wrapped so it composes with a where that has its own
+// OR (e.g. a search clause).
+export const notShowcaseWhere = {
+  AND: [
+    { OR: [{ vendorName: null }, { vendorName: { notIn: SHOWCASE_VENDORS } }] },
+  ],
+};
+
 // True when a listing comes from a showcase-only source and must be kept out of
 // the group-buy sections.
 export function isShowcaseSource(
