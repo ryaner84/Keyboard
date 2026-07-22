@@ -592,5 +592,80 @@ class KeycapClassifierTests(unittest.TestCase):
         )
 
 
+class KbdfansGroupBuyTests(unittest.TestCase):
+    def _prod(self, title, ptype, tags, handle="h", image="https://img/x.jpg"):
+        return {
+            "title": title,
+            "product_type": ptype,
+            "tags": tags,
+            "handle": handle,
+            "images": [{"src": image}] if image else [],
+        }
+
+    def test_interest_check_gmk_keycap_is_captured(self):
+        d = scrape.kbdfans_gb_product_to_set(
+            self._prod("GMK CYL Desert Nights",
+                       "Interest Check",
+                       ["CYL", "GMK Keycaps", "Group Buy", "Interest Check", "Keycaps"],
+                       handle="gmk-cyl-desert-nights")
+        )
+        self.assertIsNotNone(d)
+        self.assertEqual(d["status"], "INTEREST_CHECK")
+        # CYL profile token stripped so it dedupes against the canonical slug.
+        self.assertEqual(d["slug"], "gmk-desert-nights")
+        self.assertEqual(d["colorway"], "Desert Nights")
+        self.assertEqual(d["productUrl"], "https://kbdfans.com/products/gmk-cyl-desert-nights")
+
+    def test_group_buy_live_maps_to_active(self):
+        d = scrape.kbdfans_gb_product_to_set(
+            self._prod("GMK CYL Noire",
+                       "Group Buy Is Live",
+                       ["CYL", "GMK Keycaps", "Group Buy", "Live", "Keycaps"])
+        )
+        self.assertIsNotNone(d)
+        self.assertEqual(d["status"], "ACTIVE_GB")
+        self.assertEqual(d["slug"], "gmk-noire")
+
+    def test_in_production_is_skipped(self):
+        self.assertIsNone(
+            scrape.kbdfans_gb_product_to_set(
+                self._prod("GMK CYL Spark", "In Production",
+                           ["CYL", "GMK Keycaps", "Group Buy", "In Production", "Keycaps"])
+            )
+        )
+
+    def test_non_gmk_product_is_skipped(self):
+        self.assertIsNone(
+            scrape.kbdfans_gb_product_to_set(
+                self._prod("Tofu60 2.0 Keyboard Kit", "Group Buy Is Live",
+                           ["Keyboards", "Group Buy", "Live"])
+            )
+        )
+
+    def test_mtnu_token_stripped_to_canonical_slug(self):
+        d = scrape.kbdfans_gb_product_to_set(
+            self._prod("GMK MTNU Divinapapaya", "Interest Check",
+                       ["MTNU", "GMK Keycaps", "Interest Check", "Keycaps"])
+        )
+        self.assertEqual(d["slug"], "gmk-divinapapaya")
+
+    def test_merge_status_never_reactivates_terminal(self):
+        self.assertEqual(scrape._kbdfans_merge_status("DELIVERED", "ACTIVE_GB"), "DELIVERED")
+        self.assertEqual(scrape._kbdfans_merge_status("CANCELLED", "INTEREST_CHECK"), "CANCELLED")
+
+    def test_merge_status_never_downgrades_live_to_ic(self):
+        self.assertEqual(scrape._kbdfans_merge_status("ACTIVE_GB", "INTEREST_CHECK"), "ACTIVE_GB")
+
+    def test_merge_status_promotes_and_creates(self):
+        # incoming ACTIVE promotes any non-terminal row
+        self.assertEqual(scrape._kbdfans_merge_status("SHIPPING", "ACTIVE_GB"), "ACTIVE_GB")
+        self.assertEqual(scrape._kbdfans_merge_status("INTEREST_CHECK", "ACTIVE_GB"), "ACTIVE_GB")
+        # incoming IC only fills a blank or already-IC row
+        self.assertEqual(scrape._kbdfans_merge_status(None, "INTEREST_CHECK"), "INTEREST_CHECK")
+        self.assertEqual(scrape._kbdfans_merge_status("INTEREST_CHECK", "INTEREST_CHECK"), "INTEREST_CHECK")
+        # incoming IC must NOT drag a shipping row back to interest check
+        self.assertEqual(scrape._kbdfans_merge_status("SHIPPING", "INTEREST_CHECK"), "SHIPPING")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2008,6 +2008,270 @@ def run_zfrontier(conn, context: BrowserContext, deadline: float) -> dict:
 
 
 # ----------------------------------------------------------------------------
+# KBDfans group-buy collection — GMK keycap interest checks & live group buys
+# ----------------------------------------------------------------------------
+# KBDfans lists every GMK keycap group buy in one Shopify collection, each with a
+# clean status on the product (product_type / tags): "Interest Check",
+# "Group Buy Is Live", or "In Production". The keyboards pass only reads their
+# keyboard collections (and drops keycaps), so these keycap GBs — the interest
+# checks especially — were never captured. This pass ingests the interest-check
+# and live ones so they reach the Active/Upcoming keycap sections; In Production
+# is skipped (that GB is over).
+KBDFANS_GB_COLLECTION_URL = "https://kbdfans.com/collections/group-buy/products.json"
+KBDFANS_VENDOR_SLUG = "kbdfans"
+KBDFANS_ORIGIN = "https://kbdfans.com"
+
+
+def ensure_kbdfans_vendor(conn) -> str:
+    """Return the KBDfans vendor id, creating it (with shipping zones) if needed."""
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute('SELECT id FROM "Vendor" WHERE slug = %s', (KBDFANS_VENDOR_SLUG,))
+        row = cur.fetchone()
+        if row:
+            vendor_id = row["id"]
+        else:
+            cur.execute("""
+                INSERT INTO "Vendor"
+                    (id, slug, name, region, country, currency, "websiteUrl", "logoUrl")
+                VALUES
+                    (gen_random_uuid()::text, %s, 'KBDfans', 'ASIA', 'CN', 'USD', %s, NULL)
+                ON CONFLICT (slug) DO UPDATE SET "websiteUrl" = EXCLUDED."websiteUrl"
+                RETURNING id
+            """, (KBDFANS_VENDOR_SLUG, KBDFANS_ORIGIN))
+            vendor_id = cur.fetchone()["id"]
+
+        cur.execute("""
+            INSERT INTO "ShippingZone"
+                (id, "vendorId", "destinationRegion", "baseShippingCost", currency,
+                 "estimatedDaysMin", "estimatedDaysMax", "shipsToRegion")
+            SELECT gen_random_uuid()::text, %s, d.region::"Region",
+                   d.cost, 'USD',
+                   CASE WHEN d.region = 'ASIA' THEN 2 ELSE 5 END,
+                   CASE WHEN d.region = 'ASIA' THEN 5 ELSE 12 END,
+                   true
+            FROM (VALUES
+                ('ASIA', 8), ('SG', 10), ('AU', 18), ('US', 20),
+                ('CA', 22), ('EU', 22), ('UK', 22), ('OTHER', 25)
+            ) AS d(region, cost)
+            ON CONFLICT ("vendorId", "destinationRegion") DO NOTHING
+        """, (vendor_id,))
+        return vendor_id
+
+
+def _kbdfans_tags(product: dict) -> set[str]:
+    tags = product.get("tags") or []
+    if isinstance(tags, str):
+        tags = [t.strip() for t in tags.split(",")]
+    return {str(t).strip().lower() for t in tags if str(t).strip()}
+
+
+def kbdfans_gb_product_to_set(product: dict) -> dict | None:
+    """Turn a KBDfans group-buy product into upsert data, or None to skip.
+
+    Only GMK keycap sets that are an Interest Check or a live Group Buy are
+    captured; In Production / anything else is ignored (the GB is no longer
+    open). The slug strips the CYL/MTNU profile token so it dedupes against the
+    canonical gmk-<colorway> row (same convention as KeycapLendar / zFrontier)."""
+    title = (product.get("title") or "").strip()
+    if not title:
+        return None
+    tags = _kbdfans_tags(product)
+    ptype = (product.get("product_type") or "").strip().lower()
+
+    # GMK keycaps only — the collection also carries keyboards / deskmats.
+    if "gmk keycaps" not in tags and not re.match(r"\s*gmk\b", title, re.I):
+        return None
+
+    if ptype == "interest check" or "interest check" in tags:
+        status = "INTEREST_CHECK"
+    elif ptype in ("group buy is live", "group buy live") or "live" in tags:
+        status = "ACTIVE_GB"
+    else:
+        return None  # In Production / Sold Out / … — the GB is no longer open
+
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", title).strip("-").lower()
+    slug = re.sub(r"^gmk-(?:cyl-|mx-|mtnu-)", "gmk-", slug)
+    if not slug.startswith("gmk"):
+        slug = "gmk-" + slug
+    if slug in ("gmk", "gmk-"):
+        return None
+
+    colorway = re.sub(r"^gmk\s+(?:cyl\s+|mtnu\s+|mx\s+)?", "", title, flags=re.I).strip()
+    handle = product.get("handle")
+    if not handle:
+        return None
+    images = product.get("images") or []
+    image = images[0].get("src") if images and isinstance(images[0], dict) else None
+    return {
+        "slug": slug,
+        "name": title,
+        "colorway": colorway,
+        "status": status,
+        "imageUrl": image,
+        "images": [image] if image else [],
+        "productUrl": f"https://kbdfans.com/products/{handle}",
+    }
+
+
+def _kbdfans_merge_status(existing: str | None, incoming: str) -> str:
+    """Merge KBDfans' status with what we already have, never regressing.
+
+    - DELIVERED / CANCELLED are terminal: never reactivated.
+    - An ACTIVE_GB row is never downgraded to INTEREST_CHECK.
+    - incoming ACTIVE_GB promotes any non-terminal row to ACTIVE_GB.
+    - incoming INTEREST_CHECK applies only to a blank or already-IC row, so a
+      SHIPPING / IN_STOCK row is never pushed back to an interest check."""
+    if existing in ("DELIVERED", "CANCELLED"):
+        return existing
+    if existing == "ACTIVE_GB":
+        return "ACTIVE_GB"
+    if incoming == "ACTIVE_GB":
+        return "ACTIVE_GB"
+    if existing in (None, "", "INTEREST_CHECK"):
+        return "INTEREST_CHECK"
+    return existing
+
+
+def upsert_kbdfans_gb_set(conn, data: dict, vendor_id: str, norm_index: dict) -> tuple:
+    """Create or update a GMK keycap GB from KBDfans and link its buy page.
+
+    Matches an existing row by canonical slug, falling back to a unique
+    normalized-name match (so a divergently-slugged catalog row — e.g. gmk.net's
+    'gmk-cyl-x-keycaps' — is updated in place instead of duplicated). Status is
+    merged so KBDfans never downgrades a live set or reactivates a delivered one.
+    Name/colorway/image only fill blanks. Returns (gb_id, created)."""
+    slug = data["slug"]
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute('SELECT id, status::text AS status FROM "GroupBuy" WHERE slug = %s', (slug,))
+        existing = cur.fetchone()
+
+    if not existing:
+        key = normalize_set_name(data["name"])
+        cands = norm_index.get(key) or []
+        if len(cands) == 1:  # unambiguous only — never risk a wrong merge
+            existing = cands[0]
+
+    if existing:
+        gb_id = existing["id"]
+        new_status = _kbdfans_merge_status(existing.get("status"), data["status"])
+        imgs = data.get("images") or []
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE "GroupBuy" SET
+                    status = %s::"GBStatus",
+                    colorway = CASE WHEN (colorway IS NULL OR colorway = '') THEN %s ELSE colorway END,
+                    "imageUrl" = CASE WHEN ("imageUrl" IS NULL OR "imageUrl" = '') AND %s <> '' THEN %s ELSE "imageUrl" END,
+                    images = CASE WHEN COALESCE(cardinality(images), 0) = 0 AND cardinality(%s::text[]) > 0 THEN %s::text[] ELSE images END,
+                    "updatedAt" = now()
+                WHERE id = %s
+            """, (new_status, data.get("colorway") or "",
+                  data.get("imageUrl") or "", data.get("imageUrl") or "",
+                  imgs, imgs, gb_id))
+        created = False
+    else:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                INSERT INTO "GroupBuy"
+                    (id, slug, name, colorway, designer, status,
+                     "imageUrl", images, "productType", featured, "createdAt", "updatedAt")
+                VALUES
+                    (gen_random_uuid()::text, %s, %s, %s, '', %s::"GBStatus",
+                     %s, %s, 'KEYCAPS', %s, now(), now())
+                ON CONFLICT (slug) DO NOTHING
+                RETURNING id
+            """, (slug, data["name"], data.get("colorway") or "",
+                  data["status"], data.get("imageUrl"),
+                  data.get("images") or [], data["status"] == "ACTIVE_GB"))
+            row = cur.fetchone()
+            if not row:
+                cur.execute('SELECT id FROM "GroupBuy" WHERE slug = %s', (slug,))
+                row = cur.fetchone()
+            gb_id = row["id"]
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO "Kit" (id, name, type, "groupBuyId")
+                VALUES (gen_random_uuid()::text, 'Base Kit', 'BASE', %s)
+                ON CONFLICT DO NOTHING
+            """, (gb_id,))
+        created = True
+        norm_index.setdefault(normalize_set_name(data["name"]), []).append(
+            {"id": gb_id, "status": data["status"]}
+        )
+
+    # Link the KBDfans buy page on a KBDfans VendorKit (priced later by run_prices).
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute('SELECT id FROM "Kit" WHERE "groupBuyId" = %s AND type = \'BASE\' LIMIT 1', (gb_id,))
+        kit = cur.fetchone()
+    if kit:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO "VendorKit"
+                    (id, "kitId", "vendorId", "productUrl", "gbUrl", "inStock", currency, "updatedAt")
+                VALUES
+                    (gen_random_uuid()::text, %s, %s, %s, %s, true, 'USD', now())
+                ON CONFLICT ("kitId", "vendorId") DO UPDATE SET
+                    "productUrl" = EXCLUDED."productUrl",
+                    "gbUrl" = EXCLUDED."gbUrl",
+                    "updatedAt" = now()
+            """, (kit["id"], vendor_id, data["productUrl"], data["productUrl"]))
+    return gb_id, created
+
+
+def run_kbdfans_gb(conn, context: BrowserContext, deadline: float,
+                   scrapling: ScraplingClient | None = None) -> dict:
+    """Capture GMK keycap interest checks & live group buys from KBDfans."""
+    stats = {"products": 0, "created": 0, "updated": 0, "skipped": 0, "failed": 0}
+    log("KBDfans GB pass: capturing GMK keycap interest checks & live group buys ...")
+    vendor_id = ensure_kbdfans_vendor(conn)
+
+    # One normalized-name index of existing keycap sets, for divergent-slug dedupe.
+    norm_index: dict = {}
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("""SELECT id, name, status::text AS status FROM "GroupBuy"
+                        WHERE "productType" = 'KEYCAPS' AND slug NOT LIKE 'custom-%'""")
+        for r in cur.fetchall():
+            key = normalize_set_name(r.get("name") or "")
+            if key:
+                norm_index.setdefault(key, []).append({"id": r["id"], "status": r["status"]})
+
+    page = context.new_page()
+    try:
+        products = fetch_collection_products(
+            page, KBDFANS_GB_COLLECTION_URL, deadline, scrapling
+        )
+        stats["products"] = len(products)
+        log(f"  Found {len(products)} product(s) in the KBDfans group-buy collection.")
+        for product in products:
+            if now_ms() > deadline:
+                log("KBDfans GB pass: deadline reached — stopping.")
+                break
+            data = kbdfans_gb_product_to_set(product)
+            if not data:
+                stats["skipped"] += 1
+                continue
+            try:
+                _, created = upsert_kbdfans_gb_set(conn, data, vendor_id, norm_index)
+            except Exception as e:
+                log(f"  upsert failed ({data['slug']}): {e}")
+                stats["failed"] += 1
+                continue
+            if created:
+                stats["created"] += 1
+                log(f"  + {data['name']} ({data['status']} via KBDfans)")
+            else:
+                stats["updated"] += 1
+    except Exception as e:
+        log(f"KBDfans GB pass failed: {e}")
+        stats["failed"] += 1
+    finally:
+        page.close()
+
+    log(f"KBDfans GB pass: products={stats['products']} created={stats['created']} "
+        f"updated={stats['updated']} skipped={stats['skipped']} failed={stats['failed']}")
+    return stats
+
+
+# ----------------------------------------------------------------------------
 # Passes
 # ----------------------------------------------------------------------------
 def run_images(
@@ -4602,6 +4866,7 @@ def main() -> int:
                     # Catalog first so image + price passes have full set coverage
                     catalog_stats = run_catalog(conn, context, deadline, scrapling)
                     zf_stats = run_zfrontier(conn, context, deadline)
+                    kbdgb_stats = run_kbdfans_gb(conn, context, deadline, scrapling)
                     kb_stats = run_keyboards(conn, context, deadline, scrapling)
                     # Cap the nightly Lightning pass so a first-time full backfill
                     # can't starve the Geekhack/image/price passes that follow. The
@@ -4663,6 +4928,9 @@ def main() -> int:
     log(f"zFrontier -> cards={zf_stats['cards']} created={zf_stats['created']} "
         f"updated={zf_stats['updated']} skipped={zf_stats['skipped']} "
         f"failed={zf_stats['failed']}")
+    log(f"KBDfans GB -> products={kbdgb_stats['products']} created={kbdgb_stats['created']} "
+        f"updated={kbdgb_stats['updated']} skipped={kbdgb_stats['skipped']} "
+        f"failed={kbdgb_stats['failed']}")
     log(f"Keyboards -> fetched={kb_stats['fetched']} created={kb_stats['created']} "
         f"updated={kb_stats['updated']} failed={kb_stats['failed']}")
     log(f"Lightning -> parts={lk_stats['parts']} new_builds={lk_stats['new_builds']} "
