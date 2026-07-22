@@ -23,6 +23,22 @@ const nextConfig = {
       { protocol: "https", hostname: "firebasestorage.googleapis.com" },
     ],
   },
+  async headers() {
+    return [
+      {
+        // A "same-origin" referrer policy makes the browser omit the Referer on
+        // cross-origin requests — required for hotlink-protected image hosts
+        // (img.zfrontier.com returns 403 when a Referer is present, breaking
+        // several GMK group-buy thumbnails). Unlike the <meta> tag, an HTTP
+        // response header applies to the whole document from the start, so it
+        // also governs the early <link rel="preload"> for priority carousel
+        // images (the meta tag is parsed *after* that preload fires). Same-origin
+        // referers stay intact for our own routes.
+        source: "/(.*)",
+        headers: [{ key: "Referrer-Policy", value: "same-origin" }],
+      },
+    ];
+  },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       // Don't bundle Node.js-only packages for the browser
