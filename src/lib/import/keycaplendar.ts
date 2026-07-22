@@ -3,6 +3,7 @@ import { slugify } from "@/lib/utils";
 import { unwrapFields, type FirestoreDoc } from "./firestore";
 import { applyVendorOverride, BLOCKED_VENDOR_SLUGS } from "./vendor-overrides";
 import { buildShippingZones } from "./shipping";
+import { normalizeSetName } from "@/lib/set-name";
 import type { GBStatus, Region } from "@/generated/prisma";
 
 const PROJECT_ID = process.env.KEYCAPLENDAR_PROJECT_ID || "keycaplendar";
@@ -151,7 +152,7 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
       select: {
         id: true, slug: true, name: true, colorway: true, designer: true,
         status: true, gbStart: true, gbEnd: true, imageUrl: true, images: true,
-        description: true,
+        description: true, productType: true,
       },
     }),
     prisma.kit.findMany({ where: { type: "BASE" }, select: { id: true, groupBuyId: true } }),
@@ -167,13 +168,48 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
   ]);
 
   const setBySlug = new Map(existingSets.map((s) => [s.slug, s]));
+  // Reconcile index. KeycapLendar names a set "GMK <colorway>" (slug
+  // gmk-<colorway>), but the same set is usually already in the DB under a
+  // DIVERGENT name from another source — e.g. the gmk.net catalog scraper's
+  // "GMK CYL <colorway> Keycaps" (slug gmk-cyl-<colorway>-keycaps). Those rows
+  // carry NO GB dates and a default SHIPPING/DELIVERED status, so the live group
+  // buy never surfaces in the Active/Upcoming listing. Matching by normalized
+  // name (round-aware; strips CYL/MTNU and "Keycaps") lets KeycapLendar's
+  // authoritative status + dates land on the row the site already shows, instead
+  // of orphaning them on a brand-new slug nobody links to.
+  const normalizedIndex = new Map<string, typeof existingSets>();
+  for (const s of existingSets) {
+    if (s.productType === "KEYBOARD") continue;
+    const key = normalizeSetName(s.name);
+    if (!key) continue;
+    const arr = normalizedIndex.get(key);
+    if (arr) arr.push(s);
+    else normalizedIndex.set(key, [s]);
+  }
   const kitByGroupBuy = new Map(baseKits.map((k) => [k.groupBuyId, k.id]));
   const vendorBySlug = new Map(existingVendors.map((v) => [v.slug, v]));
   const vkByKey = new Map(existingVendorKits.map((vk) => [`${vk.kitId}:${vk.vendorId}`, vk]));
 
   const result: ImportResult = { sets: 0, vendors: 0, vendorKits: 0, unchanged: 0, stoppedEarly: false };
 
-  for (const ks of gmk) {
+  // Process LIVE group buys first so the wall-clock budget can never starve a
+  // currently-active or upcoming set. Walking 700+ sets in Firestore order used
+  // to cut off (stoppedEarly) before ever reaching recently-launched GBs — which
+  // is exactly why their rows were left stuck at the catalog default status.
+  const STATUS_PRIORITY: Record<string, number> = {
+    ACTIVE_GB: 0,
+    INTEREST_CHECK: 1,
+    SHIPPING: 3,
+    DELIVERED: 4,
+  };
+  const prioritized = gmk
+    .map((ks) => ({ ks, status: deriveStatus(ks, now) }))
+    .sort(
+      (a, b) =>
+        (STATUS_PRIORITY[a.status] ?? 2) - (STATUS_PRIORITY[b.status] ?? 2)
+    );
+
+  for (const { ks, status } of prioritized) {
     if (Date.now() - start > maxRuntimeMs) {
       result.stoppedEarly = true;
       break;
@@ -182,8 +218,6 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
     const name = `GMK ${ks.colorway}`;
     const slug = slugify(name);
     if (!slug) continue;
-
-    const status = deriveStatus(ks, now);
     const designer = (ks.designer ?? []).filter(Boolean).join(" + ") || "Unknown";
     const render = fixImageUrl(ks.image);
     const gbStart = parseDate(ks.gbLaunch);
@@ -192,7 +226,22 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
     const colorway = ks.colorway ?? null;
 
     let setChanged = false;
-    const existing = setBySlug.get(slug);
+    const existingExact = setBySlug.get(slug);
+    let existing = existingExact;
+    // No exact-slug row → try to reconcile onto a divergent-named row for the
+    // same set (e.g. the gmk.net catalog's "GMK CYL … Keycaps"). Only when
+    // EXACTLY ONE existing set normalizes to this name — an ambiguous key
+    // (duplicates / adjacent rounds) is left to create a clean row instead of
+    // risking a wrong merge.
+    let reconciled = false;
+    if (!existing) {
+      const norm = normalizeSetName(name);
+      const candidates = norm ? normalizedIndex.get(norm) : undefined;
+      if (candidates && candidates.length === 1) {
+        existing = candidates[0];
+        reconciled = true;
+      }
+    }
     let groupBuyId: string;
 
     if (!existing) {
@@ -219,8 +268,40 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
         imageUrl: render,
         images: render ? [render] : [],
         description,
+        productType: "KEYCAPS",
       });
       setChanged = true;
+    } else if (reconciled) {
+      // Matched a divergently-named row (e.g. gmk.net "GMK CYL … Keycaps").
+      // KeycapLendar owns GB timing + status, so push ONLY those onto the row —
+      // never rename, re-slug, or overwrite its scraped image/gallery. This is
+      // what promotes a stuck SHIPPING/DELIVERED catalog row to the live
+      // ACTIVE_GB / INTEREST_CHECK the site's group-buy listing filters on.
+      groupBuyId = existing.id;
+      const kclLive = status === "ACTIVE_GB" || status === "INTEREST_CHECK";
+      // Apply KeycapLendar's status when it says the GB is live/upcoming (the
+      // whole point), or when moving a non-terminal row forward — but never
+      // regress a DELIVERED row back to SHIPPING/ACTIVE on stale data.
+      const promote =
+        existing.status !== status && (kclLive || existing.status !== "DELIVERED");
+      const datesChanged =
+        !sameDate(existing.gbStart, gbStart) || !sameDate(existing.gbEnd, gbEnd);
+      const fillDesigner =
+        (!existing.designer || existing.designer === "Unknown") &&
+        designer !== "Unknown";
+      const fillDescription = !existing.description && !!description;
+      if (promote || datesChanged || fillDesigner || fillDescription) {
+        await prisma.groupBuy.update({
+          where: { id: groupBuyId },
+          data: {
+            ...(promote ? { status } : {}),
+            ...(datesChanged ? { gbStart, gbEnd } : {}),
+            ...(fillDesigner ? { designer } : {}),
+            ...(fillDescription ? { description } : {}),
+          },
+        });
+        setChanged = true;
+      }
     } else {
       groupBuyId = existing.id;
       const imageChanged = !!render && existing.imageUrl !== render;
