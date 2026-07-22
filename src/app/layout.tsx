@@ -18,6 +18,13 @@ export const metadata: Metadata = {
   },
   description:
     "Find the best price for GMK keycap group buys and new releases from vendors worldwide. See prices in your local currency with shipping included.",
+  // Some scraped set images are hotlink-protected by Referer — e.g. zFrontier
+  // cover images (img.zfrontier.com) return 200 with no Referer but 403 when the
+  // browser sends our origin, so those group-buy thumbnails render broken. A
+  // document-level "same-origin" policy strips the Referer on cross-origin
+  // requests (fixing those images site-wide) while keeping same-origin referers
+  // intact for our own routes.
+  referrer: "same-origin",
   openGraph: {
     siteName: "GMK Tracker",
     type: "website",
