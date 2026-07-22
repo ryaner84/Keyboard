@@ -1668,7 +1668,18 @@ def upsert_gmk_set(conn, data: dict, vendor_id: str, *,
                           'ELSE %s::"GBStatus" END')
             status_params = (list(TERMINAL_STATUSES), data["status"])
         else:
-            status_sql = "%s"
+            # Date-derived status wins for a set whose GB window is currently
+            # OPEN. gmk.net's breadcrumb frequently reads "in production /
+            # shipping" for a set whose community group buy is still live, which
+            # would otherwise downgrade a KeycapLendar-dated ACTIVE_GB row on
+            # every nightly catalog run. Mirror of the daily status sweep in
+            # db-setup.mjs / cron refresh (SHIPPING + in-window -> ACTIVE_GB).
+            status_sql = (
+                'CASE WHEN "gbStart" IS NOT NULL AND "gbStart" <= now() '
+                'AND "gbEnd" IS NOT NULL AND "gbEnd" >= now() '
+                'AND status::text NOT IN (\'DELIVERED\', \'CANCELLED\') '
+                'THEN \'ACTIVE_GB\'::"GBStatus" ELSE %s::"GBStatus" END'
+            )
             status_params = (data["status"],)
         # Update status and supplement blank fields; don't clobber manual edits.
         with conn.cursor() as cur:

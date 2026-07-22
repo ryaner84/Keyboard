@@ -235,6 +235,20 @@ async function expireEndedGroupBuys(client) {
     if (startedNow.rowCount > 0) {
       console.log(`[db-setup] Promoted ${startedNow.rowCount} started interest check(s) (→ ACTIVE_GB).`);
     }
+    // A set whose GB window is currently OPEN (gbStart ≤ now ≤ gbEnd) but which a
+    // coarser source left as SHIPPING should read as an ACTIVE_GB. gmk.net's
+    // catalog scraper infers "in production / shipping" for live GMK sets, and it
+    // overwrites status nightly — so date-derived status must win here, or the
+    // KeycapLendar date-reconcile's promotion gets clobbered every night. Only
+    // reopens rows with a concrete window; DELIVERED/CANCELLED are terminal.
+    const reopened = await client.query(
+      `UPDATE public."GroupBuy" SET status = 'ACTIVE_GB', "updatedAt" = now()
+        WHERE status = 'SHIPPING' AND "gbStart" IS NOT NULL AND "gbStart" <= now()
+          AND "gbEnd" IS NOT NULL AND "gbEnd" >= now()`
+    );
+    if (reopened.rowCount > 0) {
+      console.log(`[db-setup] Reopened ${reopened.rowCount} in-window group buy(s) (SHIPPING → ACTIVE_GB).`);
+    }
   } catch (err) {
     console.warn(`[db-setup] status sweep skipped: ${err.message}`);
   }

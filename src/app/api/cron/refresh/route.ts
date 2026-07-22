@@ -59,6 +59,20 @@ export async function GET(req: NextRequest) {
       },
       data: { status: "ACTIVE_GB" },
     });
+    // A set whose GB window is currently OPEN (gbStart ≤ now ≤ gbEnd) but left as
+    // SHIPPING by a coarser source should read as ACTIVE_GB. gmk.net's catalog
+    // scraper infers "in production / shipping" for live GMK sets and overwrites
+    // status nightly, so date-derived status must win here or the KeycapLendar
+    // date-reconcile's promotion is clobbered every night. DELIVERED/CANCELLED
+    // are terminal and never reopened.
+    const reopened = await prisma.groupBuy.updateMany({
+      where: {
+        status: "SHIPPING",
+        gbStart: { not: null, lte: nowTs },
+        gbEnd: { not: null, gte: nowTs },
+      },
+      data: { status: "ACTIVE_GB" },
+    });
 
     // ── 1. Primary set catalog: matrixzj.github.io ──────────────────────────
     // Static GitHub Pages site — no bot protection, fetchable from serverless.
@@ -114,7 +128,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      statusSweep: { expired: expired.count, started: started.count },
+      statusSweep: { expired: expired.count, started: started.count, reopened: reopened.count },
       matrixzj: matrixzjResult,
       supplement: supplementResult,
       overrides,
