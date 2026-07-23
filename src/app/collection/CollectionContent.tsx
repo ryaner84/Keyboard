@@ -76,6 +76,21 @@ const CONDITION_LABELS: Record<string, string> = {
   PROJECT: "Project board",
 };
 
+interface SpendingEntry {
+  id: string;
+  slug: string;
+  name: string;
+  imageUrl: string | null;
+  isKeycap: boolean;
+  detail: string | null;
+  quantity: number;
+  amount: number;
+  originalPrice: number;
+  originalCurrency: string;
+  converted: boolean;
+  acquiredAt: string;
+}
+
 interface SpendingMonth {
   key: string;
   label: string;
@@ -84,6 +99,7 @@ interface SpendingMonth {
   keyboardAmount: number;
   keycapAmount: number;
   purchases: number;
+  entries: SpendingEntry[];
 }
 
 interface CollectionSpending {
@@ -129,6 +145,7 @@ function calculateCollectionSpending(
       keyboardAmount: 0,
       keycapAmount: 0,
       purchases: 0,
+      entries: [],
     };
   });
   const monthByKey = new Map(months.map((month) => [month.key, month]));
@@ -192,6 +209,26 @@ function calculateCollectionSpending(
         if (isKeycap) month.keycapAmount += convertedPrice;
         else month.keyboardAmount += convertedPrice;
         month.purchases++;
+        const keycapPurchase = purchase as KeycapAcquisition;
+        const buildPurchase = purchase as CollectionUnit;
+        month.entries.push({
+          id: `${item.slug}-${month.key}-${month.entries.length}`,
+          slug: item.slug,
+          name: item.name,
+          imageUrl: isKeycap
+            ? keycapPurchasePhoto(keycapPurchase, normalizeImageUrl(item.imageUrl))
+            : buildPurchase.imageUrl || normalizeImageUrl(item.imageUrl),
+          isKeycap,
+          detail: isKeycap
+            ? keycapKitLabel(keycapPurchase) || null
+            : buildPurchase.switches || buildPurchase.color || null,
+          quantity: isKeycap ? keycapPurchase.quantity : 1,
+          amount: convertedPrice,
+          originalPrice: price,
+          originalCurrency: sourceCurrency,
+          converted: sourceCurrency !== targetCurrency,
+          acquiredAt: acquiredAt.toISOString(),
+        });
       }
     }
   }
@@ -1730,6 +1767,7 @@ function CollectionSpendingPanel({
   loading: boolean;
   onAddDetails?: () => void;
 }) {
+  const [detailMonth, setDetailMonth] = useState<SpendingMonth | null>(null);
   const maxMonth = Math.max(...spending.months.map((month) => month.amount), 1);
   const hasSpend = spending.pricedEntries > 0;
   const completionMessage =
@@ -1851,27 +1889,35 @@ function CollectionSpendingPanel({
               <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-[#a78345]" />Keyboards</span>
               <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-indigo-500" />Keycaps</span>
             </div>
-            <div className="grid min-w-[610px] grid-cols-12 gap-2" role="img" aria-label="Monthly collection spending over the last twelve months">
+            <div className="grid min-w-[610px] grid-cols-12 gap-2">
               {spending.months.map((month) => {
                 const height =
                   month.amount > 0
                     ? Math.max(10, Math.round((month.amount / maxMonth) * 100))
                     : 3;
+                const clickable = month.amount > 0;
                 return (
-                  <div key={month.key} className="flex min-w-0 flex-col items-center">
-                    <div className="flex h-36 w-full items-end justify-center rounded-lg bg-gray-50 px-1.5 pt-3 dark:bg-white/[0.035]">
+                  <button
+                    key={month.key}
+                    type="button"
+                    disabled={!clickable}
+                    onClick={() => setDetailMonth(month)}
+                    aria-label={
+                      clickable
+                        ? `${month.label}: ${formatCurrency(month.amount, currency)}. View breakdown`
+                        : `${month.label}: no recorded purchases`
+                    }
+                    className={`group/bar flex min-w-0 flex-col items-center rounded-lg ${clickable ? "cursor-pointer" : "cursor-default"}`}
+                  >
+                    <div
+                      className={`flex h-36 w-full items-end justify-center rounded-lg bg-gray-50 px-1.5 pt-3 ring-1 ring-transparent transition dark:bg-white/[0.035] ${
+                        clickable
+                          ? "group-hover/bar:bg-gray-100 group-hover/bar:ring-[#c9ab72]/50 dark:group-hover/bar:bg-white/[0.06]"
+                          : ""
+                      }`}
+                    >
                       <div
-                        title={`${month.label}: ${formatCurrency(
-                          month.amount,
-                          currency
-                        )}`}
-                        aria-label={`${month.label}: ${formatCurrency(
-                          month.amount,
-                          currency
-                        )}`}
-                        className={`flex w-full flex-col justify-end overflow-hidden rounded-t-md transition-[height] ${
-                          month.amount > 0 ? "bg-gray-200 dark:bg-white/10" : "bg-gray-200 dark:bg-white/10"
-                        }`}
+                        className="flex w-full flex-col justify-end overflow-hidden rounded-t-md bg-gray-200 transition-[height] dark:bg-white/10"
                         style={{ height: `${height}%` }}
                       >
                         {month.keyboardAmount > 0 && (
@@ -1888,14 +1934,31 @@ function CollectionSpendingPanel({
                         )}
                       </div>
                     </div>
-                    <span className="mt-2 text-[9px] font-semibold uppercase tracking-wide text-gray-400">
+                    <span
+                      className={`mt-2 text-[9px] font-semibold uppercase tracking-wide text-gray-400 ${
+                        clickable ? "group-hover/bar:text-[#80632f] dark:group-hover/bar:text-[#dfc284]" : ""
+                      }`}
+                    >
                       {month.shortLabel}
                     </span>
-                  </div>
+                  </button>
                 );
               })}
             </div>
+            {spending.activeMonths > 0 && (
+              <p className="mt-2 text-center text-[10px] text-gray-400">
+                Tap a month to see every purchase behind the total.
+              </p>
+            )}
           </div>
+
+          {detailMonth && (
+            <SpendingMonthDetail
+              month={detailMonth}
+              currency={currency}
+              onClose={() => setDetailMonth(null)}
+            />
+          )}
 
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4 text-xs text-gray-500 dark:border-white/10 dark:text-gray-400">
             <span>
@@ -1915,6 +1978,127 @@ function CollectionSpendingPanel({
         </div>
       </div>
     </section>
+  );
+}
+
+// Drill-down for a clicked month bar: every purchase that made up the total,
+// with its individual (converted) cost, so the owner can see how it all adds up.
+function SpendingMonthDetail({
+  month,
+  currency,
+  onClose,
+}: {
+  month: SpendingMonth;
+  currency: string;
+  onClose: () => void;
+}) {
+  const entries = [...month.entries].sort((a, b) => b.amount - a.amount);
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center sm:p-4"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Spending in ${month.label}`}
+        onClick={(event) => event.stopPropagation()}
+        className="flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl bg-white text-left shadow-2xl dark:bg-[#111417] sm:rounded-3xl"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-gray-100 p-5 dark:border-white/10">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9a7a42] dark:text-[#c9ab72]">
+              Monthly breakdown
+            </p>
+            <h3 className="mt-1 text-lg font-semibold text-gray-950 dark:text-white">{month.label}</h3>
+            <p className="mt-1 font-serif text-3xl tracking-tight text-gray-950 dark:text-white">
+              {formatCurrency(month.amount, currency)}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold">
+              {month.keyboardAmount > 0 && (
+                <span className="rounded-full bg-[#f7f1e5] px-2.5 py-1 text-[#80632f] dark:bg-[#2b251b] dark:text-[#dfc284]">
+                  Keyboards {formatCurrency(month.keyboardAmount, currency)}
+                </span>
+              )}
+              {month.keycapAmount > 0 && (
+                <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
+                  Keycaps {formatCurrency(month.keycapAmount, currency)}
+                </span>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close breakdown"
+            className="shrink-0 rounded-full border border-gray-200 p-2 text-gray-500 hover:border-gray-400 hover:text-gray-900 dark:border-gray-700 dark:hover:text-white"
+          >
+            <CloseIcon />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4">
+          <ul className="space-y-2">
+            {entries.map((entry) => {
+              const share = month.amount > 0 ? Math.round((entry.amount / month.amount) * 100) : 0;
+              return (
+                <li
+                  key={entry.id}
+                  className="flex items-center gap-3 rounded-xl border border-gray-100 p-2.5 dark:border-white/10"
+                >
+                  <div className="h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800">
+                    {entry.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={entry.imageUrl} alt={entry.name} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-sm text-gray-400">
+                        {entry.isKeycap ? "⎄" : "⌨"}
+                      </div>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{entry.name}</p>
+                    <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">
+                      {[
+                        entry.isKeycap ? "Keycap set" : "Keyboard",
+                        entry.detail,
+                        entry.quantity > 1 ? `×${entry.quantity}` : null,
+                        new Date(entry.acquiredAt).toLocaleDateString("en-SG", {
+                          day: "numeric",
+                          month: "short",
+                          timeZone: "UTC",
+                        }),
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                      {formatCurrency(entry.amount, currency)}
+                    </p>
+                    <p className="text-[10px] text-gray-400">
+                      {entry.converted
+                        ? `${entry.originalCurrency} ${entry.originalPrice.toLocaleString()}`
+                        : `${share}% of month`}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+
+        <div className="flex items-center justify-between border-t border-gray-100 px-5 py-4 dark:border-white/10">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+            {entries.length} purchase{entries.length === 1 ? "" : "s"}
+          </span>
+          <span className="text-sm font-bold text-gray-950 dark:text-white">
+            Total {formatCurrency(month.amount, currency)}
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }
 
