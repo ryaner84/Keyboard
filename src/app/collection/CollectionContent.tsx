@@ -1375,6 +1375,8 @@ export default function CollectionContent() {
           </div>
         </section>
 
+        {!authenticated && <VisitorCollectionGuide onSignIn={openSavePrompt} />}
+
         {authenticated && (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/5 bg-white/70 px-4 py-3 text-xs text-gray-500 backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-gray-400">
             <div className="flex flex-wrap items-center gap-3">
@@ -1898,6 +1900,116 @@ function SpendStat({ label, value }: { label: string; value: string }) {
         {value}
       </dd>
     </div>
+  );
+}
+
+// Shown to signed-out visitors on /collection: a 3-step visual pitch for the
+// feature (log pieces → track spend → share a showcase) plus a low-friction,
+// passwordless sign-in CTA.
+function VisitorCollectionGuide({ onSignIn }: { onSignIn: () => void }) {
+  return (
+    <section className="mt-8">
+      <div className="mx-auto max-w-2xl text-center">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#9a7a42] dark:text-[#c9ab72]">
+          Your collection, in one place
+        </p>
+        <h2 className="mt-3 font-serif text-2xl leading-tight tracking-tight text-gray-900 dark:text-white sm:text-3xl">
+          Keep every board and keycap set — and what you spent
+        </h2>
+        <p className="mt-3 text-sm leading-6 text-gray-500 dark:text-gray-400">
+          A private archive of your keyboards and GMK keycaps, with running spend
+          totals and an optional showcase to share. No password — just your email.
+        </p>
+      </div>
+
+      <div className="mt-8 grid gap-5 sm:grid-cols-3">
+        {/* Step 1 — add pieces */}
+        <div className="overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_10px_35px_rgba(25,22,16,0.05)] dark:border-white/10 dark:bg-[#111417]">
+          <div className="relative aspect-[16/10] overflow-hidden bg-[#f3f0e9] dark:bg-[#171a1e]">
+            <div className="absolute inset-0 flex items-center justify-center gap-3 p-4">
+              {[
+                { glyph: "⌨", chip: "Keyboard" },
+                { glyph: "⎄", chip: "Keycap set" },
+              ].map((c) => (
+                <div key={c.chip} className="flex w-1/2 max-w-[112px] flex-col overflow-hidden rounded-lg border border-black/10 bg-white shadow-sm dark:border-white/10 dark:bg-[#0e1114]">
+                  <div className="flex h-11 items-center justify-center bg-[#e9e7e1] text-xl text-gray-400 dark:bg-gray-800">{c.glyph}</div>
+                  <div className="space-y-1.5 p-2">
+                    <div className="h-1.5 w-3/4 rounded-full bg-gray-200 dark:bg-gray-700" />
+                    <span className="inline-block rounded-full bg-gray-900/80 px-1.5 py-0.5 text-[7px] font-semibold uppercase tracking-wide text-white">{c.chip}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <span className="absolute bottom-3 right-3 rounded-full bg-gray-950 px-2.5 py-1 text-[9px] font-semibold text-white dark:bg-white dark:text-gray-950">+ Add a piece</span>
+            <span className="absolute left-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-[#c9ab72] text-xs font-bold text-[#17130d] shadow">1</span>
+          </div>
+          <div className="p-5">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Add your keyboards & keycaps</h3>
+            <p className="mt-1.5 text-xs leading-5 text-gray-500 dark:text-gray-400">Search the catalog and log each piece — record every build and purchase, boards and GMK sets alike.</p>
+          </div>
+        </div>
+
+        {/* Step 2 — track spend */}
+        <div className="overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_10px_35px_rgba(25,22,16,0.05)] dark:border-white/10 dark:bg-[#111417]">
+          <div className="relative aspect-[16/10] overflow-hidden bg-[#f3f0e9] dark:bg-[#171a1e]">
+            <div className="absolute inset-0 flex flex-col justify-between p-4">
+              <div>
+                <div className="text-[8px] font-semibold uppercase tracking-wider text-gray-400">Total spent</div>
+                <div className="text-xl font-bold text-gray-900 dark:text-white">$4,280</div>
+              </div>
+              <div className="flex h-14 items-end gap-1.5">
+                {[42, 66, 30, 82, 54, 96].map((h, i) => (
+                  <div key={i} className="flex-1 rounded-t bg-gradient-to-t from-[#c9ab72] to-[#e6d3a6]" style={{ height: `${h}%` }} />
+                ))}
+              </div>
+            </div>
+            <span className="absolute left-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-[#c9ab72] text-xs font-bold text-[#17130d] shadow">2</span>
+          </div>
+          <div className="p-5">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Track what you spent</h3>
+            <p className="mt-1.5 text-xs leading-5 text-gray-500 dark:text-gray-400">See your total across keyboards and keycaps, month by month, converted to your local currency.</p>
+          </div>
+        </div>
+
+        {/* Step 3 — share showcase */}
+        <div className="overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_10px_35px_rgba(25,22,16,0.05)] dark:border-white/10 dark:bg-[#111417]">
+          <div className="relative aspect-[16/10] overflow-hidden bg-[#f3f0e9] dark:bg-[#171a1e]">
+            <div className="absolute inset-0 flex flex-col gap-2 p-4">
+              <div className="flex items-center gap-2">
+                <div className="h-6 w-6 shrink-0 rounded-full bg-[#c9ab72]" />
+                <div className="space-y-1">
+                  <div className="h-1.5 w-16 rounded-full bg-gray-300 dark:bg-gray-600" />
+                  <div className="h-1 w-10 rounded-full bg-gray-200 dark:bg-gray-700" />
+                </div>
+                <span className="ml-auto inline-flex items-center rounded-full bg-emerald-500/90 px-1.5 py-0.5 text-[7px] font-semibold uppercase tracking-wide text-white">On display</span>
+              </div>
+              <div className="grid flex-1 grid-cols-3 gap-1.5">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="rounded-md border border-black/5 bg-white/85 shadow-sm dark:border-white/10 dark:bg-[#0e1114]" />
+                ))}
+              </div>
+            </div>
+            <span className="absolute left-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-[#c9ab72] text-xs font-bold text-[#17130d] shadow">3</span>
+          </div>
+          <div className="p-5">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Share a public showcase</h3>
+            <p className="mt-1.5 text-xs leading-5 text-gray-500 dark:text-gray-400">Publish a curated page and choose exactly which pieces — even which units — visitors can see.</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-8 flex flex-col items-center gap-3 rounded-2xl border border-black/[0.06] bg-white/70 px-6 py-6 text-center shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
+        <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+          Signing in takes seconds — we email you a magic link, no password to remember.
+        </p>
+        <button
+          onClick={onSignIn}
+          className="rounded-full bg-[#c9ab72] px-6 py-2.5 text-sm font-semibold text-[#17130d] hover:bg-[#dbc18e]"
+        >
+          Start your collection — free
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -2437,6 +2549,11 @@ function KeycapCollectionCard({
   const imageUrl = keycapPurchasePhoto(active, catalogImage);
   const isCustomPhoto = active.photoSource === "CUSTOM" && Boolean(active.imageUrl);
   const visiblePurchaseCount = acquisitions.filter((purchase) => purchase.isPublic).length;
+  // Per-purchase public/hidden state only matters when the whole set is on
+  // display and there's more than one purchase (mirrors the keyboard builds).
+  const piecePublic = item.collection.isPublic;
+  const hiddenPurchaseCount = acquisitions.length - visiblePurchaseCount;
+  const showPurchaseVisibility = owned && piecePublic && acquisitions.length > 1;
   const pairingLabel = describeKeycapPairing(active.pairing, ownedKeyboards);
   const isCustom = isCustomSlug(item.slug);
   const acquiredYear = active.acquiredAt
@@ -2523,10 +2640,42 @@ function KeycapCollectionCard({
 
         {owned && acquisitions.length > 1 && (
           <div className="mt-4 space-y-2 border-t border-gray-100 pt-4 dark:border-white/10">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#9a7a42] dark:text-[#c9ab72]">{acquisitions.length} purchases</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-[#9a7a42] dark:text-[#c9ab72]">{acquisitions.length} purchases</p>
+              {showPurchaseVisibility && (
+                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                  hiddenPurchaseCount > 0
+                    ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+                    : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                }`}>
+                  {hiddenPurchaseCount > 0 ? `${visiblePurchaseCount} of ${acquisitions.length} public` : "All public"}
+                </span>
+              )}
+            </div>
+            {showPurchaseVisibility && hiddenPurchaseCount > 0 && (
+              <p className="flex items-center gap-1.5 text-[11px] leading-4 text-amber-700 dark:text-amber-300/90">
+                <BuildHiddenIcon />
+                {hiddenPurchaseCount === 1
+                  ? "1 purchase is hidden from your public collection page."
+                  : `${hiddenPurchaseCount} purchases are hidden from your public collection page.`}
+              </p>
+            )}
             {acquisitions.map((purchase, purchaseIndex) => (
               <button key={purchase.id} type="button" onClick={() => setActiveIndex(purchaseIndex)} className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs transition ${purchaseIndex === index ? "bg-[#faf7f0] text-gray-950 dark:bg-[#211d16] dark:text-white" : "bg-gray-50 text-gray-500 hover:bg-gray-100 dark:bg-white/[0.04] dark:text-gray-300"}`}>
-                <span className="truncate font-semibold">{keycapKitLabel(purchase)}</span>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate font-semibold">{keycapKitLabel(purchase)}</span>
+                  {showPurchaseVisibility && (purchase.isPublic ? (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">
+                      <BuildShownIcon />
+                      Public
+                    </span>
+                  ) : (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+                      <BuildHiddenIcon />
+                      Hidden
+                    </span>
+                  ))}
+                </span>
                 <span className="ml-3 shrink-0 text-[10px]">{purchase.acquiredAt ? new Date(purchase.acquiredAt).getFullYear() : "Date pending"}</span>
               </button>
             ))}
