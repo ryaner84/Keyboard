@@ -17,6 +17,7 @@ import {
   NONBASE_SUBKIT_RE,
   parseVariants,
 } from "@/lib/kit-variants";
+import { normalizeSetName } from "@/lib/set-name";
 import {
   createKeycapAcquisition,
   KEYCAP_CONDITION_LABELS,
@@ -3776,6 +3777,58 @@ interface CatalogPickerResult {
   productType: string;
 }
 
+// The same set is often in the catalog several times under different source
+// names — the official gmk.net "GMK CYL Noel R2 Keycaps", the KeycapLendar
+// "GMK Noel R2", and a Geekhack "[GB] GMK Noel R2 (Round 2) | Dec 26 - Jan 26".
+// Collapse those to one picker row per set so the collector isn't asked to pick
+// between duplicates. Round-aware, so Noel R2 stays separate from Noel.
+function pickerGroupKey(result: CatalogPickerResult): string {
+  let name = result.name;
+  const bar = name.indexOf("|");
+  if (bar > 0) name = name.slice(0, bar);
+  // Geekhack GB titles trail a date range ("- July 6th to July 27th").
+  name = name.replace(
+    /[-–—]\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*.*/i,
+    ""
+  );
+  return `${result.productType}::${normalizeSetName(name)}`;
+}
+
+function dedupePickerResults(
+  results: CatalogPickerResult[],
+  existingItems: Map<string, CollectionItemDetails>
+): CatalogPickerResult[] {
+  const groups = new Map<string, CatalogPickerResult[]>();
+  const order: string[] = [];
+  for (const result of results) {
+    const key = pickerGroupKey(result);
+    const group = groups.get(key);
+    if (group) group.push(result);
+    else {
+      groups.set(key, [result]);
+      order.push(key);
+    }
+  }
+  // Prefer the row the collector already owns/tracks (so its state is accurate),
+  // then the official "GMK CYL"/"MTNU" name, then the cleaner non-Geekhack row.
+  const score = (result: CatalogPickerResult): number => {
+    const existing = existingItems.get(result.slug);
+    let value = 0;
+    if (existing?.inCollection || existing?.isTracking) value += 1000;
+    if (/\bcyl\b/i.test(result.name)) value += 100;
+    if (/\bmtnu\b/i.test(result.name)) value += 90;
+    if (/keycaps?\b/i.test(result.name)) value += 20;
+    if (/^\s*\[/.test(result.name)) value -= 80;
+    if (result.slug.startsWith("gh-")) value -= 40;
+    value -= result.name.length * 0.1;
+    return value;
+  };
+  return order.map((key) => {
+    const group = groups.get(key)!;
+    return group.reduce((best, result) => (score(result) > score(best) ? result : best), group[0]);
+  });
+}
+
 function CollectionCatalogPicker({
   initialQuery,
   existingItems,
@@ -3825,6 +3878,11 @@ function CollectionCatalogPicker({
       setCustomBusy(false);
     }
   }
+
+  const dedupedResults = useMemo(
+    () => dedupePickerResults(results, existingItems),
+    [results, existingItems]
+  );
 
   useModalBodyLock();
 
@@ -4025,7 +4083,7 @@ function CollectionCatalogPicker({
           </div>
         ) : searching && results.length === 0 ? (
           <p className="py-12 text-center text-sm text-gray-400">Searching catalog…</p>
-        ) : results.length === 0 ? (
+        ) : dedupedResults.length === 0 ? (
           <div className="py-8">
             <div className="text-center">
               <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
@@ -4041,7 +4099,7 @@ function CollectionCatalogPicker({
           </div>
         ) : (
           <div className="space-y-3">
-            {results.map((result) => {
+            {dedupedResults.map((result) => {
               const imageUrl = normalizeImageUrl(result.imageUrl);
               const existing = existingItems.get(result.slug);
               const alreadyOwned = existing?.inCollection === true;
