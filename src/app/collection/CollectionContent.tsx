@@ -3505,41 +3505,78 @@ function KeycapCollectionEditor({
               Which kits did this purchase include?
             </p>
             <p className="mt-1 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
-              Tag the kits that came in this purchase — Base, Novelties, Spacebars… This just
-              records what you own; it doesn’t change the price.
+              Tap the kits that came in this purchase — a filled chip is included, an outline one
+              isn’t. This just records what you own; it doesn’t change the price.
             </p>
             {(() => {
-              const options = kitOptions.length > 0 ? kitOptions : item.kits.map((k) => k.name);
-              return options.length > 0 ? (
+              const optionNames = kitOptions.length > 0 ? kitOptions : item.kits.map((k) => k.name);
+              const optionSet = new Set(optionNames.map((name) => name.toLowerCase()));
+              // Custom kits the collector typed live in the same chip group, so
+              // there's one place to see what's included — no duplicate list.
+              const customSelected = active.kits
+                .filter(
+                  (kit) =>
+                    kit.name !== "Set / kits not specified" &&
+                    !optionSet.has(kit.name.toLowerCase())
+                )
+                .map((kit) => kit.name);
+              const chips = [...optionNames, ...customSelected];
+              const selectedCount = active.kits.filter(
+                (kit) => kit.name !== "Set / kits not specified"
+              ).length;
+              return (
                 <>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {options.map((name) => {
-                      const selected = active.kits.some(
-                        (candidate) => candidate.name.toLowerCase() === name.toLowerCase()
-                      );
-                      return (
-                        <button
-                          key={name}
-                          type="button"
-                          onClick={() => toggleNamedKit(name)}
-                          aria-pressed={selected}
-                          className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${selected ? "border-[#9a7a42] bg-[#9a7a42] text-white" : "border-gray-200 text-gray-600 hover:border-[#c9ab72] dark:border-gray-700 dark:text-gray-300"}`}
-                        >
-                          {name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {kitOptions.length > 0 && (
-                    <p className="mt-2 text-[10px] text-gray-400">
-                      Pulled from this set’s scraped kit list — tap the ones you bought.
-                    </p>
+                  {chips.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {chips.map((name) => {
+                        const selected = active.kits.some(
+                          (candidate) => candidate.name.toLowerCase() === name.toLowerCase()
+                        );
+                        return (
+                          <button
+                            key={name}
+                            type="button"
+                            onClick={() => toggleNamedKit(name)}
+                            aria-pressed={selected}
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                              selected
+                                ? "border-[#9a7a42] bg-[#9a7a42] text-white shadow-sm"
+                                : "border-gray-200 text-gray-600 hover:border-[#c9ab72] dark:border-gray-700 dark:text-gray-300"
+                            }`}
+                          >
+                            {selected && (
+                              <svg
+                                className="h-3 w-3"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={3}
+                                  d="M5 12l4 4 10-10"
+                                />
+                              </svg>
+                            )}
+                            {name}
+                          </button>
+                        );
+                      })}
+                    </div>
                   )}
+                  <p className="mt-2 text-[10px] text-gray-400">
+                    {selectedCount === 0
+                      ? "Nothing selected yet — tap a kit above, or add your own below."
+                      : `${selectedCount} kit${selectedCount === 1 ? "" : "s"} included${
+                          kitOptions.length > 0 ? " · options come from this set’s scraped kit list" : ""
+                        }`}
+                  </p>
                 </>
-              ) : null;
+              );
             })()}
             <div className="mt-3 flex gap-2"><input value={customKit} onChange={(event) => setCustomKit(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustomKit(); } }} placeholder="Add another kit name" className={inputClass} /><button type="button" onClick={addCustomKit} className="shrink-0 rounded-xl border border-gray-200 px-3 text-xs font-semibold text-gray-600 hover:border-[#9a7a42] hover:text-[#80632f] dark:border-gray-700 dark:text-gray-300">Add kit</button></div>
-            <div className="mt-3 flex flex-wrap gap-1.5">{active.kits.map((kit, kitIndex) => <span key={`${kit.kitId || "custom"}-${kit.name}-${kitIndex}`} className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-700 dark:bg-white/10 dark:text-gray-200">{kit.name}{kit.name !== "Set / kits not specified" && <button type="button" onClick={() => updatePurchase(activePurchase, { kits: active.kits.filter((_, index) => index !== kitIndex) })} aria-label={`Remove ${kit.name}`} className="ml-0.5 text-gray-400 hover:text-red-600">x</button>}</span>)}</div>
           </div>
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
