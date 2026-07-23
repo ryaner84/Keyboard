@@ -13,6 +13,11 @@ import { isCustomSlug } from "@/lib/showcase";
 import { collectionSharePath } from "@/lib/collection-share";
 import { convertCurrency, formatCurrency } from "@/lib/currency-utils";
 import {
+  classifyVariant,
+  NONBASE_SUBKIT_RE,
+  parseVariants,
+} from "@/lib/kit-variants";
+import {
   createKeycapAcquisition,
   KEYCAP_CONDITION_LABELS,
   keycapKitLabel,
@@ -27,7 +32,6 @@ import type {
   CollectionUnit,
   GroupBuyWithPricing,
   KeycapAcquisition,
-  KeycapKitSelection,
   KeycapPairing,
 } from "@/types";
 
@@ -291,6 +295,38 @@ function dateInputValue(value: Date | string | null): string {
   if (!value) return "";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+}
+
+// The scraped kit names for a set, derived from every vendor's variant list and
+// collapsed to clean labels (Base Kit / Alphas / Novelties / Spacebars + named
+// subkits). Lets a collector tick the exact kits they bought instead of typing.
+function scrapedKitOptions(item: CollectionCatalogItem): string[] {
+  const titles = new Set<string>();
+  for (const kit of item.kits ?? []) {
+    for (const vk of kit.vendorKits ?? []) {
+      for (const variant of parseVariants((vk as { variants?: unknown }).variants)) {
+        const title = variant.title?.trim();
+        if (title && title.toLowerCase() !== "default title") titles.add(title);
+      }
+    }
+  }
+  const found = new Set<string>();
+  const subkits = new Set<string>();
+  for (const title of Array.from(titles)) {
+    const category = classifyVariant(title);
+    if (category === "BASE") found.add("Base Kit");
+    else if (category === "ALPHA") found.add("Alphas");
+    else if (category === "NOVELTIES") found.add("Novelties");
+    else if (category === "SPACEBARS") found.add("Spacebars");
+    else {
+      const match = title.match(NONBASE_SUBKIT_RE);
+      if (match) subkits.add(match[0][0].toUpperCase() + match[0].slice(1).toLowerCase());
+    }
+  }
+  const primary = ["Base Kit", "Alphas", "Novelties", "Spacebars"].filter((label) =>
+    found.has(label)
+  );
+  return [...primary, ...Array.from(subkits).sort()].slice(0, 14);
 }
 
 function BuildSummary({
@@ -2760,6 +2796,17 @@ function KeycapCollectionCard({
   const catalogImage = normalizeImageUrl(item.imageUrl);
   const imageUrl = keycapPurchasePhoto(active, catalogImage);
   const isCustomPhoto = active.photoSource === "CUSTOM" && Boolean(active.imageUrl);
+  const namedKits = active.kits.filter((kit) => kit.name !== "Set / kits not specified");
+  const galleryImages = (((item as { images?: string[] }).images ?? [])
+    .map((src) => normalizeImageUrl(src))
+    .filter(Boolean) as string[]);
+  // A multi-kit purchase with no custom photo shows a base + novelty collage from
+  // the set's scraped gallery. We don't store a photo per kit, so two gallery
+  // views are the best available representation of "several kits in one buy".
+  const collageImages =
+    !isCustomPhoto && namedKits.length >= 2 && galleryImages.length >= 2
+      ? galleryImages.slice(0, 2)
+      : null;
   const visiblePurchaseCount = acquisitions.filter((purchase) => purchase.isPublic).length;
   // Per-purchase public/hidden state only matters when the whole set is on
   // display and there's more than one purchase (mirrors the keyboard builds).
@@ -2775,7 +2822,30 @@ function KeycapCollectionCard({
   return (
     <article className="group overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_10px_35px_rgba(25,22,16,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_18px_50px_rgba(25,22,16,0.10)] dark:border-white/10 dark:bg-[#111417]">
       <div className="relative aspect-[4/3] overflow-hidden bg-[#e9e7e1] dark:bg-gray-900">
-        {imageUrl ? (
+        {collageImages ? (
+          (() => {
+            const collage = (
+              <div className="grid h-full w-full grid-cols-2 gap-0.5 transition duration-500 group-hover:scale-[1.025]">
+                {collageImages.map((src, collageIndex) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={collageIndex}
+                    src={src}
+                    alt={`${item.name} kit ${collageIndex + 1}`}
+                    className="h-full w-full object-cover"
+                  />
+                ))}
+              </div>
+            );
+            return isCustom ? (
+              <div className="absolute inset-0">{collage}</div>
+            ) : (
+              <Link href={`/sets/${item.slug}?country=${countryCode}`} className="absolute inset-0 block">
+                {collage}
+              </Link>
+            );
+          })()
+        ) : imageUrl ? (
           isCustom ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={imageUrl} alt={item.name} className={`absolute inset-0 h-full w-full ${isCustomPhoto ? "object-contain" : "object-cover"}`} />
@@ -2787,6 +2857,11 @@ function KeycapCollectionCard({
           )
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-5xl text-gray-300 dark:text-gray-700">KEY</div>
+        )}
+        {collageImages && (
+          <span className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-full bg-black/65 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white backdrop-blur">
+            {namedKits.length} kits
+          </span>
         )}
         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4">
           <span className="rounded-full bg-black/65 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur">Keycap set</span>
@@ -3318,19 +3393,6 @@ function KeycapCollectionEditor({
     );
   }
 
-  function toggleCatalogKit(kit: KeycapKitSelection) {
-    const selected = active.kits.some((candidate) => candidate.kitId === kit.kitId);
-    const next = selected
-      ? active.kits.filter((candidate) => candidate.kitId !== kit.kitId)
-      : [
-          ...active.kits.filter((candidate) => candidate.name !== "Set / kits not specified"),
-          kit,
-        ];
-    updatePurchase(activePurchase, {
-      kits: next.length > 0 ? next : [{ kitId: null, name: "Set / kits not specified", type: "" }],
-    });
-  }
-
   function addCustomKit() {
     const name = customKit.trim().slice(0, 80);
     if (!name) return;
@@ -3346,6 +3408,20 @@ function KeycapCollectionEditor({
     });
     setCustomKit("");
   }
+
+  // Toggle a scraped-variant kit by its clean name (Base Kit / Novelties / …).
+  function toggleNamedKit(name: string) {
+    const has = active.kits.some((kit) => kit.name.toLowerCase() === name.toLowerCase());
+    const base = active.kits.filter((kit) => kit.name !== "Set / kits not specified");
+    const next = has
+      ? base.filter((kit) => kit.name.toLowerCase() !== name.toLowerCase())
+      : [...base, { kitId: null, name, type: "" }];
+    updatePurchase(activePurchase, {
+      kits: next.length > 0 ? next : [{ kitId: null, name: "Set / kits not specified", type: "" }],
+    });
+  }
+
+  const kitOptions = scrapedKitOptions(item);
 
   function setPairing(value: string) {
     if (!value) {
@@ -3425,13 +3501,45 @@ function KeycapCollectionEditor({
           </div>
 
           <div className="mt-5">
-            <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Kits included</p>
-            {item.kits.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{item.kits.map((kit) => {
-              const selected = active.kits.some((candidate) => candidate.kitId === kit.id);
-              return <button key={kit.id} type="button" onClick={() => toggleCatalogKit({ kitId: kit.id, name: kit.name, type: kit.type || "" })} aria-pressed={selected} className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${selected ? "border-[#9a7a42] bg-[#9a7a42] text-white" : "border-gray-200 text-gray-600 hover:border-[#c9ab72] dark:border-gray-700 dark:text-gray-300"}`}>{kit.name}{kit.type ? ` · ${kit.type}` : ""}</button>;
-            })}</div>}
-            <div className="mt-3 flex gap-2"><input value={customKit} onChange={(event) => setCustomKit(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustomKit(); } }} placeholder="Add a custom kit name" className={inputClass} /><button type="button" onClick={addCustomKit} className="shrink-0 rounded-xl border border-gray-200 px-3 text-xs font-semibold text-gray-600 hover:border-[#9a7a42] hover:text-[#80632f] dark:border-gray-700 dark:text-gray-300">Add kit</button></div>
-            <div className="mt-3 flex flex-wrap gap-1.5">{active.kits.map((kit, kitIndex) => <span key={`${kit.kitId || "custom"}-${kit.name}-${kitIndex}`} className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-700 dark:bg-white/10 dark:text-gray-200">{kit.name}{kit.kitId === null && kit.name !== "Set / kits not specified" && <button type="button" onClick={() => updatePurchase(activePurchase, { kits: active.kits.filter((_, index) => index !== kitIndex) })} aria-label={`Remove ${kit.name}`} className="ml-0.5 text-gray-400 hover:text-red-600">x</button>}</span>)}</div>
+            <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+              Which kits did this purchase include?
+            </p>
+            <p className="mt-1 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+              Tag the kits that came in this purchase — Base, Novelties, Spacebars… This just
+              records what you own; it doesn’t change the price.
+            </p>
+            {(() => {
+              const options = kitOptions.length > 0 ? kitOptions : item.kits.map((k) => k.name);
+              return options.length > 0 ? (
+                <>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {options.map((name) => {
+                      const selected = active.kits.some(
+                        (candidate) => candidate.name.toLowerCase() === name.toLowerCase()
+                      );
+                      return (
+                        <button
+                          key={name}
+                          type="button"
+                          onClick={() => toggleNamedKit(name)}
+                          aria-pressed={selected}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${selected ? "border-[#9a7a42] bg-[#9a7a42] text-white" : "border-gray-200 text-gray-600 hover:border-[#c9ab72] dark:border-gray-700 dark:text-gray-300"}`}
+                        >
+                          {name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {kitOptions.length > 0 && (
+                    <p className="mt-2 text-[10px] text-gray-400">
+                      Pulled from this set’s scraped kit list — tap the ones you bought.
+                    </p>
+                  )}
+                </>
+              ) : null;
+            })()}
+            <div className="mt-3 flex gap-2"><input value={customKit} onChange={(event) => setCustomKit(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustomKit(); } }} placeholder="Add another kit name" className={inputClass} /><button type="button" onClick={addCustomKit} className="shrink-0 rounded-xl border border-gray-200 px-3 text-xs font-semibold text-gray-600 hover:border-[#9a7a42] hover:text-[#80632f] dark:border-gray-700 dark:text-gray-300">Add kit</button></div>
+            <div className="mt-3 flex flex-wrap gap-1.5">{active.kits.map((kit, kitIndex) => <span key={`${kit.kitId || "custom"}-${kit.name}-${kitIndex}`} className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-700 dark:bg-white/10 dark:text-gray-200">{kit.name}{kit.name !== "Set / kits not specified" && <button type="button" onClick={() => updatePurchase(activePurchase, { kits: active.kits.filter((_, index) => index !== kitIndex) })} aria-label={`Remove ${kit.name}`} className="ml-0.5 text-gray-400 hover:text-red-600">x</button>}</span>)}</div>
           </div>
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
