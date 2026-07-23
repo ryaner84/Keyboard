@@ -59,6 +59,11 @@ function posterThumbnailUrl(rawUrl: string): string {
 }
 async function fetchImageBuffer(url: string): Promise<Buffer | null> {
   try {
+    if (url.startsWith("data:image/")) {
+      const encoded = url.split(",", 2)[1];
+      const buffer = encoded ? Buffer.from(encoded, "base64") : null;
+      return buffer && buffer.length <= 1_500_000 ? buffer : null;
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 6000);
     const response = await fetch(posterThumbnailUrl(url), {
@@ -180,6 +185,43 @@ function rankedCounts(
     .slice(0, limit);
 }
 
+function posterItemImage(item: {
+  customImageUrl: string | null;
+  keycapAcquisitions: unknown;
+  groupBuy: CollectionGroupBuy;
+}) {
+  if (item.groupBuy.productType === "KEYBOARD") {
+    return item.customImageUrl || item.groupBuy.imageUrl;
+  }
+  if (Array.isArray(item.keycapAcquisitions)) {
+    const visible = item.keycapAcquisitions.find((acquisition) => {
+      const data = (acquisition ?? {}) as Record<string, unknown>;
+      return data.isPublic !== false && data.photoSource === "CUSTOM" && typeof data.imageUrl === "string";
+    }) as Record<string, unknown> | undefined;
+    if (visible?.imageUrl && typeof visible.imageUrl === "string") return visible.imageUrl;
+  }
+  return item.customImageUrl || item.groupBuy.imageUrl;
+}
+
+function countKeycapKitCopies(value: unknown, legacyQuantity: number) {
+  if (!Array.isArray(value) || value.length === 0) return Math.max(1, legacyQuantity || 1);
+  return value.reduce((total, acquisition) => {
+    const data = (acquisition ?? {}) as Record<string, unknown>;
+    if (data.isPublic === false) return total;
+    const kits = Array.isArray(data.kits) && data.kits.length > 0 ? data.kits.length : 1;
+    const quantity = Math.max(1, Math.min(99, Number(data.quantity) || 1));
+    return total + kits * quantity;
+  }, 0);
+}
+
+function hasPublicKeycapPurchase(value: unknown) {
+  if (!Array.isArray(value) || value.length === 0) return true;
+  return value.some((acquisition) => {
+    const data = (acquisition ?? {}) as Record<string, unknown>;
+    return data.isPublic !== false;
+  });
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ slug: string }> }
@@ -201,6 +243,10 @@ export async function GET(
         },
         orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
         select: {
+          customImageUrl: true,
+          quantity: true,
+          hiddenBuilds: true,
+          keycapAcquisitions: true,
           groupBuy: {
             select: {
               name: true,
@@ -220,18 +266,45 @@ export async function GET(
 
   const owner = collection.displayName || "Keyboard collector";
   const title = collection.collectionTitle || `${owner}'s collection`;
-  const keyboards = collection.items
-    .map((item) => item.groupBuy)
-    .filter((groupBuy) => groupBuy.productType === "KEYBOARD");
-  const keycapCount = collection.items.length - keyboards.length;
+  const displayedItems = collection.items.filter((item) => {
+    if (item.groupBuy.productType !== "KEYBOARD") {
+      return hasPublicKeycapPurchase(item.keycapAcquisitions);
+    }
+    const hidden = new Set(
+      Array.isArray(item.hiddenBuilds)
+        ? item.hiddenBuilds.map((index) => Number(index))
+        : []
+    );
+    return Array.from({ length: Math.max(1, item.quantity || 1) }).some(
+      (_, index) => !hidden.has(index)
+    );
+  });
+  const keyboards = displayedItems
+    .filter((item) => item.groupBuy.productType === "KEYBOARD")
+    .map((item) => item.groupBuy);
+  const keycapItems = displayedItems.filter(
+    (item) => item.groupBuy.productType !== "KEYBOARD"
+  );
+  const keycapCount = keycapItems.length;
+  const keycapKitCopies = keycapItems.reduce(
+    (total, item) => total + countKeycapKitCopies(item.keycapAcquisitions, item.quantity),
+    0
+  );
   const layoutCounts = rankedCounts(keyboards.map(inferLayout), 5);
   const brandCounts = rankedCounts(keyboards.map(inferBrand), 5);
-  const candidates = [
-    ...keyboards,
-    ...collection.items
-      .map((item) => item.groupBuy)
-      .filter((groupBuy) => groupBuy.productType !== "KEYBOARD"),
-  ].slice(0, 5);
+  const keycapMix =
+    keycapCount > 0
+      ? [
+          { label: "Keycap sets", count: keycapCount },
+          { label: "Kit copies", count: keycapKitCopies },
+        ]
+      : [];
+  // Preserve the collector's display order across BOTH item types. Earlier
+  // posters always filled the gallery with boards first, hiding keycap photos.
+  const candidates = displayedItems.slice(0, 5).map((item) => ({
+    groupBuy: item.groupBuy,
+    imageUrl: posterItemImage(item),
+  }));
   const imageBuffers = await Promise.all(
     candidates.map(async (item) => {
       const url = normalizeImageUrl(item.imageUrl);
@@ -355,7 +428,7 @@ export async function GET(
               fontSize: 10,
             }}
           >
-            {collection.items.length} displayed
+            {displayedItems.length} displayed
             {keycapCount > 0
               ? ` · ${keycapCount} keycap set${keycapCount === 1 ? "" : "s"}`
               : ""}
@@ -424,12 +497,22 @@ export async function GET(
             title="Layout mix"
             values={layoutCounts}
             emptyLabel="Layout details coming soon"
+            width={keycapCount > 0 ? 240 : 366}
           />
           <StatPanel
             title="Top brands"
             values={brandCounts}
             emptyLabel="Independent collection"
+            width={keycapCount > 0 ? 240 : 366}
           />
+          {keycapCount > 0 && (
+            <StatPanel
+              title="Keycap mix"
+              values={keycapMix}
+              emptyLabel="Keycap details coming soon"
+              width={240}
+            />
+          )}
         </div>
 
         <div
@@ -448,7 +531,7 @@ export async function GET(
           <span style={{ display: "flex" }}>
             {collection.collectionBio
               ? collection.collectionBio.slice(0, 72)
-              : "A collector's personal keyboard archive"}
+              : "A collector's personal keyboard and keycap archive"}
           </span>
           <span
             style={{
@@ -477,15 +560,17 @@ function StatPanel({
   title,
   values,
   emptyLabel,
+  width = 366,
 }: {
   title: string;
   values: Array<{ label: string; count: number }>;
   emptyLabel: string;
+  width?: number;
 }) {
   return (
     <div
       style={{
-        width: 366,
+        width,
         height: 78,
         display: "flex",
         flexDirection: "column",

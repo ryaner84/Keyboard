@@ -9,7 +9,10 @@ export function normalizeCollectionShareToken(token?: string | null) {
 }
 
 export function collectionSharePath(slug: string, token?: string | null) {
-  return `/collection/${slug}?share=${normalizeCollectionShareToken(token)}`;
+  // A collection has one durable public address. Poster cache busting belongs
+  // on the image URL, not on a new share URL every time the owner edits it.
+  void token;
+  return `/collection/${slug}`;
 }
 
 export function collectionPosterPath(slug: string, token?: string | null) {

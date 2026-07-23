@@ -11,7 +11,8 @@
     "db:seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
-    "import": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' -r tsconfig-paths/register src/scripts/import.ts"
+    "import": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' -r tsconfig-paths/register src/scripts/import.ts",
+    "test:keycap-collection": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/keycap-collection.test.ts"
   },
   "prisma": {
     "seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts"

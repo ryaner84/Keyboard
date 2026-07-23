@@ -6,6 +6,7 @@ import { SHOWCASE_VENDORS, HIDDEN_SLUGS, notCustomWhere } from "@/lib/showcase";
 // pricing joins — fast enough to hit on every keystroke (debounced client-side).
 export async function GET(req: NextRequest) {
   const q = (req.nextUrl.searchParams.get("q") ?? "").trim();
+  const productType = req.nextUrl.searchParams.get("type");
   if (q.length < 2) return NextResponse.json({ results: [] });
   const limit = Math.min(
     48,
@@ -38,6 +39,9 @@ export async function GET(req: NextRequest) {
       ...(HIDDEN_SLUGS.length > 0 ? [{ slug: { notIn: HIDDEN_SLUGS } }] : []),
       // Custom collection pieces are private — never in global search.
       notCustomWhere,
+      ...(productType === "KEYBOARD" || productType === "KEYCAPS"
+        ? [{ productType }]
+        : []),
     ],
   };
 

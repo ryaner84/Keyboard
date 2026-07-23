@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import { getTrackerSessionUser } from "@/lib/tracker-auth";
 import { cleanCollectionPhoto } from "@/lib/collection-photo";
 import { isCustomSlug } from "@/lib/showcase";
-import type { CollectionUnit } from "@/types";
+import type { CollectionUnit, KeycapAcquisition, KeycapKitSelection, KeycapPairing } from "@/types";
 
 const CONDITIONS = new Set(["UNBUILT", "EXCELLENT", "GOOD", "FAIR", "PROJECT"]);
+const KEYCAP_CONDITIONS = new Set([
+  "SEALED",
+  "OPEN_UNUSED",
+  "MOUNTED",
+  "USED",
+  "INCOMPLETE",
+]);
 
 export async function PATCH(
   req: NextRequest,
@@ -20,7 +28,17 @@ export async function PATCH(
   const { slug } = await params;
   const item = await prisma.trackerItem.findFirst({
     where: { userId: user.id, groupBuy: { slug } },
-    select: { id: true, isTracking: true, inCollection: true },
+    select: {
+      id: true,
+      isTracking: true,
+      inCollection: true,
+      groupBuy: {
+        select: {
+          productType: true,
+          kits: { select: { id: true, name: true, type: true } },
+        },
+      },
+    },
   });
   if (!item) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
@@ -48,6 +66,7 @@ export async function PATCH(
     quantity?: number;
     customImageUrl?: string | null;
     units?: Prisma.InputJsonValue;
+    keycapAcquisitions?: Prisma.InputJsonValue | typeof Prisma.JsonNull;
   } = {};
 
   if (typeof body.isTracking === "boolean") data.isTracking = body.isTracking;
@@ -116,7 +135,7 @@ export async function PATCH(
   if ("customImageUrl" in body) {
     const photo = cleanCollectionPhoto(body.customImageUrl);
     if (body.customImageUrl && !photo) {
-      return NextResponse.json({ error: "Invalid keyboard photo" }, { status: 400 });
+      return NextResponse.json({ error: "Invalid collection photo" }, { status: 400 });
     }
     data.customImageUrl = photo;
   }
@@ -142,6 +161,37 @@ export async function PATCH(
             unitError instanceof Error
               ? unitError.message
               : "Invalid build purchase details",
+        },
+        { status: 400 }
+      );
+    }
+  }
+  if ("keycapAcquisitions" in body) {
+    if (item.groupBuy.productType === "KEYBOARD") {
+      return NextResponse.json(
+        { error: "Keycap purchase records can only be added to keycap sets" },
+        { status: 400 }
+      );
+    }
+    const raw: unknown[] = Array.isArray(body.keycapAcquisitions)
+      ? body.keycapAcquisitions.slice(0, 50)
+      : [];
+    try {
+      const knownKits = new Map(
+        item.groupBuy.kits.map((kit) => [kit.id, { name: kit.name, type: kit.type }])
+      );
+      const acquisitions = raw.map((acquisition) =>
+        cleanKeycapAcquisition(acquisition, knownKits)
+      );
+      await validateKeycapPairings(user.id, acquisitions);
+      data.keycapAcquisitions = acquisitions as unknown as Prisma.InputJsonValue;
+    } catch (acquisitionError) {
+      return NextResponse.json(
+        {
+          error:
+            acquisitionError instanceof Error
+              ? acquisitionError.message
+              : "Invalid keycap purchase details",
         },
         { status: 400 }
       );
@@ -185,6 +235,9 @@ export async function PATCH(
       customImageUrl: updated.customImageUrl,
       units: Array.isArray(updated.units) ? updated.units : [],
       hiddenBuilds: Array.isArray(updated.hiddenBuilds) ? updated.hiddenBuilds : [],
+      keycapAcquisitions: Array.isArray(updated.keycapAcquisitions)
+        ? updated.keycapAcquisitions
+        : [],
     },
   });
 }
@@ -272,4 +325,147 @@ function cleanUnitPrice(value: unknown): number | null {
 function cleanUnitCurrency(value: unknown): string | null {
   const currency = String(value ?? "").trim().toUpperCase().slice(0, 8);
   return currency || null;
+}
+
+function cleanKeycapAcquisition(
+  value: unknown,
+  knownKits: Map<string, { name: string; type: string }>
+): KeycapAcquisition {
+  const source = (value ?? {}) as Record<string, unknown>;
+  const id = cleanIdentifier(source.id) || randomUUID();
+  const kits = cleanKeycapKits(source.kits, knownKits);
+  const quantity = Math.max(1, Math.min(99, Math.floor(Number(source.quantity) || 1)));
+  const acquiredAt = cleanKeycapDate(source.acquiredAt);
+  const purchasePrice = cleanUnitPrice(source.purchasePrice);
+  const purchaseCurrency = cleanUnitCurrency(source.purchaseCurrency);
+  const condition = cleanKeycapCondition(source.condition);
+  const imageUrl = cleanCollectionPhoto(source.imageUrl);
+  if (source.imageUrl && !imageUrl) {
+    throw new Error("Invalid keycap photo");
+  }
+  const photoSource = source.photoSource === "CUSTOM" && imageUrl ? "CUSTOM" : "CATALOG";
+  return {
+    id,
+    kits,
+    quantity,
+    acquiredAt,
+    purchasePrice,
+    purchaseCurrency,
+    condition,
+    imageUrl,
+    photoSource,
+    notes: cleanOptionalText(source.notes, 1000),
+    isPublic: source.isPublic !== false,
+    pairing: cleanKeycapPairing(source.pairing),
+  };
+}
+
+function cleanIdentifier(value: unknown): string | null {
+  const id = String(value ?? "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 100);
+  return id || null;
+}
+
+function cleanKeycapKits(
+  value: unknown,
+  knownKits: Map<string, { name: string; type: string }>
+): KeycapKitSelection[] {
+  const raw = Array.isArray(value) ? value.slice(0, 12) : [];
+  const seen = new Set<string>();
+  const kits = raw
+    .map((kit) => {
+      const source = (kit ?? {}) as Record<string, unknown>;
+      const requestedId = cleanIdentifier(source.kitId);
+      if (requestedId) {
+        const catalogKit = knownKits.get(requestedId);
+        if (!catalogKit) throw new Error("A selected kit no longer belongs to this keycap set");
+        if (seen.has(`catalog:${requestedId}`)) return null;
+        seen.add(`catalog:${requestedId}`);
+        return { kitId: requestedId, name: catalogKit.name, type: catalogKit.type || "" };
+      }
+      const name = cleanOptionalText(source.name, 80);
+      if (!name) return null;
+      const key = `custom:${name.toLowerCase()}`;
+      if (seen.has(key)) return null;
+      seen.add(key);
+      return {
+        kitId: null,
+        name,
+        type: cleanOptionalText(source.type, 50) || "",
+      };
+    })
+    .filter((kit): kit is KeycapKitSelection => Boolean(kit));
+
+  return kits.length > 0
+    ? kits
+    : [{ kitId: null, name: "Set / kits not specified", type: "" }];
+}
+
+function cleanKeycapDate(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Invalid acquisition date for one of the keycap purchases");
+  }
+  return date.toISOString();
+}
+
+function cleanKeycapCondition(value: unknown): KeycapAcquisition["condition"] {
+  const condition = String(value ?? "").trim().toUpperCase();
+  if (!condition) return null;
+  if (!KEYCAP_CONDITIONS.has(condition)) {
+    throw new Error("Invalid keycap condition");
+  }
+  return condition as KeycapAcquisition["condition"];
+}
+
+function cleanKeycapPairing(value: unknown): KeycapPairing {
+  if (value == null) return null;
+  const source = value as Record<string, unknown>;
+  if (source.kind === "collection") {
+    const keyboardSlug = String(source.keyboardSlug ?? "").trim().slice(0, 160);
+    const buildIndex = Number(source.buildIndex);
+    if (!keyboardSlug || !Number.isInteger(buildIndex) || buildIndex < 0 || buildIndex > 98) {
+      throw new Error("Choose a valid keyboard build to pair with this keycap purchase");
+    }
+    return {
+      kind: "collection",
+      keyboardSlug,
+      buildIndex,
+      showPublic: source.showPublic === true,
+    };
+  }
+  if (source.kind === "free_text") {
+    const label = cleanOptionalText(source.label, 120);
+    if (!label) throw new Error("Enter the keyboard name for the free-text pairing");
+    return { kind: "free_text", label, showPublic: source.showPublic === true };
+  }
+  throw new Error("Invalid keyboard pairing");
+}
+
+async function validateKeycapPairings(userId: string, acquisitions: KeycapAcquisition[]) {
+  const pairings = acquisitions
+    .map((acquisition) => acquisition.pairing)
+    .filter((pairing): pairing is Extract<KeycapPairing, { kind: "collection" }> =>
+      pairing?.kind === "collection"
+    );
+  if (pairings.length === 0) return;
+
+  const slugs = Array.from(new Set(pairings.map((pairing) => pairing.keyboardSlug)));
+  const targets = await prisma.trackerItem.findMany({
+    where: {
+      userId,
+      inCollection: true,
+      groupBuy: { productType: "KEYBOARD", slug: { in: slugs } },
+    },
+    select: { quantity: true, groupBuy: { select: { slug: true } } },
+  });
+  const targetBySlug = new Map(
+    targets.map((target) => [target.groupBuy.slug, Math.max(1, target.quantity || 1)])
+  );
+  for (const pairing of pairings) {
+    const quantity = targetBySlug.get(pairing.keyboardSlug);
+    if (!quantity || pairing.buildIndex >= quantity) {
+      throw new Error("The paired keyboard build is no longer in your collection");
+    }
+  }
 }

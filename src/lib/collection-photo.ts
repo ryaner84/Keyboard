@@ -51,3 +51,32 @@ export function collectionPhotoAtBuild(
   if (!unit || typeof unit !== "object") return null;
   return cleanCollectionPhoto((unit as Record<string, unknown>).imageUrl);
 }
+
+// `buildIndex` in the report table is deliberately a generic per-record index:
+// keyboard entries use it for builds, while keycap entries use it for purchase
+// records. Keeping one index preserves the existing report schema and still
+// binds reports to the exact uploaded image hash.
+export function collectionPhotoAtRecord(
+  productType: unknown,
+  customImageUrl: unknown,
+  units: unknown,
+  keycapAcquisitions: unknown,
+  recordIndex: number
+): string | null {
+  if (String(productType).toUpperCase() === "KEYBOARD") {
+    return collectionPhotoAtBuild(customImageUrl, units, recordIndex);
+  }
+  if (!Array.isArray(keycapAcquisitions)) {
+    // Older keycap records used the build-one photo slot.
+    return recordIndex === 0 ? cleanCollectionPhoto(customImageUrl) : null;
+  }
+  const acquisition = keycapAcquisitions[recordIndex];
+  if (!acquisition || typeof acquisition !== "object") return null;
+  const source = acquisition as Record<string, unknown>;
+  // A parent set can be public while a particular purchase stays private.
+  // Never allow a guessed record index to expose or report that private photo.
+  if (source.isPublic === false) return null;
+  return source.photoSource === "CUSTOM"
+    ? cleanCollectionPhoto(source.imageUrl)
+    : null;
+}

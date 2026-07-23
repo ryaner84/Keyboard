@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 const REASONS = [
-  ["not_keyboard", "This is not a keyboard photo"],
+  ["wrong_item", "This photo does not show the listed item"],
   ["stolen", "Photo may belong to someone else"],
   ["offensive", "Offensive or unsafe content"],
   ["spam", "Spam or advertising"],
@@ -24,7 +24,7 @@ export default function ReportPhotoButton({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [reason, setReason] = useState<(typeof REASONS)[number][0]>("not_keyboard");
+  const [reason, setReason] = useState<(typeof REASONS)[number][0]>("wrong_item");
   const [notes, setNotes] = useState("");
   const [status, setStatus] = useState<"idle" | "submitting" | "done">("idle");
   const [error, setError] = useState("");
@@ -125,7 +125,7 @@ export default function ReportPhotoButton({
                       Report this photo
                     </h2>
                     <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                      Only report the collector-uploaded image, not the keyboard listing.
+                      Only report the collector-uploaded image, not the catalog listing.
                     </p>
                   </div>
                   <button

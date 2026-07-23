@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "@/context/LocationContext";
 import { DISPLAY_CURRENCIES } from "@/data/countries";
@@ -12,6 +12,13 @@ import { normalizeImageUrl } from "@/lib/utils";
 import { isCustomSlug } from "@/lib/showcase";
 import { collectionSharePath } from "@/lib/collection-share";
 import { convertCurrency, formatCurrency } from "@/lib/currency-utils";
+import {
+  createKeycapAcquisition,
+  KEYCAP_CONDITION_LABELS,
+  keycapKitLabel,
+  keycapPurchasePhoto,
+  normalizeKeycapAcquisitions,
+} from "@/lib/keycap-collection";
 import { DataTrustBadge } from "@/components/ui/DataTrustBadge";
 import type {
   CollectionCatalogItem,
@@ -19,9 +26,13 @@ import type {
   CollectionProfile,
   CollectionUnit,
   GroupBuyWithPricing,
+  KeycapAcquisition,
+  KeycapKitSelection,
+  KeycapPairing,
 } from "@/types";
 
 type CollectionTab = "collection" | "tracking" | "public";
+type CollectionCategory = "all" | "keyboards" | "keycaps";
 
 const EMPTY_DETAILS: CollectionItemDetails = {
   isTracking: true,
@@ -41,6 +52,7 @@ const EMPTY_DETAILS: CollectionItemDetails = {
   quantity: 1,
   customImageUrl: null,
   units: null,
+  keycapAcquisitions: null,
 };
 
 const EMPTY_UNIT: CollectionUnit = {
@@ -69,11 +81,15 @@ interface SpendingMonth {
   label: string;
   shortLabel: string;
   amount: number;
+  keyboardAmount: number;
+  keycapAmount: number;
   purchases: number;
 }
 
 interface CollectionSpending {
   total: number;
+  keyboardTotal: number;
+  keycapTotal: number;
   averagePerUnit: number;
   pricedEntries: number;
   pricedUnits: number;
@@ -110,12 +126,16 @@ function calculateCollectionSpending(
         timeZone: "UTC",
       }),
       amount: 0,
+      keyboardAmount: 0,
+      keycapAmount: 0,
       purchases: 0,
     };
   });
   const monthByKey = new Map(months.map((month) => [month.key, month]));
 
   let total = 0;
+  let keyboardTotal = 0;
+  let keycapTotal = 0;
   let pricedEntries = 0;
   let pricedUnits = 0;
   let missingPriceCount = 0;
@@ -123,9 +143,13 @@ function calculateCollectionSpending(
   let unconvertedCount = 0;
 
   for (const item of valuedItems) {
-    for (const build of assembleBuilds(item.collection)) {
-      const price = build.purchasePrice;
-      const sourceCurrency = build.purchaseCurrency || targetCurrency;
+    const isKeycap = item.productType !== "KEYBOARD";
+    const purchases = isKeycap
+      ? normalizeKeycapAcquisitions(item.collection, targetCurrency)
+      : assembleBuilds(item.collection);
+    for (const purchase of purchases) {
+      const price = purchase.purchasePrice;
+      const sourceCurrency = purchase.purchaseCurrency || targetCurrency;
       if (price == null) {
         missingPriceCount++;
         continue;
@@ -145,14 +169,16 @@ function calculateCollectionSpending(
           ? price
           : convertCurrency(price, sourceCurrency, targetCurrency, rates);
       total += convertedPrice;
+      if (isKeycap) keycapTotal += convertedPrice;
+      else keyboardTotal += convertedPrice;
       pricedEntries++;
       pricedUnits++;
 
-      if (!build.acquiredAt) {
+      if (!purchase.acquiredAt) {
         missingDateCount++;
         continue;
       }
-      const acquiredAt = new Date(build.acquiredAt);
+      const acquiredAt = new Date(purchase.acquiredAt);
       if (Number.isNaN(acquiredAt.getTime())) {
         missingDateCount++;
         continue;
@@ -163,6 +189,8 @@ function calculateCollectionSpending(
       const month = monthByKey.get(key);
       if (month) {
         month.amount += convertedPrice;
+        if (isKeycap) month.keycapAmount += convertedPrice;
+        else month.keyboardAmount += convertedPrice;
         month.purchases++;
       }
     }
@@ -170,6 +198,8 @@ function calculateCollectionSpending(
 
   return {
     total,
+    keyboardTotal,
+    keycapTotal,
     averagePerUnit: pricedUnits > 0 ? total / pricedUnits : 0,
     pricedEntries,
     pricedUnits,
@@ -426,15 +456,22 @@ function PhotoUploadField({
   fallback,
   onChange,
   onError,
+  kind = "keyboard",
+  photoSource,
+  onPhotoSourceChange,
 }: {
   value: string | null;
   fallback: string | null;
   onChange: (value: string | null) => void;
   onError: (message: string) => void;
+  kind?: "keyboard" | "keycap";
+  photoSource?: "CATALOG" | "CUSTOM";
+  onPhotoSourceChange?: (source: "CATALOG" | "CUSTOM") => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
-  const preview = value || fallback;
+  const selectedSource = photoSource || (value ? "CUSTOM" : "CATALOG");
+  const preview = selectedSource === "CUSTOM" && value ? value : fallback || value;
   const hasCustom = !!value;
 
   async function handleFile(file: File | undefined) {
@@ -453,8 +490,12 @@ function PhotoUploadField({
       if (dataUrl.length > 2_000_000) {
         onError("That photo is too large even after resizing — try a smaller one.");
       } else {
-        await validateKeyboardPhoto(dataUrl);
+        // Keycap images are intentionally file-checked only. A kit tray,
+        // artisan, or installed close-up is valid and should not be held to a
+        // keyboard-only detector.
+        if (kind === "keyboard") await validateKeyboardPhoto(dataUrl);
         onChange(dataUrl);
+        onPhotoSourceChange?.("CUSTOM");
       }
     } catch (uploadError) {
       onError(
@@ -473,7 +514,11 @@ function PhotoUploadField({
       <div className="relative h-20 w-24 shrink-0 overflow-hidden rounded-xl bg-gray-100 dark:bg-gray-800">
         {preview ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={preview} alt="Keyboard preview" className="h-full w-full object-contain" />
+          <img
+            src={preview}
+            alt={kind === "keyboard" ? "Keyboard preview" : "Keycap set preview"}
+            className="h-full w-full object-contain"
+          />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-2xl text-gray-300 dark:text-gray-600">
             ⌨
@@ -497,7 +542,7 @@ function PhotoUploadField({
           >
             {busy ? "Checking photo…" : hasCustom ? "Replace photo" : "Upload your photo"}
           </button>
-          {hasCustom && (
+          {hasCustom && !onPhotoSourceChange && (
             <button
               type="button"
               onClick={() => onChange(null)}
@@ -507,9 +552,37 @@ function PhotoUploadField({
             </button>
           )}
         </div>
+        {hasCustom && onPhotoSourceChange && (
+          <div className="mt-2 inline-flex rounded-lg bg-gray-100 p-1 text-[11px] font-semibold dark:bg-white/10">
+            <button
+              type="button"
+              onClick={() => onPhotoSourceChange("CATALOG")}
+              className={`rounded-md px-2.5 py-1 transition ${
+                selectedSource === "CATALOG"
+                  ? "bg-white text-gray-950 shadow-sm dark:bg-gray-800 dark:text-white"
+                  : "text-gray-500 dark:text-gray-400"
+              }`}
+            >
+              Catalog photo
+            </button>
+            <button
+              type="button"
+              onClick={() => onPhotoSourceChange("CUSTOM")}
+              className={`rounded-md px-2.5 py-1 transition ${
+                selectedSource === "CUSTOM"
+                  ? "bg-white text-gray-950 shadow-sm dark:bg-gray-800 dark:text-white"
+                  : "text-gray-500 dark:text-gray-400"
+              }`}
+            >
+              Your photo
+            </button>
+          </div>
+        )}
         <p className="mt-1.5 text-[11px] leading-4 text-gray-400">
           {hasCustom
-            ? "Using your uploaded photo."
+            ? selectedSource === "CUSTOM"
+              ? "Using your uploaded photo. You can switch back without deleting it."
+              : "Using the catalog photo. Your upload is safely kept for this purchase."
             : "Optional. Any photo of the board or its parts is fine — backplates, weights, switches, artisans."}
         </p>
       </div>
@@ -894,6 +967,7 @@ function BuildFields({
 
 export default function CollectionContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { countryCode, currency } = useLocation();
   const { rates, loading: ratesLoading } = useCurrency(currency);
   const {
@@ -909,13 +983,17 @@ export default function CollectionContent() {
   const [profile, setProfile] = useState<CollectionProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<CollectionTab>("collection");
+  const [category, setCategory] = useState<CollectionCategory>("all");
   const [editingItem, setEditingItem] = useState<CollectionCatalogItem | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
   const [sharePickerOpen, setSharePickerOpen] = useState(false);
   const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const findQuery = searchParams.get("find")?.trim().slice(0, 120) || "";
+  const addSlug = searchParams.get("add")?.trim().slice(0, 160) || "";
   const findQueryHandled = useRef(false);
+  const addQueryHandled = useRef(false);
+  const addPrompted = useRef(false);
 
   const legacySharedSlugs = useMemo(
     () => searchParams.get("sets")?.split(",").map((slug) => slug.trim()).filter(Boolean).slice(0, 100) ?? [],
@@ -1007,6 +1085,51 @@ export default function CollectionContent() {
     setCatalogPickerOpen(true);
   }, [authenticated, findQuery, hydrated]);
 
+  // Detail pages link here with ?add=<slug>. Signing in is the only gate; once
+  // authenticated we make the item both owned and tracked, then take the
+  // collector straight into its correct editor instead of creating a duplicate.
+  useEffect(() => {
+    if (!hydrated || !addSlug || addQueryHandled.current) return;
+    if (!authenticated) {
+      if (!addPrompted.current) {
+        addPrompted.current = true;
+        openSavePrompt();
+      }
+      return;
+    }
+    addQueryHandled.current = true;
+    let cancelled = false;
+    async function addFromDetail() {
+      try {
+        const response = await fetch("/api/tracker/items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slug: addSlug, mode: "collection" }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(payload?.error || "Could not add this item");
+        const refreshed = await fetch("/api/tracker", { cache: "no-store" });
+        const next = await refreshed.json();
+        if (!refreshed.ok) throw new Error("Could not refresh the collection");
+        if (cancelled) return;
+        const nextItems: CollectionCatalogItem[] = next.data ?? [];
+        setItems(nextItems);
+        setProfile(next.user ?? null);
+        setTab("collection");
+        setEditingItem(nextItems.find((item) => item.slug === addSlug) ?? null);
+        router.replace("/collection");
+      } catch (error) {
+        if (!cancelled) {
+          setNotice(error instanceof Error ? error.message : "Could not add this item");
+        }
+      }
+    }
+    void addFromDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [addSlug, authenticated, hydrated, openSavePrompt, router]);
+
   const owned = useMemo(
     () =>
       items
@@ -1033,15 +1156,27 @@ export default function CollectionContent() {
   const firstKeyboardMissingSpend = useMemo(
     () =>
       owned.find((item) =>
-        assembleBuilds(item.collection).some(
-          (build) => build.purchasePrice == null || !build.acquiredAt
+        (item.productType === "KEYBOARD"
+          ? assembleBuilds(item.collection)
+          : normalizeKeycapAcquisitions(item.collection, currency)
+        ).some(
+          (purchase) => purchase.purchasePrice == null || !purchase.acquiredAt
         )
       ) ?? null,
-    [owned]
+    [currency, owned]
   );
 
-  const visibleItems =
+  const tabItems =
     tab === "collection" ? owned : tab === "tracking" ? watching : publicItems;
+  const visibleItems = tabItems.filter((item) =>
+    category === "all"
+      ? true
+      : category === "keyboards"
+        ? item.productType === "KEYBOARD"
+        : item.productType !== "KEYBOARD"
+  );
+  const keyboardCount = owned.filter((item) => item.productType === "KEYBOARD").length;
+  const keycapCount = owned.length - keyboardCount;
 
   async function updateItem(
     item: CollectionCatalogItem,
@@ -1126,14 +1261,13 @@ export default function CollectionContent() {
           : payload.user
       );
       const url = `${window.location.origin}${collectionSharePath(
-        payload.user.collectionSlug,
-        Date.now().toString(36)
+        payload.user.collectionSlug
       )}`;
       await navigator.clipboard.writeText(url);
       setSharePickerOpen(false);
       setTab("public");
       setNotice(
-        `Fresh share link copied. Paste this new link into Discord or chat to load the latest collection poster. ${selectedSlugs.size} selected piece${
+        `Your permanent share link was copied. It always opens this collection; Discord may keep an older preview image briefly. ${selectedSlugs.size} selected piece${
           selectedSlugs.size === 1 ? " is" : "s are"
         } visible publicly.`
       );
@@ -1154,7 +1288,7 @@ export default function CollectionContent() {
     );
   }
 
-  const title = profile?.collectionTitle || "My keyboard collection";
+  const title = profile?.collectionTitle || "My collection";
   const owner = profile?.displayName || (authenticated ? "Private collector" : "Your collection");
   const authMessage = searchParams.get("auth");
   const alertMessage = searchParams.get("alerts");
@@ -1197,7 +1331,7 @@ export default function CollectionContent() {
               </h1>
               <p className="mt-5 max-w-2xl text-sm leading-6 text-white/60 sm:text-base">
                 {profile?.collectionBio ||
-                  "A considered record of boards collected, built, and enjoyed over time."}
+                  "A considered record of keyboards, keycaps, and the builds that make them personal."}
               </p>
             </div>
 
@@ -1281,7 +1415,11 @@ export default function CollectionContent() {
               </p>
               <h2 className="mt-1 text-2xl font-semibold tracking-tight text-gray-950 dark:text-white">
                 {tab === "collection"
-                  ? "Owned pieces"
+                  ? category === "keyboards"
+                    ? "Owned keyboards"
+                    : category === "keycaps"
+                      ? "Owned keycap sets"
+                      : "Owned pieces"
                   : tab === "tracking"
                     ? "Watching and considering"
                     : "Public display"}
@@ -1307,6 +1445,27 @@ export default function CollectionContent() {
                 count={publicItems.length}
               />
             </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2" aria-label="Filter collection category">
+            <CollectionCategoryButton
+              active={category === "all"}
+              onClick={() => setCategory("all")}
+              label="All pieces"
+              count={owned.length}
+            />
+            <CollectionCategoryButton
+              active={category === "keyboards"}
+              onClick={() => setCategory("keyboards")}
+              label="Keyboards"
+              count={keyboardCount}
+            />
+            <CollectionCategoryButton
+              active={category === "keycaps"}
+              onClick={() => setCategory("keycaps")}
+              label="Keycap sets"
+              count={keycapCount}
+            />
           </div>
 
           {authenticated && tab === "collection" && owned.length > 0 && (
@@ -1357,6 +1516,7 @@ export default function CollectionContent() {
                   tab={tab}
                   countryCode={countryCode}
                   editable={authenticated}
+                  ownedKeyboards={owned.filter((candidate) => candidate.productType === "KEYBOARD")}
                   onEdit={() => setEditingItem(item)}
                   onTogglePublic={async () => {
                     try {
@@ -1392,6 +1552,7 @@ export default function CollectionContent() {
         <CollectionItemEditor
           item={editingItem}
           defaultCurrency={currency}
+          ownedKeyboards={owned.filter((candidate) => candidate.productType === "KEYBOARD")}
           onClose={() => setEditingItem(null)}
           onSave={async (changes) => {
             try {
@@ -1473,30 +1634,12 @@ export default function CollectionContent() {
             const response = await fetch("/api/tracker/items", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ slug: result.slug }),
+              body: JSON.stringify({ slug: result.slug, mode }),
             });
             const payload = await response.json().catch(() => null);
             if (!response.ok) {
               throw new Error(payload?.error || "Could not save this catalog item");
             }
-            if (mode === "collection") {
-              const patchResponse = await fetch(
-                `/api/tracker/items/${encodeURIComponent(result.slug)}`,
-                {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    inCollection: true,
-                    isPublic: false,
-                  }),
-                }
-              );
-              const patchPayload = await patchResponse.json();
-              if (!patchResponse.ok) {
-                throw new Error(patchPayload.error || "Could not add to collection");
-              }
-            }
-
             const refreshed = await fetch("/api/tracker", { cache: "no-store" });
             const refreshedPayload = await refreshed.json();
             if (!refreshed.ok) throw new Error("Could not refresh collection");
@@ -1508,6 +1651,13 @@ export default function CollectionContent() {
                 ? `${result.name} added to your collection.`
                 : `${result.name} added to tracking.`
             );
+            if (mode === "collection") {
+              setCatalogPickerOpen(false);
+              const created = (refreshedPayload.data ?? []).find(
+                (item: CollectionCatalogItem) => item.slug === result.slug
+              );
+              if (created) setEditingItem(created);
+            }
           }}
           onAddCustom={async (name, productType) => {
             const response = await fetch("/api/tracker/items/custom", {
@@ -1577,7 +1727,7 @@ function CollectionSpendingPanel({
                 Collection spend
               </div>
               <h2 className="mt-2 text-xl font-semibold tracking-tight text-gray-950 dark:text-white">
-                Your keyboard investment
+                Your collection investment
               </h2>
             </div>
             <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1.5 text-[10px] font-semibold text-gray-500 dark:bg-white/10 dark:text-gray-300">
@@ -1596,13 +1746,21 @@ function CollectionSpendingPanel({
               </p>
             )}
             <p className="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
-              Sum of each build’s recorded purchase price, converted to {currency}.
+              Sum of each keyboard build and keycap purchase, converted to {currency}.
             </p>
+            <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold">
+              <span className="rounded-full bg-[#f7f1e5] px-2.5 py-1 text-[#80632f] dark:bg-[#2b251b] dark:text-[#dfc284]">
+                Keyboards {formatCurrency(spending.keyboardTotal, currency)}
+              </span>
+              <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
+                Keycaps {formatCurrency(spending.keycapTotal, currency)}
+              </span>
+            </div>
           </div>
 
           <dl className="mt-7 grid grid-cols-3 gap-3 border-t border-gray-100 pt-5 dark:border-white/10">
             <SpendStat
-              label="Units valued"
+              label="Purchases valued"
               value={loading ? "—" : String(spending.pricedUnits)}
             />
             <SpendStat
@@ -1659,7 +1817,11 @@ function CollectionSpendingPanel({
           </div>
 
           <div className="mt-7 overflow-x-auto pb-1">
-            <div className="grid min-w-[610px] grid-cols-12 gap-2" role="img" aria-label="Monthly keyboard spending over the last twelve months">
+            <div className="mb-3 flex gap-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400">
+              <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-[#a78345]" />Keyboards</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-indigo-500" />Keycaps</span>
+            </div>
+            <div className="grid min-w-[610px] grid-cols-12 gap-2" role="img" aria-label="Monthly collection spending over the last twelve months">
               {spending.months.map((month) => {
                 const height =
                   month.amount > 0
@@ -1677,13 +1839,24 @@ function CollectionSpendingPanel({
                           month.amount,
                           currency
                         )}`}
-                        className={`w-full rounded-t-md transition-[height] ${
-                          month.amount > 0
-                            ? "bg-gradient-to-t from-[#8b6d38] to-[#d8bd87]"
-                            : "bg-gray-200 dark:bg-white/10"
+                        className={`flex w-full flex-col justify-end overflow-hidden rounded-t-md transition-[height] ${
+                          month.amount > 0 ? "bg-gray-200 dark:bg-white/10" : "bg-gray-200 dark:bg-white/10"
                         }`}
                         style={{ height: `${height}%` }}
-                      />
+                      >
+                        {month.keyboardAmount > 0 && (
+                          <span
+                            className="w-full bg-gradient-to-t from-[#8b6d38] to-[#d8bd87]"
+                            style={{ height: `${(month.keyboardAmount / month.amount) * 100}%` }}
+                          />
+                        )}
+                        {month.keycapAmount > 0 && (
+                          <span
+                            className="w-full bg-gradient-to-t from-indigo-600 to-indigo-400"
+                            style={{ height: `${(month.keycapAmount / month.amount) * 100}%` }}
+                          />
+                        )}
+                      </div>
                     </div>
                     <span className="mt-2 text-[9px] font-semibold uppercase tracking-wide text-gray-400">
                       {month.shortLabel}
@@ -1810,7 +1983,53 @@ function CollectionTabButton({
   );
 }
 
-function CollectionCard({
+function CollectionCategoryButton({
+  active,
+  onClick,
+  label,
+  count,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count: number;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+        active
+          ? "border-[#9a7a42] bg-[#9a7a42] text-white shadow-sm"
+          : "border-black/10 bg-white text-gray-600 hover:border-[#c9ab72] hover:text-gray-950 dark:border-white/15 dark:bg-white/[0.04] dark:text-gray-300 dark:hover:text-white"
+      }`}
+    >
+      {label} <span className="ml-1 opacity-70">{count}</span>
+    </button>
+  );
+}
+
+type CollectionCardProps = {
+  item: CollectionCatalogItem;
+  tab: CollectionTab;
+  countryCode: string;
+  editable: boolean;
+  ownedKeyboards: CollectionCatalogItem[];
+  onEdit: () => void;
+  onTogglePublic: () => void;
+  onAdd: () => void;
+  onRemove: () => void;
+};
+
+function CollectionCard(props: CollectionCardProps) {
+  if (props.item.productType !== "KEYBOARD") {
+    return <KeycapCollectionCard {...props} />;
+  }
+  return <KeyboardCollectionCard {...props} />;
+}
+
+function KeyboardCollectionCard({
   item,
   tab,
   countryCode,
@@ -1819,16 +2038,7 @@ function CollectionCard({
   onTogglePublic,
   onAdd,
   onRemove,
-}: {
-  item: CollectionCatalogItem;
-  tab: CollectionTab;
-  countryCode: string;
-  editable: boolean;
-  onEdit: () => void;
-  onTogglePublic: () => void;
-  onAdd: () => void;
-  onRemove: () => void;
-}) {
+}: CollectionCardProps) {
   const owned = item.collection.inCollection;
   const builds = assembleBuilds(item.collection);
   const multiBuild = builds.length > 1;
@@ -2197,6 +2407,160 @@ function CollectionCard({
   );
 }
 
+function KeycapCollectionCard({
+  item,
+  tab,
+  countryCode,
+  editable,
+  ownedKeyboards,
+  onEdit,
+  onTogglePublic,
+  onAdd,
+  onRemove,
+}: {
+  item: CollectionCatalogItem;
+  tab: CollectionTab;
+  countryCode: string;
+  editable: boolean;
+  ownedKeyboards: CollectionCatalogItem[];
+  onEdit: () => void;
+  onTogglePublic: () => void;
+  onAdd: () => void;
+  onRemove: () => void;
+}) {
+  const owned = item.collection.inCollection;
+  const acquisitions = normalizeKeycapAcquisitions(item.collection);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const index = Math.min(activeIndex, Math.max(0, acquisitions.length - 1));
+  const active = acquisitions[index] || createKeycapAcquisition();
+  const catalogImage = normalizeImageUrl(item.imageUrl);
+  const imageUrl = keycapPurchasePhoto(active, catalogImage);
+  const isCustomPhoto = active.photoSource === "CUSTOM" && Boolean(active.imageUrl);
+  const visiblePurchaseCount = acquisitions.filter((purchase) => purchase.isPublic).length;
+  const pairingLabel = describeKeycapPairing(active.pairing, ownedKeyboards);
+  const isCustom = isCustomSlug(item.slug);
+  const acquiredYear = active.acquiredAt
+    ? new Date(active.acquiredAt).getFullYear()
+    : null;
+
+  return (
+    <article className="group overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_10px_35px_rgba(25,22,16,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_18px_50px_rgba(25,22,16,0.10)] dark:border-white/10 dark:bg-[#111417]">
+      <div className="relative aspect-[4/3] overflow-hidden bg-[#e9e7e1] dark:bg-gray-900">
+        {imageUrl ? (
+          isCustom ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={imageUrl} alt={item.name} className={`absolute inset-0 h-full w-full ${isCustomPhoto ? "object-contain" : "object-cover"}`} />
+          ) : (
+            <Link href={`/sets/${item.slug}?country=${countryCode}`} className="absolute inset-0 block">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={imageUrl} alt={item.name} className={`h-full w-full transition duration-500 group-hover:scale-[1.025] ${isCustomPhoto ? "object-contain" : "object-cover"}`} />
+            </Link>
+          )
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-5xl text-gray-300 dark:text-gray-700">KEY</div>
+        )}
+        <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4">
+          <span className="rounded-full bg-black/65 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur">Keycap set</span>
+          {owned && (
+            <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider backdrop-blur ${
+              !item.collection.isPublic
+                ? "bg-white/85 text-gray-800"
+                : visiblePurchaseCount > 0
+                  ? "bg-emerald-500/90 text-white"
+                  : "bg-amber-500/90 text-white"
+            }`}>
+              {!item.collection.isPublic
+                ? "Private"
+                : visiblePurchaseCount > 0
+                  ? `On display · ${visiblePurchaseCount}/${acquisitions.length}`
+                  : "No purchases shown"}
+            </span>
+          )}
+        </div>
+        {acquisitions.length > 1 && (
+          <>
+            <button type="button" onClick={() => setActiveIndex((index - 1 + acquisitions.length) % acquisitions.length)} aria-label="Show previous keycap purchase" className="absolute left-3 top-1/2 z-20 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-black/55 text-white shadow-lg backdrop-blur hover:bg-black/75">‹</button>
+            <button type="button" onClick={() => setActiveIndex((index + 1) % acquisitions.length)} aria-label="Show next keycap purchase" className="absolute right-3 top-1/2 z-20 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-black/55 text-white shadow-lg backdrop-blur hover:bg-black/75">›</button>
+            <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/65 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-lg backdrop-blur">
+              Purchase {index + 1} of {acquisitions.length}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#9a7a42] dark:text-[#c9ab72]">
+              {item.vendorName || item.designer || "Independent design"}
+            </p>
+            {isCustom ? (
+              <h3 className="mt-1 truncate text-lg font-semibold tracking-tight text-gray-950 dark:text-white">{item.name}</h3>
+            ) : (
+              <Link href={`/sets/${item.slug}?country=${countryCode}`}>
+                <h3 className="mt-1 truncate text-lg font-semibold tracking-tight text-gray-950 hover:text-indigo-600 dark:text-white">{item.name}</h3>
+              </Link>
+            )}
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {[keycapKitLabel(active), active.condition ? KEYCAP_CONDITION_LABELS[active.condition] || active.condition : null, acquiredYear ? `Acquired ${acquiredYear}` : null].filter(Boolean).join(" · ") || (owned ? "Kit details not added yet" : "Saved for later")}
+            </p>
+          </div>
+          {owned && editable && <button onClick={onEdit} title="Edit keycap details" className="shrink-0 rounded-full border border-gray-200 p-2 text-gray-500 hover:border-gray-400 hover:text-gray-900 dark:border-gray-700 dark:hover:border-gray-500 dark:hover:text-white"><EditIcon /></button>}
+        </div>
+
+        {owned && (
+          <div className="mt-4 border-t border-gray-100 pt-4 dark:border-white/10">
+            <div className="flex flex-wrap gap-1.5">
+              {active.kits.map((kit) => <span key={`${kit.kitId || "custom"}-${kit.name}`} className="rounded-full bg-[#f7f1e5] px-2.5 py-1 text-[10px] font-semibold text-[#71552b] dark:bg-[#2b251b] dark:text-[#dfc284]">{kit.name}</span>)}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+              {active.quantity > 1 && <span>{active.quantity} identical copies</span>}
+              {pairingLabel && <span>Paired with {pairingLabel}</span>}
+              {active.notes && <span className="line-clamp-1">{active.notes}</span>}
+            </div>
+          </div>
+        )}
+
+        {owned && acquisitions.length > 1 && (
+          <div className="mt-4 space-y-2 border-t border-gray-100 pt-4 dark:border-white/10">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#9a7a42] dark:text-[#c9ab72]">{acquisitions.length} purchases</p>
+            {acquisitions.map((purchase, purchaseIndex) => (
+              <button key={purchase.id} type="button" onClick={() => setActiveIndex(purchaseIndex)} className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs transition ${purchaseIndex === index ? "bg-[#faf7f0] text-gray-950 dark:bg-[#211d16] dark:text-white" : "bg-gray-50 text-gray-500 hover:bg-gray-100 dark:bg-white/[0.04] dark:text-gray-300"}`}>
+                <span className="truncate font-semibold">{keycapKitLabel(purchase)}</span>
+                <span className="ml-3 shrink-0 text-[10px]">{purchase.acquiredAt ? new Date(purchase.acquiredAt).getFullYear() : "Date pending"}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {owned && editable && (
+          <div className="mt-4 grid grid-cols-[1fr_auto] gap-2 border-t border-gray-100 pt-4 dark:border-white/10">
+            <button onClick={onTogglePublic} aria-pressed={item.collection.isPublic} className={`flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition ${item.collection.isPublic ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200" : "border-gray-200 bg-gray-50 text-gray-700 hover:border-[#c9ab72] dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"}`}>
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"><EyeIcon /></span>
+              <span className="min-w-0"><span className="block text-xs font-semibold">{item.collection.isPublic ? "Displayed publicly" : "Display publicly"}</span><span className="block truncate text-[10px] opacity-65">Choose individual purchases in Edit details</span></span>
+            </button>
+            <button onClick={onEdit} className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:border-gray-400 hover:text-gray-950 dark:border-gray-700 dark:text-gray-300 dark:hover:text-white">Edit details</button>
+          </div>
+        )}
+
+        {!owned && (
+          <div className="mt-4 flex gap-2 border-t border-gray-100 pt-4 dark:border-white/10">
+            <button onClick={onAdd} className="flex-1 rounded-full bg-gray-950 px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#9a7a42] dark:bg-white dark:text-gray-950 dark:hover:bg-[#c9ab72]">Add to collection</button>
+            {editable && tab === "tracking" && <button onClick={onRemove} title="Stop tracking" className="rounded-full border border-gray-200 px-3 text-xs text-gray-500 hover:border-red-200 hover:text-red-600 dark:border-gray-700">Remove</button>}
+          </div>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function describeKeycapPairing(pairing: KeycapPairing, keyboards: CollectionCatalogItem[]) {
+  if (!pairing) return null;
+  if (pairing.kind === "free_text") return pairing.label;
+  const keyboard = keyboards.find((item) => item.slug === pairing.keyboardSlug);
+  return keyboard ? `${keyboard.name} · Build ${pairing.buildIndex + 1}` : "Keyboard build needs relinking";
+}
+
 function EmptyCollectionState({
   tab,
   authenticated,
@@ -2260,21 +2624,31 @@ function EmptyCollectionState({
   );
 }
 
-function CollectionItemEditor({
+type CollectionEditorProps = {
+  item: CollectionCatalogItem;
+  defaultCurrency: string;
+  ownedKeyboards: CollectionCatalogItem[];
+  onClose: () => void;
+  onSave: (changes: Partial<CollectionItemDetails>) => Promise<void>;
+  onMoveToTracking: () => Promise<void>;
+  onDeletePiece: () => Promise<void>;
+};
+
+function CollectionItemEditor(props: CollectionEditorProps) {
+  if (props.item.productType !== "KEYBOARD") {
+    return <KeycapCollectionEditor {...props} />;
+  }
+  return <KeyboardCollectionItemEditor {...props} />;
+}
+
+function KeyboardCollectionItemEditor({
   item,
   defaultCurrency,
   onClose,
   onSave,
   onMoveToTracking,
   onDeletePiece,
-}: {
-  item: CollectionCatalogItem;
-  defaultCurrency: string;
-  onClose: () => void;
-  onSave: (changes: Partial<CollectionItemDetails>) => Promise<void>;
-  onMoveToTracking: () => Promise<void>;
-  onDeletePiece: () => Promise<void>;
-}) {
+}: CollectionEditorProps) {
   const catalogImage = normalizeImageUrl(item.imageUrl);
   const [form, setForm] = useState({
     quantity: item.collection.quantity ?? 1,
@@ -2526,6 +2900,209 @@ function CollectionItemEditor({
   );
 }
 
+function KeycapCollectionEditor({
+  item,
+  defaultCurrency,
+  ownedKeyboards,
+  onClose,
+  onSave,
+  onMoveToTracking,
+  onDeletePiece,
+}: {
+  item: CollectionCatalogItem;
+  defaultCurrency: string;
+  ownedKeyboards: CollectionCatalogItem[];
+  onClose: () => void;
+  onSave: (changes: Partial<CollectionItemDetails>) => Promise<void>;
+  onMoveToTracking: () => Promise<void>;
+  onDeletePiece: () => Promise<void>;
+}) {
+  const catalogImage = normalizeImageUrl(item.imageUrl);
+  const [purchases, setPurchases] = useState<KeycapAcquisition[]>(() =>
+    normalizeKeycapAcquisitions(item.collection, defaultCurrency)
+  );
+  const [activePurchase, setActivePurchase] = useState(0);
+  const [form, setForm] = useState({
+    isPublic: item.collection.isPublic,
+    showPurchasePrice: item.collection.showPurchasePrice,
+  });
+  const [customKit, setCustomKit] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const purchaseCurrencies = useMemo(() => {
+    const options = [...DISPLAY_CURRENCIES];
+    for (const code of purchases
+      .map((purchase) => purchase.purchaseCurrency?.trim().toUpperCase())
+      .filter((code): code is string => Boolean(code))) {
+      if (!options.some((option) => option.code === code)) {
+        options.push({ code, symbol: code, name: "Previously saved currency" });
+      }
+    }
+    return options.sort((a, b) => {
+      if (a.code === defaultCurrency) return -1;
+      if (b.code === defaultCurrency) return 1;
+      return a.code.localeCompare(b.code);
+    });
+  }, [defaultCurrency, purchases]);
+  const active = purchases[Math.min(activePurchase, purchases.length - 1)] ||
+    createKeycapAcquisition(defaultCurrency);
+
+  useModalBodyLock();
+
+  function updatePurchase(index: number, patch: Partial<KeycapAcquisition>) {
+    setPurchases((current) =>
+      current.map((purchase, purchaseIndex) =>
+        purchaseIndex === index ? { ...purchase, ...patch } : purchase
+      )
+    );
+  }
+
+  function toggleCatalogKit(kit: KeycapKitSelection) {
+    const selected = active.kits.some((candidate) => candidate.kitId === kit.kitId);
+    const next = selected
+      ? active.kits.filter((candidate) => candidate.kitId !== kit.kitId)
+      : [
+          ...active.kits.filter((candidate) => candidate.name !== "Set / kits not specified"),
+          kit,
+        ];
+    updatePurchase(activePurchase, {
+      kits: next.length > 0 ? next : [{ kitId: null, name: "Set / kits not specified", type: "" }],
+    });
+  }
+
+  function addCustomKit() {
+    const name = customKit.trim().slice(0, 80);
+    if (!name) return;
+    if (active.kits.some((kit) => kit.name.toLowerCase() === name.toLowerCase())) {
+      setCustomKit("");
+      return;
+    }
+    updatePurchase(activePurchase, {
+      kits: [
+        ...active.kits.filter((kit) => kit.name !== "Set / kits not specified"),
+        { kitId: null, name, type: "Custom kit" },
+      ],
+    });
+    setCustomKit("");
+  }
+
+  function setPairing(value: string) {
+    if (!value) {
+      updatePurchase(activePurchase, { pairing: null });
+      return;
+    }
+    if (value === "free-text") {
+      updatePurchase(activePurchase, {
+        pairing: { kind: "free_text", label: "", showPublic: false },
+      });
+      return;
+    }
+    const [keyboardSlug, rawBuildIndex] = value.split("|");
+    const buildIndex = Number(rawBuildIndex);
+    if (!keyboardSlug || !Number.isInteger(buildIndex)) return;
+    updatePurchase(activePurchase, {
+      pairing: { kind: "collection", keyboardSlug, buildIndex, showPublic: false },
+    });
+  }
+
+  async function submit() {
+    setBusy(true);
+    setError("");
+    try {
+      await onSave({
+        inCollection: true,
+        isPublic: form.isPublic,
+        showPurchasePrice: form.showPurchasePrice,
+        keycapAcquisitions: purchases,
+      });
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save keycap details");
+      setBusy(false);
+    }
+  }
+
+  const pairingValue = !active.pairing
+    ? ""
+    : active.pairing.kind === "free_text"
+      ? "free-text"
+      : `${active.pairing.keyboardSlug}|${active.pairing.buildIndex}`;
+
+  return (
+    <ModalShell onClose={onClose} label={`Edit ${item.name}`}>
+      <div className="border-b border-gray-100 px-5 py-5 dark:border-gray-800 sm:px-7">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9a7a42] dark:text-[#c9ab72]">Keycap collection record</p>
+        <h2 className="mt-1 text-2xl font-semibold tracking-tight text-gray-950 dark:text-white">{item.name}</h2>
+        <p className="mt-1 text-sm text-gray-500">Record each purchase separately, including the kits, price, and keyboard it is paired with.</p>
+      </div>
+
+      <div className="max-h-[68vh] space-y-5 overflow-y-auto px-5 py-6 dark:text-white sm:px-7">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-gray-50 px-4 py-3 dark:bg-white/[0.04]">
+          <div>
+            <p className="text-xs font-semibold text-gray-900 dark:text-white">One purchase can include several kits</p>
+            <p className="mt-1 text-[11px] leading-4 text-gray-500 dark:text-gray-400">Use another purchase when the date, price, or condition is different.</p>
+          </div>
+          <button type="button" onClick={() => { setPurchases((current) => [...current, createKeycapAcquisition(defaultCurrency)]); setActivePurchase(purchases.length); }} className="rounded-full border border-[#c9ab72] px-3.5 py-2 text-xs font-semibold text-[#80632f] hover:bg-[#f7f1e5] dark:text-[#d5b779]">+ Add purchase</button>
+        </div>
+
+        {purchases.length > 1 && (
+          <div className="flex flex-wrap gap-2">
+            {purchases.map((purchase, index) => (
+              <button key={purchase.id} type="button" onClick={() => setActivePurchase(index)} className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${activePurchase === index ? "bg-gray-950 text-white dark:bg-white dark:text-gray-950" : "border border-gray-200 text-gray-500 hover:text-gray-900 dark:border-gray-700 dark:text-gray-400 dark:hover:text-white"}`}>Purchase {index + 1}</button>
+            ))}
+          </div>
+        )}
+
+        <div className="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
+          <div className="rounded-xl border border-[#ddcfb4] bg-[#faf7f0] p-4 dark:border-[#4a3e29] dark:bg-[#211d16]">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#80632f] dark:text-[#d5b779]">Purchase record</p>
+            <div className="mt-3 grid gap-4 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_190px]">
+              <Field label="Acquired"><input type="date" value={dateInputValue(active.acquiredAt)} onChange={(event) => updatePurchase(activePurchase, { acquiredAt: event.target.value || null })} className={inputClass} /></Field>
+              <Field label="Total paid"><input type="number" min="0" step="0.01" value={active.purchasePrice ?? ""} onChange={(event) => updatePurchase(activePurchase, { purchasePrice: event.target.value === "" ? null : Number(event.target.value), purchaseCurrency: active.purchaseCurrency || purchaseCurrencies[0]?.code || "USD" })} placeholder="Optional" className={inputClass} /></Field>
+              <div><span className="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-200">Currency</span><CurrencyCombobox value={active.purchaseCurrency || purchaseCurrencies[0]?.code || "USD"} options={purchaseCurrencies} onChange={(purchaseCurrency) => updatePurchase(activePurchase, { purchaseCurrency })} /></div>
+            </div>
+            <p className="mt-2 text-[11px] leading-4 text-gray-500 dark:text-gray-400">This is the total paid for this purchase, even when it contains several kits or identical copies.</p>
+          </div>
+
+          <div className="mt-5">
+            <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Kits included</p>
+            {item.kits.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{item.kits.map((kit) => {
+              const selected = active.kits.some((candidate) => candidate.kitId === kit.id);
+              return <button key={kit.id} type="button" onClick={() => toggleCatalogKit({ kitId: kit.id, name: kit.name, type: kit.type || "" })} aria-pressed={selected} className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${selected ? "border-[#9a7a42] bg-[#9a7a42] text-white" : "border-gray-200 text-gray-600 hover:border-[#c9ab72] dark:border-gray-700 dark:text-gray-300"}`}>{kit.name}{kit.type ? ` · ${kit.type}` : ""}</button>;
+            })}</div>}
+            <div className="mt-3 flex gap-2"><input value={customKit} onChange={(event) => setCustomKit(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustomKit(); } }} placeholder="Add a custom kit name" className={inputClass} /><button type="button" onClick={addCustomKit} className="shrink-0 rounded-xl border border-gray-200 px-3 text-xs font-semibold text-gray-600 hover:border-[#9a7a42] hover:text-[#80632f] dark:border-gray-700 dark:text-gray-300">Add kit</button></div>
+            <div className="mt-3 flex flex-wrap gap-1.5">{active.kits.map((kit, kitIndex) => <span key={`${kit.kitId || "custom"}-${kit.name}-${kitIndex}`} className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-700 dark:bg-white/10 dark:text-gray-200">{kit.name}{kit.kitId === null && kit.name !== "Set / kits not specified" && <button type="button" onClick={() => updatePurchase(activePurchase, { kits: active.kits.filter((_, index) => index !== kitIndex) })} aria-label={`Remove ${kit.name}`} className="ml-0.5 text-gray-400 hover:text-red-600">x</button>}</span>)}</div>
+          </div>
+
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <Field label="Identical copies"><div className="flex items-center gap-2"><button type="button" onClick={() => updatePurchase(activePurchase, { quantity: Math.max(1, active.quantity - 1) })} className="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 text-lg dark:border-gray-700">-</button><span className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-center text-sm font-semibold text-gray-950 dark:border-gray-700 dark:bg-gray-950 dark:text-white">{active.quantity}</span><button type="button" onClick={() => updatePurchase(activePurchase, { quantity: Math.min(99, active.quantity + 1) })} className="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 text-lg dark:border-gray-700">+</button></div></Field>
+            <Field label="Condition"><select value={active.condition || ""} onChange={(event) => updatePurchase(activePurchase, { condition: (event.target.value || null) as KeycapAcquisition["condition"] })} className={inputClass}><option value="">Not specified</option>{Object.entries(KEYCAP_CONDITION_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+          </div>
+
+          <div className="mt-5"><Field label="Photo"><PhotoUploadField value={active.imageUrl} fallback={catalogImage} kind="keycap" photoSource={active.photoSource} onPhotoSourceChange={(photoSource) => updatePurchase(activePurchase, { photoSource })} onChange={(imageUrl) => updatePurchase(activePurchase, { imageUrl })} onError={setError} /></Field></div>
+
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <Field label="Paired keyboard"><select value={pairingValue} onChange={(event) => setPairing(event.target.value)} className={inputClass}><option value="">Not linked</option>{ownedKeyboards.flatMap((keyboard) => assembleBuilds(keyboard.collection).map((_, buildIndex) => <option key={`${keyboard.slug}-${buildIndex}`} value={`${keyboard.slug}|${buildIndex}`}>{keyboard.name} - Build {buildIndex + 1}</option>))}<option value="free-text">Another keyboard (free text)</option></select></Field>
+            {active.pairing?.kind === "free_text" ? <Field label="Keyboard name"><input value={active.pairing.label} onChange={(event) => updatePurchase(activePurchase, { pairing: { kind: "free_text", label: event.target.value, showPublic: active.pairing?.showPublic === true } })} placeholder="e.g. Silver Alice build" className={inputClass} /></Field> : <div className="rounded-xl bg-gray-50 px-4 py-3 text-[11px] leading-4 text-gray-500 dark:bg-white/[0.04] dark:text-gray-400">Pairing is optional. Link an owned build or keep a free-text note for a board not in this collection.</div>}
+          </div>
+          {active.pairing && <div className="mt-4"><CheckRow checked={active.pairing.showPublic} onChange={(showPublic) => updatePurchase(activePurchase, { pairing: { ...active.pairing!, showPublic } as KeycapPairing })} title="Show this pairing publicly" description="Only explicit pairings are shown to visitors. A linked keyboard must also be publicly visible." /></div>}
+          <div className="mt-4"><Field label="Private notes"><textarea value={active.notes || ""} onChange={(event) => updatePurchase(activePurchase, { notes: event.target.value })} rows={3} placeholder="Kit details, trade notes, or anything you want to remember. Never shown publicly." className={inputClass} /></Field></div>
+          <div className="mt-4"><CheckRow checked={active.isPublic} onChange={(isPublic) => updatePurchase(activePurchase, { isPublic })} title={`Show Purchase ${activePurchase + 1} on your public page`} description={form.isPublic ? "This purchase is eligible to appear when the set is publicly displayed." : "The whole keycap set is private until you enable public display below."} /></div>
+          {purchases.length > 1 && <button type="button" onClick={() => { setPurchases((current) => current.filter((_, index) => index !== activePurchase)); setActivePurchase((current) => Math.max(0, current - 1)); }} className="mt-4 text-xs font-semibold text-gray-500 hover:text-red-600">Remove this purchase</button>}
+        </div>
+
+        <CheckRow checked={form.showPurchasePrice} onChange={(showPurchasePrice) => setForm((current) => ({ ...current, showPurchasePrice }))} title="Show purchase prices publicly" description="Off by default. Every amount remains private unless this and public display are both enabled." />
+        <div className="rounded-xl border border-[#ddcfb4] bg-[#faf7f0] p-4 dark:border-[#4a3e29] dark:bg-[#211d16]"><CheckRow checked={form.isPublic} onChange={(isPublic) => setForm((current) => ({ ...current, isPublic }))} title="Display this keycap set publicly" description={`${purchases.filter((purchase) => purchase.isPublic).length} of ${purchases.length} purchase record${purchases.length === 1 ? "" : "s"} are selected for your shared collection URL.`} /></div>
+        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+      </div>
+
+      <div className="flex flex-col-reverse gap-3 border-t border-gray-100 px-5 py-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+        <button onClick={isCustomSlug(item.slug) ? onDeletePiece : onMoveToTracking} disabled={busy} className="text-sm font-medium text-gray-500 hover:text-red-600 disabled:opacity-50">{isCustomSlug(item.slug) ? "Delete this keycap set" : "Remove from collection"}</button>
+        <div className="flex gap-2"><button onClick={onClose} className={secondaryButtonClass}>Cancel</button><button onClick={submit} disabled={busy} className={primaryButtonClass}>{busy ? "Saving..." : "Save details"}</button></div>
+      </div>
+    </ModalShell>
+  );
+}
+
 function ShareCollectionPicker({
   items,
   profile,
@@ -2714,6 +3291,7 @@ function CollectionCatalogPicker({
 }) {
   const [query, setQuery] = useState(initialQuery || "");
   const [results, setResults] = useState<CatalogPickerResult[]>([]);
+  const [catalogType, setCatalogType] = useState<"ALL" | "KEYBOARD" | "KEYCAPS">("ALL");
   const [searching, setSearching] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -2757,7 +3335,9 @@ function CollectionCatalogPicker({
       setError("");
       try {
         const response = await fetch(
-          `/api/search?q=${encodeURIComponent(search)}&limit=24`,
+          `/api/search?q=${encodeURIComponent(search)}&limit=24${
+            catalogType === "ALL" ? "" : `&type=${catalogType}`
+          }`,
           { signal: controller.signal }
         );
         const payload = await response.json();
@@ -2774,7 +3354,7 @@ function CollectionCatalogPicker({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [query]);
+  }, [catalogType, query]);
 
   async function add(result: CatalogPickerResult, mode: "collection" | "tracking") {
     setAdding(`${result.slug}:${mode}`);
@@ -2863,7 +3443,7 @@ function CollectionCatalogPicker({
           Add a piece
         </p>
         <h2 className="mt-1 pr-10 text-2xl font-semibold tracking-tight text-gray-950 dark:text-white">
-          Search the keyboard catalog
+          Search your collection catalog
         </h2>
         <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
           Add something you own directly to your collection, or save it under
@@ -2873,7 +3453,31 @@ function CollectionCatalogPicker({
           For keyboard families with multiple versions, select the exact edition
           shown in the result name before choosing “I own this.”
         </p>
-        <label className="relative mt-5 block">
+        <div className="mt-4 flex flex-wrap gap-2">
+          {([
+            ["ALL", "All"],
+            ["KEYBOARD", "Keyboards"],
+            ["KEYCAPS", "Keycap sets"],
+          ] as const).map(([type, label]) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => {
+                setCatalogType(type);
+                if (type !== "ALL") setCustomType(type);
+              }}
+              aria-pressed={catalogType === type}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                catalogType === type
+                  ? "border-[#9a7a42] bg-[#9a7a42] text-white"
+                  : "border-gray-200 text-gray-600 hover:border-[#c9ab72] dark:border-gray-700 dark:text-gray-300"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <label className="relative mt-4 block">
           <span className="sr-only">Search catalog</span>
           <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400">
             <SearchSmallIcon />
@@ -3153,6 +3757,7 @@ function LegacySharedCollection({
                 tab="tracking"
                 countryCode={countryCode}
                 editable={false}
+                ownedKeyboards={[]}
                 onEdit={() => {}}
                 onTogglePublic={() => {}}
                 onAdd={() => {}}
