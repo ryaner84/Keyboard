@@ -967,14 +967,14 @@ function BuildFields({
         </p>
       </div>
 
-      <Field label="Photo">
+      <FieldBlock label="Photo">
         <PhotoUploadField
           value={build.imageUrl}
           fallback={fallbackImage}
           onChange={(imageUrl) => onChange({ imageUrl })}
           onError={onError}
         />
-      </Field>
+      </FieldBlock>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Color / variant">
           <input
@@ -3585,7 +3585,7 @@ function KeycapCollectionEditor({
             <Field label="Condition"><select value={active.condition || ""} onChange={(event) => updatePurchase(activePurchase, { condition: (event.target.value || null) as KeycapAcquisition["condition"] })} className={inputClass}><option value="">Not specified</option>{Object.entries(KEYCAP_CONDITION_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
           </div>
 
-          <div className="mt-5"><Field label="Photo"><PhotoUploadField value={active.imageUrl} fallback={catalogImage} kind="keycap" photoSource={active.photoSource} onPhotoSourceChange={(photoSource) => updatePurchase(activePurchase, { photoSource })} onChange={(imageUrl) => updatePurchase(activePurchase, { imageUrl })} onError={setError} /></Field></div>
+          <div className="mt-5"><FieldBlock label="Photo"><PhotoUploadField value={active.imageUrl} fallback={catalogImage} kind="keycap" photoSource={active.photoSource} onPhotoSourceChange={(photoSource) => updatePurchase(activePurchase, { photoSource })} onChange={(imageUrl) => updatePurchase(activePurchase, { imageUrl })} onError={setError} /></FieldBlock></div>
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <Field label="Paired keyboard"><select value={pairingValue} onChange={(event) => setPairing(event.target.value)} className={inputClass}><option value="">Not linked</option>{ownedKeyboards.flatMap((keyboard) => assembleBuilds(keyboard.collection).map((_, buildIndex) => <option key={`${keyboard.slug}-${buildIndex}`} value={`${keyboard.slug}|${buildIndex}`}>{keyboard.name} - Build {buildIndex + 1}</option>))}<option value="free-text">Another keyboard (free text)</option></select></Field>
@@ -4382,6 +4382,20 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       </span>
       {children}
     </label>
+  );
+}
+
+// Like Field but a <div>, not a <label>. Use it for controls that contain their
+// own inputs — a <label> wrapping a hidden <input type="file"> makes the whole
+// field area (its empty whitespace included) open the file picker on any click.
+function FieldBlock({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <span className="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-200">
+        {label}
+      </span>
+      {children}
+    </div>
   );
 }
 
