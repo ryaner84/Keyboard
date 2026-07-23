@@ -1293,6 +1293,44 @@ export default function CollectionContent() {
   const authMessage = searchParams.get("auth");
   const alertMessage = searchParams.get("alerts");
 
+  const renderCollectionCard = (item: CollectionCatalogItem) => (
+    <CollectionCard
+      key={item.id}
+      item={item}
+      tab={tab}
+      countryCode={countryCode}
+      editable={authenticated}
+      ownedKeyboards={owned.filter((candidate) => candidate.productType === "KEYBOARD")}
+      onEdit={() => setEditingItem(item)}
+      onTogglePublic={async () => {
+        try {
+          await updateItem(item, { isPublic: !item.collection.isPublic });
+          setNotice(
+            item.collection.isPublic
+              ? "Piece removed from your public display."
+              : "Piece added to your public display."
+          );
+        } catch (error) {
+          setNotice(
+            error instanceof Error ? error.message : "Could not update public visibility"
+          );
+        }
+      }}
+      onAdd={() => addToCollection(item)}
+      onRemove={() => {
+        toggle(item.slug);
+        setItems((current) => current.filter((candidate) => candidate.slug !== item.slug));
+      }}
+    />
+  );
+
+  // Owned collection, split into Keyboards then Keycap sets so a mixed archive
+  // reads as two organised sections instead of one interleaved grid.
+  const collectionGroups = [
+    { key: "KEYBOARD" as const, label: "Keyboards" },
+    { key: "KEYCAPS" as const, label: "Keycap sets" },
+  ];
+
   return (
     <main className="min-h-screen bg-[#f5f4f0] pb-16 dark:bg-[#090b0d]">
       <div className="mx-auto max-w-7xl px-4 pt-6 sm:px-6 lg:px-8">
@@ -1510,41 +1548,31 @@ export default function CollectionContent() {
               onShowTracking={() => setTab("tracking")}
             />
           ) : (
-            <div className="mt-6 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
-              {visibleItems.map((item) => (
-                <CollectionCard
-                  key={item.id}
-                  item={item}
-                  tab={tab}
-                  countryCode={countryCode}
-                  editable={authenticated}
-                  ownedKeyboards={owned.filter((candidate) => candidate.productType === "KEYBOARD")}
-                  onEdit={() => setEditingItem(item)}
-                  onTogglePublic={async () => {
-                    try {
-                      await updateItem(item, {
-                        isPublic: !item.collection.isPublic,
-                      });
-                      setNotice(
-                        item.collection.isPublic
-                          ? "Piece removed from your public display."
-                          : "Piece added to your public display."
-                      );
-                    } catch (error) {
-                      setNotice(
-                        error instanceof Error
-                          ? error.message
-                          : "Could not update public visibility"
-                      );
-                    }
-                  }}
-                  onAdd={() => addToCollection(item)}
-                  onRemove={() => {
-                    toggle(item.slug);
-                    setItems((current) => current.filter((candidate) => candidate.slug !== item.slug));
-                  }}
-                />
-              ))}
+            <div className="mt-6 space-y-10">
+              {collectionGroups.map((group) => {
+                const groupItems = visibleItems.filter((item) =>
+                  group.key === "KEYBOARD"
+                    ? item.productType === "KEYBOARD"
+                    : item.productType !== "KEYBOARD"
+                );
+                if (groupItems.length === 0) return null;
+                return (
+                  <div key={group.key}>
+                    <div className="flex items-center gap-3">
+                      <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#9a7a42] dark:text-[#c9ab72]">
+                        {group.label}
+                      </h3>
+                      <span className="rounded-full bg-gray-900/[0.06] px-2 py-0.5 text-[11px] font-semibold text-gray-500 dark:bg-white/10 dark:text-gray-300">
+                        {groupItems.length}
+                      </span>
+                      <span className="h-px flex-1 bg-gray-200 dark:bg-white/10" />
+                    </div>
+                    <div className="mt-5 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+                      {groupItems.map(renderCollectionCard)}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>
