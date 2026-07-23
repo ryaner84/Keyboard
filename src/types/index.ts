@@ -136,6 +136,52 @@ export interface CollectionUnit {
   imageUrl: string | null;
 }
 
+export type KeycapCondition =
+  | "SEALED"
+  | "OPEN_UNUSED"
+  | "MOUNTED"
+  | "USED"
+  | "INCOMPLETE";
+
+export interface KeycapKitSelection {
+  // Catalog kit id when this is a known kit; null means collector-entered kit.
+  kitId: string | null;
+  name: string;
+  type: string;
+}
+
+export type KeycapPairing =
+  | {
+      kind: "collection";
+      keyboardSlug: string;
+      buildIndex: number;
+      showPublic: boolean;
+    }
+  | {
+      kind: "free_text";
+      label: string;
+      showPublic: boolean;
+    }
+  | null;
+
+// A keycap set can be bought more than once, with a different kit mix, price,
+// date, condition, photo, and keyboard pairing each time. The price is the
+// total paid for this purchase, never a per-kit multiplication.
+export interface KeycapAcquisition {
+  id: string;
+  kits: KeycapKitSelection[];
+  quantity: number;
+  acquiredAt: Date | string | null;
+  purchasePrice: number | null;
+  purchaseCurrency: string | null;
+  condition: KeycapCondition | null;
+  imageUrl: string | null;
+  photoSource: "CATALOG" | "CUSTOM";
+  notes: string | null;
+  isPublic: boolean;
+  pairing: KeycapPairing;
+}
+
 export interface CollectionItemDetails {
   isTracking: boolean;
   inCollection: boolean;
@@ -158,6 +204,8 @@ export interface CollectionItemDetails {
   units: CollectionUnit[] | null;
   // 0-based build indexes excluded from the public collection page.
   hiddenBuilds?: number[] | null;
+  // Per-purchase keycap records. Keyboard entries leave this empty.
+  keycapAcquisitions?: KeycapAcquisition[] | null;
 }
 
 export interface CollectionCatalogItem extends GroupBuyWithPricing {

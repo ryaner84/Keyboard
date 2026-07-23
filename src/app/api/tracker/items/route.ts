@@ -11,6 +11,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => null);
   const slug = String(body?.slug ?? "").trim();
+  const mode = body?.mode === "collection" ? "collection" : "tracking";
   if (!slug) return NextResponse.json({ error: "Missing slug" }, { status: 400 });
 
   const [groupBuy, rates] = await Promise.all([getGroupBuyForTracking(slug), getUsdRates()]);
@@ -18,10 +19,17 @@ export async function POST(req: NextRequest) {
 
   await prisma.trackerItem.upsert({
     where: { userId_groupBuyId: { userId: user.id, groupBuyId: groupBuy.id } },
-    update: { isTracking: true, alertsEnabled: true },
+    // Owning a piece and tracking it are deliberately independent. Adding a
+    // set to the collection must never turn off its existing tracker alert.
+    update:
+      mode === "collection"
+        ? { isTracking: true, inCollection: true, alertsEnabled: true }
+        : { isTracking: true, alertsEnabled: true },
     create: {
       userId: user.id,
       groupBuyId: groupBuy.id,
+      isTracking: true,
+      inCollection: mode === "collection",
       ...trackerSnapshotFromGroupBuy(groupBuy, rates),
     },
   });

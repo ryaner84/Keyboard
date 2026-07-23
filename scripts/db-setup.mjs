@@ -173,6 +173,20 @@ async function ensureHiddenBuildsColumn(client) {
   }
 }
 
+// Keycap-set purchases are stored as a compact JSON ledger on the same tracker
+// record as the set. Keep this self-healing because Vercel's build path uses
+// this script even when Prisma migrations have not been applied separately.
+async function ensureKeycapAcquisitionsColumn(client) {
+  try {
+    await client.query(
+      `ALTER TABLE public."TrackerItem"
+       ADD COLUMN IF NOT EXISTS "keycapAcquisitions" jsonb`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] keycapAcquisitions column setup skipped: ${err.message}`);
+  }
+}
+
 async function healBlankVendorUrls(client) {
   try {
     const res = await client.query(
@@ -426,6 +440,7 @@ async function main() {
         await reclassifyKeycapKeyboards(client);
         await healBlankVendorUrls(client);
         await ensureHiddenBuildsColumn(client);
+        await ensureKeycapAcquisitionsColumn(client);
         await healWarehouseGalleries(client);
         await expireEndedGroupBuys(client);
         await ensureDiscoveryColumn(client);
@@ -479,6 +494,7 @@ async function main() {
     await ensureListingReportTable(client);
     await ensurePersonalTrackerTables(client);
     await ensureCollectionPhotoReportTable(client);
+    await ensureKeycapAcquisitionsColumn(client);
     await purgeBlockedVendors(client);
     await purgeCancelledSets(client);
     await purgeBlockedVendorSetPairs(client);

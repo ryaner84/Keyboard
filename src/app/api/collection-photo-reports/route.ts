@@ -5,11 +5,14 @@ import {
   getTrackerSessionUser,
   trackerIpHash,
 } from "@/lib/tracker-auth";
-import { collectionPhotoAtBuild } from "@/lib/collection-photo";
+import { collectionPhotoAtRecord } from "@/lib/collection-photo";
 
 export const dynamic = "force-dynamic";
 
 const ISSUE_TYPES = new Set([
+  "wrong_item",
+  // Retain the original value so reports made before keycap support continue
+  // to be readable in the visitor inbox.
   "not_keyboard",
   "stolen",
   "offensive",
@@ -51,15 +54,19 @@ export async function POST(req: NextRequest) {
       id: true,
       customImageUrl: true,
       units: true,
+      keycapAcquisitions: true,
+      groupBuy: { select: { productType: true } },
     },
   });
   if (!item) {
     return NextResponse.json({ error: "Photo is no longer public" }, { status: 404 });
   }
 
-  const photo = collectionPhotoAtBuild(
+  const photo = collectionPhotoAtRecord(
+    item.groupBuy.productType,
     item.customImageUrl,
     item.units,
+    item.keycapAcquisitions,
     buildIndex
   );
   if (!photo) {

@@ -26,6 +26,7 @@ export function CollectionCardGallery({
   setName,
   number,
   buildsCount,
+  recordLabel = "build",
   collectionSlug,
   trackerItemId,
 }: {
@@ -34,6 +35,7 @@ export function CollectionCardGallery({
   setName: string;
   number: number;
   buildsCount: number;
+  recordLabel?: "build" | "purchase";
   collectionSlug: string;
   trackerItemId: string;
 }) {
@@ -56,7 +58,7 @@ export function CollectionCardGallery({
           src={current.imageUrl}
           alt={
             hasMultiple
-              ? `${setName}, build ${current.buildIndex + 1}`
+              ? `${setName}, ${recordLabel} ${current.buildIndex + 1}`
               : setName
           }
           className={`absolute inset-0 h-full w-full transition duration-700 group-hover:scale-[1.03] ${
@@ -74,7 +76,7 @@ export function CollectionCardGallery({
       </span>
       {buildsCount > 1 && (
         <span className="absolute right-4 top-4 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur">
-          {buildsCount} builds
+          {buildsCount} {recordLabel === "build" ? "builds" : "purchases"}
         </span>
       )}
     </div>
@@ -97,7 +99,7 @@ export function CollectionCardGallery({
           {/* Prev / next arrows — stop propagation so they don't follow the link. */}
           <button
             type="button"
-            aria-label="Previous build photo"
+            aria-label={`Previous ${recordLabel} photo`}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -111,7 +113,7 @@ export function CollectionCardGallery({
           </button>
           <button
             type="button"
-            aria-label="Next build photo"
+            aria-label={`Next ${recordLabel} photo`}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -130,7 +132,7 @@ export function CollectionCardGallery({
               <button
                 key={slide.buildIndex}
                 type="button"
-                aria-label={`Show build ${slide.buildIndex + 1}`}
+                aria-label={`Show ${recordLabel} ${slide.buildIndex + 1}`}
                 aria-current={index === active}
                 onClick={(event) => {
                   event.preventDefault();
@@ -152,7 +154,7 @@ export function CollectionCardGallery({
           collectionSlug={collectionSlug}
           trackerItemId={trackerItemId}
           buildIndex={current.buildIndex}
-          label={`${setName}, build ${current.buildIndex + 1}`}
+          label={`${setName}, ${recordLabel} ${current.buildIndex + 1}`}
           className="absolute bottom-4 right-4"
         />
       )}

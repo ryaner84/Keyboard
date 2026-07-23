@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { KeyboardPurchasePanel } from "@/components/set-detail/KeyboardPurchasePanel";
 import { KeyboardOtherStores } from "@/components/set-detail/KeyboardOtherStores";
@@ -146,6 +147,13 @@ export function SetDetailClient({ groupBuy }: Props) {
           </svg>
           {tracked ? "Tracked" : "Track this set"}
         </button>
+
+        <Link
+          href={`/collection?add=${encodeURIComponent(groupBuy.slug)}`}
+          className="flex items-center gap-2 rounded-xl border border-[#c9ab72] bg-[#faf7f0] px-4 py-2 text-sm font-semibold text-[#725729] transition-colors hover:bg-[#f1e5cd] dark:border-[#80632f] dark:bg-[#211d16] dark:text-[#dfc284]"
+        >
+          {groupBuy.productType === "KEYBOARD" ? "Add to collection" : "Collect this keycap set"}
+        </Link>
 
         <SharePosterButton
           slug={groupBuy.slug}

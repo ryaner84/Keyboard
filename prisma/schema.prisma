@@ -315,6 +315,10 @@ model TrackerItem {
   // purchaseCurrency, color, condition, switches, keycaps, buildDetails,
   // notes, imageUrl }].
   units             Json?
+  // Keycap-set purchase records. Unlike a keyboard's per-unit builds, a
+  // keycap collection entry can contain several purchases with their own
+  // kits, total paid, photo, condition, and optional keyboard pairing.
+  keycapAcquisitions Json?
   lastStatus        String?
   lastBestPriceUsd  Float?
   lastVendorCount   Int       @default(0)
