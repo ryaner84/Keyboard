@@ -1412,6 +1412,28 @@ def infer_status_from_text(text: str) -> str:
     return "DELIVERED"
 
 
+def gmk_breadcrumb_text(content: str) -> str:
+    """Return the product page's breadcrumb text (e.g. 'Home Group Buys'), or ''.
+
+    Matches ONLY a real breadcrumb element (its class contains 'breadcrumb') and
+    closes the same tag via a backreference. The previous loose regex matched the
+    word 'navigation' inside a <script> config and captured a huge JS blob that
+    happened to contain 'shipping' — so every gmk.net product mis-inferred
+    SHIPPING even when its breadcrumb actually read 'Group Buys'."""
+    match = re.search(
+        r"<(nav|ol|ul)[^>]*\bbreadcrumb[^>]*>(.*?)</\1>",
+        content,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    text = re.sub(r"<[^>]+>", " ", match.group(2))
+    text = re.sub(r"\s+", " ", text).strip()
+    # A real breadcrumb is short ("Home Group Buys"); anything long is a bad
+    # match (nested markup) and would just reintroduce false keyword hits.
+    return text if len(text) <= 300 else ""
+
+
 def extract_gmk_slug_from_url(url: str) -> str | None:
     """Extract the set slug from a GMK.net product URL.
 
@@ -1555,15 +1577,9 @@ def scrape_gmk_product_metadata(
         if not name or not re.match(r"gmk\b", name, re.IGNORECASE):
             return None
 
-        # Breadcrumb / category text for status inference
-        breadcrumb = ""
-        bc = re.search(
-            r"(?:breadcrumb|navigation)[^>]*?>(.*?)</(?:nav|ol|ul)>",
-            content, re.DOTALL | re.IGNORECASE
-        )
-        if bc:
-            breadcrumb = re.sub(r"<[^>]+>", " ", bc.group(1)).strip()
-
+        # Breadcrumb / category text for status inference (gmk.net files a set
+        # under Group Buys / In Production / … — that category drives the status).
+        breadcrumb = gmk_breadcrumb_text(content)
         status = infer_status_from_text(url + " " + breadcrumb)
 
         # Extract slug from the URL (authoritative — GMK chose it)
