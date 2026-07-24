@@ -105,6 +105,7 @@ const BLOCKED_VENDOR_SET_PAIRS = [
   { vendor: "latamkeys", set: "gmk-mictlan-rebirth" },
   { vendor: "latamkeys", set: "gmk-nervewrecker" },
   { vendor: "zfrontier", set: "gmk-camping-r3" },
+  { vendor: "novelkeys", set: "gmk-awaken" },
 ];
 async function purgeBlockedVendorSetPairs(client) {
   try {
