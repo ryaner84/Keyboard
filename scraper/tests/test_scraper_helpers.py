@@ -667,5 +667,49 @@ class KbdfansGroupBuyTests(unittest.TestCase):
         self.assertEqual(scrape._kbdfans_merge_status("SHIPPING", "INTEREST_CHECK"), "SHIPPING")
 
 
+class GmkBreadcrumbStatusTests(unittest.TestCase):
+    # A page like gmk.net's: a <script> mentioning "navigation" and shipping
+    # routes, plus the REAL breadcrumb that reads "Home > Group Buys".
+    PAGE = (
+        "<html><head><script>"
+        "window.router['frontend.shopware_analytics.customer.data'] = "
+        "'/shop/en/storefront/script/shopware-analytics-customer';"
+        "window.navigation = {shipping:'/ship', fulfilment:'/fulfil'};"
+        "</script></head><body>"
+        '<nav class="breadcrumb" aria-label="breadcrumb"><ol class="breadcrumb-list">'
+        '<li class="breadcrumb-item"><a href="/">Home</a></li>'
+        '<li class="breadcrumb-item"><a href="/shop/en/group-buys/">Group Buys</a></li>'
+        "</ol></nav></body></html>"
+    )
+
+    def test_breadcrumb_ignores_script_navigation_blob(self):
+        # Must return the real breadcrumb, not the <script> JS containing "shipping".
+        self.assertEqual(scrape.gmk_breadcrumb_text(self.PAGE), "Home Group Buys")
+
+    def test_group_buy_breadcrumb_infers_active(self):
+        url = "https://www.gmk.net/shop/en/gmk-cyl-gonzales-keycaps/gmk10100"
+        status = scrape.infer_status_from_text(url + " " + scrape.gmk_breadcrumb_text(self.PAGE))
+        self.assertEqual(status, "ACTIVE_GB")
+
+    def test_in_production_breadcrumb_infers_shipping(self):
+        page = (
+            '<nav class="breadcrumb"><ol class="breadcrumb-list">'
+            '<li class="breadcrumb-item">Home</li>'
+            '<li class="breadcrumb-item">In Production</li></ol></nav>'
+        )
+        self.assertEqual(scrape.gmk_breadcrumb_text(page), "Home In Production")
+        self.assertEqual(
+            scrape.infer_status_from_text("https://x/y " + scrape.gmk_breadcrumb_text(page)),
+            "SHIPPING",
+        )
+
+    def test_no_breadcrumb_does_not_leak_script_shipping(self):
+        # Only a script blob (no breadcrumb element) -> empty, so a set never
+        # falsely infers SHIPPING from unrelated page JS.
+        page = "<script>var x = 'shipping fulfilment navigation';</script>"
+        self.assertEqual(scrape.gmk_breadcrumb_text(page), "")
+        self.assertEqual(scrape.infer_status_from_text("https://x/y "), "DELIVERED")
+
+
 if __name__ == "__main__":
     unittest.main()
