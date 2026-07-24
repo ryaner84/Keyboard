@@ -1058,6 +1058,7 @@ export default function CollectionContent() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<CollectionTab>("collection");
   const [category, setCategory] = useState<CollectionCategory>("all");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [editingItem, setEditingItem] = useState<CollectionCatalogItem | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
   const [sharePickerOpen, setSharePickerOpen] = useState(false);
@@ -1398,6 +1399,30 @@ export default function CollectionContent() {
     />
   );
 
+  const renderCollectionRow = (item: CollectionCatalogItem) => (
+    <CollectionListRow
+      key={item.id}
+      item={item}
+      countryCode={countryCode}
+      editable={authenticated}
+      onEdit={() => setEditingItem(item)}
+      onTogglePublic={async () => {
+        try {
+          await updateItem(item, { isPublic: !item.collection.isPublic });
+          setNotice(
+            item.collection.isPublic
+              ? "Piece removed from your public display."
+              : "Piece added to your public display."
+          );
+        } catch (error) {
+          setNotice(
+            error instanceof Error ? error.message : "Could not update public visibility"
+          );
+        }
+      }}
+    />
+  );
+
   // Owned collection, split into Keyboards then Keycap sets so a mixed archive
   // reads as two organised sections instead of one interleaved grid.
   const collectionGroups = [
@@ -1561,25 +1586,53 @@ export default function CollectionContent() {
             </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center gap-2" aria-label="Filter collection category">
-            <CollectionCategoryButton
-              active={category === "all"}
-              onClick={() => setCategory("all")}
-              label="All pieces"
-              count={owned.length}
-            />
-            <CollectionCategoryButton
-              active={category === "keyboards"}
-              onClick={() => setCategory("keyboards")}
-              label="Keyboards"
-              count={keyboardCount}
-            />
-            <CollectionCategoryButton
-              active={category === "keycaps"}
-              onClick={() => setCategory("keycaps")}
-              label="Keycap sets"
-              count={keycapCount}
-            />
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2" aria-label="Filter collection category">
+              <CollectionCategoryButton
+                active={category === "all"}
+                onClick={() => setCategory("all")}
+                label="All pieces"
+                count={owned.length}
+              />
+              <CollectionCategoryButton
+                active={category === "keyboards"}
+                onClick={() => setCategory("keyboards")}
+                label="Keyboards"
+                count={keyboardCount}
+              />
+              <CollectionCategoryButton
+                active={category === "keycaps"}
+                onClick={() => setCategory("keycaps")}
+                label="Keycap sets"
+                count={keycapCount}
+              />
+            </div>
+            {/* Grid / list toggle — a dense list helps collectors with 100+ pieces. */}
+            <div
+              className="inline-flex shrink-0 rounded-full border border-gray-200 bg-white p-0.5 dark:border-gray-700 dark:bg-[#111417]"
+              role="group"
+              aria-label="Collection view"
+            >
+              {([
+                ["grid", "Grid view"],
+                ["list", "List view"],
+              ] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setViewMode(mode)}
+                  aria-label={label}
+                  aria-pressed={viewMode === mode}
+                  className={`flex h-8 w-9 items-center justify-center rounded-full transition ${
+                    viewMode === mode
+                      ? "bg-[#9a7a42] text-white"
+                      : "text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+                  }`}
+                >
+                  {mode === "grid" ? <GridViewIcon /> : <ListViewIcon />}
+                </button>
+              ))}
+            </div>
           </div>
 
           {authenticated && tab === "collection" && owned.length > 0 && (
@@ -1641,9 +1694,15 @@ export default function CollectionContent() {
                       </span>
                       <span className="h-px flex-1 bg-gray-200 dark:bg-white/10" />
                     </div>
-                    <div className="mt-5 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
-                      {groupItems.map(renderCollectionCard)}
-                    </div>
+                    {viewMode === "grid" ? (
+                      <div className="mt-5 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+                        {groupItems.map(renderCollectionCard)}
+                      </div>
+                    ) : (
+                      <div className="mt-4 space-y-2">
+                        {groupItems.map(renderCollectionRow)}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -2262,6 +2321,131 @@ function VisitorCollectionGuide({ onSignIn }: { onSignIn: () => void }) {
   );
 }
 
+// Dense one-line row used by the collection's list view — better than cards for
+// browsing a large (100+) archive at a glance.
+function CollectionListRow({
+  item,
+  countryCode,
+  editable,
+  onEdit,
+  onTogglePublic,
+}: {
+  item: CollectionCatalogItem;
+  countryCode: string;
+  editable: boolean;
+  onEdit: () => void;
+  onTogglePublic: () => void;
+}) {
+  const owned = item.collection.inCollection;
+  const isKeycap = item.productType !== "KEYBOARD";
+  const isCustom = isCustomSlug(item.slug);
+  const isPublic = item.collection.isPublic;
+  const image = isKeycap
+    ? keycapPurchasePhoto(
+        normalizeKeycapAcquisitions(item.collection)[0] || createKeycapAcquisition(),
+        normalizeImageUrl(item.imageUrl)
+      )
+    : item.collection.customImageUrl || normalizeImageUrl(item.imageUrl);
+  const meta = [isKeycap ? "Keycap set" : "Keyboard", item.designer || item.vendorName || null]
+    .filter(Boolean)
+    .join(" · ");
+
+  const thumb = (
+    <span className="relative h-12 w-14 shrink-0 overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800">
+      {image ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={image} alt={item.name} className="h-full w-full object-cover" />
+      ) : (
+        <span className="flex h-full w-full items-center justify-center text-gray-400">
+          {isKeycap ? "⎄" : "⌨"}
+        </span>
+      )}
+    </span>
+  );
+  const titleBlock = (
+    <div className="min-w-0">
+      <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{item.name}</p>
+      <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">{meta || "—"}</p>
+    </div>
+  );
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-black/[0.06] bg-white px-3 py-2 shadow-[0_4px_18px_rgba(25,22,16,0.04)] dark:border-white/10 dark:bg-[#111417]">
+      {isCustom ? (
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          {thumb}
+          {titleBlock}
+        </div>
+      ) : (
+        <Link
+          href={`/sets/${item.slug}?country=${countryCode}`}
+          className="flex min-w-0 flex-1 items-center gap-3 hover:opacity-90"
+        >
+          {thumb}
+          {titleBlock}
+        </Link>
+      )}
+      {owned && (
+        <span
+          className={`hidden shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide sm:inline-block ${
+            isPublic
+              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+              : "bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400"
+          }`}
+        >
+          {isPublic ? "On display" : "Private"}
+        </span>
+      )}
+      {owned && editable && (
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={onTogglePublic}
+            aria-label={isPublic ? "Make private" : "Show on public page"}
+            className={`flex h-8 w-8 items-center justify-center rounded-full border transition ${
+              isPublic
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                : "border-gray-200 text-gray-400 hover:text-gray-700 dark:border-gray-700 dark:hover:text-white"
+            }`}
+          >
+            <EyeIcon />
+          </button>
+          <button
+            type="button"
+            onClick={onEdit}
+            aria-label="Edit details"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-500 hover:text-gray-900 dark:border-gray-700 dark:hover:text-white"
+          >
+            <EditIcon />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GridViewIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <rect x="4" y="4" width="7" height="7" rx="1.5" strokeWidth={1.8} />
+      <rect x="13" y="4" width="7" height="7" rx="1.5" strokeWidth={1.8} />
+      <rect x="4" y="13" width="7" height="7" rx="1.5" strokeWidth={1.8} />
+      <rect x="13" y="13" width="7" height="7" rx="1.5" strokeWidth={1.8} />
+    </svg>
+  );
+}
+
+function ListViewIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path strokeLinecap="round" strokeWidth={1.8} d="M9 6h11M9 12h11M9 18h11" />
+      <circle cx="4.5" cy="6" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="4.5" cy="12" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="4.5" cy="18" r="1.1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 function HeroStat({
   value,
   label,
@@ -2826,14 +3010,17 @@ function KeycapCollectionCard({
         {collageImages ? (
           (() => {
             const collage = (
-              <div className="grid h-full w-full grid-cols-2 gap-0.5 transition duration-500 group-hover:scale-[1.025]">
+              <div className="grid h-full w-full grid-cols-2 gap-0.5 bg-[#e9e7e1] transition duration-500 group-hover:scale-[1.025] dark:bg-gray-900">
                 {collageImages.map((src, collageIndex) => (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     key={collageIndex}
                     src={src}
                     alt={`${item.name} kit ${collageIndex + 1}`}
-                    className="h-full w-full object-cover"
+                    // object-contain (not cover) so each kit render is resized to
+                    // fit its half — a wide keycap image was being cropped to a
+                    // sliver by object-cover.
+                    className="h-full w-full object-contain"
                   />
                 ))}
               </div>
