@@ -46,17 +46,25 @@ Work on the `main` branch.
    in the current codebase (the issue no longer exists) are dropped from the
    table. List them in a short "removed / already resolved" note for the audit
    trail instead of leaving them in the main table.
-7. **Always render the report ledger.** On EVERY run — including when there are
-   zero pending reports — show the full wrong-price history table from
-   `price-report-ledger.md` (columns: logged date, set, vendor, reported price,
-   client reason, verdict, root cause & fix, status now). This is the durable
-   "what has the client complained about and what's been fixed" view the owner
-   expects each run; the live feed only shows pending items, so this ledger is
-   the source of truth for logged dates and resolution history. When the current
-   run surfaces a NEW report, append a dated row to `price-report-ledger.md`
-   (and commit it on `main`) so the ledger stays complete.
-8. If there are no PENDING reports, still render the ledger (step 7), say
-   "No pending reports", and stop.
+7. **Always render the ledger as three tables** (from `price-report-ledger.md`).
+   On EVERY run — including when there are zero pending reports — render:
+   - **(a) Open wrong-price reports** — ledger rows that are **not yet
+     resolved**. **Resolved rows are omitted** from this table; when everything
+     is resolved, show "none".
+   - **(b) Open client-recommended values** — client-suggested corrected
+     prices/URLs/vendors **still awaiting verification**. **Verified (resolved)
+     recommendations are omitted**; when all are verified, show "none".
+   - **(c) Client-reported items** — the full client's-eye log of every report
+     ever filed (columns: logged date, set, vendor, reported price, client
+     reason, verdict, status). This one **always shows every item**, resolved or
+     not, and is the durable "what has the client complained about" view.
+
+   The `Resolution audit` table in the ledger keeps the full root-cause/fix
+   detail for the audit trail and is **not** rendered per run. When the current
+   run surfaces a NEW report, append its row to the client-reported log **and**
+   the resolution audit (and commit on `main`) so the ledger stays complete.
+8. If there are no PENDING reports, still render the three ledger tables
+   (step 7), say "No pending reports", and stop.
 9. Check on any new product/vendor a reporter recommends (a corrected base
    price, the correct product URL, or a vendor/currency note in the reason) and
    verify it against the scraper's vendor overrides and plausibility bounds.
