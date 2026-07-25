@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { verifyAdminToken } from "@/lib/auth";
 import { SHOWCASE_VENDORS, HIDDEN_SLUGS, cleanDisplayName, notCustomWhere } from "@/lib/showcase";
+import { dedupeKey, dedupeCanonicalScore } from "@/lib/set-name";
 import type { GBStatus } from "@/generated/prisma";
 
 export async function GET(req: NextRequest) {
@@ -114,33 +115,69 @@ export async function GET(req: NextRequest) {
           ? { gbEnd: "asc" as const }
           : { createdAt: "desc" as const };
 
-  const [total, data] = await Promise.all([
-    prisma.groupBuy.count({ where }),
-    prisma.groupBuy.findMany({
-      where,
-      orderBy,
-      skip: (page - 1) * limit,
-      take: limit,
+  const include = {
+    kits: {
       include: {
-        kits: {
-          include: {
-            vendorKits: {
-              include: { vendor: { include: { shippingZones: true } } },
-            },
-          },
+        vendorKits: {
+          include: { vendor: { include: { shippingZones: true } } },
         },
       },
-    }),
-  ]);
+    },
+  } as const;
 
-  // Strip the showcase source out of display names (e.g. the scraped
-  // "… — Lightning Keyboards" suffix) before any client renders them.
-  const cleaned = data.map((row) => ({
-    ...row,
-    name: cleanDisplayName(row.name),
-  }));
+  // A direct slug lookup (share/tracker links) must return exactly those rows —
+  // never collapse them.
+  if (slugs.length > 0) {
+    const [total, data] = await Promise.all([
+      prisma.groupBuy.count({ where }),
+      prisma.groupBuy.findMany({ where, orderBy, skip: (page - 1) * limit, take: limit, include }),
+    ]);
+    return NextResponse.json({
+      data: data.map((row) => ({ ...row, name: cleanDisplayName(row.name) })),
+      total,
+      page,
+      limit,
+    });
+  }
 
-  return NextResponse.json({ data: cleaned, total, page, limit });
+  // Otherwise collapse duplicate catalog rows for the same set/board (gmk.net
+  // "GMK CYL X Keycaps", KeycapLendar "GMK X", Geekhack "[GB] X …", the three
+  // "Sensy Seal80 … Dolch …" spellings) into one listing. Fetch lightweight
+  // candidates, dedupe to a canonical row per identity key, then hydrate only
+  // the current page — so pagination and counts reflect the deduped set.
+  const CANDIDATE_CAP = 4000;
+  const candidates = await prisma.groupBuy.findMany({
+    where,
+    orderBy,
+    take: CANDIDATE_CAP,
+    select: { id: true, name: true, slug: true },
+  });
+
+  const seen = new Map<string, { score: number; orderIdx: number }>();
+  const canonicalIds: string[] = [];
+  for (const candidate of candidates) {
+    const key = dedupeKey(candidate.name) || candidate.slug;
+    const score = dedupeCanonicalScore(candidate.name, candidate.slug);
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, { score, orderIdx: canonicalIds.length });
+      canonicalIds.push(candidate.id);
+    } else if (score > existing.score) {
+      canonicalIds[existing.orderIdx] = candidate.id;
+      existing.score = score;
+    }
+  }
+
+  const total = canonicalIds.length;
+  const pageIds = canonicalIds.slice((page - 1) * limit, page * limit);
+  const rows = await prisma.groupBuy.findMany({ where: { id: { in: pageIds } }, include });
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const data = pageIds
+    .map((id) => byId.get(id))
+    .filter((row): row is (typeof rows)[number] => Boolean(row))
+    .map((row) => ({ ...row, name: cleanDisplayName(row.name) }));
+
+  return NextResponse.json({ data, total, page, limit });
 }
 
 export async function POST(req: NextRequest) {

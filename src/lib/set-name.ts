@@ -32,3 +32,44 @@ export function roundNumber(normalized: string): number {
   const m = normalized.match(/\br(\d+)$/);
   return m ? Number(m[1]) : 1;
 }
+
+// Aggressive identity key for collapsing DISPLAY duplicates of one set/board
+// across differently-named catalog rows — e.g. gmk.net "GMK CYL Divinapapaya
+// Keycaps", KeycapLendar "GMK Divinapapaya", and the three "Sensy Seal80 … Dolch
+// … Kit" spellings. Distinct from normalizeSetName (kept conservative for price
+// matching): this also drops edition/kit filler and the CYL/DCS profile tokens,
+// but deliberately KEEPS "mtnu" — GMK MTNU is a genuinely different profile, so
+// "MTNU X" must NOT merge with "X". Round-aware, so R1 never merges with R2.
+export function dedupeKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\[[^\]]*\]|\([^)]*\)/g, " ")
+    .replace(/[—–]/g, " ")
+    .replace(/\bround\s*(\d+)\b/g, "r$1")
+    .replace(
+      /\b(group\s*buy|groupbuy|gb|pre[- ]?order|in[- ]?stock|extras?|live|launch(ed)?)\b/g,
+      " "
+    )
+    // generic filler that varies between listings of the same item
+    .replace(/\b(keycap\s*sets?|keycaps?|keysets?|keyboard|kit|special|edition)\b/g, " ")
+    // strippable profile / brand tokens — CYL/DCS/OEM/SA describe caps and are
+    // interchangeable defaults; "gmk" is constant. "mtnu" is intentionally NOT here.
+    .replace(/\b(gmk|cyl|dcs|oem|sa|cherry\s*profile)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Rank a catalog row within a dedupe group: higher = better representative.
+// Prefers the official profile-named row (GMK CYL / MTNU, "… Keycaps"), and
+// penalises Geekhack "[GB] …"/"(Group Buy) …" thread names and gh- slugs.
+export function dedupeCanonicalScore(name: string, slug: string): number {
+  let score = 0;
+  if (/\bcyl\b/i.test(name)) score += 40;
+  if (/\bmtnu\b/i.test(name)) score += 40;
+  if (/keycaps?\b/i.test(name)) score += 10;
+  if (/^\s*[[(]/.test(name)) score -= 60;
+  if (slug.startsWith("gh-")) score -= 30;
+  score -= name.length * 0.05;
+  return score;
+}

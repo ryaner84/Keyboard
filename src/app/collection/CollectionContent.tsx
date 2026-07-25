@@ -17,7 +17,7 @@ import {
   NONBASE_SUBKIT_RE,
   parseVariants,
 } from "@/lib/kit-variants";
-import { normalizeSetName } from "@/lib/set-name";
+import { dedupeKey } from "@/lib/set-name";
 import {
   createKeycapAcquisition,
   KEYCAP_CONDITION_LABELS,
@@ -3978,7 +3978,7 @@ function pickerGroupKey(result: CatalogPickerResult): string {
     /[-–—]\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*.*/i,
     ""
   );
-  return `${result.productType}::${normalizeSetName(name)}`;
+  return `${result.productType}::${dedupeKey(name)}`;
 }
 
 function dedupePickerResults(
