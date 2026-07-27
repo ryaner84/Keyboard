@@ -12,7 +12,9 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "import": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' -r tsconfig-paths/register src/scripts/import.ts",
-    "test:keycap-collection": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/keycap-collection.test.ts"
+    "test:keycap-collection": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/keycap-collection.test.ts",
+    "test:csv-import": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/csv.test.ts",
+    "test:collection-import": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/collection-import.test.ts"
   },
   "prisma": {
     "seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts"

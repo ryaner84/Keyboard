@@ -1,20 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import { getTrackerSessionUser } from "@/lib/tracker-auth";
 import { cleanCollectionPhoto } from "@/lib/collection-photo";
 import { isCustomSlug } from "@/lib/showcase";
-import type { CollectionUnit, KeycapAcquisition, KeycapKitSelection, KeycapPairing } from "@/types";
+// Keycap purchase validation is shared with the CSV batch importer — one
+// definition of what a stored acquisition may contain.
+import {
+  cleanKeycapAcquisition,
+  cleanOptionalText,
+  cleanUnitCurrency,
+  cleanUnitPrice,
+} from "@/lib/keycap-acquisition-server";
+import type { CollectionUnit, KeycapAcquisition, KeycapPairing } from "@/types";
 
 const CONDITIONS = new Set(["UNBUILT", "EXCELLENT", "GOOD", "FAIR", "PROJECT"]);
-const KEYCAP_CONDITIONS = new Set([
-  "SEALED",
-  "OPEN_UNUSED",
-  "MOUNTED",
-  "USED",
-  "INCOMPLETE",
-]);
 
 export async function PATCH(
   req: NextRequest,
@@ -278,11 +278,6 @@ export async function DELETE(
   return NextResponse.json({ ok: true });
 }
 
-function cleanOptionalText(value: unknown, maxLength: number): string | null {
-  const text = String(value ?? "").trim().slice(0, maxLength);
-  return text || null;
-}
-
 function cleanCondition(value: unknown): string | null {
   const c = String(value ?? "").toUpperCase();
   return c && CONDITIONS.has(c) ? c : null;
@@ -311,135 +306,6 @@ function cleanUnitDate(value: unknown): string | null {
     throw new Error("Invalid acquisition date for one of the builds");
   }
   return date.toISOString();
-}
-
-function cleanUnitPrice(value: unknown): number | null {
-  if (value == null || value === "") return null;
-  const price = Number(value);
-  if (!Number.isFinite(price) || price < 0 || price > 10_000_000) {
-    throw new Error("Invalid purchase price for one of the builds");
-  }
-  return price;
-}
-
-function cleanUnitCurrency(value: unknown): string | null {
-  const currency = String(value ?? "").trim().toUpperCase().slice(0, 8);
-  return currency || null;
-}
-
-function cleanKeycapAcquisition(
-  value: unknown,
-  knownKits: Map<string, { name: string; type: string }>
-): KeycapAcquisition {
-  const source = (value ?? {}) as Record<string, unknown>;
-  const id = cleanIdentifier(source.id) || randomUUID();
-  const kits = cleanKeycapKits(source.kits, knownKits);
-  const quantity = Math.max(1, Math.min(99, Math.floor(Number(source.quantity) || 1)));
-  const acquiredAt = cleanKeycapDate(source.acquiredAt);
-  const purchasePrice = cleanUnitPrice(source.purchasePrice);
-  const purchaseCurrency = cleanUnitCurrency(source.purchaseCurrency);
-  const condition = cleanKeycapCondition(source.condition);
-  const imageUrl = cleanCollectionPhoto(source.imageUrl);
-  if (source.imageUrl && !imageUrl) {
-    throw new Error("Invalid keycap photo");
-  }
-  const photoSource = source.photoSource === "CUSTOM" && imageUrl ? "CUSTOM" : "CATALOG";
-  return {
-    id,
-    kits,
-    quantity,
-    acquiredAt,
-    purchasePrice,
-    purchaseCurrency,
-    condition,
-    imageUrl,
-    photoSource,
-    notes: cleanOptionalText(source.notes, 1000),
-    isPublic: source.isPublic !== false,
-    pairing: cleanKeycapPairing(source.pairing),
-  };
-}
-
-function cleanIdentifier(value: unknown): string | null {
-  const id = String(value ?? "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 100);
-  return id || null;
-}
-
-function cleanKeycapKits(
-  value: unknown,
-  knownKits: Map<string, { name: string; type: string }>
-): KeycapKitSelection[] {
-  const raw = Array.isArray(value) ? value.slice(0, 12) : [];
-  const seen = new Set<string>();
-  const kits = raw
-    .map((kit) => {
-      const source = (kit ?? {}) as Record<string, unknown>;
-      const requestedId = cleanIdentifier(source.kitId);
-      if (requestedId) {
-        const catalogKit = knownKits.get(requestedId);
-        if (!catalogKit) throw new Error("A selected kit no longer belongs to this keycap set");
-        if (seen.has(`catalog:${requestedId}`)) return null;
-        seen.add(`catalog:${requestedId}`);
-        return { kitId: requestedId, name: catalogKit.name, type: catalogKit.type || "" };
-      }
-      const name = cleanOptionalText(source.name, 80);
-      if (!name) return null;
-      const key = `custom:${name.toLowerCase()}`;
-      if (seen.has(key)) return null;
-      seen.add(key);
-      return {
-        kitId: null,
-        name,
-        type: cleanOptionalText(source.type, 50) || "",
-      };
-    })
-    .filter((kit): kit is KeycapKitSelection => Boolean(kit));
-
-  return kits.length > 0
-    ? kits
-    : [{ kitId: null, name: "Set / kits not specified", type: "" }];
-}
-
-function cleanKeycapDate(value: unknown): string | null {
-  if (value == null || value === "") return null;
-  const date = new Date(String(value));
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid acquisition date for one of the keycap purchases");
-  }
-  return date.toISOString();
-}
-
-function cleanKeycapCondition(value: unknown): KeycapAcquisition["condition"] {
-  const condition = String(value ?? "").trim().toUpperCase();
-  if (!condition) return null;
-  if (!KEYCAP_CONDITIONS.has(condition)) {
-    throw new Error("Invalid keycap condition");
-  }
-  return condition as KeycapAcquisition["condition"];
-}
-
-function cleanKeycapPairing(value: unknown): KeycapPairing {
-  if (value == null) return null;
-  const source = value as Record<string, unknown>;
-  if (source.kind === "collection") {
-    const keyboardSlug = String(source.keyboardSlug ?? "").trim().slice(0, 160);
-    const buildIndex = Number(source.buildIndex);
-    if (!keyboardSlug || !Number.isInteger(buildIndex) || buildIndex < 0 || buildIndex > 98) {
-      throw new Error("Choose a valid keyboard build to pair with this keycap purchase");
-    }
-    return {
-      kind: "collection",
-      keyboardSlug,
-      buildIndex,
-      showPublic: source.showPublic === true,
-    };
-  }
-  if (source.kind === "free_text") {
-    const label = cleanOptionalText(source.label, 120);
-    if (!label) throw new Error("Enter the keyboard name for the free-text pairing");
-    return { kind: "free_text", label, showPublic: source.showPublic === true };
-  }
-  throw new Error("Invalid keyboard pairing");
 }
 
 async function validateKeycapPairings(userId: string, acquisitions: KeycapAcquisition[]) {
