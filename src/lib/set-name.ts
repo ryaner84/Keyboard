@@ -36,12 +36,20 @@ export function roundNumber(normalized: string): number {
 // Aggressive identity key for collapsing DISPLAY duplicates of one set/board
 // across differently-named catalog rows — e.g. gmk.net "GMK CYL Divinapapaya
 // Keycaps", KeycapLendar "GMK Divinapapaya", and the three "Sensy Seal80 … Dolch
-// … Kit" spellings. Distinct from normalizeSetName (kept conservative for price
-// matching): this also drops edition/kit filler and the CYL/DCS profile tokens,
-// but deliberately KEEPS "mtnu" — GMK MTNU is a genuinely different profile, so
-// "MTNU X" must NOT merge with "X". Round-aware, so R1 never merges with R2.
-export function dedupeKey(name: string): string {
-  return name
+// … Kit" spellings. Distinct from normalizeSetName, which is kept conservative
+// for price matching. Round-aware, so R1 never merges with R2.
+//
+// Profile tokens are context-dependent, which is why `keepProfile` exists:
+//   • On a KEYCAP SET the profile IS the product identity — "DCS Dolch" is a
+//     Signature Plastics set and "GMK Dolch" is a different product entirely, so
+//     collapsing them would merge two unrelated sets into one listing. Callers
+//     dealing with keycaps must pass keepProfile: true.
+//   • On a KEYBOARD the same words merely describe the bundled caps ("Seal80 —
+//     DCS Dolch Special Edition"), so they are noise that must be stripped for
+//     the three spellings of one board to collapse.
+// "mtnu" is never stripped: GMK MTNU is always a distinct profile.
+export function dedupeKey(name: string, opts?: { keepProfile?: boolean }): string {
+  const base = name
     .toLowerCase()
     .replace(/\[[^\]]*\]|\([^)]*\)/g, " ")
     .replace(/[—–]/g, " ")
@@ -51,10 +59,17 @@ export function dedupeKey(name: string): string {
       " "
     )
     // generic filler that varies between listings of the same item
-    .replace(/\b(keycap\s*sets?|keycaps?|keysets?|keyboard|kit|special|edition)\b/g, " ")
-    // strippable profile / brand tokens — CYL/DCS/OEM/SA describe caps and are
-    // interchangeable defaults; "gmk" is constant. "mtnu" is intentionally NOT here.
-    .replace(/\b(gmk|cyl|dcs|oem|sa|cherry\s*profile)\b/g, " ")
+    .replace(/\b(keycap\s*sets?|keycaps?|keysets?|keyboard|kit|special|edition)\b/g, " ");
+
+  // "gmk" and "cyl" are always dropped: "gmk" is a constant across the catalog
+  // and CYL is GMK's default profile, so neither distinguishes two sets.
+  const withoutConstants = base.replace(/\b(gmk|cyl|cherry\s*profile)\b/g, " ");
+
+  return (
+    opts?.keepProfile
+      ? withoutConstants
+      : withoutConstants.replace(/\b(dcs|oem|sa)\b/g, " ")
+  )
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();

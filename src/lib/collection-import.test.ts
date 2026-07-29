@@ -72,6 +72,19 @@ const mtnuOnly = resolveSetName("GMK MTNU Bento", index);
 assert.equal(mtnuOnly.match, null);
 assert.deepEqual(mtnuOnly.candidates, []);
 
+// --- DCS is a different product line from GMK ----------------------------
+// Signature Plastics DCS and GMK sets share colourway names ("Dolch", "9009",
+// "Hangul"), but they are different products and must never be merged.
+const profileIndex = buildKeycapSetIndex([
+  set("gmk-dolch", "GMK Dolch", "SHIPPING", "2024-01-01"),
+  set("gh-126770", "[GB] DCS Dolch", "ACTIVE_GB", "2026-06-01"),
+]);
+assert.equal(resolveSetName("GMK Dolch", profileIndex).match?.slug, "gmk-dolch");
+assert.equal(resolveSetName("DCS Dolch", profileIndex).match?.slug, "gh-126770");
+// Neither offers the other as an alternative — they are unrelated sets.
+assert.deepEqual(resolveSetName("DCS Dolch", profileIndex).candidates, []);
+assert.deepEqual(resolveSetName("GMK Dolch", profileIndex).candidates, []);
+
 // --- no match ------------------------------------------------------------
 const missing = resolveSetName("GMK Totally Made Up Set", index);
 assert.equal(missing.match, null);
