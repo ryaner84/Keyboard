@@ -711,5 +711,46 @@ class GmkBreadcrumbStatusTests(unittest.TestCase):
         self.assertEqual(scrape.infer_status_from_text("https://x/y "), "DELIVERED")
 
 
+class TrackedProfileCatalogTests(unittest.TestCase):
+    def _data(self, *titles):
+        return {"products": [{"title": t, "handle": t.lower().replace(" ", "-")} for t in titles]}
+
+    def test_keeps_gmk_and_dcs_listings(self):
+        out = scrape.tracked_products_from_catalog(
+            self._data("GMK Olivia R2", "DCS Superweld", "DCS Cream Cheese and Green R3"),
+            "https://novelkeys.com",
+        )
+        self.assertEqual(
+            [p["title"] for p in out],
+            ["GMK Olivia R2", "DCS Superweld", "DCS Cream Cheese and Green R3"],
+        )
+        self.assertEqual(out[1]["url"], "https://novelkeys.com/products/dcs-superweld")
+
+    def test_drops_untracked_profiles_and_handleless(self):
+        out = scrape.tracked_products_from_catalog(
+            {
+                "products": [
+                    {"title": "KAT Milkshake", "handle": "kat-milkshake"},
+                    {"title": "SA Laser", "handle": "sa-laser"},
+                    {"title": "GMK No Handle"},  # unusable without a handle
+                ]
+            },
+            "https://x.test",
+        )
+        self.assertEqual(out, [])
+
+    def test_legacy_alias_still_exposed(self):
+        # run_discovery calls the old name; it must keep working.
+        self.assertIs(scrape.gmk_products_from_catalog, scrape.tracked_products_from_catalog)
+
+    def test_dcs_and_gmk_normalize_to_different_sets(self):
+        # The profile token is the identity: a DCS set must never be matched to
+        # the same-colourway GMK set by the vendor-linking normalizer.
+        self.assertNotEqual(
+            scrape.normalize_set_name("DCS Dolch"),
+            scrape.normalize_set_name("GMK Dolch"),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

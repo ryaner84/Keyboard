@@ -467,6 +467,7 @@ async function main() {
         await reclassifyMisflaggedKeycaps(client);
         await reclassifyGeekhackStatuses(client);
         await dropForumDuplicatesOfOfficialSets(client);
+        await ensureBaseKitForKeycapSets(client);
       }
     }
 
@@ -507,6 +508,7 @@ async function main() {
     await reclassifyMisflaggedKeycaps(client);
     await reclassifyGeekhackStatuses(client);
     await dropForumDuplicatesOfOfficialSets(client);
+    await ensureBaseKitForKeycapSets(client);
   } catch (err) {
     console.warn(`[db-setup] Setup failed: ${err.message}`);
     console.warn("[db-setup] The app will still deploy; you can re-run by redeploying once the DB is reachable.");
@@ -1815,6 +1817,36 @@ async function auditCleanupV3(client) {
   }
 }
 
+// RECURRING (every deploy): give every keycap set a BASE Kit.
+//
+// Vendor pricing is only reachable through a BASE kit — the scraper's set index
+// inner-joins on it and every vendor-linking pass writes against its id. Only
+// the gmk.net and KBDfans upserts used to create one, so a set whose only source
+// is Geekhack had NO kit and could never be priced. That silently made every
+// non-GMK profile unpriceable: all 14 Geekhack-sourced DCS sets were in exactly
+// this state. scrape.py now creates the kit on both its insert and update paths;
+// this heal repairs the rows that already exist.
+async function ensureBaseKitForKeycapSets(client) {
+  try {
+    const { rowCount } = await client.query(
+      `INSERT INTO public."Kit" (id, name, type, "groupBuyId")
+       SELECT gen_random_uuid()::text, 'Base Kit', 'BASE', gb.id
+         FROM public."GroupBuy" gb
+        WHERE gb."productType" = 'KEYCAPS'
+          AND gb.slug NOT LIKE 'custom-%'
+          AND NOT EXISTS (
+            SELECT 1 FROM public."Kit" k
+             WHERE k."groupBuyId" = gb.id AND k.type = 'BASE'
+          )`
+    );
+    if (rowCount > 0) {
+      console.log(`[db-setup] Added a BASE kit to ${rowCount} keycap set(s) that had none.`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] Base-kit backfill skipped: ${err.message}`);
+  }
+}
+
 // Remove speculative, date-less interest-check sets from KeycapLendar
 // (e.g. GMK Strawberry) — no confirmed GB date, no real vendor listings.
 // Cascade deletes child Kit/VendorKit rows automatically.
@@ -1935,6 +1967,13 @@ async function reclassifyGeekhackStatuses(client) {
 // stub is deleted ONLY when a NON-forum twin with the same colorway exists AND
 // that twin's name actually starts with "GMK" — so forum-only sets (no official
 // equivalent) are always kept. Child Kit/VendorKit rows cascade on delete.
+//
+// CRUCIALLY the forum stub must ALSO be a "GMK …" row. Because the key strips
+// the leading profile word, "[GB] DCS Dolch" and an official "GMK Dolch"
+// normalise to the same key — but they are completely different products (a DCS
+// set is Signature Plastics, not GMK). Without this guard the heal silently
+// deletes a DCS / SA / KAT / MT3 forum set on every deploy whenever a
+// same-colourway GMK set exists. Only ever collapse GMK-vs-GMK duplicates.
 async function dropForumDuplicatesOfOfficialSets(client) {
   try {
     const { rowCount } = await client.query(
@@ -1960,6 +1999,9 @@ async function dropForumDuplicatesOfOfficialSets(client) {
          AND o.id <> f.id
          AND f.key <> '' AND f.key = o.key                       -- same colorway
          AND o.name ~* '^\\s*(?:\\[[^\\]]*\\]\\s*)*gmk\\y'        -- twin is officially "GMK …"
+         -- ...and the stub is itself GMK, so "[GB] DCS Dolch" is never deleted
+         -- by an official "GMK Dolch" (different manufacturer, different product).
+         AND f.name ~* '^\\s*(?:\\[[^\\]]*\\]\\s*)*gmk\\y'
       `
     );
     if (rowCount > 0) {

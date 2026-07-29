@@ -50,10 +50,17 @@ interface CatalogProduct {
   url: string;
 }
 
+// Keycap profiles we track. A vendor listing must name one of these to be
+// considered — the profile token is what makes "DCS Dolch" a different product
+// from "GMK Dolch", so it is matched here and deliberately kept in the set name.
+// Mirror of TRACKED_PROFILE_RE in scraper/scrape.py — keep in sync.
+const TRACKED_PROFILE_RE = /\b(?:GMK|DCS)\b/i;
+
 // ── Shopify path ────────────────────────────────────────────────────────────
-// Pull every product titled "GMK …" from a Shopify store's public catalog.
-// Returns null when the store isn't Shopify / blocks the endpoint, so the
-// caller can tell "no GMK products" apart from "couldn't look".
+// Pull every product for a tracked profile (GMK / DCS …) from a Shopify store's
+// public catalog. Returns null when the store isn't Shopify / blocks the
+// endpoint, so the caller can tell "no matching products" apart from
+// "couldn't look".
 async function fetchGmkCatalogShopify(origin: string): Promise<CatalogProduct[] | null> {
   const found: CatalogProduct[] = [];
   for (let page = 1; page <= MAX_CATALOG_PAGES; page++) {
@@ -69,7 +76,7 @@ async function fetchGmkCatalogShopify(origin: string): Promise<CatalogProduct[] 
 
     for (const p of products) {
       const title = String(p.title ?? "");
-      if (!p.handle || !/\bGMK\b/i.test(title)) continue;
+      if (!p.handle || !TRACKED_PROFILE_RE.test(title)) continue;
       found.push({ title, url: `${origin}/products/${p.handle}` });
     }
     if (products.length < 250) break; // last page
@@ -152,7 +159,7 @@ async function fetchGmkCatalogHtml(origin: string): Promise<CatalogProduct[]> {
   const found: CatalogProduct[] = [];
   for (const links of pages) {
     for (const l of links) {
-      if (!sameOrigin(l.href) || !/\bGMK\b/i.test(l.text) || seen.has(l.href)) continue;
+      if (!sameOrigin(l.href) || !TRACKED_PROFILE_RE.test(l.text) || seen.has(l.href)) continue;
       seen.add(l.href);
       found.push({ title: l.text, url: l.href });
     }

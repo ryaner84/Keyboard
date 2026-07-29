@@ -2392,17 +2392,29 @@ def strip_round(normalized: str) -> str:
     return re.sub(r"\s+r\d+$", "", normalized).strip()
 
 
-def gmk_products_from_catalog(data: dict, origin: str) -> list[dict]:
-    """Extract [{title, url}] for every 'GMK …' product in a Shopify
-    products.json page. Non-GMK and handle-less products are dropped."""
+# Keycap profiles we track. A vendor listing must name one of these to be
+# considered — the profile token is what makes "DCS Dolch" a different product
+# from "GMK Dolch", so it is matched here and deliberately kept in the set name.
+# Mirror of TRACKED_PROFILE_RE in src/lib/import/discovery.ts — keep in sync.
+TRACKED_PROFILE_RE = re.compile(r"\b(?:GMK|DCS)\b", re.IGNORECASE)
+
+
+def tracked_products_from_catalog(data: dict, origin: str) -> list[dict]:
+    """Extract [{title, url}] for every tracked-profile product (GMK / DCS …) in
+    a Shopify products.json page. Other profiles and handle-less products are
+    dropped."""
     out: list[dict] = []
     for p in (data or {}).get("products", []) or []:
         title = str(p.get("title") or "")
         handle = p.get("handle")
-        if not handle or not re.search(r"\bGMK\b", title, re.IGNORECASE):
+        if not handle or not TRACKED_PROFILE_RE.search(title):
             continue
         out.append({"title": title, "url": f"{origin}/products/{handle}"})
     return out
+
+
+# Back-compat alias: the old name described a GMK-only filter.
+gmk_products_from_catalog = tracked_products_from_catalog
 
 
 def _pick_from_family(candidates: list[dict]) -> dict:
@@ -4368,6 +4380,29 @@ def _fetch_gh_first_post(page, topic_url: str) -> dict | None:
         return None
 
 
+def ensure_base_kit(conn, gb_id: str) -> None:
+    """Guarantee a set has a BASE Kit row.
+
+    Vendor linking is only possible through a BASE kit: _build_set_index INNER
+    JOINs on it, and every pass that attaches a VendorKit (discovery, outlets,
+    gmk_direct) writes against base_kit_id. Historically only the gmk.net and
+    KBDfans upserts created one, so a set whose ONLY source is Geekhack had no
+    kit and could therefore never receive a price — which is exactly the state
+    every DCS set was in (14 of 15 live DCS rows had no kit at all).
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO "Kit" (id, name, type, "groupBuyId")
+            SELECT gen_random_uuid()::text, 'Base Kit', 'BASE', %s
+            WHERE NOT EXISTS (
+                SELECT 1 FROM "Kit" WHERE "groupBuyId" = %s AND type = 'BASE'
+            )
+            """,
+            (gb_id, gb_id),
+        )
+
+
 def _upsert_gh_set(conn, data: dict) -> tuple[str | None, bool]:
     """
     Try to match an existing GroupBuy row by slug variants.
@@ -4478,6 +4513,9 @@ def _upsert_gh_set(conn, data: dict) -> tuple[str | None, bool]:
                         existing["slug"],
                     ),
                 )
+        # A Geekhack-only keycap set needs a BASE kit or it can never be priced.
+        if product_type == "KEYCAPS":
+            ensure_base_kit(conn, existing["id"])
         return existing["id"], False
 
     # No match — create new row with gh- slug
@@ -4517,7 +4555,12 @@ def _upsert_gh_set(conn, data: dict) -> tuple[str | None, bool]:
             ),
         )
         row = cur.fetchone()
-    return (row["id"] if row else None), True
+    new_id = row["id"] if row else None
+    # Same for a freshly-created row: without a BASE kit no vendor listing can
+    # ever attach, so the set would stay permanently priceless.
+    if new_id and product_type == "KEYCAPS":
+        ensure_base_kit(conn, new_id)
+    return new_id, True
 
 
 def run_geekhack(

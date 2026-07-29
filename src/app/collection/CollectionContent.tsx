@@ -4017,7 +4017,10 @@ function pickerGroupKey(result: CatalogPickerResult): string {
     /[-–—]\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*.*/i,
     ""
   );
-  return `${result.productType}::${dedupeKey(name)}`;
+  // Keycap profiles (DCS vs GMK) are distinct products; on a keyboard the same
+  // words only describe bundled caps, so they stay strippable.
+  const keepProfile = result.productType !== "KEYBOARD";
+  return `${result.productType}::${dedupeKey(name, { keepProfile })}`;
 }
 
 function dedupePickerResults(

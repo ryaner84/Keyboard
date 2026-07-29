@@ -150,13 +150,18 @@ export async function GET(req: NextRequest) {
     where,
     orderBy,
     take: CANDIDATE_CAP,
-    select: { id: true, name: true, slug: true },
+    select: { id: true, name: true, slug: true, productType: true },
   });
 
   const seen = new Map<string, { score: number; orderIdx: number }>();
   const canonicalIds: string[] = [];
   for (const candidate of candidates) {
-    const key = dedupeKey(candidate.name) || candidate.slug;
+    // Keep the profile token for keycap sets so "DCS Dolch" is never collapsed
+    // into "GMK Dolch" — different manufacturers, different products.
+    const key =
+      dedupeKey(candidate.name, {
+        keepProfile: candidate.productType !== "KEYBOARD",
+      }) || candidate.slug;
     const score = dedupeCanonicalScore(candidate.name, candidate.slug);
     const existing = seen.get(key);
     if (!existing) {

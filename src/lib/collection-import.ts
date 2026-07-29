@@ -51,7 +51,7 @@ export function buildKeycapSetIndex(sets: ImportSetCandidate[]): KeycapSetIndex 
     const full = normalizeSetName(set.name);
     push(index.byFull, full, set);
     push(index.byBase, stripRound(full), set);
-    push(index.byDedupe, dedupeKey(set.name), set);
+    push(index.byDedupe, dedupeKey(set.name, { keepProfile: true }), set);
   }
   return index;
 }
@@ -82,7 +82,7 @@ function collapseDuplicates(candidates: ImportSetCandidate[]): ImportSetCandidat
   const groups = new Map<string, ImportSetCandidate[]>();
   const order: string[] = [];
   for (const candidate of candidates) {
-    const key = dedupeKey(candidate.name) || candidate.slug;
+    const key = dedupeKey(candidate.name, { keepProfile: true }) || candidate.slug;
     const group = groups.get(key);
     if (group) group.push(candidate);
     else {
@@ -141,7 +141,7 @@ export function resolveSetName(name: string, index: KeycapSetIndex): ResolveResu
   // Last resort: the looser display-identity key, which also tolerates
   // "Keyboard Kit"/"Edition"-style noise a collector may have typed.
   if (!pool || pool.length === 0) {
-    const loose = dedupeKey(name);
+    const loose = dedupeKey(name, { keepProfile: true });
     pool = loose ? index.byDedupe.get(loose) : undefined;
   }
 
