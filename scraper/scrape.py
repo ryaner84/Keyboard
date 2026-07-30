@@ -1846,6 +1846,483 @@ def run_catalog(
 
 
 # ----------------------------------------------------------------------------
+# dcs.wiki catalog — the DCS profile's canonical source
+# GMK sets get their identity from gmk.net (run_catalog above). DCS sets had no
+# equivalent: their only source was Geekhack, so rows carried thread titles
+# ("[GB] DCS Mermaid | Running Oct 17 - Nov 14") and gh-<topic> slugs.
+# https://dcs.wiki is the DCS archive and fills exactly the gmk.net role:
+#   /keycaps     — 135-set archive; each card carries the set name in an
+#                  aria-label and links to /keycaps/<slug>
+#   /keycaps/... — designer, release date, GB type, colors, price, GB location,
+#                  and a "Group Buy Page" link to the vendor actually running it
+#   /group-buys  — live status in two <h1> sections: Active Group Buys (cards
+#                  link to /keycaps/<slug>) and Active Interest Checks (cards
+#                  link straight out to Geekhack)
+# The pages are server-rendered, so a plain fetch sees the full markup.
+#
+# The "Group Buy Page" link is the valuable part: it often points at a store we
+# already track (DCS Soju -> unikeyboards.com, an existing UniKeys vendor), so
+# the catalog can hand run_prices a scrapeable URL instead of waiting for
+# run_discovery to rediscover the listing.
+# ----------------------------------------------------------------------------
+
+DCS_WIKI_ORIGIN = "https://dcs.wiki"
+DCS_WIKI_ARCHIVE_URL = f"{DCS_WIKI_ORIGIN}/keycaps"
+DCS_WIKI_GROUP_BUYS_URL = f"{DCS_WIKI_ORIGIN}/group-buys"
+DCS_VENDOR_SLUG = "dcs-wiki"
+
+_DCS_SCRIPT_RE = re.compile(r"<script.*?</script>", re.S | re.I)
+_DCS_TAG_RE = re.compile(r"<[^>]+>")
+# Both the archive index and the Active Group Buys cards use this same anchor
+# shape, so one pattern reads names + slugs off either page.
+_DCS_CARD_RE = re.compile(
+    r'aria-label="Open\s+(?P<name>[^"]+?)\s+details"\s+href="/keycaps/(?P<slug>[a-z0-9-]+)"',
+    re.I,
+)
+_DCS_EMPTY_FIELD_VALUES = {"", "—", "–", "-", "n/a", "na", "tbd", "unknown"}
+
+
+def _dcs_text(fragment: str) -> str:
+    """Strip tags/entities out of an HTML fragment and collapse whitespace."""
+    return re.sub(r"\s+", " ", html_unescape(_DCS_TAG_RE.sub(" ", fragment or ""))).strip()
+
+
+def _dcs_field(body: str, label: str) -> str | None:
+    """Read one <p>LABEL</p><p>VALUE</p> detail pair; None when blank or a dash.
+
+    Every field on a set page is optional (a running GB has no price yet, an old
+    set has no designer credited), so a missing or em-dash value must come back
+    as None rather than being written over good data as an empty string.
+    """
+    match = re.search(
+        r">\s*" + re.escape(label) + r"\s*</p>\s*<p[^>]*>(.*?)</p>",
+        body,
+        re.S | re.I,
+    )
+    if not match:
+        return None
+    value = _dcs_text(match.group(1))
+    return None if value.lower() in _DCS_EMPTY_FIELD_VALUES else value
+
+
+def parse_dcs_archive_index(html: str) -> list[dict]:
+    """Every set in the /keycaps archive as {slug, name}, in page order."""
+    body = _DCS_SCRIPT_RE.sub("", html or "")
+    sets: list[dict] = []
+    seen: set[str] = set()
+    for match in _DCS_CARD_RE.finditer(body):
+        slug = match.group("slug").lower()
+        if slug in seen:
+            continue
+        seen.add(slug)
+        sets.append({"slug": slug, "name": _dcs_text(match.group("name"))})
+    return sets
+
+
+def parse_dcs_group_buys(html: str) -> dict:
+    """Split /group-buys into live GB slugs and interest checks.
+
+    Active Group Buys are matched by SLUG (their cards link to /keycaps/<slug>),
+    which avoids any name-matching guesswork. Interest checks have no wiki page
+    at all — their cards link straight to Geekhack — so they are returned with
+    the topic id instead, letting the caller update the gh-<topic> row that the
+    Geekhack pass already created.
+    """
+    body = _DCS_SCRIPT_RE.sub("", html or "")
+    split = re.search(r"<h1[^>]*>\s*Active Interest Checks\s*</h1>", body, re.I)
+    gb_part = body[: split.start()] if split else body
+    ic_part = body[split.end():] if split else ""
+
+    active_slugs: list[str] = []
+    for match in re.finditer(r'href="/keycaps/([a-z0-9-]+)"', gb_part, re.I):
+        slug = match.group(1).lower()
+        if slug not in active_slugs:
+            active_slugs.append(slug)
+
+    interest_checks: list[dict] = []
+    for match in re.finditer(r'<a[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>', ic_part, re.S | re.I):
+        name_match = re.search(r"<p[^>]*>(.*?)</p>", match.group(2), re.S)
+        name = _dcs_text(name_match.group(1)) if name_match else ""
+        # Cards lead with the set name; the trailing nav/footer links don't.
+        if not re.match(r"^dcs\b", name, re.I):
+            continue
+        url = match.group(1)
+        topic = re.search(r"geekhack\.org/index\.php\?topic=(\d+)", url, re.I)
+        interest_checks.append({
+            "name": name,
+            "url": url,
+            "topic_id": topic.group(1) if topic else None,
+        })
+
+    return {"active_slugs": active_slugs, "interest_checks": interest_checks}
+
+
+def parse_dcs_release_date(text: str | None) -> datetime | None:
+    """Parse a wiki release date; None when it can't be read unambiguously.
+
+    The field is hand-written, so it appears as '7/1/2026', 'January 2023',
+    'July 2026' or a bare '2021'. Month-only values are pinned to the 1st.
+    Anything else returns None rather than inventing a date.
+    """
+    value = (text or "").strip()
+    if not value:
+        return None
+    match = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", value)
+    if match:
+        month, day, year = (int(g) for g in match.groups())
+        try:
+            return datetime(year, month, day)
+        except ValueError:
+            return None
+    for fmt in ("%B %Y", "%b %Y", "%B %d, %Y", "%b %d, %Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    if re.match(r"^\d{4}$", value):
+        return datetime(int(value), 1, 1)
+    return None
+
+
+def parse_dcs_set_page(html: str, url: str) -> dict | None:
+    """Turn a /keycaps/<slug> page into upsert data, or None if unreadable.
+
+    Returning None on a missing name matters: a failed/partial fetch must skip
+    the set entirely rather than blank out a good row on the next run.
+    """
+    if not html:
+        return None
+    body = _DCS_SCRIPT_RE.sub("", html)
+
+    name_match = re.search(r"<h1[^>]*>(.*?)</h1>", body, re.S | re.I)
+    name = _dcs_text(name_match.group(1)) if name_match else ""
+    if not name:
+        return None
+
+    slug_match = re.search(r"/keycaps/([a-z0-9-]+)", url, re.I)
+    if not slug_match:
+        return None
+    slug = slug_match.group(1).lower()
+
+    # The prose blurb is only reliably available as the page's meta description
+    # (the visible copy is split across styled spans). Read it from the raw
+    # HTML — <meta> lives in <head>, which the script strip above leaves intact.
+    desc_match = re.search(
+        r'<meta\s+name="description"\s+content="([^"]*)"', html, re.I
+    )
+    description = html_unescape(desc_match.group(1)).strip() if desc_match else ""
+
+    images: list[str] = []
+    for pattern in (
+        r'<link[^>]+as="image"[^>]+href="(/images/[^"]+)"',
+        r'<img[^>]+src="(/images/[^"]+)"',
+    ):
+        for match in re.finditer(pattern, html, re.I):
+            absolute = DCS_WIKI_ORIGIN + match.group(1)
+            if absolute not in images:
+                images.append(absolute)
+
+    # The GB link is an <a> that follows the "Group Buy Page" label rather than
+    # a <p> value, so it needs its own lookup.
+    gb_match = re.search(
+        r">\s*Group Buy Page\s*</p>\s*<a[^>]+href="
+        r'"(https?://[^"]+)"',
+        body,
+        re.S | re.I,
+    )
+
+    colors = _dcs_field(body, "Colors")
+    return {
+        "slug": slug,
+        "name": name,
+        "colorway": re.sub(r"^dcs\s+", "", name, flags=re.I).strip(),
+        "designer": _dcs_field(body, "Designer"),
+        "release_date": parse_dcs_release_date(_dcs_field(body, "Release Date")),
+        "gb_type": _dcs_field(body, "GB Type"),
+        # Signature Plastics colour codes (e.g. "BHG, BE, WGE") — a plastics
+        # reference, NOT a kit list, so they never reach the kit classifier.
+        "colors": colors,
+        "price": _dcs_field(body, "Price"),
+        "gb_location": _dcs_field(body, "Group Buy Location"),
+        "gb_page_url": gb_match.group(1) if gb_match else None,
+        "description": description,
+        "imageUrl": images[0] if images else None,
+        "images": images,
+        "wiki_url": f"{DCS_WIKI_ARCHIVE_URL}/{slug}",
+    }
+
+
+def ensure_dcs_vendor(conn) -> str:
+    """Return the dcs.wiki vendor id, creating it if needed.
+
+    Like the 'gmk' row this is a MANUFACTURER/catalog marker, never priced or
+    displayed — it exists to carry the wiki URL so the catalog pass can tell
+    which sets it has already visited.
+
+    NOTE: "Vendor" has no createdAt/updatedAt columns; naming them here is what
+    broke a nightly run once before.
+    """
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute('SELECT id FROM "Vendor" WHERE slug = %s', (DCS_VENDOR_SLUG,))
+        row = cur.fetchone()
+        if row:
+            return row["id"]
+        cur.execute("""
+            INSERT INTO "Vendor"
+                (id, slug, name, region, country, currency, "websiteUrl", "logoUrl")
+            VALUES
+                (gen_random_uuid()::text, %s, 'DCS Wiki', 'US', 'US', 'USD', %s, NULL)
+            ON CONFLICT (slug) DO UPDATE SET "websiteUrl" = EXCLUDED."websiteUrl"
+            RETURNING id
+        """, (DCS_VENDOR_SLUG, DCS_WIKI_ORIGIN))
+        return cur.fetchone()["id"]
+
+
+def fetch_frozen_dcs_slugs(conn) -> set[str]:
+    """Slugs the DCS catalog pass can skip: terminal status + wiki link present.
+
+    Mirrors fetch_frozen_catalog_slugs — the second condition matters because
+    upsert_dcs_set is also what attaches the wiki link, so a delivered set that
+    has never been visited still needs one pass.
+    """
+    sql = """
+        SELECT gb.slug
+          FROM "GroupBuy" gb
+         WHERE gb.status::text = ANY(%s)
+           AND EXISTS (
+                SELECT 1 FROM "VendorKit" vk
+                  JOIN "Kit" k ON k.id = vk."kitId"
+                  JOIN "Vendor" v ON v.id = vk."vendorId"
+                 WHERE k."groupBuyId" = gb.id
+                   AND v.slug = %s)
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (list(TERMINAL_STATUSES), DCS_VENDOR_SLUG))
+        return {row[0] for row in cur.fetchall()}
+
+
+def _dcs_host(url: str | None) -> str:
+    return urllib.parse.urlsplit(url or "").netloc.lower().removeprefix("www.")
+
+
+def find_vendor_for_url(conn, url: str) -> str | None:
+    """The tracked vendor whose site hosts this URL, or None if untracked.
+
+    Matched on the registered websiteUrl host so a wiki "Group Buy Page" that
+    points at a store we already scrape (UniKeys, Oblotzky, …) becomes a real
+    priced listing; geekhack.org and one-off vendor sites simply return None
+    and are left to run_discovery.
+    """
+    host = _dcs_host(url)
+    if not host:
+        return None
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            'SELECT id, "websiteUrl" FROM "Vendor" '
+            'WHERE "websiteUrl" IS NOT NULL AND slug <> %s',
+            (DCS_VENDOR_SLUG,),
+        )
+        for row in cur.fetchall():
+            if _dcs_host(row["websiteUrl"]) == host:
+                return row["id"]
+    return None
+
+
+def _attach_dcs_vendor_kit(conn, gb_id: str, vendor_id: str, url: str) -> None:
+    """Point a vendor's BASE VendorKit row at `url` (price left to run_prices)."""
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            'SELECT id FROM "Kit" WHERE "groupBuyId" = %s AND type = \'BASE\' LIMIT 1',
+            (gb_id,),
+        )
+        kit = cur.fetchone()
+    if not kit:
+        return
+    with conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO "VendorKit"
+                (id, "kitId", "vendorId", "productUrl", "gbUrl", "inStock", currency, "updatedAt")
+            VALUES
+                (gen_random_uuid()::text, %s, %s, %s, %s, true, 'USD', now())
+            ON CONFLICT ("kitId", "vendorId") DO UPDATE SET
+                "productUrl" = EXCLUDED."productUrl",
+                "gbUrl" = EXCLUDED."gbUrl",
+                "updatedAt" = now()
+        """, (kit["id"], vendor_id, url, url))
+
+
+def upsert_dcs_set(conn, data: dict, vendor_id: str, status: str) -> tuple:
+    """Upsert a DCS GroupBuy + BASE Kit + wiki link. Returns (gb_id, created).
+
+    Modelled on upsert_gmk_set: a terminal (DELIVERED/CANCELLED) row is never
+    reopened, and existing name/designer/description are supplemented rather
+    than clobbered so manual edits survive.
+    """
+    slug = data["slug"]
+
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute('SELECT id FROM "GroupBuy" WHERE slug = %s', (slug,))
+        existing = cur.fetchone()
+
+    if existing:
+        gb_id = existing["id"]
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE "GroupBuy" SET
+                    status = CASE WHEN status::text = ANY(%s) THEN status
+                                  ELSE %s::"GBStatus" END,
+                    name = CASE WHEN (name IS NULL OR name = '') THEN %s ELSE name END,
+                    designer = CASE WHEN (designer IS NULL OR designer = '') THEN %s ELSE designer END,
+                    description = CASE WHEN (description IS NULL OR description = '') THEN %s ELSE description END,
+                    "imageUrl" = COALESCE(NULLIF("imageUrl", ''), %s),
+                    "gbStart" = COALESCE("gbStart", %s),
+                    "updatedAt" = now()
+                WHERE slug = %s
+            """, (
+                list(TERMINAL_STATUSES), status, data["name"],
+                data.get("designer") or "", data.get("description") or "",
+                data.get("imageUrl"), data.get("release_date"), slug,
+            ))
+        created = False
+    else:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                INSERT INTO "GroupBuy"
+                    (id, slug, name, colorway, designer, status, "productType",
+                     "imageUrl", images, description, "gbStart", featured,
+                     "createdAt", "updatedAt")
+                VALUES
+                    (gen_random_uuid()::text, %s, %s, %s, %s, %s, 'KEYCAPS',
+                     %s, %s, %s, %s, %s, now(), now())
+                ON CONFLICT (slug) DO NOTHING
+                RETURNING id
+            """, (
+                slug, data["name"], data.get("colorway") or "",
+                data.get("designer") or "", status,
+                data.get("imageUrl"), data.get("images") or [],
+                data.get("description") or "", data.get("release_date"),
+                status == "ACTIVE_GB",
+            ))
+            row = cur.fetchone()
+            if not row:
+                cur.execute('SELECT id FROM "GroupBuy" WHERE slug = %s', (slug,))
+                row = cur.fetchone()
+            gb_id = row["id"]
+        created = True
+
+    # Vendor linking is only possible through a BASE kit (_build_set_index
+    # INNER JOINs on it), so guarantee one before attaching anything.
+    ensure_base_kit(conn, gb_id)
+    _attach_dcs_vendor_kit(conn, gb_id, vendor_id, data["wiki_url"])
+
+    # A GB page hosted by a store we already scrape becomes a real listing;
+    # anything else (Geekhack, one-off sites) is left for run_discovery.
+    gb_page = data.get("gb_page_url")
+    if gb_page:
+        store_vendor_id = find_vendor_for_url(conn, gb_page)
+        if store_vendor_id:
+            _attach_dcs_vendor_kit(conn, gb_id, store_vendor_id, gb_page)
+
+    return gb_id, created
+
+
+def apply_dcs_interest_checks(conn, interest_checks: list[dict]) -> int:
+    """Mark Geekhack-sourced rows for wiki-listed ICs as INTEREST_CHECK.
+
+    Interest checks have no /keycaps page, but their cards link to the Geekhack
+    topic the Geekhack pass already imported, so the topic id maps straight onto
+    the gh-<topic> slug — no fuzzy name matching. Terminal rows are left alone.
+    """
+    updated = 0
+    for ic in interest_checks:
+        if not ic.get("topic_id"):
+            continue
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE "GroupBuy"
+                   SET status = 'INTEREST_CHECK'::"GBStatus", "updatedAt" = now()
+                 WHERE slug = %s
+                   AND status::text <> ALL(%s)
+                   AND status::text <> 'INTEREST_CHECK'
+            """, (f"gh-{ic['topic_id']}", list(TERMINAL_STATUSES)))
+            updated += cur.rowcount
+    return updated
+
+
+def run_dcs_catalog(
+    conn,
+    context: BrowserContext,
+    deadline: float,
+    scrapling: ScraplingClient | None = None,
+) -> dict:
+    """Discover every DCS set from dcs.wiki and upsert it.
+
+    Runs alongside run_catalog (before the image/discovery/price passes) so DCS
+    sets reach them with a real name, designer, image and vendor link.
+    """
+    stats = {"urls_found": 0, "sets_scraped": 0, "created": 0, "updated": 0,
+             "skipped": 0, "failed": 0, "interest_checks": 0}
+    log("DCS catalog pass: discovering DCS sets from dcs.wiki ...")
+
+    vendor_id = ensure_dcs_vendor(conn)
+    frozen_slugs = fetch_frozen_dcs_slugs(conn)
+    log(f"  {len(frozen_slugs)} released DCS set(s) already final — detail pages skipped.")
+
+    page = context.new_page()
+    try:
+        gb_html = fetch_page_html(page, DCS_WIKI_GROUP_BUYS_URL, scrapling=scrapling)
+        live = parse_dcs_group_buys(gb_html or "")
+        active_slugs = set(live["active_slugs"])
+        log(f"  {len(active_slugs)} active group buy(s), "
+            f"{len(live['interest_checks'])} interest check(s).")
+        stats["interest_checks"] = apply_dcs_interest_checks(conn, live["interest_checks"])
+
+        index_html = fetch_page_html(page, DCS_WIKI_ARCHIVE_URL, scrapling=scrapling)
+        entries = parse_dcs_archive_index(index_html or "")
+        stats["urls_found"] = len(entries)
+        log(f"  Found {len(entries)} set(s) in the archive.")
+
+        for entry in entries:
+            if now_ms() > deadline:
+                log("DCS catalog pass: deadline reached during set scraping.")
+                break
+            slug = entry["slug"]
+            # An active GB is never frozen — its status and price still move.
+            if slug in frozen_slugs and slug not in active_slugs:
+                stats["skipped"] += 1
+                continue
+
+            url = f"{DCS_WIKI_ARCHIVE_URL}/{slug}"
+            detail = parse_dcs_set_page(
+                fetch_page_html(page, url, scrapling=scrapling) or "", url
+            )
+            if not detail:
+                stats["failed"] += 1
+                continue
+
+            # The archive lists only sets that exist; anything not currently
+            # running has shipped. Interest checks never appear here.
+            status = "ACTIVE_GB" if slug in active_slugs else "DELIVERED"
+            stats["sets_scraped"] += 1
+            _, created = upsert_dcs_set(conn, detail, vendor_id, status)
+            if created:
+                stats["created"] += 1
+                log(f"  + {detail['name']} ({status})")
+            else:
+                stats["updated"] += 1
+    finally:
+        page.close()
+
+    log(
+        f"DCS catalog pass: sets={stats['urls_found']} scraped={stats['sets_scraped']} "
+        f"created={stats['created']} updated={stats['updated']} "
+        f"skipped={stats['skipped']} failed={stats['failed']} "
+        f"ics={stats['interest_checks']}"
+    )
+    return stats
+
+
+# ----------------------------------------------------------------------------
 # zFrontier group-buy discovery
 # zFrontier (https://www.zfrontier.com) runs the China-region group buys for
 # most GMK sets. Their equipment collection filtered to tag=GMK and
@@ -4793,6 +5270,14 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--dcs-only",
+        action="store_true",
+        help=(
+            "Run only the dcs.wiki catalog pass (import the DCS keycap archive "
+            "and its live group-buy/interest-check statuses)."
+        ),
+    )
+    parser.add_argument(
         "--discovery-only",
         action="store_true",
         help=(
@@ -4921,9 +5406,18 @@ def main() -> int:
                         f"budget={budget_minutes} minutes."
                     )
                     disc_stats = run_discovery(conn, context, deadline, scrapling)
+                elif args.dcs_only:
+                    log(
+                        f"dcs.wiki catalog only; budget={budget_minutes} minutes."
+                    )
+                    dcs_stats = run_dcs_catalog(conn, context, deadline, scrapling)
                 else:
                     # Catalog first so image + price passes have full set coverage
                     catalog_stats = run_catalog(conn, context, deadline, scrapling)
+                    # dcs.wiki is the DCS profile's gmk.net — same role, so it
+                    # runs alongside the GMK catalog and ahead of everything
+                    # that needs complete set coverage.
+                    dcs_stats = run_dcs_catalog(conn, context, deadline, scrapling)
                     zf_stats = run_zfrontier(conn, context, deadline)
                     kbdgb_stats = run_kbdfans_gb(conn, context, deadline, scrapling)
                     kb_stats = run_keyboards(conn, context, deadline, scrapling)
@@ -4974,6 +5468,14 @@ def main() -> int:
         log("Lightning backfill done. Re-run safely if the deadline was reached.")
         return 0
 
+    if args.dcs_only:
+        log(f"DCS catalog -> sets={dcs_stats['urls_found']} "
+            f"created={dcs_stats['created']} updated={dcs_stats['updated']} "
+            f"skipped={dcs_stats['skipped']} failed={dcs_stats['failed']} "
+            f"ics={dcs_stats['interest_checks']}")
+        log("DCS catalog done. Re-run safely if the deadline was reached.")
+        return 0
+
     if args.discovery_only:
         log(f"Discovery -> vendors={disc_stats['vendors']} "
             f"gmk_listings={disc_stats['gmk_listings']} linked={disc_stats['linked']} "
@@ -4984,6 +5486,10 @@ def main() -> int:
     log(f"Catalog -> urls={catalog_stats['urls_found']} "
         f"created={catalog_stats['created']} updated={catalog_stats['updated']} "
         f"skipped={catalog_stats['skipped']} failed={catalog_stats['failed']}")
+    log(f"DCS catalog -> sets={dcs_stats['urls_found']} "
+        f"created={dcs_stats['created']} updated={dcs_stats['updated']} "
+        f"skipped={dcs_stats['skipped']} failed={dcs_stats['failed']} "
+        f"ics={dcs_stats['interest_checks']}")
     log(f"zFrontier -> cards={zf_stats['cards']} created={zf_stats['created']} "
         f"updated={zf_stats['updated']} skipped={zf_stats['skipped']} "
         f"failed={zf_stats['failed']}")
