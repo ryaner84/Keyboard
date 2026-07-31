@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { notHiddenWhere, notShowcaseWhere } from "@/lib/showcase";
+import { isKeycapMaker, makerWhereOr } from "@/lib/set-name";
 
 const RELEASED_STATUSES = ["SHIPPING", "DELIVERED", "IN_STOCK"] as const;
 const VISIBLE_LISTING_WHERE = { dataTrustLevel: { not: "DEAD" } } as const;
@@ -63,6 +64,9 @@ export async function GET(req: NextRequest) {
   const year = searchParams.get("year") ?? "";
   const designer = searchParams.get("designer") ?? "";
   const vendor = searchParams.get("vendor") ?? "";
+  // Maker filter (GMK / Signature Plastics). Keycaps only — a maker pill
+  // is meaningless on the keyboards tab.
+  const makers = searchParams.getAll("maker").filter(isKeycapMaker);
   const sortBy = searchParams.get("sort") ?? "released-desc";
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
   const limit = Math.min(48, Math.max(1, parseInt(searchParams.get("limit") ?? "24")));
@@ -124,6 +128,9 @@ export async function GET(req: NextRequest) {
         },
       },
     }),
+    // AND (not OR) so this composes with the search OR below instead of
+    // replacing it.
+    ...(makers.length > 0 && { AND: [{ OR: makerWhereOr(makers) }] }),
     ...(search && {
       OR: [
         { name: { contains: search, mode: "insensitive" as const } },

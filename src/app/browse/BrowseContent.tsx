@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { SetCard } from "@/components/browse/SetCard";
 import { BrowseFilters } from "@/components/browse/BrowseFilters";
 import { isCrediblyActiveGeekhackListing } from "@/lib/geekhack-listing";
-import { setMaker, type KeycapMaker } from "@/lib/set-name";
+import { type KeycapMaker } from "@/lib/set-name";
 import type { GroupBuyWithPricing, GBStatus } from "@/types";
 
 const DEFAULT_STATUSES: GBStatus[] = ["INTEREST_CHECK", "ACTIVE_GB"];
@@ -48,8 +48,8 @@ export default function BrowseContent() {
     [searchParams.toString()]
   );
 
-  // Maker pills are applied client-side: the API has no maker concept, and
-  // filtering the already-loaded page makes toggling instant with no refetch.
+  // Maker filtering happens server-side so the count stays honest and the
+  // filter sees every match, not just the loaded page.
   const makers = useMemo(
     () => searchParams.getAll("maker").filter(
       (m): m is KeycapMaker => m === "GMK" || m === "SP"
@@ -68,6 +68,7 @@ export default function BrowseContent() {
     params.set("limit", "60");
     params.set("type", "KEYCAPS");
     statuses.forEach((s) => params.append("status", s));
+    makers.forEach((m) => params.append("maker", m));
 
     try {
       const res = await fetch(`/api/group-buys?${params}`);
@@ -80,7 +81,7 @@ export default function BrowseContent() {
     } finally {
       setLoading(false);
     }
-  }, [search, sortBy, statuses, finishing, newDays]);
+  }, [search, sortBy, statuses, finishing, newDays, makers]);
 
   useEffect(() => {
     fetchSets();
@@ -101,21 +102,6 @@ export default function BrowseContent() {
     },
     [searchParams, router]
   );
-
-  // No maker selected = every maker, so an unrecognised profile still shows up
-  // rather than disappearing behind a filter the user never set.
-  const visibleSets = useMemo(() => {
-    if (makers.length === 0) return sets;
-    return sets.filter((s) => {
-      const maker = setMaker(s.name);
-      return maker !== null && makers.includes(maker);
-    });
-  }, [sets, makers]);
-
-  // `total` comes from the server and counts every match across all pages.
-  // Once a maker pill narrows the loaded page client-side that number would
-  // overstate what is actually on screen, so switch to the rendered count.
-  const displayCount = makers.length > 0 ? visibleSets.length : total;
 
   const handleMakerToggle = (maker: KeycapMaker) => {
     const next = makers.includes(maker)
@@ -165,11 +151,7 @@ export default function BrowseContent() {
         </div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{title}</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          {loading
-            ? "Loading..."
-            // With a maker pill on, the server total no longer describes what is
-            // on screen, so report the count actually rendered.
-            : `${displayCount} set${displayCount !== 1 ? "s" : ""} found`}
+          {loading ? "Loading..." : `${total} set${total !== 1 ? "s" : ""} found`}
         </p>
       </div>
 
@@ -204,7 +186,7 @@ export default function BrowseContent() {
                 </div>
               ))}
             </div>
-          ) : visibleSets.length === 0 ? (
+          ) : sets.length === 0 ? (
             <div className="text-center py-16 text-gray-400">
               <p className="text-4xl mb-3">⌨</p>
               <p className="font-medium text-gray-500">No sets found</p>
@@ -212,7 +194,7 @@ export default function BrowseContent() {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
-              {visibleSets.map((set) => (
+              {sets.map((set) => (
                 <SetCard key={set.id} set={set} />
               ))}
             </div>

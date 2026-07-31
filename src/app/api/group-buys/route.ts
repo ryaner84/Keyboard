@@ -3,7 +3,12 @@ import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { verifyAdminToken } from "@/lib/auth";
 import { SHOWCASE_VENDORS, HIDDEN_SLUGS, cleanDisplayName, notCustomWhere } from "@/lib/showcase";
-import { dedupeKey, dedupeCanonicalScore } from "@/lib/set-name";
+import {
+  dedupeKey,
+  dedupeCanonicalScore,
+  isKeycapMaker,
+  makerWhereOr,
+} from "@/lib/set-name";
 import type { GBStatus } from "@/generated/prisma";
 
 export async function GET(req: NextRequest) {
@@ -30,6 +35,7 @@ export async function GET(req: NextRequest) {
   // leads with the maker, e.g. "Meletrix Zoom65").
   const designers = searchParams.getAll("designer").filter(Boolean).slice(0, 50);
   const slugs = searchParams.getAll("slug").filter(Boolean).slice(0, 100);
+  const makers = searchParams.getAll("maker").filter(isKeycapMaker);
   const includeLowTrust = searchParams.get("includeLowTrust") === "1";
   // Drop browse-only showcase vendors (Lightning Keyboards) at the query level
   // so pagination/counts reflect real group buys — filtering them client-side
@@ -86,6 +92,15 @@ export async function GET(req: NextRequest) {
         { name: { contains: d, mode: "insensitive" as const } },
       ]),
     });
+  }
+
+  // Maker filter (GMK / Signature Plastics). Server-side because /released
+  // paginates: filtering a 12-row page client-side would hide most matches and
+  // make the totals lie. OR across the selected makers, and within each maker
+  // across its profile prefixes — see MAKER_NAME_PREFIXES for why names are
+  // matched both as a prefix and as a post-bracket-tag substring.
+  if (makers.length > 0) {
+    andConditions.push({ OR: makerWhereOr(makers) });
   }
 
   const where = {
