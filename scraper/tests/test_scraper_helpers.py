@@ -11,7 +11,12 @@ if str(SCRAPER_DIR) not in sys.path:
     sys.path.insert(0, str(SCRAPER_DIR))
 
 import scrape
-from scrapling_client import ScraplingClient, decode_response_body, response_is_blocked
+from scrapling_client import (
+    ScraplingClient,
+    ScraplingStats,
+    decode_response_body,
+    response_is_blocked,
+)
 
 
 class FakeResponse:
@@ -939,6 +944,83 @@ class DcsWikiParsingTests(unittest.TestCase):
             scrape.normalize_set_name("DCS Soju"),
             scrape.normalize_set_name("GMK Soju"),
         )
+
+
+class HostThrottleTests(unittest.TestCase):
+    def test_same_host_is_spaced_out_but_different_hosts_are_not(self):
+        # interval big enough to measure, jitter off so the assert is exact.
+        throttle = scrape.HostThrottle(interval=0.25, jitter=0.0)
+        self.assertEqual(throttle.wait("https://a.test/products/x.json"), 0.0)
+        # A different host must never wait on the first one — a queue spread
+        # across many stores should cost close to nothing.
+        self.assertEqual(throttle.wait("https://b.test/products/y.json"), 0.0)
+        # Back to the first host: this one has to wait.
+        slept = throttle.wait("https://a.test/products/z.json")
+        self.assertGreater(slept, 0.0)
+        self.assertLessEqual(slept, 0.25)
+
+    def test_interleave_spreads_clustered_hosts_without_losing_rows(self):
+        # The price queue is oldest-first, which clusters by host: everything
+        # discovered in one run shares a timestamp. That clustering is the only
+        # case the throttle actually has to sleep through.
+        clustered = [
+            {"productUrl": "https://a.test/products/1"},
+            {"productUrl": "https://a.test/products/2"},
+            {"productUrl": "https://a.test/products/3"},
+            {"productUrl": "https://b.test/products/1"},
+            {"productUrl": "https://b.test/products/2"},
+            {"productUrl": "https://c.test/products/1"},
+        ]
+        spread = scrape.HostThrottle.interleave(clustered)
+        self.assertEqual(len(spread), len(clustered))
+        self.assertCountEqual(spread, clustered)  # no row invented or dropped
+        hosts = [u["productUrl"].split("/")[2] for u in spread]
+        self.assertEqual(hosts[:3], ["a.test", "b.test", "c.test"])
+        # Oldest-first is preserved WITHIN each host.
+        a_urls = [u["productUrl"] for u in spread if "a.test" in u["productUrl"]]
+        self.assertEqual(a_urls, [
+            "https://a.test/products/1",
+            "https://a.test/products/2",
+            "https://a.test/products/3",
+        ])
+
+    def test_interleave_tolerates_missing_urls(self):
+        rows = [{"productUrl": None}, {}, {"productUrl": "https://a.test/x"}]
+        self.assertEqual(len(scrape.HostThrottle.interleave(rows)), 3)
+
+    def test_blank_and_malformed_urls_never_block_the_pass(self):
+        throttle = scrape.HostThrottle(interval=5.0, jitter=0.0)
+        for url in ("", None, "not-a-url"):
+            self.assertEqual(throttle.wait(url), 0.0)
+
+
+class ScraplingStatsAttributionTests(unittest.TestCase):
+    def test_blocked_and_failed_fetches_are_attributed_to_their_host(self):
+        # Regression: a run reported blocked=424 with no record of WHICH hosts
+        # blocked it, because only the success paths recorded a domain.
+        stats = scrape_stats = ScraplingStats()
+        stats.record_blocked("https://kbdfans.com/products/a.json")
+        stats.record_blocked("https://kbdfans.com/products/b.json")
+        stats.record_failed("https://cannonkeys.com/products/c.json")
+        self.assertEqual(scrape_stats.blocked_domains["kbdfans.com"], 2)
+        self.assertEqual(scrape_stats.failed_domains["cannonkeys.com"], 1)
+        summary = stats.problem_summary()
+        # Worst offender ranks first so the log line leads with the real cause.
+        self.assertTrue(summary.startswith("kbdfans.com blocked=2"), summary)
+        self.assertIn("cannonkeys.com failed=1", summary)
+
+    def test_problem_summary_is_empty_on_a_clean_run(self):
+        stats = ScraplingStats()
+        stats.record_domain("https://kbdfans.com/products/a.json")
+        self.assertEqual(stats.problem_summary(), "")
+
+    def test_problem_summary_caps_the_host_list(self):
+        stats = ScraplingStats()
+        for i in range(12):
+            stats.record_blocked(f"https://host{i:02d}.test/x")
+        summary = stats.problem_summary(limit=3)
+        self.assertEqual(summary.count(";"), 3)  # 3 hosts + the "more" note
+        self.assertIn("(+9 more host(s))", summary)
 
 
 if __name__ == "__main__":
