@@ -1272,12 +1272,91 @@ GALLERY_MAX_AGE_DAYS = 7
 # Prices fresher than this are skipped — the nightly run shouldn't redo work.
 PRICE_MAX_AGE_HOURS = 20
 
+# Minimum gap between requests to the SAME host, with a little jitter.
+#
+# Stores rate-limit per IP, and HTTP 429 is one of the statuses the block
+# detector counts as "blocked". The 2026-08-01 run fired 500 price fetches
+# back-to-back and came back with blocked=424; the week before, 39 fetches
+# produced 5. The endpoints were never walled off — they answer 200 fine — we
+# were simply asking too fast. Every other pass that hammers one host (Geekhack)
+# already sleeps between requests; the price and discovery passes did not.
+#
+# Requests to DIFFERENT hosts never wait on each other, so a queue spread over
+# many stores costs almost nothing. Both passes check the deadline each
+# iteration, so if throttling means fewer rows this run, the oldest-first
+# rotation just picks the rest up next run.
+HOST_MIN_INTERVAL_S = 1.5
+HOST_JITTER_S = 0.5
+
+
+class HostThrottle:
+    """Space out requests per host so a big queue doesn't trip rate limits."""
+
+    def __init__(self, interval: float = HOST_MIN_INTERVAL_S,
+                 jitter: float = HOST_JITTER_S) -> None:
+        self._interval = interval
+        self._jitter = jitter
+        self._last: dict[str, float] = {}
+
+    @staticmethod
+    def interleave(rows: list[dict], key: str = "productUrl") -> list[dict]:
+        """Round-robin rows across hosts so the throttle rarely has to sleep.
+
+        fetch_price_candidates orders oldest-first, which CLUSTERS by host —
+        listings discovered in the same run share a timestamp. Walking a cluster
+        back to back is the one case the per-host throttle has to slow down, so
+        spread the hosts out instead: the same rows, in an order that costs far
+        less wall clock. Relative order within a host is preserved, so the
+        oldest listing for each store is still checked first.
+        """
+        buckets: dict[str, list[dict]] = {}
+        for row in rows:
+            host = urllib.parse.urlsplit(row.get(key) or "").netloc.lower()
+            buckets.setdefault(host, []).append(row)
+        spread: list[dict] = []
+        while buckets:
+            for host in list(buckets):
+                spread.append(buckets[host].pop(0))
+                if not buckets[host]:
+                    del buckets[host]
+        return spread
+
+    def wait(self, url: str) -> float:
+        """Sleep until this host may be hit again. Returns seconds slept."""
+        host = urllib.parse.urlsplit(url or "").netloc.lower()
+        if not host:
+            return 0.0
+        previous = self._last.get(host)
+        slept = 0.0
+        if previous is not None:
+            gap = self._interval + (
+                random.uniform(0, self._jitter) if self._jitter else 0.0
+            )
+            remaining = (previous + gap) - time.monotonic()
+            if remaining > 0:
+                time.sleep(remaining)
+                slept = remaining
+        self._last[host] = time.monotonic()
+        return slept
+
 # Once a set reaches one of these statuses its gmk.net catalog page is frozen —
 # the name, designer, description, and gallery never change again. The catalog
 # and image passes skip these sets entirely; only prices keep rotating.
 # IN_STOCK and SHIPPING are NOT terminal: extras sell out and shipments arrive,
 # so those still get rechecked for the status transition.
 TERMINAL_STATUSES = ("DELIVERED", "CANCELLED")
+
+# Vendors that are MANUFACTURER/catalog markers, not stores. Their VendorKit
+# rows exist only to carry a catalog URL (gmk.net, dcs.wiki) for the catalog and
+# image passes, so they must never be priced or crawled for listings.
+#
+# This used to be a bare `slug <> 'gmk'` in two places. When dcs.wiki was added
+# it inherited none of that, so all 135 wiki rows landed in the price queue —
+# and because they had never been priced they sorted FIRST under
+# `priceUpdatedAt ASC NULLS FIRST`, pushing real vendor listings past the 500
+# row cap. Keep new manufacturer sources in this list.
+MANUFACTURER_VENDOR_SLUGS = ("gmk", "dcs-wiki")
+MANUFACTURER_URL_PATTERNS = ("%gmk.net%", "%dcs.wiki%")
 
 
 def fetch_frozen_catalog_slugs(conn) -> set[str]:
@@ -1349,8 +1428,8 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
     # BASE kits only — buyers decide on the base kit and only base kit prices
     # are shown on the site. The vendor's currency rides along as the fallback
     # when a store blocks /meta.json.
-    # GMK is the manufacturer, not a vendor: its rows only carry the gmk.net
-    # URL for the catalog/image passes and must never be priced.
+    # Manufacturer/catalog rows (GMK -> gmk.net, DCS -> dcs.wiki) only carry a
+    # catalog URL for the catalog/image passes and must never be priced.
     sql = """
         SELECT vk.id, vk."productUrl", v.currency AS vendor_currency
           FROM "VendorKit" vk
@@ -1359,8 +1438,8 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
          WHERE vk."productUrl" IS NOT NULL
            AND btrim(vk."productUrl") <> ''
            AND k.type = 'BASE'
-           AND v.slug <> 'gmk'
-           AND vk."productUrl" NOT ILIKE '%%gmk.net%%'
+           AND NOT (v.slug = ANY(%s))
+           AND NOT (vk."productUrl" ILIKE ANY(%s))
            AND (vk."priceSource" IS NULL OR vk."priceSource" <> 'MANUAL')
            AND (vk."priceUpdatedAt" IS NULL
                 OR vk."priceUpdatedAt" < now() - make_interval(hours => %s))
@@ -1368,7 +1447,12 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
          LIMIT %s
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute(sql, (PRICE_MAX_AGE_HOURS, limit))
+        cur.execute(sql, (
+            list(MANUFACTURER_VENDOR_SLUGS),
+            list(MANUFACTURER_URL_PATTERNS),
+            PRICE_MAX_AGE_HOURS,
+            limit,
+        ))
         return cur.fetchall()
 
 
@@ -2993,13 +3077,15 @@ def run_discovery(
     stats = {"vendors": 0, "gmk_listings": 0, "linked": 0, "relinked": 0}
 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        # Manufacturer/catalog sources aren't stores — crawling dcs.wiki or
+        # gmk.net for a products.json just burns a vendor slot on a 404.
         cur.execute("""
             SELECT id, "websiteUrl", currency
               FROM "Vendor"
-             WHERE slug <> 'gmk'
+             WHERE NOT (slug = ANY(%s))
              ORDER BY "lastDiscoveredAt" ASC NULLS FIRST
              LIMIT %s
-        """, (_DISCOVERY_VENDOR_LIMIT,))
+        """, (list(MANUFACTURER_VENDOR_SLUGS), _DISCOVERY_VENDOR_LIMIT))
         vendors = cur.fetchall()
     if not vendors:
         return stats
@@ -3007,6 +3093,7 @@ def run_discovery(
     by_full, by_base = _build_set_index(conn)
     log(f"Discovery: {len(vendors)} vendor(s) to crawl; "
         f"{len(by_full)} tracked set name(s) indexed.")
+    throttle = HostThrottle()
     page = context.new_page()
     try:
         for vendor in vendors:
@@ -3029,8 +3116,11 @@ def run_discovery(
                 continue
 
             catalog: list[dict] = []
+            raw_products = 0
+            unreadable = False
             for page_num in range(1, _DISCOVERY_MAX_CATALOG_PAGES + 1):
                 url = f"{origin}/products.json?limit=250&page={page_num}"
+                throttle.wait(url)
                 data = scrapling.get_json(url) if scrapling and scrapling.available else None
                 if data is None:
                     try:
@@ -3041,14 +3131,26 @@ def run_discovery(
                     except Exception:  # noqa: BLE001
                         data = None
                 if not isinstance(data, dict):
+                    # Only the FIRST page failing means we learned nothing;
+                    # a later page just ends the catalog.
+                    unreadable = page_num == 1
                     break  # not Shopify / blocked / end of catalog
                 products = data.get("products") or []
+                raw_products += len(products)
                 catalog.extend(gmk_products_from_catalog(data, origin))
                 if len(products) < 250:
                     break  # last page
 
-            if not catalog:
+            # This loop used to be silent on every failure path, so a run
+            # reporting gmk_listings=0 gave no way to tell "every store blocked
+            # us" apart from "fetched fine, nothing matched". Say which.
+            if unreadable:
+                log(f"  {origin}: catalog unreadable (blocked, or not Shopify) — skipped.")
                 continue
+            if not catalog:
+                log(f"  {origin}: {raw_products} product(s), 0 tracked listing(s).")
+                continue
+            log(f"  {origin}: {raw_products} product(s), {len(catalog)} tracked listing(s).")
             stats["gmk_listings"] += len(catalog)
 
             for product in catalog:
@@ -3522,9 +3624,10 @@ def run_prices(
     deadline: float,
     scrapling: ScraplingClient | None = None,
 ) -> dict:
-    stats = {"attempted": 0, "updated": 0, "failed": 0}
-    candidates = fetch_price_candidates(conn)
+    stats = {"attempted": 0, "updated": 0, "failed": 0, "throttled_s": 0.0}
+    candidates = HostThrottle.interleave(fetch_price_candidates(conn))
     log(f"Price pass: {len(candidates)} vendor listing(s) to check.")
+    throttle = HostThrottle()
     page = context.new_page()
     try:
         for vk in candidates:
@@ -3552,6 +3655,7 @@ def run_prices(
             price_fn = (
                 shopify_price if "/products/" in product_url else generic_price
             )
+            stats["throttled_s"] += throttle.wait(product_url)
             result = price_fn(
                 page,
                 product_url,
@@ -5448,6 +5552,11 @@ def main() -> int:
 
         if scrapling.available:
             log(f"Scrapling acquisition -> {scrapling.stats.summary()}")
+            # Totals alone can't tell you whether one store is rate-limiting us
+            # or the whole network path is down. Name the worst offenders.
+            problems = scrapling.stats.problem_summary()
+            if problems:
+                log(f"  worst hosts -> {problems}")
 
     conn.close()
     if args.geekhack_backfill_year:
@@ -5514,6 +5623,7 @@ def main() -> int:
         f"products={out_stats['products']} linked={out_stats['linked']}")
     log(f"GMK Direct -> pages={gd_stats['pages']} priced={gd_stats['priced']} "
         f"out_of_stock={gd_stats['out_of_stock']} unmatched={gd_stats['unmatched']}")
+    log(f"Prices  -> throttle_wait={price_stats['throttled_s']:.0f}s")
     log(f"Prices  -> attempted={price_stats['attempted']} "
         f"updated={price_stats['updated']} failed={price_stats['failed']}")
     log("Done.")

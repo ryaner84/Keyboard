@@ -55,22 +55,46 @@ def decode_response_body(response: Any) -> str:
 
 @dataclass
 class ScraplingStats:
+    """Fetch outcomes, tracked per domain so blocks can be attributed.
+
+    The totals alone are not actionable: a run once reported blocked=424 with no
+    record of WHICH hosts blocked us, because record_domain was only ever called
+    on the success paths and the resulting dict was never printed. Blocked and
+    failed fetches are now attributed too, and surfaced by problem_summary().
+    """
+
     http_ok: int = 0
     http_failed: int = 0
     blocked: int = 0
     stealth_ok: int = 0
     stealth_failed: int = 0
     domains: dict[str, int] = field(default_factory=dict)
+    blocked_domains: dict[str, int] = field(default_factory=dict)
+    failed_domains: dict[str, int] = field(default_factory=dict)
 
-    def record_domain(self, url: str) -> None:
+    @staticmethod
+    def _domain_of(url: str) -> str:
         try:
             from urllib.parse import urlsplit
 
-            domain = urlsplit(url).netloc.lower()
+            return urlsplit(url).netloc.lower()
         except Exception:
-            domain = ""
+            return ""
+
+    @staticmethod
+    def _bump(bucket: dict[str, int], url: str) -> None:
+        domain = ScraplingStats._domain_of(url)
         if domain:
-            self.domains[domain] = self.domains.get(domain, 0) + 1
+            bucket[domain] = bucket.get(domain, 0) + 1
+
+    def record_domain(self, url: str) -> None:
+        self._bump(self.domains, url)
+
+    def record_blocked(self, url: str) -> None:
+        self._bump(self.blocked_domains, url)
+
+    def record_failed(self, url: str) -> None:
+        self._bump(self.failed_domains, url)
 
     def summary(self) -> str:
         return (
@@ -78,6 +102,37 @@ class ScraplingStats:
             f"blocked={self.blocked} stealth_ok={self.stealth_ok} "
             f"stealth_failed={self.stealth_failed}"
         )
+
+    def problem_summary(self, limit: int = 8) -> str:
+        """Worst offending hosts as 'host blocked=N failed=M', or '' if clean.
+
+        This is the line that tells you whether a bad run means one store is
+        rate-limiting you or the whole network path is down.
+        """
+        hosts = set(self.blocked_domains) | set(self.failed_domains)
+        if not hosts:
+            return ""
+        ranked = sorted(
+            hosts,
+            key=lambda h: (
+                self.blocked_domains.get(h, 0) + self.failed_domains.get(h, 0)
+            ),
+            reverse=True,
+        )
+        parts = []
+        for host in ranked[:limit]:
+            blocked = self.blocked_domains.get(host, 0)
+            failed = self.failed_domains.get(host, 0)
+            detail = " ".join(
+                bit for bit in (
+                    f"blocked={blocked}" if blocked else "",
+                    f"failed={failed}" if failed else "",
+                ) if bit
+            )
+            parts.append(f"{host} {detail}")
+        if len(ranked) > limit:
+            parts.append(f"(+{len(ranked) - limit} more host(s))")
+        return "; ".join(parts)
 
 
 class ScraplingClient:
@@ -244,9 +299,11 @@ class ScraplingClient:
             status = getattr(response, "status", None)
             if response_is_blocked(status, body):
                 self.stats.blocked += 1
+                self.stats.record_blocked(url)
                 return None
             if status is not None and not 200 <= int(status) < 300:
                 self.stats.http_failed += 1
+                self.stats.record_failed(url)
                 return None
             try:
                 data = response.json()
@@ -257,6 +314,7 @@ class ScraplingClient:
             return data
         except Exception:  # noqa: BLE001
             self.stats.http_failed += 1
+            self.stats.record_failed(url)
             return None
 
     def get_html(
@@ -283,8 +341,10 @@ class ScraplingClient:
                     self.stats.record_domain(url)
                     return body
                 self.stats.blocked += 1
+                self.stats.record_blocked(url)
             except Exception:  # noqa: BLE001
                 self.stats.http_failed += 1
+                self.stats.record_failed(url)
 
         stealth = self._ensure_stealth()
         if stealth is None:
@@ -303,13 +363,16 @@ class ScraplingClient:
             status = getattr(response, "status", None)
             if response_is_blocked(status, body):
                 self.stats.blocked += 1
+                self.stats.record_blocked(url)
                 kwargs["solve_cloudflare"] = True
                 kwargs["timeout"] = 75_000
                 response = self._stealth_call(stealth.fetch, url, **kwargs)
                 body = decode_response_body(response)
                 status = getattr(response, "status", None)
                 if response_is_blocked(status, body):
-                    self.stats.blocked += 1
+                    # Same URL, already counted as blocked above — counting the
+                    # retry again inflated `blocked` by up to 3x for one URL and
+                    # made the totals useless for judging severity.
                     self.stats.stealth_failed += 1
                     return None
             self.stats.stealth_ok += 1
@@ -317,4 +380,5 @@ class ScraplingClient:
             return body
         except Exception:  # noqa: BLE001
             self.stats.stealth_failed += 1
+            self.stats.record_failed(url)
             return None
