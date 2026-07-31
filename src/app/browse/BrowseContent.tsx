@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { SetCard } from "@/components/browse/SetCard";
 import { BrowseFilters } from "@/components/browse/BrowseFilters";
 import { isCrediblyActiveGeekhackListing } from "@/lib/geekhack-listing";
+import { setMaker, type KeycapMaker } from "@/lib/set-name";
 import type { GroupBuyWithPricing, GBStatus } from "@/types";
 
 const DEFAULT_STATUSES: GBStatus[] = ["INTEREST_CHECK", "ACTIVE_GB"];
@@ -43,6 +44,16 @@ export default function BrowseContent() {
       if (rawStatuses.includes("all" as GBStatus)) return [];
       return rawStatuses.length > 0 ? rawStatuses : DEFAULT_STATUSES;
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searchParams.toString()]
+  );
+
+  // Maker pills are applied client-side: the API has no maker concept, and
+  // filtering the already-loaded page makes toggling instant with no refetch.
+  const makers = useMemo(
+    () => searchParams.getAll("maker").filter(
+      (m): m is KeycapMaker => m === "GMK" || m === "SP"
+    ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [searchParams.toString()]
   );
@@ -91,6 +102,28 @@ export default function BrowseContent() {
     [searchParams, router]
   );
 
+  // No maker selected = every maker, so an unrecognised profile still shows up
+  // rather than disappearing behind a filter the user never set.
+  const visibleSets = useMemo(() => {
+    if (makers.length === 0) return sets;
+    return sets.filter((s) => {
+      const maker = setMaker(s.name);
+      return maker !== null && makers.includes(maker);
+    });
+  }, [sets, makers]);
+
+  // `total` comes from the server and counts every match across all pages.
+  // Once a maker pill narrows the loaded page client-side that number would
+  // overstate what is actually on screen, so switch to the rendered count.
+  const displayCount = makers.length > 0 ? visibleSets.length : total;
+
+  const handleMakerToggle = (maker: KeycapMaker) => {
+    const next = makers.includes(maker)
+      ? makers.filter((m) => m !== maker)
+      : [...makers, maker];
+    updateParams({ maker: next });
+  };
+
   const handleStatusToggle = (status: GBStatus) => {
     const next = statuses.includes(status)
       ? statuses.filter((s) => s !== status)
@@ -132,7 +165,11 @@ export default function BrowseContent() {
         </div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{title}</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          {loading ? "Loading..." : `${total} set${total !== 1 ? "s" : ""} found`}
+          {loading
+            ? "Loading..."
+            // With a maker pill on, the server total no longer describes what is
+            // on screen, so report the count actually rendered.
+            : `${displayCount} set${displayCount !== 1 ? "s" : ""} found`}
         </p>
       </div>
 
@@ -141,11 +178,13 @@ export default function BrowseContent() {
           <BrowseFilters
             search={search}
             statuses={statuses}
+            makers={makers}
             sortBy={sortBy}
             finishingSoon={!!finishing}
             newArrivals={!!newDays}
             onSearchChange={(v) => updateParams({ search: v })}
             onStatusToggle={handleStatusToggle}
+            onMakerToggle={handleMakerToggle}
             onSortChange={(v) => updateParams({ sort: v })}
             onFinishingToggle={handleFinishingToggle}
             onNewToggle={handleNewToggle}
@@ -165,7 +204,7 @@ export default function BrowseContent() {
                 </div>
               ))}
             </div>
-          ) : sets.length === 0 ? (
+          ) : visibleSets.length === 0 ? (
             <div className="text-center py-16 text-gray-400">
               <p className="text-4xl mb-3">⌨</p>
               <p className="font-medium text-gray-500">No sets found</p>
@@ -173,7 +212,7 @@ export default function BrowseContent() {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
-              {sets.map((set) => (
+              {visibleSets.map((set) => (
                 <SetCard key={set.id} set={set} />
               ))}
             </div>

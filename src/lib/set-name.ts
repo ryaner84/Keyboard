@@ -75,6 +75,52 @@ export function dedupeKey(name: string, opts?: { keepProfile?: boolean }): strin
     .trim();
 }
 
+// ── Maker (manufacturer) ────────────────────────────────────────────────────
+// Who physically makes the set, which is NOT the same as its profile:
+//   • GMK Electronic Design makes Cherry-profile sets ("GMK Botanical"), plus
+//     the CYL and MTNU profiles. "MTNU Electronic Control" carries no "GMK"
+//     token at all, so a naive name check would miss it.
+//   • Signature Plastics makes DCS — and SA, DSS and DSA, which share the maker
+//     but are entirely different profiles. DCS is a sibling of SA, not a kind
+//     of SA.
+// Grouping by maker is what lets the browse page offer two stable pills while
+// new profiles from the same factory land in the right bucket automatically.
+export type KeycapMaker = "GMK" | "SP";
+
+export const KEYCAP_MAKER_LABELS: Record<KeycapMaker, string> = {
+  GMK: "GMK",
+  SP: "Signature Plastics",
+};
+
+// Leading profile token -> maker. Order matters only for readability; the
+// lookup is exact on the first token of the name.
+const MAKER_BY_PROFILE: Record<string, KeycapMaker> = {
+  gmk: "GMK",
+  cyl: "GMK",
+  mtnu: "GMK",
+  dcs: "SP",
+  sa: "SP",
+  dss: "SP",
+  dsa: "SP",
+};
+
+// The maker of a keycap set, or null when the name carries no known profile
+// token (Geekhack threads for untracked profiles, oddly-named imports).
+// Returning null rather than guessing keeps unknown sets visible under "All"
+// instead of being silently filed under the wrong maker.
+export function setMaker(name: string): KeycapMaker | null {
+  // Drop leading "[GB]"/"(IC)" tags the same way the dedupe helpers do, so a
+  // thread title resolves as well as a catalog name.
+  const cleaned = (name ?? "")
+    .toLowerCase()
+    .replace(/\[[^\]]*\]|\([^)]*\)/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  if (!cleaned) return null;
+  const [first] = cleaned.split(" ");
+  return MAKER_BY_PROFILE[first] ?? null;
+}
+
 // Rank a catalog row within a dedupe group: higher = better representative.
 // Prefers the official profile-named row (GMK CYL / MTNU, "… Keycaps"), and
 // penalises Geekhack "[GB] …"/"(Group Buy) …" thread names and gh- slugs.

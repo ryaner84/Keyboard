@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { dedupeKey, normalizeSetName, stripRound, roundNumber } from "@/lib/set-name";
+import {
+  dedupeKey,
+  normalizeSetName,
+  stripRound,
+  roundNumber,
+  setMaker,
+  KEYCAP_MAKER_LABELS,
+} from "@/lib/set-name";
 
 // --- normalizeSetName keeps DCS distinct from GMK -------------------------
 // This is the key the vendor-listing matcher uses. It strips GMK's own default
@@ -53,5 +60,38 @@ assert.notEqual(
 assert.equal(stripRound(normalizeSetName("GMK Striker R2")), "gmk striker");
 assert.equal(roundNumber(normalizeSetName("GMK Striker Round 3")), 3);
 assert.equal(roundNumber(normalizeSetName("GMK Striker")), 1);
+
+// --- setMaker: who MAKES the set, which is not the same as its profile ----
+// GMK makes Cherry-profile sets plus the CYL and MTNU profiles. Signature
+// Plastics makes DCS *and* SA — they are sibling profiles from one factory,
+// not a parent/child pair, which is why the pill is labelled by maker.
+assert.equal(setMaker("GMK Botanical"), "GMK");
+assert.equal(setMaker("GMK CYL Zombie"), "GMK");
+// No "GMK" token anywhere in the name — a plain name check would miss it.
+assert.equal(setMaker("MTNU Electronic Control"), "GMK");
+
+assert.equal(setMaker("DCS Soju"), "SP");
+assert.equal(setMaker("DCS 9009"), "SP");
+assert.equal(setMaker("SA Laser"), "SP");
+
+// The two makers must never collide for the same colourway.
+assert.notEqual(setMaker("DCS Dolch"), setMaker("GMK Dolch"));
+
+// Geekhack thread titles carry bracketed tags before the profile token.
+assert.equal(setMaker("[GB] DCS Mermaid | Running Oct 17 - Nov 14"), "SP");
+assert.equal(setMaker("(Group Buy) GMK Bento"), "GMK");
+
+// Unknown or absent profile -> null, so the set stays visible under "all"
+// instead of being silently filed under the wrong maker.
+assert.equal(setMaker("KAT Milkshake"), null);
+assert.equal(setMaker("Mystery Set"), null);
+assert.equal(setMaker(""), null);
+// A profile token that is not the FIRST word does not decide the maker:
+// "Seal80 - DCS Dolch Edition" is a keyboard bundling DCS caps, not a DCS set.
+assert.equal(setMaker("Sensy Seal80 Dolch Edition Keyboard Kit"), null);
+
+// Labels are what the pills render; SP must not read as "SA".
+assert.equal(KEYCAP_MAKER_LABELS.GMK, "GMK");
+assert.equal(KEYCAP_MAKER_LABELS.SP, "Signature Plastics");
 
 console.log("set-name profile-identity checks passed");
