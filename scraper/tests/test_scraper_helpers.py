@@ -752,5 +752,177 @@ class TrackedProfileCatalogTests(unittest.TestCase):
         )
 
 
+# Trimmed from the live pages (2026-07). The class soup is kept verbatim on the
+# elements the parsers key off, so a dcs.wiki redesign fails here rather than
+# silently writing blanks over good rows.
+_DCS_LABEL_CLASS = 'class="text-[10px] uppercase tracking-wide font-semibold text-gray-400 mb-0.5"'
+_DCS_VALUE_CLASS = 'class="text-sm font-medium text-gray-800"'
+
+
+def _dcs_pair(label: str, value: str) -> str:
+    return (f"<p {_DCS_LABEL_CLASS}>{label}</p>"
+            f"<p {_DCS_VALUE_CLASS}>{value}</p>")
+
+
+DCS_GROUP_BUYS_HTML = (
+    '<section><h1 class="text-3xl font-bold">Active Group Buys</h1>'
+    '<a class="block" aria-label="Open DCS Rainbow details" href="/keycaps/dcs-rainbow">'
+    '<h3>DCS Rainbow</h3></a>'
+    '<a class="block" aria-label="Open DCS Soju details" href="/keycaps/dcs-soju">'
+    '<h3>DCS Soju</h3></a>'
+    '</section>'
+    '<section><h1 class="text-3xl font-bold">Active Interest Checks</h1>'
+    '<a href="https://ankitsachdeva.com/dcs-lily/" rel="noopener noreferrer">'
+    '<p class="text-base font-semibold">DCS Lily Revival</p>'
+    '<p class="mt-1.5 text-sm">The 2013 geekhack group buy, back for a new run</p></a>'
+    '<a href="https://geekhack.org/index.php?topic=126911.0">'
+    '<p class="text-base font-semibold">DCS VoC (Violet on Cream)</p>'
+    '<p class="mt-1.5 text-sm">A classic VoC colorway</p></a>'
+    '<a href="https://geekhack.org/index.php?topic=126299.0">'
+    '<p class="text-base font-semibold">DCS Mermaid</p>'
+    '<p class="mt-1.5 text-sm">Teal and pink colorway</p></a>'
+    '<a href="/about">About</a>'
+    '</section>'
+)
+
+DCS_ARCHIVE_HTML = (
+    '<h2>2026</h2>'
+    '<a class="block" aria-label="Open DCS Soju details" href="/keycaps/dcs-soju"><div/></a>'
+    '<h2>2023</h2>'
+    '<a class="block" aria-label="Open DCS Alchemy details" href="/keycaps/dcs-alchemy"><div/></a>'
+    '<a class="block" aria-label="Open DCS 9009 details" href="/keycaps/dcs-9009"><div/></a>'
+    # The same set is linked again by a "related sets" rail — must not duplicate.
+    '<a class="block" aria-label="Open DCS Soju details" href="/keycaps/dcs-soju"><div/></a>'
+    '<nav><a href="/keycaps">Keycaps</a><a href="/about">About</a></nav>'
+)
+
+DCS_SOJU_HTML = (
+    '<html><head><title>DCS Soju | DCS Keycaps</title>'
+    '<meta name="description" content="DCS SOJU BLUE, the sequel by KEI &quot;Jinro Is Back&quot;."/>'
+    '<link rel="preload" as="image" href="/images/dcs_soju_6.png"/>'
+    '<link rel="preload" as="image" href="/images/dcs_soju.jpg"/>'
+    '<script>window.__NEXT_DATA__ = {"name":"NOT THE NAME"}</script>'
+    '</head><body><h1 class="text-4xl font-bold">DCS Soju</h1>'
+    + _dcs_pair("Designer", "Sauceinmyveins")
+    + _dcs_pair("Release Date", "7/1/2026")
+    + _dcs_pair("GB Type", "Public")
+    + _dcs_pair("Colors", "BHG, BE, WGE")
+    + _dcs_pair("Price", "—")
+    + _dcs_pair("Group Buy Location", "Unikeys")
+    + f'<div><p {_DCS_LABEL_CLASS}>Group Buy Page</p>'
+      '<a href="https://unikeyboards.com/products/gb-dcs-soju-blue-keycap-set" '
+      'target="_blank" rel="noopener noreferrer">View Group Buy</a></div>'
+    '</body></html>'
+)
+
+DCS_RAINBOW_HTML = (
+    '<html><head><title>DCS Rainbow | DCS Keycaps</title>'
+    '<meta name="description" content="DCS version of GMK set; Ran by DN."/>'
+    '<link rel="preload" as="image" href="/images/rainbow.png"/>'
+    '</head><body><h1>DCS Rainbow</h1>'
+    + _dcs_pair("Designer", "DNWorks")
+    + _dcs_pair("Release Date", "7/1/2026")
+    + _dcs_pair("Colors", "—")
+    + _dcs_pair("Price", "—")
+    + _dcs_pair("Group Buy Location", "DN Discord")
+    + '</body></html>'
+)
+
+
+class DcsWikiParsingTests(unittest.TestCase):
+    def test_group_buys_page_splits_live_gbs_from_interest_checks(self):
+        live = scrape.parse_dcs_group_buys(DCS_GROUP_BUYS_HTML)
+        # Active GBs are identified by SLUG, not by name — their cards link to
+        # the wiki page, so there is nothing to guess.
+        self.assertEqual(live["active_slugs"], ["dcs-rainbow", "dcs-soju"])
+        names = [ic["name"] for ic in live["interest_checks"]]
+        self.assertEqual(
+            names,
+            ["DCS Lily Revival", "DCS VoC (Violet on Cream)", "DCS Mermaid"],
+        )
+        # The trailing "/about" nav link is not a set.
+        self.assertNotIn("About", names)
+
+    def test_interest_checks_carry_geekhack_topic_ids_when_present(self):
+        by_name = {
+            ic["name"]: ic
+            for ic in scrape.parse_dcs_group_buys(DCS_GROUP_BUYS_HTML)["interest_checks"]
+        }
+        self.assertEqual(by_name["DCS Mermaid"]["topic_id"], "126299")
+        self.assertEqual(by_name["DCS VoC (Violet on Cream)"]["topic_id"], "126911")
+        # No Geekhack thread -> no topic id, so apply_dcs_interest_checks skips
+        # it rather than guessing which row it means. This matters here: the
+        # archive has a delivered "DCS Lily" that must NOT be reopened by the
+        # separate "DCS Lily Revival" interest check.
+        self.assertIsNone(by_name["DCS Lily Revival"]["topic_id"])
+
+    def test_archive_index_yields_unique_slugs_with_names(self):
+        entries = scrape.parse_dcs_archive_index(DCS_ARCHIVE_HTML)
+        self.assertEqual(
+            entries,
+            [
+                {"slug": "dcs-soju", "name": "DCS Soju"},
+                {"slug": "dcs-alchemy", "name": "DCS Alchemy"},
+                {"slug": "dcs-9009", "name": "DCS 9009"},
+            ],
+        )
+
+    def test_set_page_reads_identity_fields_and_vendor_group_buy_link(self):
+        data = scrape.parse_dcs_set_page(
+            DCS_SOJU_HTML, "https://dcs.wiki/keycaps/dcs-soju"
+        )
+        self.assertEqual(data["slug"], "dcs-soju")
+        self.assertEqual(data["name"], "DCS Soju")
+        self.assertEqual(data["colorway"], "Soju")
+        self.assertEqual(data["designer"], "Sauceinmyveins")
+        self.assertEqual(data["release_date"], datetime(2026, 7, 1))
+        self.assertEqual(data["colors"], "BHG, BE, WGE")
+        # The whole point of the pass: a scrapeable vendor listing URL.
+        self.assertEqual(
+            data["gb_page_url"],
+            "https://unikeyboards.com/products/gb-dcs-soju-blue-keycap-set",
+        )
+        self.assertEqual(data["imageUrl"], "https://dcs.wiki/images/dcs_soju_6.png")
+        self.assertIn("https://dcs.wiki/images/dcs_soju.jpg", data["images"])
+        self.assertTrue(data["description"].startswith("DCS SOJU BLUE"))
+        self.assertIn('"Jinro Is Back"', data["description"])
+
+    def test_set_page_returns_none_for_blank_optional_fields(self):
+        data = scrape.parse_dcs_set_page(
+            DCS_RAINBOW_HTML, "https://dcs.wiki/keycaps/dcs-rainbow"
+        )
+        # Em-dash placeholders must become None, never the literal "—", so the
+        # upsert's COALESCE/blank guards leave existing data alone.
+        self.assertIsNone(data["colors"])
+        self.assertIsNone(data["price"])
+        self.assertIsNone(data["gb_page_url"])
+        self.assertEqual(data["gb_location"], "DN Discord")
+
+    def test_set_page_without_a_name_is_skipped(self):
+        # A blocked or truncated fetch must skip the set rather than upsert a
+        # row with an empty name over a good one.
+        self.assertIsNone(scrape.parse_dcs_set_page("", "https://dcs.wiki/keycaps/x"))
+        self.assertIsNone(
+            scrape.parse_dcs_set_page("<html><body>nope</body></html>",
+                                      "https://dcs.wiki/keycaps/dcs-x")
+        )
+
+    def test_release_dates_parse_or_return_none(self):
+        self.assertEqual(scrape.parse_dcs_release_date("7/1/2026"), datetime(2026, 7, 1))
+        self.assertEqual(scrape.parse_dcs_release_date("January 2023"), datetime(2023, 1, 1))
+        self.assertEqual(scrape.parse_dcs_release_date("July 2026"), datetime(2026, 7, 1))
+        self.assertEqual(scrape.parse_dcs_release_date("2021"), datetime(2021, 1, 1))
+        for junk in (None, "", "soon", "TBD", "13/40/2026"):
+            self.assertIsNone(scrape.parse_dcs_release_date(junk), junk)
+
+    def test_dcs_and_gmk_sets_keep_separate_identities(self):
+        # dcs.wiki now creates official "DCS …" rows, so the guard that keeps
+        # them from collapsing into the same-colourway GMK set still holds.
+        self.assertNotEqual(
+            scrape.normalize_set_name("DCS Soju"),
+            scrape.normalize_set_name("GMK Soju"),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1988,7 +1988,13 @@ async function dropForumDuplicatesOfOfficialSets(client) {
                  '^\\s*(gmk\\s+cyl|gmk|sa|dcs|mtnu|kat|mt3|cyl|xda|mda|dsa|dss|kam)\\s+', '', 'i')
              ),
              '[^a-z0-9]+', '', 'g'                               -- keep only [a-z0-9]
-           ) AS key
+           ) AS key,
+           -- Leading profile token ('gmk' for both "GMK Foo" and "GMK CYL Foo",
+           -- 'dcs' for "DCS Foo"), used to keep the collapse within one profile.
+           lower(coalesce((regexp_match(
+             regexp_replace(name, '\\[[^\\]]*\\]', '', 'g'),
+             '^\\s*(gmk|sa|dcs|mtnu|kat|mt3|cyl|xda|mda|dsa|dss|kam)\\y', 'i'
+           ))[1], '')) AS profile
          FROM public."GroupBuy"
        )
        DELETE FROM public."GroupBuy" g
@@ -1998,14 +2004,18 @@ async function dropForumDuplicatesOfOfficialSets(client) {
          AND o.slug NOT LIKE 'gh-%'                              -- twin: non-forum
          AND o.id <> f.id
          AND f.key <> '' AND f.key = o.key                       -- same colorway
-         AND o.name ~* '^\\s*(?:\\[[^\\]]*\\]\\s*)*gmk\\y'        -- twin is officially "GMK …"
-         -- ...and the stub is itself GMK, so "[GB] DCS Dolch" is never deleted
-         -- by an official "GMK Dolch" (different manufacturer, different product).
-         AND f.name ~* '^\\s*(?:\\[[^\\]]*\\]\\s*)*gmk\\y'
+         -- Same profile on both sides. Originally this required both to be
+         -- "GMK …", because gmk.net was the only official catalog and the
+         -- narrow guard stopped "[GB] DCS Dolch" being deleted by an official
+         -- "GMK Dolch". Now that dcs.wiki supplies official "DCS …" rows too,
+         -- the real rule is profile equality: a DCS stub collapses into its
+         -- dcs.wiki twin, while DCS↔GMK still never collapse (different
+         -- manufacturer, different product).
+         AND f.profile <> '' AND f.profile = o.profile
       `
     );
     if (rowCount > 0) {
-      console.log(`[db-setup] Dropped ${rowCount} forum stub(s) duplicating an official "GMK …" set.`);
+      console.log(`[db-setup] Dropped ${rowCount} forum stub(s) duplicating an official same-profile set.`);
     }
   } catch (err) {
     console.warn(`[db-setup] Forum-duplicate cleanup skipped: ${err.message}`);
