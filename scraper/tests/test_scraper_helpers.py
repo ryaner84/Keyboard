@@ -915,6 +915,23 @@ class DcsWikiParsingTests(unittest.TestCase):
         for junk in (None, "", "soon", "TBD", "13/40/2026"):
             self.assertIsNone(scrape.parse_dcs_release_date(junk), junk)
 
+    def test_every_manufacturer_source_is_registered_as_unpriceable(self):
+        # Regression: dcs.wiki shipped without being added to the manufacturer
+        # list, so all 135 wiki rows entered the price queue — and having never
+        # been priced they sorted FIRST under `priceUpdatedAt ASC NULLS FIRST`,
+        # crowding real vendor listings out of the 500-row cap. Any catalog
+        # source that gets a VendorKit row must be registered here.
+        self.assertIn(scrape.GMK_VENDOR_SLUG, scrape.MANUFACTURER_VENDOR_SLUGS)
+        self.assertIn(scrape.DCS_VENDOR_SLUG, scrape.MANUFACTURER_VENDOR_SLUGS)
+        # The URL guard is the belt-and-braces half: a manufacturer link that
+        # somehow lands on a store's VendorKit row still must not be priced.
+        self.assertTrue(
+            any("dcs.wiki" in p for p in scrape.MANUFACTURER_URL_PATTERNS)
+        )
+        self.assertTrue(
+            any("gmk.net" in p for p in scrape.MANUFACTURER_URL_PATTERNS)
+        )
+
     def test_dcs_and_gmk_sets_keep_separate_identities(self):
         # dcs.wiki now creates official "DCS …" rows, so the guard that keeps
         # them from collapsing into the same-colourway GMK set still holds.

@@ -1279,6 +1279,18 @@ PRICE_MAX_AGE_HOURS = 20
 # so those still get rechecked for the status transition.
 TERMINAL_STATUSES = ("DELIVERED", "CANCELLED")
 
+# Vendors that are MANUFACTURER/catalog markers, not stores. Their VendorKit
+# rows exist only to carry a catalog URL (gmk.net, dcs.wiki) for the catalog and
+# image passes, so they must never be priced or crawled for listings.
+#
+# This used to be a bare `slug <> 'gmk'` in two places. When dcs.wiki was added
+# it inherited none of that, so all 135 wiki rows landed in the price queue —
+# and because they had never been priced they sorted FIRST under
+# `priceUpdatedAt ASC NULLS FIRST`, pushing real vendor listings past the 500
+# row cap. Keep new manufacturer sources in this list.
+MANUFACTURER_VENDOR_SLUGS = ("gmk", "dcs-wiki")
+MANUFACTURER_URL_PATTERNS = ("%gmk.net%", "%dcs.wiki%")
+
 
 def fetch_frozen_catalog_slugs(conn) -> set[str]:
     """Slugs the catalog pass can skip: terminal status + gmk.net link present.
@@ -1349,8 +1361,8 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
     # BASE kits only — buyers decide on the base kit and only base kit prices
     # are shown on the site. The vendor's currency rides along as the fallback
     # when a store blocks /meta.json.
-    # GMK is the manufacturer, not a vendor: its rows only carry the gmk.net
-    # URL for the catalog/image passes and must never be priced.
+    # Manufacturer/catalog rows (GMK -> gmk.net, DCS -> dcs.wiki) only carry a
+    # catalog URL for the catalog/image passes and must never be priced.
     sql = """
         SELECT vk.id, vk."productUrl", v.currency AS vendor_currency
           FROM "VendorKit" vk
@@ -1359,8 +1371,8 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
          WHERE vk."productUrl" IS NOT NULL
            AND btrim(vk."productUrl") <> ''
            AND k.type = 'BASE'
-           AND v.slug <> 'gmk'
-           AND vk."productUrl" NOT ILIKE '%%gmk.net%%'
+           AND NOT (v.slug = ANY(%s))
+           AND NOT (vk."productUrl" ILIKE ANY(%s))
            AND (vk."priceSource" IS NULL OR vk."priceSource" <> 'MANUAL')
            AND (vk."priceUpdatedAt" IS NULL
                 OR vk."priceUpdatedAt" < now() - make_interval(hours => %s))
@@ -1368,7 +1380,12 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
          LIMIT %s
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute(sql, (PRICE_MAX_AGE_HOURS, limit))
+        cur.execute(sql, (
+            list(MANUFACTURER_VENDOR_SLUGS),
+            list(MANUFACTURER_URL_PATTERNS),
+            PRICE_MAX_AGE_HOURS,
+            limit,
+        ))
         return cur.fetchall()
 
 
@@ -2993,13 +3010,15 @@ def run_discovery(
     stats = {"vendors": 0, "gmk_listings": 0, "linked": 0, "relinked": 0}
 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        # Manufacturer/catalog sources aren't stores — crawling dcs.wiki or
+        # gmk.net for a products.json just burns a vendor slot on a 404.
         cur.execute("""
             SELECT id, "websiteUrl", currency
               FROM "Vendor"
-             WHERE slug <> 'gmk'
+             WHERE NOT (slug = ANY(%s))
              ORDER BY "lastDiscoveredAt" ASC NULLS FIRST
              LIMIT %s
-        """, (_DISCOVERY_VENDOR_LIMIT,))
+        """, (list(MANUFACTURER_VENDOR_SLUGS), _DISCOVERY_VENDOR_LIMIT))
         vendors = cur.fetchall()
     if not vendors:
         return stats
