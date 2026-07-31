@@ -104,6 +104,47 @@ const MAKER_BY_PROFILE: Record<string, KeycapMaker> = {
   dsa: "SP",
 };
 
+// Server-side equivalents of setMaker(), for the SQL layer.
+//
+// setMaker() can tokenize a string; a Prisma `where` cannot, so the same rule
+// is expressed as prefixes. Names are matched two ways because catalog rows and
+// Geekhack rows are shaped differently:
+//   "DCS Soju"                       -> startsWith "DCS"
+//   "[GB] DCS Mermaid | Running ..." -> contains   "] DCS"
+// Slug prefixes are the belt-and-braces pass for rows whose display name was
+// edited by hand but whose catalog slug still identifies the source.
+//
+// "SA " keeps its trailing space on purpose: a bare "SA" prefix would swallow
+// "Salamander" and "Sanctuary", which are GMK sets.
+export const MAKER_NAME_PREFIXES: Record<KeycapMaker, string[]> = {
+  GMK: ["GMK", "CYL ", "MTNU "],
+  SP: ["DCS", "SA ", "DSS ", "DSA "],
+};
+
+export const MAKER_SLUG_PREFIXES: Record<KeycapMaker, string[]> = {
+  GMK: ["gmk-", "cyl-", "mtnu-"],
+  SP: ["dcs-", "sa-", "dss-", "dsa-"],
+};
+
+export function isKeycapMaker(value: string): value is KeycapMaker {
+  return value === "GMK" || value === "SP";
+}
+
+// The OR arm of a Prisma `where` that keeps only sets by the given makers.
+// Shared by /api/group-buys and /api/released so the two surfaces can never
+// disagree about which sets belong to which maker.
+export function makerWhereOr(makers: KeycapMaker[]): Record<string, unknown>[] {
+  return makers.flatMap((maker) => [
+    ...MAKER_NAME_PREFIXES[maker].flatMap((prefix) => [
+      { name: { startsWith: prefix, mode: "insensitive" as const } },
+      { name: { contains: `] ${prefix}`, mode: "insensitive" as const } },
+    ]),
+    ...MAKER_SLUG_PREFIXES[maker].map((prefix) => ({
+      slug: { startsWith: prefix },
+    })),
+  ]);
+}
+
 // The maker of a keycap set, or null when the name carries no known profile
 // token (Geekhack threads for untracked profiles, oddly-named imports).
 // Returning null rather than guessing keeps unknown sets visible under "All"

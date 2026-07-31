@@ -6,6 +6,8 @@ import {
   roundNumber,
   setMaker,
   KEYCAP_MAKER_LABELS,
+  makerWhereOr,
+  isKeycapMaker,
 } from "@/lib/set-name";
 
 // --- normalizeSetName keeps DCS distinct from GMK -------------------------
@@ -93,5 +95,37 @@ assert.equal(setMaker("Sensy Seal80 Dolch Edition Keyboard Kit"), null);
 // Labels are what the pills render; SP must not read as "SA".
 assert.equal(KEYCAP_MAKER_LABELS.GMK, "GMK");
 assert.equal(KEYCAP_MAKER_LABELS.SP, "Signature Plastics");
+
+// --- makerWhereOr: the SQL-side twin of setMaker ---------------------------
+// The two must agree, or /browse and /released would disagree about which
+// sets belong to which maker.
+assert.equal(isKeycapMaker("GMK"), true);
+assert.equal(isKeycapMaker("SP"), true);
+assert.equal(isKeycapMaker("SA"), false);
+
+const spOr = makerWhereOr(["SP"]);
+const spJson = JSON.stringify(spOr);
+// Catalog rows match on the name prefix, Geekhack rows on the post-tag form.
+assert.ok(spJson.includes('"startsWith":"DCS"'), spJson);
+assert.ok(spJson.includes('"contains":"] DCS"'), spJson);
+// Slug prefixes are the fallback for hand-edited display names.
+assert.ok(spJson.includes('"startsWith":"dcs-"'), spJson);
+// SP must never reach for GMK's profiles.
+assert.ok(!spJson.includes('"startsWith":"GMK"'), spJson);
+
+const gmkOr = makerWhereOr(["GMK"]);
+const gmkJson = JSON.stringify(gmkOr);
+assert.ok(gmkJson.includes('"startsWith":"MTNU "'), gmkJson);
+assert.ok(!gmkJson.includes('"startsWith":"DCS"'), gmkJson);
+
+// "SA " keeps its trailing space: a bare "SA" prefix would swallow the GMK
+// sets "Salamander" and "Sanctuary".
+assert.ok(spJson.includes('"startsWith":"SA "'), spJson);
+assert.equal(setMaker("GMK Salamander"), "GMK");
+assert.equal(setMaker("GMK Sanctuary"), "GMK");
+
+// Selecting both makers unions the arms rather than intersecting them.
+assert.equal(makerWhereOr(["GMK", "SP"]).length, gmkOr.length + spOr.length);
+assert.deepEqual(makerWhereOr([]), []);
 
 console.log("set-name profile-identity checks passed");

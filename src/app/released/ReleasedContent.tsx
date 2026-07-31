@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { SetCard } from "@/components/browse/SetCard";
 import { KeyboardCard } from "@/components/keyboards/KeyboardCard";
 import { useLocation } from "@/context/LocationContext";
+import { KEYCAP_MAKER_LABELS, isKeycapMaker, type KeycapMaker } from "@/lib/set-name";
 import type { GroupBuyWithPricing } from "@/types";
 
 const PAGE_SIZE = 12;
@@ -18,6 +19,8 @@ const CATEGORY_TABS = [
   { value: "keycaps", label: "Keycaps", emoji: "🎨" },
   { value: "keyboards", label: "Keyboards", emoji: "⌨️" },
 ] as const;
+
+const ALL_MAKERS: KeycapMaker[] = ["GMK", "SP"];
 
 const AVAILABILITY_TABS = [
   { value: "", label: "All" },
@@ -54,6 +57,14 @@ export default function ReleasedContent() {
   const year = searchParams.get("year") ?? "";
   const designer = searchParams.get("designer") ?? "";
   const vendor = searchParams.get("vendor") ?? "";
+  // Brand pills are keycaps-only; a maker means nothing on the keyboards tab.
+  // Memoised because getAll() returns a fresh array every render, which would
+  // otherwise change fetchPage's identity each pass and loop it forever.
+  const makers = useMemo(
+    () => searchParams.getAll("maker").filter(isKeycapMaker),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searchParams.toString()]
+  );
   const sortDefault = "released-desc";
   let sortBy = searchParams.get("sort") ?? sortDefault;
   // Guard: keyboard tab can't use keycap-only sorts.
@@ -92,6 +103,18 @@ export default function ReleasedContent() {
     [searchParams, router]
   );
 
+  // updateParams takes single values; maker is multi-select, so it needs its
+  // own writer that can append repeated params.
+  const toggleMaker = (maker: KeycapMaker) => {
+    const next = makers.includes(maker)
+      ? makers.filter((m) => m !== maker)
+      : [...makers, maker];
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("maker");
+    next.forEach((m) => params.append("maker", m));
+    router.replace(`/released?${params.toString()}`);
+  };
+
   const onSearchChange = (value: string) => {
     setSearchDraft(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -119,6 +142,7 @@ export default function ReleasedContent() {
       if (year) params.set("year", year);
       if (designer) params.set("designer", designer);
       if (!isKeyboard && vendor) params.set("vendor", vendor);
+      if (!isKeyboard) makers.forEach((m) => params.append("maker", m));
       params.set("sort", sortBy);
       params.set("page", String(pageNum));
       params.set("limit", String(PAGE_SIZE));
@@ -151,7 +175,7 @@ export default function ReleasedContent() {
         }
       }
     },
-    [isKeyboard, search, availability, year, designer, vendor, sortBy]
+    [isKeyboard, search, availability, year, designer, vendor, sortBy, makers]
   );
 
   useEffect(() => {
@@ -270,6 +294,25 @@ export default function ReleasedContent() {
                 }`}
               >
                 {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {!isKeyboard && (
+          <div className="inline-flex gap-2 flex-shrink-0">
+            {ALL_MAKERS.map((maker) => (
+              <button
+                key={maker}
+                onClick={() => toggleMaker(maker)}
+                aria-pressed={makers.includes(maker)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                  makers.includes(maker)
+                    ? "bg-indigo-600 text-white border-indigo-600"
+                    : "bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-indigo-300"
+                }`}
+              >
+                {KEYCAP_MAKER_LABELS[maker]}
               </button>
             ))}
           </div>
