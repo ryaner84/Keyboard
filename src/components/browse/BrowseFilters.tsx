@@ -1,6 +1,7 @@
 "use client";
 
 import { STATUS_LABELS } from "@/lib/utils";
+import { KEYCAP_MAKER_LABELS, type KeycapMaker } from "@/lib/set-name";
 import type { GBStatus } from "@/types";
 
 const ALL_STATUSES: GBStatus[] = [
@@ -11,14 +12,18 @@ const ALL_STATUSES: GBStatus[] = [
   "IN_STOCK",
 ];
 
+const ALL_MAKERS: KeycapMaker[] = ["GMK", "SP"];
+
 interface BrowseFiltersProps {
   search: string;
   statuses: GBStatus[];
+  makers: KeycapMaker[];
   sortBy: string;
   finishingSoon: boolean;
   newArrivals: boolean;
   onSearchChange: (v: string) => void;
   onStatusToggle: (s: GBStatus) => void;
+  onMakerToggle: (m: KeycapMaker) => void;
   onSortChange: (v: string) => void;
   onFinishingToggle: () => void;
   onNewToggle: () => void;
@@ -27,11 +32,13 @@ interface BrowseFiltersProps {
 export function BrowseFilters({
   search,
   statuses,
+  makers,
   sortBy,
   finishingSoon,
   newArrivals,
   onSearchChange,
   onStatusToggle,
+  onMakerToggle,
   onSortChange,
   onFinishingToggle,
   onNewToggle,
@@ -76,6 +83,29 @@ export function BrowseFilters({
           >
             ✨ New arrivals
           </button>
+        </div>
+      </div>
+
+      {/* Maker filters — GMK vs Signature Plastics. No pill selected means
+          "all makers", so sets whose profile we don't recognise stay visible
+          instead of vanishing behind a filter nobody set. */}
+      <div>
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Brand</p>
+        <div className="flex flex-wrap gap-2">
+          {ALL_MAKERS.map((maker) => (
+            <button
+              key={maker}
+              onClick={() => onMakerToggle(maker)}
+              aria-pressed={makers.includes(maker)}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                makers.includes(maker)
+                  ? "bg-indigo-600 text-white border-indigo-600"
+                  : "bg-white text-gray-600 border-gray-200 hover:border-indigo-300"
+              }`}
+            >
+              {KEYCAP_MAKER_LABELS[maker]}
+            </button>
+          ))}
         </div>
       </div>
 
