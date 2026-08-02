@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { notHiddenWhere } from "@/lib/showcase";
+import { cachedHomeQuery, STATIC_TTL, WINDOWED_TTL } from "@/lib/home-cache";
 import { HomeCarousel } from "@/components/home/HomeCarousel";
 import { SetCard } from "@/components/browse/SetCard";
 import { LocationReminder } from "@/components/home/LocationReminder";
@@ -13,8 +14,12 @@ export const metadata: Metadata = {
     "Find GMK keycap group buys and new releases. Compare prices from vendors worldwide in your local currency, including shipping.",
 };
 
-// Render at request time so featured sets / stats are always fresh and the
-// build never depends on a live database connection.
+// Render at request time so the build never depends on a live database
+// connection. The per-visitor DB cost this used to imply is gone: every loader
+// below reads through unstable_cache (src/lib/home-cache.ts), so the 13 queries
+// run once per TTL and are shared across requests rather than repeated per view.
+// Kept dynamic on purpose — page-level ISR would cache the loaders' error
+// fallbacks, pinning an empty homepage after a single transient DB blip.
 export const dynamic = "force-dynamic";
 
 // Include base-kit vendor pricing so catalog cards can show cheapest vendors.
@@ -30,57 +35,73 @@ const PRICING_INCLUDE = {
 
 const VISIBLE_LISTING_WHERE = { dataTrustLevel: { not: "DEAD" } } as const;
 
+const loadFeaturedSets = cachedHomeQuery("featured", async () =>
+  (await prisma.groupBuy.findMany({
+    where: { ...VISIBLE_LISTING_WHERE, featured: true, ...notHiddenWhere },
+    include: PRICING_INCLUDE,
+    orderBy: { createdAt: "desc" },
+    take: 6,
+  })) as unknown as GroupBuyWithPricing[], STATIC_TTL);
+
 async function getFeaturedSets(): Promise<GroupBuyWithPricing[]> {
   try {
-    return (await prisma.groupBuy.findMany({
-      where: { ...VISIBLE_LISTING_WHERE, featured: true, ...notHiddenWhere },
-      include: PRICING_INCLUDE,
-      orderBy: { createdAt: "desc" },
-      take: 6,
-    })) as unknown as GroupBuyWithPricing[];
+    return await loadFeaturedSets();
   } catch {
     return [];
   }
 }
+
+// `now` is evaluated on cache miss and then frozen for WINDOWED_TTL — see the
+// note in home-cache.ts about why that TTL is deliberately short.
+const loadFinishingSoon = cachedHomeQuery("finishing-soon", async () => {
+  const now = new Date();
+  const in7 = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  return (await prisma.groupBuy.findMany({
+    where: { ...VISIBLE_LISTING_WHERE, status: "ACTIVE_GB", gbEnd: { gte: now, lte: in7 }, ...notHiddenWhere },
+    include: PRICING_INCLUDE,
+    orderBy: { gbEnd: "asc" },
+    take: 5,
+  })) as unknown as GroupBuyWithPricing[];
+}, WINDOWED_TTL);
 
 async function getFinishingSoon(): Promise<GroupBuyWithPricing[]> {
   try {
-    const now = new Date();
-    const in7 = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-    return (await prisma.groupBuy.findMany({
-      where: { ...VISIBLE_LISTING_WHERE, status: "ACTIVE_GB", gbEnd: { gte: now, lte: in7 }, ...notHiddenWhere },
-      include: PRICING_INCLUDE,
-      orderBy: { gbEnd: "asc" },
-      take: 5,
-    })) as unknown as GroupBuyWithPricing[];
+    return await loadFinishingSoon();
   } catch {
     return [];
   }
 }
+
+const loadNewGroupBuys = cachedHomeQuery("new-gbs", async () => {
+  const now = new Date();
+  const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+  return (await prisma.groupBuy.findMany({
+    where: { ...VISIBLE_LISTING_WHERE, status: "ACTIVE_GB", gbStart: { gte: twoWeeksAgo, lte: now }, ...notHiddenWhere },
+    include: PRICING_INCLUDE,
+    orderBy: { gbStart: "desc" },
+    take: 5,
+  })) as unknown as GroupBuyWithPricing[];
+}, WINDOWED_TTL);
 
 async function getNewGroupBuys(): Promise<GroupBuyWithPricing[]> {
   try {
-    const now = new Date();
-    const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-    return (await prisma.groupBuy.findMany({
-      where: { ...VISIBLE_LISTING_WHERE, status: "ACTIVE_GB", gbStart: { gte: twoWeeksAgo, lte: now }, ...notHiddenWhere },
-      include: PRICING_INCLUDE,
-      orderBy: { gbStart: "desc" },
-      take: 5,
-    })) as unknown as GroupBuyWithPricing[];
+    return await loadNewGroupBuys();
   } catch {
     return [];
   }
 }
 
-async function getUpcomingSets(): Promise<GroupBuyWithKits[]> {
-  try {
-    return (await prisma.groupBuy.findMany({
+const loadUpcomingSets = cachedHomeQuery("upcoming", async () =>
+  (await prisma.groupBuy.findMany({
       where: { ...VISIBLE_LISTING_WHERE, productType: "KEYCAPS", status: { in: ["ACTIVE_GB", "INTEREST_CHECK"] }, ...notHiddenWhere },
       include: { kits: { select: { id: true, name: true, type: true } } },
-      orderBy: [{ featured: "desc" }, { status: "asc" }, { gbEnd: "asc" }],
-      take: 5,
-    })) as GroupBuyWithKits[];
+    orderBy: [{ featured: "desc" }, { status: "asc" }, { gbEnd: "asc" }],
+    take: 5,
+  })) as GroupBuyWithKits[], STATIC_TTL);
+
+async function getUpcomingSets(): Promise<GroupBuyWithKits[]> {
+  try {
+    return await loadUpcomingSets();
   } catch {
     return [];
   }
@@ -88,40 +109,52 @@ async function getUpcomingSets(): Promise<GroupBuyWithKits[]> {
 
 // Keyboards run their group buys single-vendor (price on the row), so the home
 // carousel shows them in the simpler upcoming-style layout for both tabs.
-async function getKeyboardGBs(): Promise<GroupBuyWithKits[]> {
-  try {
-    return (await prisma.groupBuy.findMany({
+const loadKeyboardGBs = cachedHomeQuery("keyboard-gbs", async () =>
+  (await prisma.groupBuy.findMany({
       where: { ...VISIBLE_LISTING_WHERE, productType: "KEYBOARD", status: { in: ["ACTIVE_GB", "IN_STOCK"] }, ...notHiddenWhere },
       include: { kits: { select: { id: true, name: true, type: true } } },
-      orderBy: [{ featured: "desc" }, { gbEnd: { sort: "asc", nulls: "last" } }],
-      take: 6,
-    })) as GroupBuyWithKits[];
+    orderBy: [{ featured: "desc" }, { gbEnd: { sort: "asc", nulls: "last" } }],
+    take: 6,
+  })) as GroupBuyWithKits[], STATIC_TTL);
+
+async function getKeyboardGBs(): Promise<GroupBuyWithKits[]> {
+  try {
+    return await loadKeyboardGBs();
   } catch {
     return [];
   }
 }
+
+const loadKeyboardReleased = cachedHomeQuery("keyboard-released", async () =>
+  (await prisma.groupBuy.findMany({
+      where: { ...VISIBLE_LISTING_WHERE, productType: "KEYBOARD", status: { in: ["SHIPPING", "DELIVERED"] }, ...notHiddenWhere },
+      include: { kits: { select: { id: true, name: true, type: true } } },
+    orderBy: { updatedAt: "desc" },
+    take: 6,
+  })) as GroupBuyWithKits[], STATIC_TTL);
 
 async function getKeyboardReleased(): Promise<GroupBuyWithKits[]> {
   try {
-    return (await prisma.groupBuy.findMany({
-      where: { ...VISIBLE_LISTING_WHERE, productType: "KEYBOARD", status: { in: ["SHIPPING", "DELIVERED"] }, ...notHiddenWhere },
-      include: { kits: { select: { id: true, name: true, type: true } } },
-      orderBy: { updatedAt: "desc" },
-      take: 6,
-    })) as GroupBuyWithKits[];
+    return await loadKeyboardReleased();
   } catch {
     return [];
   }
 }
 
+// The zero fallback below is rendered as fact ("0 Active Group Buys"), which is
+// exactly why it must never reach the cache — see home-cache.ts.
+const loadStats = cachedHomeQuery("stats", async () => {
+  const [activeGBs, inStock, totalSets] = await Promise.all([
+    prisma.groupBuy.count({ where: { ...VISIBLE_LISTING_WHERE, status: "ACTIVE_GB", ...notHiddenWhere } }),
+    prisma.groupBuy.count({ where: { ...VISIBLE_LISTING_WHERE, status: "IN_STOCK", ...notHiddenWhere } }),
+    prisma.groupBuy.count({ where: { ...VISIBLE_LISTING_WHERE, ...notHiddenWhere } }),
+  ]);
+  return { activeGBs, inStock, totalSets };
+}, STATIC_TTL);
+
 async function getStats() {
   try {
-    const [activeGBs, inStock, totalSets] = await Promise.all([
-      prisma.groupBuy.count({ where: { ...VISIBLE_LISTING_WHERE, status: "ACTIVE_GB", ...notHiddenWhere } }),
-      prisma.groupBuy.count({ where: { ...VISIBLE_LISTING_WHERE, status: "IN_STOCK", ...notHiddenWhere } }),
-      prisma.groupBuy.count({ where: { ...VISIBLE_LISTING_WHERE, ...notHiddenWhere } }),
-    ]);
-    return { activeGBs, inStock, totalSets };
+    return await loadStats();
   } catch {
     return { activeGBs: 0, inStock: 0, totalSets: 0 };
   }
@@ -134,9 +167,8 @@ async function getStats() {
 // Best deals: released sets where vendors disagree on price the most.
 // Sorted by USD-normalised spread descending (biggest savings first) and
 // filtered to ≥5% spread so only meaningful deals appear.
-async function getBestReleasedDeals(): Promise<GroupBuyWithPricing[]> {
-  try {
-    const [available, rateRows] = await Promise.all([
+const loadBestReleasedDeals = cachedHomeQuery("best-deals", async () => {
+  const [available, rateRows] = await Promise.all([
       prisma.groupBuy.findMany({
         where: {
           ...VISIBLE_LISTING_WHERE,
@@ -173,18 +205,22 @@ async function getBestReleasedDeals(): Promise<GroupBuyWithPricing[]> {
       return count >= 2 && max > 0 ? (max - min) / max : 0;
     };
 
-    return available
-      .filter((s) => spreadOf(s) >= 0.05)
-      .sort((a, b) => spreadOf(b) - spreadOf(a))
-      .slice(0, 5) as unknown as GroupBuyWithPricing[];
+  return available
+    .filter((s) => spreadOf(s) >= 0.05)
+    .sort((a, b) => spreadOf(b) - spreadOf(a))
+    .slice(0, 5) as unknown as GroupBuyWithPricing[];
+}, STATIC_TTL);
+
+async function getBestReleasedDeals(): Promise<GroupBuyWithPricing[]> {
+  try {
+    return await loadBestReleasedDeals();
   } catch {
     return [];
   }
 }
 
-async function getReleasedForCarousel(): Promise<GroupBuyWithPricing[]> {
-  try {
-    const [available, rateRows] = await Promise.all([
+const loadReleasedForCarousel = cachedHomeQuery("released-carousel", async () => {
+  const [available, rateRows] = await Promise.all([
       prisma.groupBuy.findMany({
         where: {
           ...VISIBLE_LISTING_WHERE,
@@ -232,13 +268,18 @@ async function getReleasedForCarousel(): Promise<GroupBuyWithPricing[]> {
 
     // Fall back to plain recent releases when nothing is priced yet, so the
     // carousel never disappears entirely.
-    if (filled.length > 0) return filled as unknown as GroupBuyWithPricing[];
-    return (await prisma.groupBuy.findMany({
-      where: { ...VISIBLE_LISTING_WHERE, status: { in: ["SHIPPING", "DELIVERED", "IN_STOCK"] }, ...notHiddenWhere },
-      include: PRICING_INCLUDE,
-      orderBy: { gbEnd: { sort: "desc", nulls: "last" } },
-      take: 5,
-    })) as unknown as GroupBuyWithPricing[];
+  if (filled.length > 0) return filled as unknown as GroupBuyWithPricing[];
+  return (await prisma.groupBuy.findMany({
+    where: { ...VISIBLE_LISTING_WHERE, status: { in: ["SHIPPING", "DELIVERED", "IN_STOCK"] }, ...notHiddenWhere },
+    include: PRICING_INCLUDE,
+    orderBy: { gbEnd: { sort: "desc", nulls: "last" } },
+    take: 5,
+  })) as unknown as GroupBuyWithPricing[];
+}, STATIC_TTL);
+
+async function getReleasedForCarousel(): Promise<GroupBuyWithPricing[]> {
+  try {
+    return await loadReleasedForCarousel();
   } catch {
     return [];
   }
