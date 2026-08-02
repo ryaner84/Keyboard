@@ -18,7 +18,7 @@ rather than reaching for draft state.
 
 ## Tests
 
-Five suites, all of which should pass before pushing:
+Six suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -26,12 +26,15 @@ npm run test:set-name
 npm run test:csv-import
 npm run test:collection-import
 npm run test:keycap-collection
+npm run test:home-cache
 npx tsc --noEmit
 ```
 
 CI (`.github/workflows/scraper-tests.yml`) only runs the Python suite, and only
 when `scraper/**` changes — so TypeScript changes are gated by Vercel's build
-alone. Run `npx tsc --noEmit` and `npx next lint` locally for those.
+alone, and NONE of the `npm run test:*` suites run in CI at all. Run them,
+`npx tsc --noEmit` and `npx next lint` locally before pushing; nothing else
+will catch a break.
 
 `npx next build` will compile and typecheck without a database, then stop at
 "Collecting page data" with a `No database configuration found` error. That
