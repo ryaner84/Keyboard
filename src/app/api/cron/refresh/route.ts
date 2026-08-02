@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { HOME_CACHE_TAG } from "@/lib/home-cache";
 import { importFromMatrixzj } from "@/lib/import/matrixzj";
 import { importGmkSets } from "@/lib/import/keycaplendar";
 import { refreshPrices } from "@/lib/import/prices";
@@ -125,6 +127,13 @@ export async function GET(req: NextRequest) {
     const imageResult = await enrichImagesFromGmk({
       maxRuntimeMs: Math.max(3_000, REQUEST_BUDGET_MS - (Date.now() - start)),
     });
+
+    // This run just flipped statuses (ended GBs -> SHIPPING, due ICs ->
+    // ACTIVE_GB) and rewrote prices. Without busting the homepage cache it
+    // would keep counting those sets as Active and listing them under
+    // "Finishing Soon" while /browse and /sets already show the new status —
+    // a cross-page contradiction, not just lag.
+    revalidateTag(HOME_CACHE_TAG);
 
     return NextResponse.json({
       ok: true,
