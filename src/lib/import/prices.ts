@@ -88,22 +88,22 @@ const CURRENCY_HOME_COUNTRY: Record<string, string> = {
 // tighter than the producers' window silently wipes legitimate prices on
 // every deploy (this is exactly what blanked released-set pricing).
 const KIT_BOUNDS: Record<string, { min: number; max: number }> = {
-  USD: { min: 30, max: 225 },
-  EUR: { min: 28, max: 210 },
-  GBP: { min: 24, max: 180 },
-  AUD: { min: 45, max: 345 },
-  CAD: { min: 41, max: 310 },
-  SGD: { min: 40, max: 310 },
-  JPY: { min: 4500, max: 34000 },
-  KRW: { min: 40000, max: 320000 },
-  CNY: { min: 215, max: 1650 },
-  HKD: { min: 235, max: 1800 },
-  THB: { min: 1075, max: 8100 },
-  TWD: { min: 965, max: 7300 },
-  CLP: { min: 27000, max: 210000 },
-  INR: { min: 2500, max: 19000 },
-  ARS: { min: 30000, max: 400000 },
-  MYR: { min: 140, max: 1100 },
+  USD: { min: 0, max: 225 },
+  EUR: { min: 0, max: 210 },
+  GBP: { min: 0, max: 180 },
+  AUD: { min: 0, max: 345 },
+  CAD: { min: 0, max: 310 },
+  SGD: { min: 0, max: 310 },
+  JPY: { min: 0, max: 34000 },
+  KRW: { min: 0, max: 320000 },
+  CNY: { min: 0, max: 1650 },
+  HKD: { min: 0, max: 1800 },
+  THB: { min: 0, max: 8100 },
+  TWD: { min: 0, max: 7300 },
+  CLP: { min: 0, max: 210000 },
+  INR: { min: 0, max: 19000 },
+  ARS: { min: 0, max: 400000 },
+  MYR: { min: 0, max: 1100 },
 };
 
 // Currencies the site can actually convert (the Currency table). A price in
@@ -121,8 +121,11 @@ const SUPPORTED_CURRENCIES = new Set([
 // USD, since the fallback is always one of the western vendor currencies.
 export function isPlausibleBaseKitPrice(price: number, currency: string | null): boolean {
   const b = KIT_BOUNDS[currency ?? "USD"];
-  if (!b) return true;
-  return price >= b.min && price <= b.max;
+  if (!b) return price > 0;
+  // min is 0 by design: accessory products (addons, spacebar packs, fix kits)
+  // are tracked as sets and legitimately cost a few dollars. Only a 0/negative
+  // parse result is refused.
+  return price > b.min && price <= b.max;
 }
 
 // Some stores link products through a collection path

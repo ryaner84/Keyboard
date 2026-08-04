@@ -946,6 +946,42 @@ class DcsWikiParsingTests(unittest.TestCase):
         )
 
 
+class BaseKitPriceBoundsTests(unittest.TestCase):
+    def test_cheap_accessory_prices_are_accepted(self):
+        # The dcs.wiki archive tracks accessory products as first-class sets
+        # (DCS Bae Addon, 6u bars, 10U Spacebars, 9009 Fix Kit). Their real
+        # price is a few dollars, and the old USD 30 floor discarded them —
+        # sneakbox's DCS Bae listing was skipped as "implausible" at 3.9 USD.
+        self.assertTrue(scrape.is_plausible_base_price(3.9, "USD"))
+        self.assertTrue(scrape.is_plausible_base_price(12.0, "USD"))
+        self.assertTrue(scrape.is_plausible_base_price(29.99, "USD"))
+
+    def test_normal_set_prices_still_accepted(self):
+        self.assertTrue(scrape.is_plausible_base_price(135.0, "USD"))
+        self.assertTrue(scrape.is_plausible_base_price(60.0, "EUR"))
+
+    def test_ceiling_still_rejects_bundles_and_parse_errors(self):
+        # The upper bound is NOT removed: a price far above a base kit is a
+        # bundle or a parse failure, not a real listing.
+        self.assertFalse(scrape.is_plausible_base_price(2999.0, "USD"))
+        self.assertFalse(scrape.is_plausible_base_price(40000.0, "JPY"))
+
+    def test_zero_and_negative_are_still_refused(self):
+        # Not a "cheap product" — always a parse failure, and it would render
+        # as a $0.00 best price on the set page.
+        self.assertFalse(scrape.is_plausible_base_price(0, "USD"))
+        self.assertFalse(scrape.is_plausible_base_price(-5, "USD"))
+        # Unbounded currency: still refuse a non-positive price.
+        self.assertFalse(scrape.is_plausible_base_price(0, "NOK"))
+        self.assertTrue(scrape.is_plausible_base_price(50, "NOK"))
+
+    def test_no_currency_bound_has_a_floor_left(self):
+        # A stale floor in any currency would silently drop that store's
+        # accessory prices while others worked.
+        for currency, (low, _high) in scrape._KIT_BOUNDS.items():
+            self.assertEqual(low, 0, f"{currency} still has a price floor")
+
+
 class HostThrottleTests(unittest.TestCase):
     def test_same_host_is_spaced_out_but_different_hosts_are_not(self):
         # interval big enough to measure, jitter off so the assert is exact.

@@ -548,32 +548,36 @@ _SUBKIT_PRODUCT_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Per-currency plausibility bounds for a GMK base kit. The lower bound admits
-# CLEARANCE prices (released sets routinely sell off at USD 40-70); the upper
-# bound rejects bundles/parse errors. MUST stay in sync with KIT_BOUNDS in
+# Per-currency plausibility CEILING for a base kit. There is deliberately no
+# floor any more: the dcs.wiki archive tracks accessory products as first-class
+# sets (DCS Bae Addon, 6u bars, 10U Spacebars, 9009 Fix Kit …) whose real price
+# is a few dollars, and a floor threw those away as "implausible". The minimum
+# is kept at 0 only to reject a 0/negative parse result, which is never a real
+# price. The upper bound stays: it rejects bundles and parse errors.
+# MUST stay in sync with KIT_BOUNDS in
 # src/lib/import/prices.ts and the purge window in scripts/db-setup.mjs — if
 # this stores a price the deploy purge rejects, it gets wiped on every deploy.
 _KIT_BOUNDS = {
-    "USD": (30, 225),
-    "EUR": (28, 210),
-    "GBP": (24, 180),
-    "AUD": (45, 345),
-    "CAD": (41, 310),
-    "SGD": (40, 310),
-    "JPY": (4500, 34000),
-    "KRW": (40000, 320000),
-    "CNY": (215, 1650),
-    "HKD": (235, 1800),
-    "THB": (1075, 8100),
-    "TWD": (965, 7300),
+    "USD": (0, 225),
+    "EUR": (0, 210),
+    "GBP": (0, 180),
+    "AUD": (0, 345),
+    "CAD": (0, 310),
+    "SGD": (0, 310),
+    "JPY": (0, 34000),
+    "KRW": (0, 320000),
+    "CNY": (0, 1650),
+    "HKD": (0, 1800),
+    "THB": (0, 8100),
+    "TWD": (0, 7300),
     # Chilean Peso — used by Fancy Customs (CL). 1 USD ≈ 960 CLP as of 2025.
-    "CLP": (27_000, 210_000),
+    "CLP": (0, 210_000),
     # Indian Rupee — 1 USD ≈ 84 INR as of 2025. ~$30–$225 USD range.
-    "INR": (2_500, 19_000),
+    "INR": (0, 19_000),
     # Argentine Peso — used by Latamkeys. Volatile; bounds intentionally wide.
-    "ARS": (30_000, 400_000),
+    "ARS": (0, 400_000),
     # Malaysian Ringgit — 1 USD ≈ 4.71 MYR as of 2025.
-    "MYR": (140, 1100),
+    "MYR": (0, 1100),
 }
 
 # Currencies the site's Currency table can convert (db-setup ensureCurrencies).
@@ -619,8 +623,10 @@ def is_plausible_base_price(price: float, currency: str | None) -> bool:
     # vendor currency); currencies without bounds are not bounded.
     bounds = _KIT_BOUNDS.get(currency or "USD")
     if bounds is None:
-        return True
-    return bounds[0] <= price <= bounds[1]
+        return price > 0
+    # bounds[0] is 0 by design — see the _KIT_BOUNDS comment. A 0 or negative
+    # price is a parse failure, not a cheap product, so it is still refused.
+    return price > bounds[0] and price <= bounds[1]
 
 
 def choose_kit_variant(variants: list[dict]) -> dict | None:
