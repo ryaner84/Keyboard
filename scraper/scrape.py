@@ -529,9 +529,16 @@ _NONBASE_SUBKIT_RE = re.compile(
 # "extra" — a product titled "GMK Foo Extras" is a real base listing — and no
 # "shipping"/"insurance" ("… Free Shipping" suffixes). Mirror of
 # PRODUCT_ACCESSORY_RE in src/lib/kit-variants.ts — keep in sync.
+# "leftover"/"child kit" catch the MULTI-SET clearance listing: one product
+# whose variants are each a DIFFERENT set (NovelKeys "GMK Leftovers" holds 12,
+# "GMK Child Kits" holds ~26). choose_kit_variant assumes every variant belongs
+# to one set and takes the dearest as its base, so linking one of these would
+# stamp an unrelated set's price onto whatever it matched. "badge" covers the
+# keyboard-parts listings that share the same shape.
 _TITLE_ACCESSORY_RE = re.compile(
     r"desk\s?mat|mouse\s?pad|wrist\s?rest|cable|artisan|sticker|sample"
-    r"|keychain|coin|tray|deposit|add[\s-]?on",
+    r"|keychain|coin|tray|deposit|add[\s-]?on|left\s?overs?|child\s*kits?"
+    r"|\bbadges?\b",
     re.IGNORECASE,
 )
 
