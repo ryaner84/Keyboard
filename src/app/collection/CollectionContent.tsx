@@ -340,6 +340,52 @@ function scrapedKitOptions(item: CollectionCatalogItem): string[] {
   return [...primary, ...Array.from(subkits).sort()].slice(0, 14);
 }
 
+// The "display publicly" switch is a PIECE-level setting: it governs whether the
+// whole record reaches the owner's public page, not the build they happen to be
+// looking at. It used to sit in the card footer, below every build row, which
+// read as if it belonged to the last build. It now renders once — on the
+// Summary tab for a multi-build piece, inline for a single-build one.
+function PiecePublicToggle({
+  isPublic,
+  onToggle,
+}: {
+  isPublic: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      aria-pressed={isPublic}
+      className={`flex w-full min-w-0 items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition ${
+        isPublic
+          ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+          : "border-gray-200 bg-gray-50 text-gray-700 hover:border-[#c9ab72] dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+      }`}
+    >
+      <span
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
+          isPublic ? "bg-emerald-100 dark:bg-emerald-900" : "bg-white dark:bg-gray-800"
+        }`}
+      >
+        <EyeIcon />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-xs font-semibold">
+          {isPublic ? "Displayed publicly" : "Display publicly"}
+        </span>
+        <span className="block truncate text-[10px] opacity-65">
+          {isPublic ? "Included when you share" : "Private until selected"}
+        </span>
+      </span>
+      <span
+        className={`ml-auto h-2.5 w-2.5 shrink-0 rounded-full border ${
+          isPublic ? "border-emerald-600 bg-emerald-500" : "border-gray-400 bg-transparent"
+        }`}
+      />
+    </button>
+  );
+}
+
 function BuildSummary({
   build,
   index,
@@ -2626,8 +2672,18 @@ function KeyboardCollectionCard({
   const owned = item.collection.inCollection;
   const builds = assembleBuilds(item.collection);
   const multiBuild = builds.length > 1;
-  const [activeBuildIndex, setActiveBuildIndex] = useState(0);
+  // Tab model for a multi-build piece: a Summary tab first, then one tab per
+  // build. Settings that apply to the WHOLE piece (display publicly) live on
+  // Summary — shown beneath a single build they read as if they applied to
+  // that build alone, which is the opposite of what they do. A single-build
+  // piece has no such ambiguity, so it keeps the plain footer.
+  const [activeTab, setActiveTab] = useState<"summary" | number>(
+    multiBuild ? "summary" : 0
+  );
+  const onSummary = multiBuild && activeTab === "summary";
+  const activeBuildIndex = typeof activeTab === "number" ? activeTab : 0;
   const visibleBuildIndex = Math.min(activeBuildIndex, builds.length - 1);
+  const setActiveBuildIndex = (index: number) => setActiveTab(index);
   const activeBuild = builds[visibleBuildIndex];
   // Which builds are excluded from the public collection page. hiddenBuilds is
   // 0-based over the same order assembleBuilds returns, so an index maps 1:1 to
@@ -2643,22 +2699,29 @@ function KeyboardCollectionCard({
   const hiddenCount = hiddenSet.size;
   const shownCount = builds.length - hiddenCount;
   const showBuildVisibility = owned && piecePublic && multiBuild;
-  const activeBuildHidden = showBuildVisibility && hiddenSet.has(visibleBuildIndex);
+  const activeBuildHidden =
+    !onSummary && showBuildVisibility && hiddenSet.has(visibleBuildIndex);
   // A public piece with EVERY build hidden shows nothing on the public page —
   // the public page drops all-hidden pieces — so the badge must not claim it's
   // on display (holds for single- and multi-build alike).
   const nothingPublic = owned && piecePublic && shownCount === 0;
   const catalogImageUrl = normalizeImageUrl(item.imageUrl);
-  const imageUrl = multiBuild
-    ? activeBuild?.imageUrl ||
-      (visibleBuildIndex === 0 ? catalogImageUrl : null)
-    : item.collection.customImageUrl || catalogImageUrl;
+  // Summary represents the whole piece, so it shows the catalog render rather
+  // than any one build's photo.
+  const imageUrl = onSummary
+    ? catalogImageUrl
+    : multiBuild
+      ? activeBuild?.imageUrl ||
+        (visibleBuildIndex === 0 ? catalogImageUrl : null)
+      : item.collection.customImageUrl || catalogImageUrl;
   // Owner-uploaded photos come in arbitrary aspect ratios — show the WHOLE
   // photo in proportion (object-contain against the card's muted backdrop)
   // instead of cropping it. Catalog renders are pre-framed, so cover is right.
-  const isUserPhoto = multiBuild
-    ? Boolean(activeBuild?.imageUrl)
-    : Boolean(item.collection.customImageUrl);
+  const isUserPhoto = onSummary
+    ? false
+    : multiBuild
+      ? Boolean(activeBuild?.imageUrl)
+      : Boolean(item.collection.customImageUrl);
   // Custom (off-catalog) pieces have no public /sets page — don't link to one.
   const isCustom = isCustomSlug(item.slug);
   const cardImage = imageUrl ? (
@@ -2666,7 +2729,11 @@ function KeyboardCollectionCard({
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={imageUrl}
-      alt={multiBuild ? `${item.name}, Build ${visibleBuildIndex + 1}` : item.name}
+      alt={
+        multiBuild && !onSummary
+          ? `${item.name}, Build ${visibleBuildIndex + 1}`
+          : item.name
+      }
       className={`absolute inset-0 h-full w-full transition duration-500 group-hover:scale-[1.025] ${
         isUserPhoto ? "object-contain" : "object-cover"
       }`}
@@ -2906,12 +2973,55 @@ function KeyboardCollectionCard({
                   : `${hiddenCount} builds are hidden from your public collection page.`}
               </p>
             )}
+            {/* Summary is always the first tab. It holds whatever applies to
+                the piece as a whole, so those controls are never mistaken for
+                per-build ones. */}
+            <button
+              type="button"
+              onClick={() => setActiveTab("summary")}
+              aria-pressed={onSummary}
+              className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition ${
+                onSummary
+                  ? "border-[#c9ab72] bg-[#faf6ed] shadow-[0_0_0_2px_rgba(201,171,114,0.12)] dark:border-[#80632f] dark:bg-[#2a241a]"
+                  : "border-transparent bg-gray-50 hover:border-gray-200 hover:bg-white dark:bg-white/[0.04] dark:hover:border-gray-700 dark:hover:bg-white/[0.07]"
+              }`}
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-base dark:bg-gray-800">
+                ⌨
+              </span>
+              <span className="min-w-0">
+                <span className="block text-xs font-semibold text-gray-900 dark:text-gray-100">
+                  Summary
+                </span>
+                <span className="block truncate text-[11px] text-gray-500 dark:text-gray-400">
+                  {builds.length} builds · settings for the whole piece
+                </span>
+              </span>
+            </button>
+
+            {/* Summary panel — everything here governs the whole piece, so it
+                sits directly under the Summary tab rather than below the build
+                rows, where it would read as belonging to the last build. */}
+            {onSummary && editable && owned && (
+              <div className="space-y-2 rounded-xl border border-[#e7dcc4] bg-[#fdfbf6] p-3 dark:border-[#4a3f28] dark:bg-[#1d1a14]">
+                <PiecePublicToggle
+                  isPublic={item.collection.isPublic}
+                  onToggle={onTogglePublic}
+                />
+                <p className="text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+                  {item.collection.isPublic
+                    ? `Applies to all ${builds.length} builds. Hide individual builds from their own tab.`
+                    : `Applies to all ${builds.length} builds — none of them appear on your public page while this is off.`}
+                </p>
+              </div>
+            )}
+
             {builds.map((build, index) => (
               <BuildSummary
                 key={index}
                 build={build}
                 index={index}
-                selected={index === visibleBuildIndex}
+                selected={!onSummary && index === visibleBuildIndex}
                 onSelect={() => setActiveBuildIndex(index)}
                 showVisibility={showBuildVisibility}
                 hidden={hiddenSet.has(index)}
@@ -2921,46 +3031,22 @@ function KeyboardCollectionCard({
         )}
 
         {owned && editable && (
-          <div className="mt-4 grid grid-cols-[1fr_auto] gap-2 border-t border-gray-100 pt-4 dark:border-white/10">
-            <button
-              onClick={onTogglePublic}
-              aria-pressed={item.collection.isPublic}
-              className={`flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition ${
-                item.collection.isPublic
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
-                  : "border-gray-200 bg-gray-50 text-gray-700 hover:border-[#c9ab72] dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
-              }`}
-            >
-              <span
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
-                  item.collection.isPublic
-                    ? "bg-emerald-100 dark:bg-emerald-900"
-                    : "bg-white dark:bg-gray-800"
-                }`}
-              >
-                <EyeIcon />
-              </span>
-              <span className="min-w-0">
-                <span className="block text-xs font-semibold">
-                  {item.collection.isPublic ? "Displayed publicly" : "Display publicly"}
-                </span>
-                <span className="block truncate text-[10px] opacity-65">
-                  {item.collection.isPublic
-                    ? "Included when you share"
-                    : "Private until selected"}
-                </span>
-              </span>
-              <span
-                className={`ml-auto h-2.5 w-2.5 shrink-0 rounded-full border ${
-                  item.collection.isPublic
-                    ? "border-emerald-600 bg-emerald-500"
-                    : "border-gray-400 bg-transparent"
-                }`}
+          <div
+            className={`mt-4 gap-2 border-t border-gray-100 pt-4 dark:border-white/10 ${
+              multiBuild ? "flex" : "grid grid-cols-[1fr_auto]"
+            }`}
+          >
+            {!multiBuild && (
+              <PiecePublicToggle
+                isPublic={item.collection.isPublic}
+                onToggle={onTogglePublic}
               />
-            </button>
+            )}
             <button
               onClick={onEdit}
-              className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:border-gray-400 hover:text-gray-950 dark:border-gray-700 dark:text-gray-300 dark:hover:text-white"
+              className={`rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:border-gray-400 hover:text-gray-950 dark:border-gray-700 dark:text-gray-300 dark:hover:text-white ${
+                multiBuild ? "w-full" : ""
+              }`}
             >
               Edit details
             </button>
