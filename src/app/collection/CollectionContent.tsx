@@ -2672,15 +2672,17 @@ function KeyboardCollectionCard({
   const owned = item.collection.inCollection;
   const builds = assembleBuilds(item.collection);
   const multiBuild = builds.length > 1;
-  // Tab model for a multi-build piece: a Summary tab first, then one tab per
-  // build. Settings that apply to the WHOLE piece (display publicly) live on
-  // Summary — shown beneath a single build they read as if they applied to
-  // that build alone, which is the opposite of what they do. A single-build
-  // piece has no such ambiguity, so it keeps the plain footer.
-  const [activeTab, setActiveTab] = useState<"summary" | number>(
-    multiBuild ? "summary" : 0
-  );
-  const onSummary = multiBuild && activeTab === "summary";
+  // Tab model: a Summary tab first, then one tab per build. Settings that apply
+  // to the WHOLE piece (display publicly) live on Summary — shown beneath a
+  // build they read as if they applied to that build alone, which is the
+  // opposite of what they do.
+  //
+  // Every piece gets Summary, including single-build ones. Scoping it to
+  // multi-build pieces was the earlier behaviour, but that put a piece-wide
+  // control in two different places depending on build count, which is its own
+  // inconsistency — the whole point is that these settings have one home.
+  const [activeTab, setActiveTab] = useState<"summary" | number>("summary");
+  const onSummary = activeTab === "summary";
   const activeBuildIndex = typeof activeTab === "number" ? activeTab : 0;
   const visibleBuildIndex = Math.min(activeBuildIndex, builds.length - 1);
   const setActiveBuildIndex = (index: number) => setActiveTab(index);
@@ -2706,22 +2708,23 @@ function KeyboardCollectionCard({
   // on display (holds for single- and multi-build alike).
   const nothingPublic = owned && piecePublic && shownCount === 0;
   const catalogImageUrl = normalizeImageUrl(item.imageUrl);
-  // Summary represents the whole piece, so it shows the catalog render rather
-  // than any one build's photo.
-  const imageUrl = onSummary
-    ? catalogImageUrl
-    : multiBuild
-      ? activeBuild?.imageUrl ||
-        (visibleBuildIndex === 0 ? catalogImageUrl : null)
-      : item.collection.customImageUrl || catalogImageUrl;
+  // Summary represents the whole piece. On a multi-build piece that means the
+  // catalog render rather than any one build's photo; a single-build piece has
+  // only its own photo, so Summary and the build tab show the same thing.
+  const imageUrl = !multiBuild
+    ? item.collection.customImageUrl || catalogImageUrl
+    : onSummary
+      ? catalogImageUrl
+      : activeBuild?.imageUrl ||
+        (visibleBuildIndex === 0 ? catalogImageUrl : null);
   // Owner-uploaded photos come in arbitrary aspect ratios — show the WHOLE
   // photo in proportion (object-contain against the card's muted backdrop)
   // instead of cropping it. Catalog renders are pre-framed, so cover is right.
-  const isUserPhoto = onSummary
-    ? false
-    : multiBuild
-      ? Boolean(activeBuild?.imageUrl)
-      : Boolean(item.collection.customImageUrl);
+  const isUserPhoto = !multiBuild
+    ? Boolean(item.collection.customImageUrl)
+    : onSummary
+      ? false
+      : Boolean(activeBuild?.imageUrl);
   // Custom (off-catalog) pieces have no public /sets page — don't link to one.
   const isCustom = isCustomSlug(item.slug);
   const cardImage = imageUrl ? (
@@ -2945,11 +2948,11 @@ function KeyboardCollectionCard({
           </p>
         )}
 
-        {owned && multiBuild && (
+        {owned && (
           <div className="mt-4 space-y-3 border-t border-gray-100 pt-4 dark:border-white/10">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-[#9a7a42] dark:text-[#c9ab72]">
-                {builds.length} builds
+                {builds.length === 1 ? "1 build" : `${builds.length} builds`}
               </p>
               {showBuildVisibility && (
                 <span
@@ -2994,7 +2997,8 @@ function KeyboardCollectionCard({
                   Summary
                 </span>
                 <span className="block truncate text-[11px] text-gray-500 dark:text-gray-400">
-                  {builds.length} builds · settings for the whole piece
+                  {builds.length === 1 ? "1 build" : `${builds.length} builds`} ·
+                  settings for the whole piece
                 </span>
               </span>
             </button>
@@ -3009,9 +3013,13 @@ function KeyboardCollectionCard({
                   onToggle={onTogglePublic}
                 />
                 <p className="text-[11px] leading-4 text-gray-500 dark:text-gray-400">
-                  {item.collection.isPublic
-                    ? `Applies to all ${builds.length} builds. Hide individual builds from their own tab.`
-                    : `Applies to all ${builds.length} builds — none of them appear on your public page while this is off.`}
+                  {builds.length === 1
+                    ? item.collection.isPublic
+                      ? "This piece appears on your public collection page."
+                      : "This piece stays private until you turn this on."
+                    : item.collection.isPublic
+                      ? `Applies to all ${builds.length} builds. Hide individual builds from their own tab.`
+                      : `Applies to all ${builds.length} builds — none of them appear on your public page while this is off.`}
                 </p>
               </div>
             )}
@@ -3032,21 +3040,11 @@ function KeyboardCollectionCard({
 
         {owned && editable && (
           <div
-            className={`mt-4 gap-2 border-t border-gray-100 pt-4 dark:border-white/10 ${
-              multiBuild ? "flex" : "grid grid-cols-[1fr_auto]"
-            }`}
+            className="mt-4 flex gap-2 border-t border-gray-100 pt-4 dark:border-white/10"
           >
-            {!multiBuild && (
-              <PiecePublicToggle
-                isPublic={item.collection.isPublic}
-                onToggle={onTogglePublic}
-              />
-            )}
             <button
               onClick={onEdit}
-              className={`rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:border-gray-400 hover:text-gray-950 dark:border-gray-700 dark:text-gray-300 dark:hover:text-white ${
-                multiBuild ? "w-full" : ""
-              }`}
+              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:border-gray-400 hover:text-gray-950 dark:border-gray-700 dark:text-gray-300 dark:hover:text-white"
             >
               Edit details
             </button>
