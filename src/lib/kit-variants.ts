@@ -12,10 +12,23 @@ export interface KitVariant {
   available?: boolean;
 }
 
-export type VariantCategory = "BASE" | "ALPHA" | "NOVELTIES" | "SPACEBARS" | "OTHERS";
+// BUNDLE is a base kit sold together with extras ("Base + Novelties"). It is
+// its own category rather than BASE or NOVELTIES: calling it NOVELTIES hid it
+// entirely (a bundle-only listing stored no price at all — ktechs sells four
+// GMK sets this way), and calling it BASE would let a dearer bundle outrank a
+// real base kit in the same listing, making the stored price depend on the
+// vendor's variant order.
+export type VariantCategory =
+  | "BASE"
+  | "BUNDLE"
+  | "ALPHA"
+  | "NOVELTIES"
+  | "SPACEBARS"
+  | "OTHERS";
 
 export const VARIANT_CATEGORIES: Array<{ value: VariantCategory; label: string }> = [
   { value: "BASE", label: "Base" },
+  { value: "BUNDLE", label: "Base + extras" },
   { value: "ALPHA", label: "Alpha" },
   { value: "NOVELTIES", label: "Novelties" },
   { value: "SPACEBARS", label: "Spacebars" },
@@ -27,6 +40,12 @@ export const VARIANT_CATEGORIES: Array<{ value: VariantCategory; label: string }
 // Japanese keywords cover JP vendors (e.g. Yushakobo) whose variant titles
 // are ベースキット / ノベルティ / スペースバー / アルファ.
 export function classifyVariant(title: string): VariantCategory {
+  // Checked BEFORE the subkit patterns: "Base + Novelties" would otherwise
+  // match `novelt` and be filed as a novelty kit. A joiner is required, so
+  // "Novelties (fits base)" is untouched.
+  if (/base|ベース/i.test(title) && /[+&/]|\band\b|\bwith\b|\bplus\b/i.test(title)) {
+    return "BUNDLE";
+  }
   if (/novelt|ノベルティ/i.test(title)) return "NOVELTIES";
   if (/space\s*bar|スペースバー/i.test(title)) return "SPACEBARS";
   if (/alpha|アルファ/i.test(title)) return "ALPHA";
@@ -81,9 +100,18 @@ export function pickBaseVariant<T extends { title: string; price: number }>(
     if (category === "BASE") return true;
     return category === "OTHERS" && !NONBASE_SUBKIT_RE.test(v.title);
   });
-  if (basePool.length === 0) return null;
   const titledBase = basePool.find((v) => classifyVariant(v.title) === "BASE");
   if (titledBase) return titledBase;
+  // No plain base kit on offer: fall back to the CHEAPEST bundle rather than
+  // storing nothing. A bundle costs more than the base alone, so it is only
+  // ever used when there is no base to be had — that keeps a dearer bundle
+  // from displacing a real base kit, and keeps the pick independent of the
+  // vendor's variant order.
+  if (basePool.length === 0) {
+    const bundles = nonAddon.filter((v) => classifyVariant(v.title) === "BUNDLE");
+    if (bundles.length === 0) return null;
+    return bundles.reduce((best, v) => (v.price < best.price ? v : best));
+  }
   return basePool.reduce((best, v) => (v.price > best.price ? v : best));
 }
 

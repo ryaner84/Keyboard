@@ -614,6 +614,14 @@ def classify_variant(title: str) -> str:
     scraper is the one that actually reaches Yushakobo (real browser), and
     without them a JP-titled subkit (ノベルティ) classified OTHERS and could be
     stored as the base price when the base kit had sold out."""
+    # BUNDLE before the subkit tests: "Base + Novelties" would otherwise match
+    # `novelt` and be filed as a novelty kit, so a bundle-only listing yielded
+    # no base candidate and stored nothing. A joiner is required, leaving
+    # "Novelties (fits base)" alone. Mirror of kit-variants.ts.
+    if re.search(r"base|ベース", title, re.IGNORECASE) and re.search(
+        r"[+&/]|\band\b|\bwith\b|\bplus\b", title, re.IGNORECASE
+    ):
+        return "BUNDLE"
     if re.search(r"novelt|ノベルティ", title, re.IGNORECASE):
         return "NOVELTIES"
     if re.search(r"space\s*bar|スペースバー", title, re.IGNORECASE):
@@ -675,11 +683,19 @@ def choose_kit_variant(variants: list[dict]) -> dict | None:
             and not _NONBASE_SUBKIT_RE.search(v["title"])
         )
     ]
-    if not base_pool:
-        return None
     for v in base_pool:
         if classify_variant(v["title"]) == "BASE":
             return v
+    # No plain base kit on offer: fall back to the CHEAPEST bundle instead of
+    # storing nothing. A bundle costs more than the base alone, so it is used
+    # only when there is no base to be had — that keeps a dearer bundle from
+    # displacing a real base kit, and keeps the pick independent of the
+    # vendor's variant order.
+    if not base_pool:
+        bundles = [v for v in pool if classify_variant(v["title"]) == "BUNDLE"]
+        if not bundles:
+            return None
+        return min(bundles, key=lambda v: v["price"])
     # No variant is titled "base": the real base is the dearest candidate, not
     # whichever subkit happens to come first in display order (an out-of-range
     # bundle is rejected downstream by is_plausible_base_price).
@@ -949,6 +965,12 @@ def parse_jsonld_offer(html: str):
     named_base = [o for o in found if classify_variant(o["name"]) == "BASE"]
     if named_base:
         return max(named_base, key=lambda o: o["price"])
+    # No plain base offer: a bundle that includes the base ("Base + Novelties")
+    # is the base-bearing option, so use the cheapest rather than refusing to
+    # price the listing. A plain base, when present, always wins above.
+    bundles = [o for o in found if classify_variant(o["name"]) == "BUNDLE"]
+    if bundles:
+        return min(bundles, key=lambda o: o["price"])
     if len(found) > 1:
         # Multi-kit aggregate with no identifiable base — do not guess.
         return NO_BASE_KIT
