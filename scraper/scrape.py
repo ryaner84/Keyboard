@@ -701,19 +701,33 @@ def pinned_variant_id(product_url: str) -> str | None:
 
 
 def _parse_shopify_variants(raw_variants: list) -> list[dict]:
-    """Shopify product.json variants → [{id, title, price}], invalid dropped."""
+    """Shopify product.json variants → [{id, title, price, compareAt}].
+
+    compareAt is the store's pre-discount price. It is kept ONLY when strictly
+    greater than price: Shopify leaves the field populated at the same value on
+    plenty of listings, and treating that as a markdown would advertise a 0%
+    discount on half the catalogue.
+    """
     out: list[dict] = []
     for v in raw_variants:
         try:
             p = float(v.get("price"))
         except (TypeError, ValueError):
             continue
-        if p > 0:
-            out.append({
-                "id": str(v.get("id") or ""),
-                "title": str(v.get("title") or ""),
-                "price": p,
-            })
+        if p <= 0:
+            continue
+        try:
+            compare = float(v.get("compare_at_price"))
+        except (TypeError, ValueError):
+            compare = 0.0
+        entry = {
+            "id": str(v.get("id") or ""),
+            "title": str(v.get("title") or ""),
+            "price": p,
+        }
+        if compare > p:
+            entry["compareAt"] = compare
+        out.append(entry)
     return out
 
 
@@ -1262,6 +1276,9 @@ def shopify_price(
             "currency": currency,
             "variants": variants,
             "inStock": in_stock,
+            # Only the CHOSEN variant's markdown — a discount on some unrelated
+            # subkit says nothing about the base kit's price.
+            "compareAt": chosen.get("compareAt"),
         }
     except Exception as e:  # noqa: BLE001
         log(f"  price fetch failed for {product_url}: {e}")
@@ -3523,9 +3540,38 @@ def run_gmk_direct(
 # discount (main() runs discovery → outlets → prices in that order, so the
 # outlet link always wins the night). MANUAL prices are never touched.
 # ----------------------------------------------------------------------------
+# Surveyed from every vendor's /collections.json (2026-08): 12 of 13 stores run
+# a standing clearance/sale collection. Only stable handles are listed —
+# KBDfans' are dated ("2025-mid-autumn-festival-sale-keycaps") and rot within a
+# season, and Oblotzky runs none at all.
+#
+# Entries are URLs only. The old form keyed each one by a hardcoded vendor slug,
+# which silently skips ("vendor not in DB") whenever the guess is wrong; the
+# vendor is now resolved from the URL's host against Vendor.websiteUrl, so a
+# collection can only fail loudly on the fetch itself.
 OUTLET_COLLECTIONS = [
-    ("ilumkb",
-     "https://ilumkb.com/collections/%F0%9F%94%A5-gmk-outlet/products.json"),
+    # iLumKB — the original entry; the emoji handle is percent-encoded.
+    "https://ilumkb.com/collections/%F0%9F%94%A5-gmk-outlet/products.json",
+    "https://ilumkb.com/collections/last-chance/products.json",
+    "https://ilumkb.com/collections/on-sale/products.json",
+    # NovelKeys — richest source: a GMK-specific discount collection plus the
+    # leftovers listing this pass exists to catch.
+    "https://novelkeys.com/collections/discounted-gmk/products.json",
+    "https://novelkeys.com/collections/in-stock-gmk-leftovers/products.json",
+    "https://novelkeys.com/collections/clearance/products.json",
+    "https://novelkeys.com/collections/base-kit-sale/products.json",
+    "https://cannonkeys.com/collections/clearance/products.json",
+    "https://cannonkeys.com/collections/clearance-nicepbt-cannoncaps/products.json",
+    "https://unikeyboards.com/collections/keycap-sale-collection/products.json",
+    "https://unikeyboards.com/collections/currently-on-sale/products.json",
+    "https://prototypist.net/collections/last-chance/products.json",
+    "https://prototypist.net/collections/in-stock-streamsale/products.json",
+    "https://ktechs.store/collections/warehouse-clearance/products.json",
+    "https://pantheonkeys.com/collections/clearance/products.json",
+    "https://clickclack.io/collections/sale/products.json",
+    "https://klc-playground.com/collections/black-friday/products.json",
+    "https://geon.works/collections/gmk-leftover-collection/products.json",
+    "https://www.matrixlab.store/collections/flash/products.json",
 ]
 
 
@@ -3540,18 +3586,24 @@ def run_outlets(
     by_full, by_base = _build_set_index(conn)
     page = context.new_page()
     try:
-        for vendor_slug, url in OUTLET_COLLECTIONS:
+        for url in OUTLET_COLLECTIONS:
             if now_ms() > deadline:
                 log("Outlets: time budget reached — stopping.")
                 break
+            # Resolve the vendor from the collection's HOST rather than a
+            # hardcoded slug: a wrong slug skips silently, a wrong host does not
+            # exist to get wrong.
+            vendor_id = find_vendor_for_url(conn, url)
+            if not vendor_id:
+                log(f"Outlets: no tracked vendor for {_dcs_host(url)} — skipped.")
+                continue
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
-                    'SELECT id, currency FROM "Vendor" WHERE slug = %s',
-                    (vendor_slug,),
+                    'SELECT id, currency FROM "Vendor" WHERE id = %s',
+                    (vendor_id,),
                 )
                 vendor = cur.fetchone()
             if not vendor:
-                log(f"Outlets: vendor '{vendor_slug}' not in DB — skipped.")
                 continue
 
             fetch_url = f"{url}?limit=250"
@@ -3674,7 +3726,8 @@ def run_prices(
                 # it persist run after run. Counts as a successful update.
                 with conn.cursor() as cur:
                     cur.execute(
-                        'UPDATE "VendorKit" SET price = NULL, "inStock" = false, '
+                        'UPDATE "VendorKit" SET price = NULL, "compareAtPrice" = NULL, '
+                        '"inStock" = false, '
                         'variants = \'[]\'::jsonb, "priceUpdatedAt" = now(), '
                         '"priceSource" = \'SCRAPED\' WHERE id = %s',
                         (vk["id"],),
@@ -3685,11 +3738,13 @@ def run_prices(
                 with conn.cursor() as cur:
                     cur.execute(
                         'UPDATE "VendorKit" SET price = %s, currency = %s, '
+                        '"compareAtPrice" = %s, '
                         'variants = %s::jsonb, "inStock" = %s, '
                         '"priceUpdatedAt" = now(), "priceSource" = \'SCRAPED\' WHERE id = %s',
                         (
                             result["price"],
                             result["currency"],
+                            result.get("compareAt"),
                             json.dumps(result["variants"]),
                             result["inStock"],
                             vk["id"],

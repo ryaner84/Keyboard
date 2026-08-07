@@ -119,6 +119,11 @@ model VendorKit {
   vendorId       String
   vendor         Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   price          Float?
+  // Shopify's compare_at_price for the SAME variant `price` came from: the
+  // pre-discount number a store shows struck through. Only stored when it is
+  // strictly greater than price, so a non-null value always means a real
+  // markdown rather than a decorative equal-value field.
+  compareAtPrice Float?
   currency       String?
   inStock        Boolean   @default(true)
   gbUrl          String?

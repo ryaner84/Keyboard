@@ -946,6 +946,63 @@ class DcsWikiParsingTests(unittest.TestCase):
         )
 
 
+class CompareAtPriceTests(unittest.TestCase):
+    def test_markdown_is_captured_when_compare_exceeds_price(self):
+        out = scrape._parse_shopify_variants([
+            {"id": 1, "title": "Base Kit", "price": "99.00", "compare_at_price": "135.00"},
+        ])
+        self.assertEqual(out[0]["price"], 99.0)
+        self.assertEqual(out[0]["compareAt"], 135.0)
+
+    def test_equal_compare_is_not_a_discount(self):
+        # Shopify leaves compare_at_price populated at the SAME value on plenty
+        # of listings. Treating that as a markdown would advertise 0% off across
+        # half the catalogue.
+        out = scrape._parse_shopify_variants([
+            {"id": 1, "title": "Base Kit", "price": "135.00", "compare_at_price": "135.00"},
+        ])
+        self.assertNotIn("compareAt", out[0])
+
+    def test_lower_compare_is_ignored(self):
+        # compare_at BELOW price is bad vendor data, not a negative discount.
+        out = scrape._parse_shopify_variants([
+            {"id": 1, "title": "Base Kit", "price": "135.00", "compare_at_price": "99.00"},
+        ])
+        self.assertNotIn("compareAt", out[0])
+
+    def test_missing_or_null_compare_is_fine(self):
+        out = scrape._parse_shopify_variants([
+            {"id": 1, "title": "A", "price": "135.00", "compare_at_price": None},
+            {"id": 2, "title": "B", "price": "40.00"},
+        ])
+        self.assertEqual(len(out), 2)
+        for v in out:
+            self.assertNotIn("compareAt", v)
+
+    def test_price_parsing_is_unaffected_by_junk_compare(self):
+        out = scrape._parse_shopify_variants([
+            {"id": 1, "title": "A", "price": "135.00", "compare_at_price": "not-a-number"},
+        ])
+        self.assertEqual(out[0]["price"], 135.0)
+        self.assertNotIn("compareAt", out[0])
+
+
+class OutletCollectionTests(unittest.TestCase):
+    def test_entries_are_plain_product_json_urls(self):
+        # The list used to be (vendor_slug, url) pairs; a wrong slug skipped
+        # silently. Entries are now URLs whose host resolves to the vendor.
+        self.assertGreater(len(scrape.OUTLET_COLLECTIONS), 1)
+        for url in scrape.OUTLET_COLLECTIONS:
+            self.assertIsInstance(url, str, url)
+            self.assertTrue(url.startswith("https://"), url)
+            self.assertTrue(url.endswith("/products.json"), url)
+
+    def test_no_duplicate_collections(self):
+        self.assertEqual(
+            len(scrape.OUTLET_COLLECTIONS), len(set(scrape.OUTLET_COLLECTIONS))
+        )
+
+
 class BaseKitPriceBoundsTests(unittest.TestCase):
     def test_cheap_accessory_prices_are_accepted(self):
         # The dcs.wiki archive tracks accessory products as first-class sets
