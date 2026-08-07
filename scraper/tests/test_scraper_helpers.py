@@ -987,6 +987,48 @@ class CompareAtPriceTests(unittest.TestCase):
         self.assertNotIn("compareAt", out[0])
 
 
+class MultiSetListingExclusionTests(unittest.TestCase):
+    """A clearance page holding MANY sets must never link as one set's listing.
+
+    Surveyed across every vendor's clearance collections: the shape is rare but
+    real, and confined to NovelKeys plus GMK's own Warehouse Finds. The common
+    case — one set with many kits (KAT Space Dust, CRP R4) — is handled by
+    choose_kit_variant and must keep working.
+    """
+
+    def _excluded(self, title: str) -> bool:
+        return bool(scrape._TITLE_ACCESSORY_RE.search(title))
+
+    def test_multi_set_clearance_listings_are_excluded(self):
+        for title in (
+            "GMK Leftovers",
+            "In stock GMK Leftovers",
+            "GMK Child Kits",
+            "GMK Child Kit",
+            "Zoom75 Extra Badge",
+        ):
+            self.assertTrue(self._excluded(title), title)
+
+    def test_artisans_stay_excluded(self):
+        # Their variants are named after real sets (RAMA Artisans -> bushido,
+        # bento, awaken), so a miss here links an artisan to a GMK set.
+        for title in ("RAMA Artisans", "Salvun Artisans", "HIBI Artisans"):
+            self.assertTrue(self._excluded(title), title)
+
+    def test_real_sets_are_not_caught(self):
+        # The exclusion must not swallow ordinary listings — including a set
+        # whose own name contains a word near the new patterns.
+        for title in (
+            "GMK Bingsu R2",
+            "GMK Botanical Keycaps",
+            "DCS Soju",
+            "GMK Foo Extras",
+            "KAT Space Dust Keycaps",
+            "CRP R4",
+        ):
+            self.assertFalse(self._excluded(title), title)
+
+
 class OutletCollectionTests(unittest.TestCase):
     def test_entries_are_plain_product_json_urls(self):
         # The list used to be (vendor_slug, url) pairs; a wrong slug skipped
