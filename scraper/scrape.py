@@ -2956,7 +2956,13 @@ def run_images(
 
 # Shopify caps products.json at 250/page; 4 pages = 1000 products covers every
 # keyboard store's catalog comfortably.
-_DISCOVERY_MAX_CATALOG_PAGES = 4
+# 250 products per page. Four pages covered every store when this was written;
+# Prototypist now carries 1500+, with 106 GMK/DCS products sitting on pages 5-6
+# alone — invisible to discovery and impossible to notice, because the loop
+# stopped silently. Eight pages covers it, and small stores still exit early on
+# the short-page break, so only large catalogues pay the extra requests (which
+# HostThrottle now spaces out).
+_DISCOVERY_MAX_CATALOG_PAGES = 8
 _DISCOVERY_VENDOR_LIMIT = 8
 
 
@@ -2974,6 +2980,12 @@ def normalize_set_name(name: str) -> str:
     # is the same set as "GMK Seafarer" (vendor outlets and gmk.net both add it).
     s = re.sub(r"\b(keycap\s*sets?|keycaps?|keysets?|cherry\s*profile|cyl|mtnu)\b", " ", s)
     s = re.sub(r"\bround\s*(\d+)\b", r"r\1", s)
+    # Drop apostrophes BEFORE punctuation becomes whitespace. Otherwise a
+    # vendor's "40's" splits into "40 s" and stops matching the set's "40s" —
+    # that is a real miss on Prototypist/KeebzNCables' DCS After School 1992,
+    # and on "Li'l Dragon". A trailing possessive ("Davy Jones' Locker") always
+    # matched, which is why this stayed hidden.
+    s = s.replace("'", "").replace("\u2019", "")
     s = re.sub(r"[^a-z0-9]+", " ", s)
     return re.sub(r"\s+", " ", s).strip()
 
@@ -3170,6 +3182,12 @@ def run_discovery(
                 catalog.extend(gmk_products_from_catalog(data, origin))
                 if len(products) < 250:
                     break  # last page
+                if page_num == _DISCOVERY_MAX_CATALOG_PAGES:
+                    # Still a full page at the cap: the catalogue continues and
+                    # we are choosing not to read it. Say so rather than let the
+                    # shortfall look like the store having nothing.
+                    log(f"  {origin}: page cap reached — catalogue continues "
+                        f"beyond {raw_products} products.")
 
             # This loop used to be silent on every failure path, so a run
             # reporting gmk_listings=0 gave no way to tell "every store blocked

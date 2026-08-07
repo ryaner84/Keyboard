@@ -946,6 +946,50 @@ class DcsWikiParsingTests(unittest.TestCase):
         )
 
 
+class ApostropheNormalisationTests(unittest.TestCase):
+    """An apostrophe INSIDE a token used to split it and kill the match.
+
+    "40's" became "40 s" and stopped matching a set's "40s" — a real miss on
+    Prototypist / Keebz n Cables' DCS After School 1992. A TRAILING possessive
+    ("Davy Jones' Locker") always worked, which is why this stayed hidden.
+    """
+
+    def test_apostrophe_inside_a_token_no_longer_splits_it(self):
+        self.assertEqual(
+            scrape.normalize_set_name("DCS After School 1992 - 40's Keycap Kit"),
+            scrape.normalize_set_name("DCS After School 1992 40s kit"),
+        )
+        self.assertEqual(
+            scrape.normalize_set_name("KAM Li'l Dragon Keyset"),
+            scrape.normalize_set_name("KAM Lil Dragon"),
+        )
+
+    def test_trailing_possessive_still_matches(self):
+        self.assertEqual(
+            scrape.normalize_set_name("GMK Davy Jones' Locker Keycaps"),
+            scrape.normalize_set_name("GMK Davy Jones Locker"),
+        )
+
+    def test_curly_apostrophe_is_handled_too(self):
+        self.assertEqual(
+            scrape.normalize_set_name("KAM Li\u2019l Dragon"),
+            scrape.normalize_set_name("KAM Lil Dragon"),
+        )
+
+    def test_distinct_sets_still_do_not_collide(self):
+        self.assertNotEqual(
+            scrape.normalize_set_name("DCS Dolch"),
+            scrape.normalize_set_name("GMK Dolch"),
+        )
+
+
+class DiscoveryPagingTests(unittest.TestCase):
+    def test_page_cap_covers_the_largest_known_catalogue(self):
+        # Prototypist carries 1500+ products; at 250/page a cap of 4 hid 106
+        # GMK/DCS items on pages 5-6 with no log line to show for it.
+        self.assertGreaterEqual(scrape._DISCOVERY_MAX_CATALOG_PAGES, 6)
+
+
 class CompareAtPriceTests(unittest.TestCase):
     def test_markdown_is_captured_when_compare_exceeds_price(self):
         out = scrape._parse_shopify_variants([

@@ -16,6 +16,9 @@ export function normalizeSetName(name: string): string {
     // is the same set as "GMK Seafarer" (vendor outlets and gmk.net both add it).
     .replace(/\b(keycap\s*sets?|keycaps?|keysets?|cherry\s*profile|cyl|mtnu)\b/g, " ")
     .replace(/\bround\s*(\d+)\b/g, "r$1")
+    // Strip apostrophes before punctuation collapses to spaces: "40's" must
+    // normalise like "40s", not "40 s". Mirror of scrape.py.
+    .replace(/['\u2019]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
