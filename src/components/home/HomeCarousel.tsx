@@ -132,7 +132,7 @@ export function HomeCarousel({ upcoming, released, kbUpcoming, kbReleased }: Hom
           <UpcomingCarousel
             sets={kbReleased}
             railTitle="Released Keyboards"
-            viewAllHref="/released?type=keyboards"
+            viewAllHref="/keyboards/past"
             moreLabel="Show more keyboards"
           />
         )}

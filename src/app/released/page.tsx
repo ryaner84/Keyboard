@@ -5,7 +5,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Bargain — GMK Tracker",
   description:
-    "Bargain hunt: GMK keycap sets and keyboards that finished their group buy — see which ones you can still buy in stock, from which vendors, at the best price to your country.",
+    "Bargain hunt: GMK keycap sets that finished their group buy — see which ones you can still buy in stock, from which vendors, at the best price to your country.",
 };
 
 export default function ReleasedPage() {

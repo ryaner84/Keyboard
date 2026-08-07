@@ -64,22 +64,15 @@ export async function GET(req: NextRequest) {
   const year = searchParams.get("year") ?? "";
   const designer = searchParams.get("designer") ?? "";
   const vendor = searchParams.get("vendor") ?? "";
-  // Maker filter (GMK / Signature Plastics). Keycaps only — a maker pill
-  // is meaningless on the keyboards tab.
+  // Maker filter (GMK / Signature Plastics).
   const makers = searchParams.getAll("maker").filter(isKeycapMaker);
   const sortBy = searchParams.get("sort") ?? "released-desc";
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
   const limit = Math.min(48, Math.max(1, parseInt(searchParams.get("limit") ?? "24")));
-  // Released sets split into two categories. Keycaps keep the multi-vendor
-  // price-compare experience; keyboards are single-vendor (price on the row),
-  // so the available/savings/deals machinery is skipped for them.
-  // Accept the type param case-insensitively and in either spelling — the UI
-  // sends "KEYBOARD", but a hand-typed / shared link uses "keyboards", and that
-  // must NOT silently fall through to keycaps (which is what surfaced GMK
-  // keycap sets under /released?type=keyboards).
-  const typeParam = (searchParams.get("type") ?? "").toLowerCase();
-  const productType = typeParam === "keyboard" || typeParam === "keyboards" ? "KEYBOARD" : "KEYCAPS";
-  const isKeyboard = productType === "KEYBOARD";
+  // Bargain is keycap-only: it exists for the multi-vendor price-compare and
+  // savings experience. Keyboards are single-vendor (price on the row), so they
+  // live in their own /keyboards section and never surface here.
+  const productType = "KEYCAPS" as const;
 
   let yearFilter: Record<string, unknown> = {};
   if (/^\d{4}$/.test(year)) {
@@ -91,15 +84,11 @@ export async function GET(req: NextRequest) {
     };
   }
 
-  // The price/savings sorts and availability filter are keycap-only (they read
-  // multi-vendor VendorKit prices). Keyboards ignore them entirely.
-  const priceSort = !isKeyboard && sortBy === "price-asc";
-  const savingsSort = !isKeyboard && sortBy === "savings-desc";
-  const effectiveAvailability = isKeyboard
-    ? ""
-    : priceSort || savingsSort
-      ? "available"
-      : availability;
+  // The price/savings sorts force the "available" filter (they read
+  // multi-vendor VendorKit prices, which only priced+in-stock sets have).
+  const priceSort = sortBy === "price-asc";
+  const savingsSort = sortBy === "savings-desc";
+  const effectiveAvailability = priceSort || savingsSort ? "available" : availability;
 
   const where = {
     ...VISIBLE_LISTING_WHERE,
@@ -205,15 +194,9 @@ export async function GET(req: NextRequest) {
     ]);
   }
 
-  // Per-category released counts power the Keycaps / Keyboards tab badges.
-  const baseReleased = { ...VISIBLE_LISTING_WHERE, status: { in: [...RELEASED_STATUSES] }, ...notHiddenWhere, ...notShowcaseWhere };
-  const [totalReleased, totalAvailable, countKeycaps, countKeyboards] = await Promise.all([
+  const [totalReleased, totalAvailable] = await Promise.all([
     prisma.groupBuy.count({ where: releasedWhere }),
-    isKeyboard
-      ? Promise.resolve(0)
-      : prisma.groupBuy.count({ where: { ...releasedWhere, ...AVAILABLE_FILTER } }),
-    prisma.groupBuy.count({ where: { ...baseReleased, productType: "KEYCAPS" } }),
-    prisma.groupBuy.count({ where: { ...baseReleased, productType: "KEYBOARD" } }),
+    prisma.groupBuy.count({ where: { ...releasedWhere, ...AVAILABLE_FILTER } }),
   ]);
 
   // Top designers for the filter dropdown — only returned on page 1 with no
@@ -249,9 +232,9 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // "Biggest savings" deals rail (keycap-only — needs multi-vendor pricing)
+  // "Biggest savings" deals rail (needs multi-vendor pricing)
   let deals: unknown[] = [];
-  if (!isKeyboard && page === 1 && !search && !year && !designer && !vendor && availability !== "soldout") {
+  if (page === 1 && !search && !year && !designer && !vendor && availability !== "soldout") {
     const available = await prisma.groupBuy.findMany({
       where: { ...releasedWhere, ...AVAILABLE_FILTER },
       include: PRICING_INCLUDE,
@@ -276,5 +259,5 @@ export async function GET(req: NextRequest) {
       .map((r) => r.set);
   }
 
-  return NextResponse.json({ data, total, page, limit, totalReleased, totalAvailable, countKeycaps, countKeyboards, deals, topDesigners, topVendors });
+  return NextResponse.json({ data, total, page, limit, totalReleased, totalAvailable, deals, topDesigners, topVendors });
 }
