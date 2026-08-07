@@ -320,7 +320,7 @@ async function backfillShipping(client) {
     // the nightly refresh re-scrapes with the corrected store currency.
     const requeue = await client.query(
       `UPDATE public."VendorKit"
-       SET price = NULL, "priceUpdatedAt" = NULL
+       SET price = NULL, "compareAtPrice" = NULL, "priceUpdatedAt" = NULL
        WHERE "priceSource" = 'SCRAPED' AND "vendorId" = ANY($1)`,
       [correctedIds]
     );
@@ -434,7 +434,8 @@ async function main() {
         await ensureListingReportTable(client);
         await ensurePersonalTrackerTables(client);
         await ensureCollectionPhotoReportTable(client);
-        await purgeBlockedVendors(client);
+        await ensureCompareAtPriceColumn(client);
+    await purgeBlockedVendors(client);
         await purgeCancelledSets(client);
         await purgeBlockedVendorSetPairs(client);
         await reclassifyKeycapKeyboards(client);
@@ -462,6 +463,7 @@ async function main() {
         await requeueGeoCurrencyPrices(client);
         await requeueGeoCurrencyPricesV2(client);
         await auditCleanupV3(client);
+        await ensureCompareAtPriceColumn(client);
         await purgeMispricedListings(client);
         await prioritizePreorderVendors(client);
         await reclassifyMisflaggedKeycaps(client);
@@ -514,6 +516,19 @@ async function main() {
     console.warn("[db-setup] The app will still deploy; you can re-run by redeploying once the DB is reachable.");
   } finally {
     await client.end().catch(() => {});
+  }
+}
+
+// Pre-discount price for the same variant `price` came from, so the site can
+// show "was X, now Y". Nullable and only written when a real markdown exists.
+async function ensureCompareAtPriceColumn(client) {
+  try {
+    await client.query(
+      `ALTER TABLE public."VendorKit"
+       ADD COLUMN IF NOT EXISTS "compareAtPrice" double precision`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] compareAtPrice column ensure skipped: ${err.message}`);
   }
 }
 
@@ -868,7 +883,7 @@ async function purgeImplausibleScrapedPrices(client) {
   try {
     const { rowCount } = await client.query(
       `UPDATE public."VendorKit"
-       SET price = NULL, "priceUpdatedAt" = NULL
+       SET price = NULL, "compareAtPrice" = NULL, "priceUpdatedAt" = NULL
        WHERE "priceSource" = 'SCRAPED'
          AND price IS NOT NULL
          AND (

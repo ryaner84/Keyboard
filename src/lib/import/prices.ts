@@ -31,6 +31,10 @@ const DEFAULT_MAX_RUNTIME_MS = 50_000;
 
 export interface PriceResult {
   price: number;
+  // Pre-discount price of the SAME variant `price` came from, when that
+  // variant is actually marked down. Undefined otherwise — a discount on an
+  // unrelated subkit says nothing about the base kit.
+  compareAt?: number;
   // Vendor-level availability for the selected/base-kit variants.
   inStock: boolean;
   // null when the store's /meta.json is blocked — caller must fall back to the
@@ -39,7 +43,7 @@ export interface PriceResult {
   // Every variant on the product page, in display order: feeds the set
   // page's kit sections. `available` present only when the store reported
   // per-variant stock.
-  variants: Array<{ title: string; price: number; available?: boolean }>;
+  variants: Array<{ title: string; price: number; compareAt?: number; available?: boolean }>;
 }
 
 // Sentinel distinct from null. `null` means the listing couldn't be read this
@@ -271,12 +275,30 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     const data = (await res.json()) as {
       product?: {
         title?: string;
-        variants?: Array<{ id?: number | string; title?: string; price?: string | number; available?: boolean }>;
+        variants?: Array<{
+          id?: number | string;
+          title?: string;
+          price?: string | number;
+          compare_at_price?: string | number | null;
+          available?: boolean;
+        }>;
       };
     };
     const rawVariants = data.product?.variants ?? [];
     const variants = rawVariants
-      .map((v) => ({ id: String(v.id ?? ""), title: String(v.title ?? ""), price: Number(v.price) }))
+      .map((v) => {
+        // compare_at_price is often populated at the SAME value as price on
+        // Shopify; treating that as a markdown would advertise 0% off across
+        // half the catalogue, so keep it only when strictly greater.
+        const price = Number(v.price);
+        const compare = Number(v.compare_at_price);
+        return {
+          id: String(v.id ?? ""),
+          title: String(v.title ?? ""),
+          price,
+          ...(Number.isFinite(compare) && compare > price ? { compareAt: compare } : {}),
+        };
+      })
       .filter((v) => !isNaN(v.price) && v.price > 0);
     if (variants.length === 0) return null;
 
@@ -435,12 +457,16 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
       price: chosen.price,
       currency,
       inStock,
+      // The markdown belongs to the CHOSEN variant only — a sale on some
+      // unrelated subkit is not a sale on the base kit.
+      ...(chosen.compareAt ? { compareAt: chosen.compareAt } : {}),
       // Persist per-variant availability when Shopify reported it, so the set
       // page's "Complete the set" section can show subkit stock the same way
       // the base table does. Unknown stock is omitted, not guessed.
       variants: variants.map((v) => ({
         title: v.title,
         price: v.price,
+        ...(v.compareAt ? { compareAt: v.compareAt } : {}),
         ...(availableById.has(v.id) ? { available: availableById.get(v.id)! } : {}),
       })),
     };
@@ -827,6 +853,7 @@ async function refreshOne(
       where: { id: vk.id },
       data: {
         price: null,
+        compareAtPrice: null,
         inStock: false,
         priceUpdatedAt: new Date(),
         priceSource: "SCRAPED",
@@ -839,6 +866,9 @@ async function refreshOne(
       where: { id: vk.id },
       data: {
         price: priceData.price,
+        // Null when the chosen variant isn't marked down, so a stale markdown
+        // never outlives the discount that produced it.
+        compareAtPrice: priceData.compareAt ?? null,
         // Store currency (meta.json) when reachable; otherwise the vendor's
         // own currency — e.g. Deskhero prices are CAD even when meta is blocked.
         currency: priceData.currency ?? vk.vendor.currency,
