@@ -960,6 +960,31 @@ class DcsWikiParsingTests(unittest.TestCase):
         )
 
 
+class ZFrontierStorefrontTests(unittest.TestCase):
+    """zFrontier runs two sites and the vendor row pointed at the wrong one.
+
+    www.zfrontier.com is the CN app the GB-card pass reads; en.zfrontier.com is
+    an ordinary Shopify storefront (359 products, 107 GMK/DCS). Discovery builds
+    {websiteUrl host}/products.json, so pointing the vendor at the app produced
+    a 404 on every run — silently, since an unreadable catalogue just skips.
+    """
+
+    def test_vendor_points_at_the_shopify_storefront(self):
+        self.assertEqual(scrape.ZFRONTIER_STORE_ORIGIN, "https://en.zfrontier.com")
+        self.assertIn("en.zfrontier.com", scrape.ZFRONTIER_STORE_ORIGIN)
+
+    def test_gb_card_pass_still_uses_the_app_host(self):
+        # The two hosts do different jobs; collapsing them would break the
+        # group-buy card scrape, which has no Shopify equivalent.
+        self.assertEqual(scrape.ZFRONTIER_ORIGIN, "https://www.zfrontier.com")
+        self.assertNotEqual(scrape.ZFRONTIER_ORIGIN, scrape.ZFRONTIER_STORE_ORIGIN)
+        self.assertTrue(scrape.ZFRONTIER_GB_URL.startswith(scrape.ZFRONTIER_ORIGIN))
+
+    def test_storefront_host_resolves_for_discovery(self):
+        # Discovery and find_vendor_for_url both key off the URL host.
+        self.assertEqual(scrape._dcs_host(scrape.ZFRONTIER_STORE_ORIGIN), "en.zfrontier.com")
+
+
 class BundleVariantTests(unittest.TestCase):
     """"Base + Novelties" is its own category, not BASE and not NOVELTIES.
 
