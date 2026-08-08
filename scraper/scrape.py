@@ -1761,6 +1761,13 @@ def ensure_gmk_vendor(conn) -> str:
         row = cur.fetchone()
         if row:
             vendor_id = row["id"]
+            # The row already exists in every live DB, so the INSERT below never
+            # runs there. Repoint it here or the 404 crawl persists forever.
+            cur.execute(
+                'UPDATE "Vendor" SET "websiteUrl" = %s, country = %s '
+                'WHERE id = %s AND ("websiteUrl" IS DISTINCT FROM %s OR country IS DISTINCT FROM %s)',
+                (ZFRONTIER_STORE_ORIGIN, "HK", vendor_id, ZFRONTIER_STORE_ORIGIN, "HK"),
+            )
         else:
             cur.execute("""
                 INSERT INTO "Vendor"
@@ -2475,6 +2482,17 @@ ZFRONTIER_GB_URL = (
 )
 ZFRONTIER_VENDOR_SLUG = "zfrontier"
 
+# zFrontier runs TWO sites. www.zfrontier.com is the CN app whose collection
+# pages the GB-card pass above reads; en.zfrontier.com is a separate, ordinary
+# Shopify storefront (359 products, 107 of them GMK/DCS, USD, HK).
+#
+# The vendor row pointed at the app, so discovery built
+# www.zfrontier.com/products.json — a 404 — and had been crawling zFrontier for
+# nothing. The vendor's websiteUrl is the STOREFRONT, so discovery reaches the
+# catalogue and the price pass can price it; the GB-card pass keeps using
+# ZFRONTIER_ORIGIN, which is a different job on a different host.
+ZFRONTIER_STORE_ORIGIN = "https://en.zfrontier.com"
+
 _ZF_CARD_JS = """() => {
     const items = [];
     const seen = new Set();
@@ -2505,16 +2523,25 @@ def ensure_zfrontier_vendor(conn) -> str:
         row = cur.fetchone()
         if row:
             vendor_id = row["id"]
+            # The row already exists in every live database, so the INSERT below
+            # never runs there. Repoint it here, or the 404 crawl persists.
+            cur.execute(
+                'UPDATE "Vendor" SET "websiteUrl" = %s, country = %s WHERE id = %s',
+                (ZFRONTIER_STORE_ORIGIN, "HK", vendor_id),
+            )
         else:
-            # Region/currency mirror vendor-overrides.ts (ASIA / CN / USD).
+            # Country/currency per the storefront's own meta.json (HK / USD);
+            # region stays ASIA, which is what shipping estimates key off.
             cur.execute("""
                 INSERT INTO "Vendor"
                     (id, slug, name, region, country, currency, "websiteUrl", "logoUrl")
                 VALUES
-                    (gen_random_uuid()::text, %s, 'zFrontier', 'ASIA', 'CN', 'USD', %s, NULL)
-                ON CONFLICT (slug) DO UPDATE SET "websiteUrl" = EXCLUDED."websiteUrl"
+                    (gen_random_uuid()::text, %s, 'zFrontier', 'ASIA', 'HK', 'USD', %s, NULL)
+                ON CONFLICT (slug) DO UPDATE SET
+                    "websiteUrl" = EXCLUDED."websiteUrl",
+                    country = EXCLUDED.country
                 RETURNING id
-            """, (ZFRONTIER_VENDOR_SLUG, ZFRONTIER_ORIGIN))
+            """, (ZFRONTIER_VENDOR_SLUG, ZFRONTIER_STORE_ORIGIN))
             vendor_id = cur.fetchone()["id"]
 
         cur.execute("""
