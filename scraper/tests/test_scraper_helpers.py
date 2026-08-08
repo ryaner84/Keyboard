@@ -1214,6 +1214,83 @@ class OutletCollectionTests(unittest.TestCase):
             len(scrape.OUTLET_COLLECTIONS), len(set(scrape.OUTLET_COLLECTIONS))
         )
 
+    def test_prototypist_in_stock_collections_are_listed(self):
+        # Prototypist mints a new product per lifecycle stage, so a VendorKit
+        # linked during the group buy stays pointed at a permanently sold-out
+        # coming-soon-*/group-buy-* handle. Only these collections carry the
+        # in-stock listing that actually has a price.
+        hosts = [scrape._dcs_host(u) for u in scrape.OUTLET_COLLECTIONS]
+        self.assertIn("prototypist.net", hosts)
+        for handle in ("in-stock-gmk", "in-stock-signature-plastics-keysets"):
+            self.assertTrue(
+                any(f"prototypist.net/collections/{handle}/" in u
+                    for u in scrape.OUTLET_COLLECTIONS),
+                handle,
+            )
+
+
+    def test_collections_interleave_across_hosts_without_loss(self):
+        # The list is written grouped by store (five consecutive Prototypist
+        # entries), and paging multiplied the requests per entry — that is the
+        # host-clustered burst the throttle exists to avoid. Interleaving must
+        # spread them while keeping every URL exactly once.
+        urls = scrape.OUTLET_COLLECTIONS
+        spread = [
+            r["productUrl"]
+            for r in scrape.HostThrottle.interleave(
+                [{"productUrl": u} for u in urls]
+            )
+        ]
+        self.assertEqual(sorted(spread), sorted(urls))
+
+        def adjacent_same_host(seq):
+            hosts = [scrape._dcs_host(u) for u in seq]
+            return sum(1 for a, b in zip(hosts, hosts[1:]) if a == b)
+
+        self.assertLess(adjacent_same_host(spread), adjacent_same_host(urls))
+
+
+class SeededVendorTests(unittest.TestCase):
+    def test_every_seeded_vendor_is_well_formed(self):
+        slugs = set()
+        for slug, name, region, country, currency, website in scrape.SEEDED_VENDORS:
+            self.assertNotIn(slug, slugs, f"duplicate slug {slug}")
+            slugs.add(slug)
+            self.assertTrue(slug and slug == slug.lower(), slug)
+            self.assertTrue(name, slug)
+            self.assertEqual(len(country), 2, slug)
+            self.assertEqual(len(currency), 3, slug)
+            self.assertTrue(website.startswith("https://"), slug)
+            # An origin only — discovery appends "/products.json" to it.
+            self.assertNotIn("/products.json", website, slug)
+            self.assertFalse(website.endswith("/"), slug)
+
+    def test_seeded_hosts_cover_their_outlet_collections(self):
+        # A collection whose host resolves to no vendor is skipped every night
+        # with only a log line to show for it, so the seed list and the outlet
+        # list must not drift apart.
+        seeded = {scrape._dcs_host(v[5]) for v in scrape.SEEDED_VENDORS}
+        for host in ("saberkeebs.com", "shop.yushakobo.jp"):
+            self.assertIn(host, seeded, host)
+            self.assertTrue(
+                any(scrape._dcs_host(u) == host for u in scrape.OUTLET_COLLECTIONS),
+                host,
+            )
+
+    def test_host_matching_strips_www_but_not_a_shop_subdomain(self):
+        # Why Yushakobo has to be seeded with the subdomain: "www." is stripped
+        # so either spelling of Keebz n Cables resolves, but "shop." is not —
+        # a row pointed at yushakobo.jp would never match shop.yushakobo.jp,
+        # and yushakobo.jp/products.json is a 404.
+        self.assertEqual(
+            scrape._dcs_host("https://www.keebzncables.com/collections/x/products.json"),
+            scrape._dcs_host("https://keebzncables.com"),
+        )
+        self.assertNotEqual(
+            scrape._dcs_host("https://shop.yushakobo.jp"),
+            scrape._dcs_host("https://yushakobo.jp"),
+        )
+
 
 class BaseKitPriceBoundsTests(unittest.TestCase):
     def test_cheap_accessory_prices_are_accepted(self):
