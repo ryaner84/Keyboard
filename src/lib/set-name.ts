@@ -14,7 +14,12 @@ export function normalizeSetName(name: string): string {
     .replace(/\b(group\s*buy|groupbuy|gb|pre[- ]?order|in[- ]?stock|extras?|live|launch(ed)?)\b/g, " ")
     // "cyl"/"mtnu" are GMK profile tokens, not set identity: "GMK CYL Seafarer"
     // is the same set as "GMK Seafarer" (vendor outlets and gmk.net both add it).
-    .replace(/\b(keycap\s*sets?|keycaps?|keysets?|cherry\s*profile|cyl|mtnu)\b/g, " ")
+    //
+    // "kit"/"kits" is filler for the same reason "keycap set" is — it names the
+    // packaging, not the product. dcs.wiki calls one set "DCS After School 1992
+    // 40s kit" while Prototypist sells it as "DCS After-School 1992 40s Keycap
+    // Set"; only "kit" kept those apart. `\bkits?\b` cannot eat "Kitsune".
+    .replace(/\b(keycap\s*sets?|keycaps?|keysets?|kits?|cherry\s*profile|cyl|mtnu)\b/g, " ")
     .replace(/\bround\s*(\d+)\b/g, "r$1")
     // Strip apostrophes before punctuation collapses to spaces: "40's" must
     // normalise like "40s", not "40 s". Mirror of scrape.py.

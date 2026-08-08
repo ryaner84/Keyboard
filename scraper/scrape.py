@@ -3044,7 +3044,18 @@ def normalize_set_name(name: str) -> str:
     )
     # "cyl"/"mtnu" are GMK profile tokens, not set identity: "GMK CYL Seafarer"
     # is the same set as "GMK Seafarer" (vendor outlets and gmk.net both add it).
-    s = re.sub(r"\b(keycap\s*sets?|keycaps?|keysets?|cherry\s*profile|cyl|mtnu)\b", " ", s)
+    #
+    # "kit"/"kits" joined the filler list for the same reason "keycap set" is
+    # there — it names the packaging, not the product. dcs.wiki calls one set
+    # "DCS After School 1992 40s kit" while Prototypist sells the same thing as
+    # "DCS After-School 1992 40s Keycap Set"; only "kit" kept those apart.
+    # dedupeKey has always treated it as filler; this brings the price matcher
+    # into line. Checked against all 1198 tracked set names: zero new
+    # collisions. "\bkits?\b" cannot eat "Kitsune" — the boundary requires the
+    # token to end there.
+    s = re.sub(
+        r"\b(keycap\s*sets?|keycaps?|keysets?|kits?|cherry\s*profile|cyl|mtnu)\b", " ", s
+    )
     s = re.sub(r"\bround\s*(\d+)\b", r"r\1", s)
     # Drop apostrophes BEFORE punctuation becomes whitespace. Otherwise a
     # vendor's "40's" splits into "40 s" and stops matching the set's "40s" —
@@ -3250,6 +3261,12 @@ def _build_set_index(conn) -> tuple[dict, dict]:
             "base_kit_id": row["base_kit_id"],
             "status": row["status"],
             "gbStart": row["gbStart"],
+            # Whether the SET ITSELF is a subkit/accessory product. The
+            # dcs.wiki archive catalogs these as first-class sets — DCS Bae
+            # Addon, 10U Spacebars, LAE Addon, "After School 1992 40s kit" —
+            # so the rule "never link a subkit-looking product" has to know
+            # when the subkit IS the product being tracked.
+            "is_subkit": bool(_SUBKIT_PRODUCT_RE.search(row["name"] or "")),
         }
         full = normalize_set_name(row["name"])
         if not full:
@@ -3369,12 +3386,22 @@ def run_discovery(
             # the best one exactly once.
             by_kit: dict[str, dict] = {}
             for product in catalog:
-                # Subkit/accessory products (novelties, spacebars, deskmats…)
-                # are never the set's base listing — skip before matching.
-                if _SUBKIT_PRODUCT_RE.search(product["title"]):
-                    continue
                 match = match_product_to_set(product["title"], by_full, by_base)
                 if not match:
+                    continue
+                # Subkit/accessory products are never a normal set's base
+                # listing: "GMK Foo (Novelties)" normalises to "gmk foo" once
+                # the bracket is stripped, so without this it would hijack the
+                # base listing of GMK Foo.
+                #
+                # But the test used to run BEFORE matching, which made it
+                # unconditional — and dcs.wiki catalogs subkits as sets in their
+                # own right. Every such set (DCS Bae Addon, 10U Spacebars, LAE
+                # Addon, After School 1992 40s kit) was therefore unlinkable by
+                # discovery: the only products that could match them are exactly
+                # the ones being skipped. Apply the guard only when the matched
+                # SET is not itself a subkit.
+                if _SUBKIT_PRODUCT_RE.search(product["title"]) and not match["is_subkit"]:
                     continue
                 bucket = by_kit.setdefault(
                     match["base_kit_id"], {"match": match, "products": []}
@@ -3987,13 +4014,16 @@ def run_outlets(
                 if not handle:
                     continue
                 stats["products"] += 1
-                # Outlet collections list base and subkits as separate
-                # products — only the base listing may take over the link.
-                if _SUBKIT_PRODUCT_RE.search(title):
-                    continue
                 match = match_product_to_set(title, by_full, by_base)
                 if not match:
                     log(f"  outlet product not matched to a set: {title[:60]}")
+                    continue
+                # Outlet collections list base and subkits as separate products,
+                # and only a base listing may take over a normal set's link.
+                # A set that IS a subkit (dcs.wiki catalogs several) is the one
+                # case where the subkit product is the right listing — same rule
+                # as run_discovery, and it has to run AFTER matching to know.
+                if _SUBKIT_PRODUCT_RE.search(title) and not match["is_subkit"]:
                     continue
                 product_url = f"{origin}/products/{handle}"
                 # Relink to the outlet listing and clear priceUpdatedAt so the
