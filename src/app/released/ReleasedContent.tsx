@@ -3,22 +3,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { SetCard } from "@/components/browse/SetCard";
-import { KeyboardCard } from "@/components/keyboards/KeyboardCard";
-import { useLocation } from "@/context/LocationContext";
 import { KEYCAP_MAKER_LABELS, type KeycapMaker } from "@/lib/set-name";
 import type { GroupBuyWithPricing } from "@/types";
 
 const PAGE_SIZE = 12;
 const CURRENT_YEAR = new Date().getFullYear();
 const OLDEST_YEAR = 2015;
-
-// Top-level split: released keycap sets vs released keyboards. They have very
-// different data models (multi-vendor price compare vs single-vendor card), so
-// each tab shows only the controls that make sense for it.
-const CATEGORY_TABS = [
-  { value: "keycaps", label: "Keycaps", emoji: "🎨" },
-  { value: "keyboards", label: "Keyboards", emoji: "⌨️" },
-] as const;
 
 const ALL_MAKERS: KeycapMaker[] = ["GMK", "SP"];
 
@@ -38,20 +28,10 @@ const SORT_OPTIONS = [
   { value: "name", label: "A–Z" },
 ] as const;
 
-// Keyboards are single-vendor — only ordering sorts apply (no price/savings).
-const KEYBOARD_SORT_OPTIONS = [
-  { value: "released-desc", label: "Newest" },
-  { value: "released-asc", label: "Oldest" },
-  { value: "name", label: "A–Z" },
-] as const;
-
 export default function ReleasedContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { countryCode } = useLocation();
 
-  const category = searchParams.get("type") === "keyboards" ? "keyboards" : "keycaps";
-  const isKeyboard = category === "keyboards";
   const search = searchParams.get("search") ?? "";
   const availability = searchParams.get("availability") ?? "";
   const year = searchParams.get("year") ?? "";
@@ -61,11 +41,7 @@ export default function ReleasedContent() {
   // dropdown like designer/vendor/year, not pills — same row, same affordance.
   const maker = searchParams.get("maker") ?? "";
   const sortDefault = "released-desc";
-  let sortBy = searchParams.get("sort") ?? sortDefault;
-  // Guard: keyboard tab can't use keycap-only sorts.
-  if (isKeyboard && (sortBy === "price-asc" || sortBy === "savings-desc")) {
-    sortBy = sortDefault;
-  }
+  const sortBy = searchParams.get("sort") ?? sortDefault;
 
   const [sets, setSets] = useState<GroupBuyWithPricing[]>([]);
   const [deals, setDeals] = useState<GroupBuyWithPricing[]>([]);
@@ -74,8 +50,6 @@ export default function ReleasedContent() {
   const [total, setTotal] = useState(0);
   const [totalReleased, setTotalReleased] = useState<number | null>(null);
   const [totalAvailable, setTotalAvailable] = useState<number | null>(null);
-  const [countKeycaps, setCountKeycaps] = useState<number | null>(null);
-  const [countKeyboards, setCountKeyboards] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -104,28 +78,18 @@ export default function ReleasedContent() {
     debounceRef.current = setTimeout(() => updateParams({ search: value }), 350);
   };
 
-  // Switching category resets the filters that don't carry over (the two tabs
-  // have different vendors/designers and keyboards have no availability/price sort).
-  const switchCategory = (value: string) => {
-    setSearchDraft("");
-    const params = new URLSearchParams();
-    if (value === "keyboards") params.set("type", "keyboards");
-    router.replace(`/released?${params.toString()}`);
-  };
-
   const fetchPage = useCallback(
     async (pageNum: number, append: boolean) => {
       const seq = ++reqSeq.current;
       if (append) setLoadingMore(true);
       else setLoading(true);
       const params = new URLSearchParams();
-      if (isKeyboard) params.set("type", "KEYBOARD");
       if (search) params.set("search", search);
-      if (!isKeyboard && availability) params.set("availability", availability);
+      if (availability) params.set("availability", availability);
       if (year) params.set("year", year);
       if (designer) params.set("designer", designer);
-      if (!isKeyboard && vendor) params.set("vendor", vendor);
-      if (!isKeyboard && maker) params.set("maker", maker);
+      if (vendor) params.set("vendor", vendor);
+      if (maker) params.set("maker", maker);
       params.set("sort", sortBy);
       params.set("page", String(pageNum));
       params.set("limit", String(PAGE_SIZE));
@@ -146,8 +110,6 @@ export default function ReleasedContent() {
         setTotal(data.total ?? 0);
         setTotalReleased(data.totalReleased ?? null);
         setTotalAvailable(data.totalAvailable ?? null);
-        if (data.countKeycaps != null) setCountKeycaps(data.countKeycaps);
-        if (data.countKeyboards != null) setCountKeyboards(data.countKeyboards);
         setPage(pageNum);
       } catch {
         if (seq === reqSeq.current && !append) setSets([]);
@@ -158,7 +120,7 @@ export default function ReleasedContent() {
         }
       }
     },
-    [isKeyboard, search, availability, year, designer, vendor, sortBy, maker]
+    [search, availability, year, designer, vendor, sortBy, maker]
   );
 
   useEffect(() => {
@@ -184,15 +146,9 @@ export default function ReleasedContent() {
             💸 Bargain
           </span>
           <h1 className="mt-3 text-2xl sm:text-3xl font-extrabold text-white">
-            {isKeyboard ? "Keyboard Bargains" : "Keycap Bargains"}
+            Keycap Bargains
           </h1>
           <p className="mt-2 text-emerald-50 text-sm sm:text-base max-w-2xl">
-            {isKeyboard ? (
-              <>
-                Keyboards whose group buy has wrapped up — here&apos;s where they
-                landed, with the latest status and development updates.
-              </>
-            ) : (
               <>
                 Missed the group buy? These sets have finished their run —
                 here&apos;s which ones vendors still stock, and where they&apos;re
@@ -201,7 +157,6 @@ export default function ReleasedContent() {
                   Prices differ across stores — we find you the lowest.
                 </span>
               </>
-            )}
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
             <div className="bg-white/15 backdrop-blur-sm rounded-xl px-4 py-2">
@@ -209,10 +164,10 @@ export default function ReleasedContent() {
                 {totalReleased ?? "—"}
               </p>
               <p className="text-[11px] text-emerald-100 uppercase tracking-wide">
-                {isKeyboard ? "released keyboards" : "released sets"}
+                released sets
               </p>
             </div>
-            {!isKeyboard && (
+            {(
               <div className="bg-white/15 backdrop-blur-sm rounded-xl px-4 py-2">
                 <p className="text-xl font-bold text-white leading-tight">
                   {totalAvailable ?? "—"}
@@ -226,41 +181,11 @@ export default function ReleasedContent() {
         </div>
       </div>
 
-      {/* ── Category switch: Keycaps / Keyboards ─────────────────────────── */}
-      <div className="inline-flex rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-1 mb-6">
-        {CATEGORY_TABS.map((tab) => {
-          const active = category === tab.value;
-          const count = tab.value === "keyboards" ? countKeyboards : countKeycaps;
-          return (
-            <button
-              key={tab.value}
-              onClick={() => switchCategory(tab.value)}
-              className={`flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold transition-colors ${
-                active
-                  ? "bg-emerald-600 text-white shadow-sm"
-                  : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-              }`}
-            >
-              <span>{tab.emoji}</span>
-              {tab.label}
-              {count != null && (
-                <span
-                  className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
-                    active ? "bg-white/25 text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
-                  }`}
-                >
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
 
       {/* ── Controls ─────────────────────────────────────────────────────── */}
       {/* Row 1: availability (keycaps only) + search */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-3">
-        {!isKeyboard && (
+        {(
           <div className="inline-flex rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-1 flex-shrink-0">
             {AVAILABILITY_TABS.map((tab) => (
               <button
@@ -295,7 +220,7 @@ export default function ReleasedContent() {
             type="text"
             value={searchDraft}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder={isKeyboard ? "Search keyboards…" : "Search sets, colorways…"}
+            placeholder="Search sets, colorways…"
             className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-900 transition-colors"
           />
         </div>
@@ -316,7 +241,7 @@ export default function ReleasedContent() {
           ))}
         </select>
 
-        {!isKeyboard && (
+        {(
           <select
             value={vendor}
             onChange={(e) => updateParams({ vendor: e.target.value })}
@@ -346,7 +271,7 @@ export default function ReleasedContent() {
           )}
         </select>
 
-        {!isKeyboard && (
+        {(
           <select
             value={maker}
             onChange={(e) => updateParams({ maker: e.target.value })}
@@ -365,7 +290,7 @@ export default function ReleasedContent() {
           <button
             onClick={() => {
               setSearchDraft("");
-              router.replace(isKeyboard ? "/released?type=keyboards" : "/released");
+              router.replace("/released");
             }}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-600 text-sm font-medium hover:bg-red-100 transition-colors"
           >
@@ -385,7 +310,7 @@ export default function ReleasedContent() {
           </svg>
           Sort by
         </span>
-        {(isKeyboard ? KEYBOARD_SORT_OPTIONS : SORT_OPTIONS).map((opt) => {
+        {SORT_OPTIONS.map((opt) => {
           const active = sortBy === opt.value;
           const isSavings = opt.value === "savings-desc";
           return (
@@ -429,7 +354,7 @@ export default function ReleasedContent() {
       )}
 
       {/* ── Deals rail (keycaps only) ────────────────────────────────────── */}
-      {!isKeyboard && !loading && deals.length > 0 && !search && !year && !designer && !vendor && availability !== "soldout" && (
+      {!loading && deals.length > 0 && !search && !year && !designer && !vendor && availability !== "soldout" && (
         <div className="mb-10 rounded-2xl border-2 border-amber-200 dark:border-amber-900 bg-gradient-to-br from-amber-50 via-orange-50 to-amber-50 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-amber-950/40 p-5 sm:p-6">
           <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -463,7 +388,7 @@ export default function ReleasedContent() {
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
         {loading
           ? "Loading…"
-          : `${total} ${isKeyboard ? "keyboard" : "set"}${total !== 1 ? "s" : ""}${designer ? ` by ${designer}` : ""}${
+          : `${total} $set${total !== 1 ? "s" : ""}${designer ? ` by ${designer}` : ""}${
               vendor ? ` at ${topVendors.find((v) => v.slug === vendor)?.name ?? vendor}` : ""
             }${
               availability === "available"
@@ -495,7 +420,7 @@ export default function ReleasedContent() {
         <div className="text-center py-16 text-gray-400">
           <p className="text-4xl mb-3">⌨</p>
           <p className="font-medium text-gray-500 dark:text-gray-300">
-            No released {isKeyboard ? "keyboards" : "sets"} found
+            No released sets found
           </p>
           <p className="text-sm mt-1">
             {availability === "available"
@@ -504,7 +429,7 @@ export default function ReleasedContent() {
           </p>
           {hasFilters && (
             <button
-              onClick={() => { setSearchDraft(""); router.replace(isKeyboard ? "/released?type=keyboards" : "/released"); }}
+              onClick={() => { setSearchDraft(""); router.replace("/released"); }}
               className="mt-4 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors"
             >
               Clear all filters
@@ -513,16 +438,10 @@ export default function ReleasedContent() {
         </div>
       ) : (
         <>
-          <div className={isKeyboard
-            ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
-            : "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5"}>
-            {sets.map((set) =>
-              isKeyboard ? (
-                <KeyboardCard key={set.id} kb={set} countryCode={countryCode} />
-              ) : (
-                <SetCard key={set.id} set={set} />
-              )
-            )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+            {sets.map((set) => (
+              <SetCard key={set.id} set={set} />
+            ))}
           </div>
 
           {hasMore && (
