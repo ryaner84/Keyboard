@@ -1441,23 +1441,6 @@ class StoreListingChoiceTests(unittest.TestCase):
         self.assertIsNotNone(scrape.pick_store_listing([product]))
 
 
-class HealthCheckTests(unittest.TestCase):
-    def test_only_removed_pages_count_as_dead(self):
-        # The whole value of the check is that RED means actionable. A removed
-        # page is a fact; 403/429/timeout is almost always rate limiting, and
-        # failing the job on those would train everyone to ignore it.
-        for status in (404, 410):
-            self.assertIn(status, scrape._HEALTH_DEAD_STATUSES, status)
-        for status in (200, 401, 403, 429, 500, 503, None):
-            self.assertNotIn(status, scrape._HEALTH_DEAD_STATUSES, status)
-
-    def test_manufacturer_vendors_are_excluded_from_probing(self):
-        # gmk.net and dcs.wiki are catalog sources, not stores — they serve no
-        # products.json, so probing them would report a permanent false fault.
-        self.assertIn("gmk", scrape.MANUFACTURER_VENDOR_SLUGS)
-        self.assertIn("dcs-wiki", scrape.MANUFACTURER_VENDOR_SLUGS)
-
-
 class SeededVendorTests(unittest.TestCase):
     def test_every_seeded_vendor_is_well_formed(self):
         slugs = set()

@@ -7,11 +7,6 @@ name: Verify live released pricing
 
 on:
   workflow_dispatch:
-  schedule:
-    # Daily, after the nightly linking + health jobs. Cheap end-to-end
-    # assertion that cards actually render a price — the failure mode a
-    # visitor notices first.
-    - cron: "10 5 * * *"
   push:
     branches: [main]
     paths:

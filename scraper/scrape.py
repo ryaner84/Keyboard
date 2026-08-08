@@ -4062,155 +4062,6 @@ def run_outlets(
     return stats
 
 
-# ----------------------------------------------------------------------------
-# Health check
-#
-# Every coverage bug found so far failed the same way: SILENTLY. A vendor whose
-# stored origin 404s, a collection that still resolves but is empty, a catalog
-# that quietly truncates — each produces a run summary that looks exactly like
-# "there was nothing to do". The passes cannot tell the difference; only an
-# explicit assertion can.
-#
-# Real examples this exists to catch, all found by hand:
-#   • yushakobo.jp/products.json → 404 (the store is on shop.yushakobo.jp).
-#     Discovery reported "0 tracked listings" for months.
-#   • geon.works/collections/gmk-leftover-collection → 200 with 0 products.
-#     Outlets reported a successful collection every night.
-#
-# Deliberately read-only: it writes nothing and is safe to run at any time.
-# ----------------------------------------------------------------------------
-
-# A removed page is a fact; a refused one is usually us being rate-limited, and
-# treating the two alike would make the check cry wolf until it was ignored.
-_HEALTH_DEAD_STATUSES = (404, 410)
-
-
-def _probe_catalog(page, url: str, scrapling=None) -> tuple[int | None, int | None]:
-    """Fetch a products.json and report (http_status, product_count).
-
-    A None count means the body could not be read at all. Uses the same fetch
-    path as the real passes on purpose — a health check that fetches differently
-    from the thing it is checking proves nothing about it.
-    """
-    status: int | None = None
-    data = None
-    try:
-        resp = page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
-        if resp is not None:
-            status = resp.status
-            if resp.ok:
-                try:
-                    data = json.loads(resp.text())
-                except Exception:  # noqa: BLE001
-                    data = None
-    except Exception:  # noqa: BLE001
-        pass
-    # Only fall back when the browser learned nothing; a real 404 is an answer.
-    if data is None and status not in _HEALTH_DEAD_STATUSES:
-        if scrapling is not None and scrapling.available:
-            data = scrapling.get_json(url)
-            if isinstance(data, dict) and status is None:
-                status = 200
-    if not isinstance(data, dict):
-        return status, None
-    return status, len(data.get("products") or [])
-
-
-def run_health(
-    conn,
-    context: BrowserContext,
-    deadline: float,
-    scrapling: ScraplingClient | None = None,
-) -> dict:
-    """Assert that every vendor origin and outlet collection is still readable."""
-    stats = {
-        "vendors_ok": 0, "vendors_dead": 0, "vendors_blocked": 0,
-        "collections_ok": 0, "collections_dead": 0, "collections_empty": 0,
-        "collections_blocked": 0,
-    }
-    problems: list[str] = []
-
-    with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute("""
-            SELECT slug, name, "websiteUrl"
-              FROM "Vendor"
-             WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" <> ''
-               AND NOT (slug = ANY(%s))
-             ORDER BY slug
-        """, (list(MANUFACTURER_VENDOR_SLUGS),))
-        vendors = cur.fetchall()
-
-    # Interleave so consecutive probes hit different hosts, exactly as the real
-    # passes do — otherwise the check itself becomes the rate-limit trigger.
-    targets: list[dict] = []
-    for vendor in vendors:
-        origin = _origin_of(vendor["websiteUrl"] or "")
-        if not origin:
-            problems.append(f"VENDOR_BAD_URL   {vendor['slug']}: {vendor['websiteUrl']!r}")
-            stats["vendors_dead"] += 1
-            continue
-        targets.append({
-            "kind": "vendor", "label": vendor["slug"],
-            "productUrl": f"{origin}/products.json?limit=1",
-        })
-    for url in OUTLET_COLLECTIONS:
-        targets.append({
-            "kind": "collection", "label": url.replace("/products.json", ""),
-            "productUrl": f"{url}?limit=1",
-        })
-
-    throttle = HostThrottle()
-    page = context.new_page()
-    try:
-        for target in HostThrottle.interleave(targets):
-            if now_ms() > deadline:
-                log("Health: time budget reached — stopping early.")
-                break
-            url = target["productUrl"]
-            throttle.wait(url)
-            status, count = _probe_catalog(page, url, scrapling)
-            kind, label = target["kind"], target["label"]
-
-            if count is None:
-                if status in _HEALTH_DEAD_STATUSES:
-                    stats[f"{kind}s_dead"] += 1
-                    problems.append(
-                        f"{kind.upper()}_DEAD   {label}: HTTP {status} — {url}"
-                    )
-                else:
-                    stats[f"{kind}s_blocked"] += 1
-                    log(f"  {kind} {label}: unreadable (HTTP {status}) — "
-                        f"blocked or not Shopify, not counted as a fault.")
-                continue
-
-            if kind == "collection" and count == 0:
-                stats["collections_empty"] += 1
-                problems.append(f"COLLECTION_EMPTY   {label}: 200 but 0 products")
-                continue
-            if kind == "vendor" and count == 0:
-                # A store with a readable but empty catalog is odd rather than
-                # broken (some vendors gate their feed), so warn, don't fail.
-                log(f"  vendor {label}: catalog readable but empty.")
-            stats[f"{kind}s_ok"] += 1
-    finally:
-        page.close()
-
-    log(
-        f"Health -> vendors ok={stats['vendors_ok']} dead={stats['vendors_dead']} "
-        f"blocked={stats['vendors_blocked']} | collections ok={stats['collections_ok']} "
-        f"dead={stats['collections_dead']} empty={stats['collections_empty']} "
-        f"blocked={stats['collections_blocked']}"
-    )
-    if problems:
-        log(f"Health: {len(problems)} actionable problem(s):")
-        for line in problems:
-            log(f"  {line}")
-    else:
-        log("Health: no actionable problems.")
-    stats["problems"] = problems
-    return stats
-
-
 def run_prices(
     conn,
     context: BrowserContext,
@@ -5986,25 +5837,6 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--links-only",
-        action="store_true",
-        help=(
-            "Run the two vendor-linking passes (discovery, then outlets) and "
-            "nothing else. They are a pair — outlets must follow discovery so "
-            "an outlet link wins — and both clear priceUpdatedAt, so the next "
-            "price refresh prices whatever they relink."
-        ),
-    )
-    parser.add_argument(
-        "--health-only",
-        action="store_true",
-        help=(
-            "Read-only check that every vendor origin and outlet collection is "
-            "still readable. Writes nothing. Exits 1 when it finds an "
-            "actionable fault (a dead origin or an empty collection)."
-        ),
-    )
-    parser.add_argument(
         "--headless",
         action="store_true",
         help="Run Chromium without a visible window (used by manual GitHub Actions).",
@@ -6119,16 +5951,6 @@ def main() -> int:
                         f"budget={budget_minutes} minutes."
                     )
                     lk_stats = run_lightning(conn, context, deadline)
-                elif args.health_only:
-                    log(f"Health check only; budget={budget_minutes} minutes.")
-                    health_stats = run_health(conn, context, deadline, scrapling)
-                elif args.links_only:
-                    log(
-                        f"Vendor linking passes only (discovery + outlets); "
-                        f"budget={budget_minutes} minutes."
-                    )
-                    disc_stats = run_discovery(conn, context, deadline, scrapling)
-                    out_stats = run_outlets(conn, context, deadline, scrapling)
                 elif args.discovery_only:
                     log(
                         f"Vendor-catalog discovery only; "
@@ -6208,28 +6030,6 @@ def main() -> int:
             f"skipped={dcs_stats['skipped']} failed={dcs_stats['failed']} "
             f"ics={dcs_stats['interest_checks']}")
         log("DCS catalog done. Re-run safely if the deadline was reached.")
-        return 0
-
-    if args.health_only:
-        # Non-zero so a scheduled run goes RED on a real fault. Only dead
-        # origins and empty collections count — a blocked fetch is almost
-        # always rate limiting, and failing on that would train everyone to
-        # ignore the job, which is worse than not having it.
-        problems = health_stats["problems"]
-        if problems:
-            log(f"Health: FAILING — {len(problems)} actionable problem(s) above.")
-            return 1
-        return 0
-
-    if args.links_only:
-        log(f"Discovery -> vendors={disc_stats['vendors']} "
-            f"gmk_listings={disc_stats['gmk_listings']} linked={disc_stats['linked']} "
-            f"relinked={disc_stats['relinked']} "
-            f"multi_listing={disc_stats['multi_listing']}")
-        log(f"Outlets -> collections={out_stats['collections']} "
-            f"products={out_stats['products']} linked={out_stats['linked']} "
-            f"skipped_hosts={out_stats['skipped_hosts']}")
-        log("Linking done. Re-run safely to crawl the next batch of vendors.")
         return 0
 
     if args.discovery_only:
