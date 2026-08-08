@@ -10,7 +10,7 @@ import {
   getImageCandidates,
 } from "@/lib/utils";
 import { formatCurrency } from "@/lib/currency-utils";
-import { computeCheapest, computeSavings, latestUpdate } from "@/lib/pricing";
+import { computeCheapest, computeSavings, latestUpdate, bestDiscount, bestBundle } from "@/lib/pricing";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
 import { useLocation } from "@/context/LocationContext";
 import { useCurrency } from "@/hooks/useCurrency";
@@ -78,6 +78,13 @@ export function SetCard({ set }: SetCardProps) {
   // Only show the savings badge on released/in-stock sets where vendors vary.
   const isGroupBuy = set.status === "ACTIVE_GB" || set.status === "INTEREST_CHECK";
   const savings = isGroupBuy ? null : computeSavings(allPrices);
+  // A vendor markdown is a different claim from inter-vendor savings: one shop
+  // cutting its own price, versus two shops disagreeing. It is the stronger
+  // signal, so it takes the badge slot when both apply.
+  const discount = isGroupBuy ? null : bestDiscount(set);
+  // "Base + extras" is a listing shape, not a price claim, so unlike the two
+  // badges above it is shown on group buys as well.
+  const bundle = bestBundle(set);
   const updated = latestUpdate(cheapest);
   const href = `/sets/${set.slug}?country=${countryCode}`;
 
@@ -112,14 +119,31 @@ export function SetCard({ set }: SetCardProps) {
             <StatusBadge status={set.status} size="sm" />
             <DataTrustBadge item={set} compact />
           </div>
-          {savings && (
-            <div
-              className="absolute top-3 right-3 flex items-center gap-1 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-lg"
-              title={`${formatCurrency(savings.amount, currency)} cheaper than ${savings.vsVendor}`}
-            >
-              💸 Save {savings.percent}%
-            </div>
-          )}
+          <div className="absolute top-3 right-3 flex flex-col items-end gap-1">
+            {discount ? (
+              <div
+                className="flex items-center gap-1 bg-gradient-to-r from-rose-500 to-red-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-lg"
+                title={`Was ${formatCurrency(discount.was, discount.currency ?? currency)}, now ${formatCurrency(discount.now, discount.currency ?? currency)}`}
+              >
+                🔻 {discount.percent}% off
+              </div>
+            ) : savings ? (
+              <div
+                className="flex items-center gap-1 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-lg"
+                title={`${formatCurrency(savings.amount, currency)} cheaper than ${savings.vsVendor}`}
+              >
+                💸 Save {savings.percent}%
+              </div>
+            ) : null}
+            {bundle && (
+              <div
+                className="flex items-center gap-1 bg-violet-600/90 text-white text-[10px] font-semibold px-2 py-0.5 rounded-full shadow backdrop-blur-sm"
+                title={`${bundle.vendorName} sells “${bundle.title}” for ${formatCurrency(bundle.price, bundle.currency ?? currency)}`}
+              >
+                🎁 Base + extras
+              </div>
+            )}
+          </div>
           {countdown && (
             <div className="absolute bottom-2 left-2 flex items-center gap-1 bg-black/70 text-white text-[11px] font-semibold px-2 py-1 rounded-full backdrop-blur-sm">
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">

@@ -81,6 +81,10 @@ export interface ShippingZoneSummary {
 export interface VendorKitWithDetails {
   id: string;
   price: number | null;
+  // Pre-discount price of the same variant `price` came from. Only ever set
+  // when the vendor is actually running a markdown (compare_at > price), so a
+  // non-null value always means a real saving worth showing.
+  compareAtPrice?: number | null;
   currency: string | null;
   inStock: boolean;
   gbUrl: string | null;
@@ -98,11 +102,18 @@ export interface VendorKitWithDetails {
 export interface VendorKitPreview {
   id: string;
   price: number | null;
+  // See VendorKitWithDetails.compareAtPrice — set only for a real markdown.
+  compareAtPrice?: number | null;
   currency: string | null;
   inStock: boolean;
   gbUrl: string | null;
   productUrl: string | null;
   priceUpdatedAt: Date | string | null;
+  // Raw scraped variant list ([{ title, price }]). Untyped on purpose — the
+  // shape is a store's, not ours; parseVariants() in kit-variants.ts is the
+  // only sanctioned reader. Optional so callers that `select` a narrow row
+  // still satisfy this type.
+  variants?: unknown;
   vendor: {
     name: string;
     region: Region;

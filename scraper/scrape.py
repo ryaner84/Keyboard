@@ -3655,6 +3655,14 @@ OUTLET_COLLECTIONS = [
     "https://prototypist.net/collections/last-chance/products.json",
     "https://prototypist.net/collections/in-stock-streamsale/products.json",
     "https://ktechs.store/collections/warehouse-clearance/products.json",
+    # Ktechs' standing GMK collection (19 sets), not a clearance page. It is
+    # here because discovery rotates only _DISCOVERY_VENDOR_LIMIT stores per
+    # run, so a listing published between a store's turns waits days to be
+    # linked — GMK Hanami Dango went up 2026-08-07 at $88 (a single
+    # "Base + Novelties" variant) and was still unlinked the next day. Outlets
+    # runs EVERY collection every night, so a GMK-only collection listed here
+    # is checked on every run regardless of the discovery rotation.
+    "https://ktechs.store/collections/gmk/products.json",
     "https://pantheonkeys.com/collections/clearance/products.json",
     "https://clickclack.io/collections/sale/products.json",
     "https://klc-playground.com/collections/black-friday/products.json",

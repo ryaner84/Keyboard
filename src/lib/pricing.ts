@@ -2,6 +2,7 @@
 // given exchange rates, the user's region and currency. No Prisma imports.
 import { convertCurrency } from "./currency-utils";
 import { dhlShippingUsd } from "./import/shipping";
+import { classifyVariant, parseVariants } from "./kit-variants";
 import type {
   KitWithVendors,
   GroupBuyWithPricing,
@@ -77,6 +78,67 @@ export function computeSavings(allPrices: ComputedVendorPrice[]): Savings | null
 }
 
 // Most recent priceUpdatedAt across a set's vendor prices.
+// The best markdown any vendor is running on a set's base kit, or null when
+// nobody is discounting it.
+//
+// Distinct from computeSavings(), which measures the SPREAD between vendors —
+// two shops charging different full prices. A markdown is one shop cutting its
+// own price, which is the thing a shopper recognises as "on sale".
+export function bestDiscount(
+  set: GroupBuyWithPricing
+): { was: number; now: number; percent: number; currency: string | null } | null {
+  const base = baseKit(set);
+  if (!base) return null;
+  let best: { was: number; now: number; percent: number; currency: string | null } | null = null;
+  for (const vk of base.vendorKits ?? []) {
+    const now = vk.price;
+    const was = vk.compareAtPrice;
+    // Guard the ordering here too: the scrapers only store a real markdown, but
+    // a hand-edited row must never render as a negative discount.
+    if (now == null || was == null || was <= now) continue;
+    const percent = Math.round((1 - now / was) * 100);
+    if (percent <= 0) continue;
+    if (!best || percent > best.percent) {
+      best = { was, now, percent, currency: vk.currency ?? null };
+    }
+  }
+  return best;
+}
+
+// The cheapest "base + extras" bundle any vendor lists for a set, or null when
+// nobody sells one.
+//
+// Bundles are not a Kit row — KitType has no BUNDLE member — they live inside a
+// vendor listing's scraped `variants` JSON ("Base + Novelties"). That is why
+// this reads the raw variant list rather than a column, and why the bargain
+// page's bundle filter has to post-filter in JS instead of in SQL.
+export function bestBundle(
+  set: GroupBuyWithPricing
+): { title: string; price: number; currency: string | null; vendorName: string } | null {
+  const base = baseKit(set);
+  if (!base) return null;
+  let best: { title: string; price: number; currency: string | null; vendorName: string } | null =
+    null;
+  for (const vk of base.vendorKits ?? []) {
+    if (!vk.inStock) continue;
+    for (const v of parseVariants(vk.variants)) {
+      if (classifyVariant(v.title) !== "BUNDLE") continue;
+      // A per-variant `available: false` is a store telling us this exact
+      // bundle is gone; only an unreported stock state is treated as in stock.
+      if (v.available === false) continue;
+      if (!best || v.price < best.price) {
+        best = {
+          title: v.title,
+          price: v.price,
+          currency: vk.currency ?? vk.vendor.currency ?? null,
+          vendorName: vk.vendor.name,
+        };
+      }
+    }
+  }
+  return best;
+}
+
 export function latestUpdate(prices: ComputedVendorPrice[]): Date | null {
   let latest: number | null = null;
   for (const p of prices) {

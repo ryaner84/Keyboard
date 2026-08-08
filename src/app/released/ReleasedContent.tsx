@@ -40,16 +40,24 @@ export default function ReleasedContent() {
   // Keycaps-only: a maker means nothing on the keyboards tab. A single-select
   // dropdown like designer/vendor/year, not pills — same row, same affordance.
   const maker = searchParams.get("maker") ?? "";
+  // The two bargain-hunter toggles. Kept as separate params rather than folded
+  // into `availability` because they compose: "on sale" AND "sold as a bundle"
+  // is a legitimate, and interesting, combination.
+  const onSale = searchParams.get("deals") === "1";
+  const bundlesOnly = searchParams.get("bundles") === "1";
   const sortDefault = "released-desc";
   const sortBy = searchParams.get("sort") ?? sortDefault;
 
   const [sets, setSets] = useState<GroupBuyWithPricing[]>([]);
   const [deals, setDeals] = useState<GroupBuyWithPricing[]>([]);
+  const [markdowns, setMarkdowns] = useState<GroupBuyWithPricing[]>([]);
   const [topDesigners, setTopDesigners] = useState<string[]>([]);
   const [topVendors, setTopVendors] = useState<Array<{ slug: string; name: string }>>([]);
   const [total, setTotal] = useState(0);
   const [totalReleased, setTotalReleased] = useState<number | null>(null);
   const [totalAvailable, setTotalAvailable] = useState<number | null>(null);
+  const [totalOnSale, setTotalOnSale] = useState<number | null>(null);
+  const [totalBundles, setTotalBundles] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -90,6 +98,8 @@ export default function ReleasedContent() {
       if (designer) params.set("designer", designer);
       if (vendor) params.set("vendor", vendor);
       if (maker) params.set("maker", maker);
+      if (onSale) params.set("deals", "1");
+      if (bundlesOnly) params.set("bundles", "1");
       params.set("sort", sortBy);
       params.set("page", String(pageNum));
       params.set("limit", String(PAGE_SIZE));
@@ -102,6 +112,7 @@ export default function ReleasedContent() {
         setSets((prev) => (append ? [...prev, ...(data.data ?? [])] : (data.data ?? [])));
         if (!append) {
           setDeals(data.deals ?? []);
+          setMarkdowns(data.markdowns ?? []);
           if (data.topDesigners?.length) setTopDesigners(data.topDesigners);
           else setTopDesigners([]);
           if (data.topVendors?.length) setTopVendors(data.topVendors);
@@ -110,6 +121,10 @@ export default function ReleasedContent() {
         setTotal(data.total ?? 0);
         setTotalReleased(data.totalReleased ?? null);
         setTotalAvailable(data.totalAvailable ?? null);
+        setTotalOnSale(data.totalOnSale ?? null);
+        // Only sent when the API recomputed it; keep the last known count on
+        // pages that don't, so the pill label doesn't blank out mid-browse.
+        if (data.totalBundles != null) setTotalBundles(data.totalBundles);
         setPage(pageNum);
       } catch {
         if (seq === reqSeq.current && !append) setSets([]);
@@ -120,7 +135,7 @@ export default function ReleasedContent() {
         }
       }
     },
-    [search, availability, year, designer, vendor, sortBy, maker]
+    [search, availability, year, designer, vendor, sortBy, maker, onSale, bundlesOnly]
   );
 
   useEffect(() => {
@@ -128,7 +143,9 @@ export default function ReleasedContent() {
   }, [fetchPage]);
 
   const hasMore = sets.length < total;
-  const hasFilters = !!(search || year || designer || vendor || availability || maker);
+  const hasFilters = !!(
+    search || year || designer || vendor || availability || maker || onSale || bundlesOnly
+  );
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -177,6 +194,23 @@ export default function ReleasedContent() {
                 </p>
               </div>
             )}
+            {/* Markdowns are the headline number on a bargain page, so the stat
+                doubles as the shortcut into the filter. */}
+            {!!totalOnSale && (
+              <button
+                onClick={() => updateParams({ deals: onSale ? "" : "1" })}
+                className={`text-left rounded-xl px-4 py-2 transition-colors ${
+                  onSale
+                    ? "bg-white text-rose-700 shadow-lg"
+                    : "bg-rose-500/90 hover:bg-rose-500 text-white"
+                }`}
+              >
+                <p className="text-xl font-bold leading-tight">🔻 {totalOnSale}</p>
+                <p className="text-[11px] uppercase tracking-wide opacity-90">
+                  {onSale ? "showing sale items" : "on sale today"}
+                </p>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -224,6 +258,50 @@ export default function ReleasedContent() {
             className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-900 transition-colors"
           />
         </div>
+      </div>
+
+      {/* Row 1.5: the two bargain toggles.
+          Deliberately NOT another <select> in the row below — a discount filter
+          buried in "Any …" dropdowns reads as metadata, when it is the reason
+          most people open this page. Given their own row, labelled with live
+          counts, and coloured to match the badges the cards carry. */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <span className="text-xs text-gray-400 mr-1">Show only</span>
+        <button
+          onClick={() => updateParams({ deals: onSale ? "" : "1" })}
+          aria-pressed={onSale}
+          className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+            onSale
+              ? "bg-gradient-to-r from-rose-500 to-red-600 text-white border-transparent shadow-sm"
+              : "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-900 hover:border-rose-400"
+          }`}
+        >
+          🔻 On sale
+          {totalOnSale != null && (
+            <span className={onSale ? "opacity-80" : "opacity-70"}>({totalOnSale})</span>
+          )}
+        </button>
+        <button
+          onClick={() => updateParams({ bundles: bundlesOnly ? "" : "1" })}
+          aria-pressed={bundlesOnly}
+          className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+            bundlesOnly
+              ? "bg-violet-600 text-white border-violet-600 shadow-sm"
+              : "bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400 border-violet-200 dark:border-violet-900 hover:border-violet-400"
+          }`}
+        >
+          🎁 Base + extras
+          {totalBundles != null && (
+            <span className={bundlesOnly ? "opacity-80" : "opacity-70"}>({totalBundles})</span>
+          )}
+        </button>
+        <span className="text-[11px] text-gray-400">
+          {bundlesOnly
+            ? "Listings that sell the base kit together with novelties, spacebars or alphas."
+            : onSale
+              ? "Vendors currently marking the set down from their own list price."
+              : ""}
+        </span>
       </div>
 
       {/* Row 2: designer + year + sort + clear */}
@@ -353,8 +431,40 @@ export default function ReleasedContent() {
         </div>
       )}
 
+      {/* ── Markdown rail — leads the page: a store cutting its own price is
+             the sale a shopper is looking for. ─────────────────────────────── */}
+      {!loading && markdowns.length > 0 && (
+        <div className="mb-6 rounded-2xl border-2 border-rose-200 dark:border-rose-900 bg-gradient-to-br from-rose-50 via-red-50 to-rose-50 dark:from-rose-950/40 dark:via-red-950/30 dark:to-rose-950/40 p-5 sm:p-6">
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <span className="text-xl">🔻</span> On sale right now
+            </h2>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-semibold text-rose-700 dark:text-rose-400 uppercase tracking-wide bg-rose-100 dark:bg-rose-900/60 px-2.5 py-1 rounded-full">
+                Vendor markdowns
+              </span>
+              <button
+                onClick={() => updateParams({ deals: "1" })}
+                className="text-xs font-semibold text-rose-700 dark:text-rose-400 hover:text-rose-900 dark:hover:text-rose-300 transition-colors"
+              >
+                See all {totalOnSale ?? ""} →
+              </button>
+            </div>
+          </div>
+          <p className="text-sm text-gray-600 dark:text-gray-300 mb-5">
+            These stores have cut their own list price — the struck-through
+            number is what the set cost yesterday.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {markdowns.map((set) => (
+              <SetCard key={set.id} set={set} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── Deals rail (keycaps only) ────────────────────────────────────── */}
-      {!loading && deals.length > 0 && !search && !year && !designer && !vendor && availability !== "soldout" && (
+      {!loading && deals.length > 0 && !search && !year && !designer && !vendor && !onSale && !bundlesOnly && availability !== "soldout" && (
         <div className="mb-10 rounded-2xl border-2 border-amber-200 dark:border-amber-900 bg-gradient-to-br from-amber-50 via-orange-50 to-amber-50 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-amber-950/40 p-5 sm:p-6">
           <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -388,7 +498,7 @@ export default function ReleasedContent() {
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
         {loading
           ? "Loading…"
-          : `${total} $set${total !== 1 ? "s" : ""}${designer ? ` by ${designer}` : ""}${
+          : `${total} ${onSale ? "discounted " : ""}${bundlesOnly ? "bundled " : ""}set${total !== 1 ? "s" : ""}${designer ? ` by ${designer}` : ""}${
               vendor ? ` at ${topVendors.find((v) => v.slug === vendor)?.name ?? vendor}` : ""
             }${
               availability === "available"
