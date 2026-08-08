@@ -35,12 +35,22 @@ const PRICED_FILTER = {
   },
 };
 
-// Rows where some vendor is running a markdown (compare_at_price > price).
+// Rows where some vendor is running a markdown (compare_at_price > price) AND
+// will still sell it to you.
+//
+// The three conditions live in ONE `some` on purpose: as separate filters they
+// could be satisfied by different vendor rows, so a set could qualify because
+// vendor A is in stock and vendor B (sold out) is discounted. In stock is part
+// of the claim rather than a separate availability filter because "on sale"
+// means buyable at a markdown — a discount on a listing nobody can buy is a
+// price-history footnote, not a deal.
 const ON_SALE_FILTER = {
   kits: {
     some: {
       type: "BASE" as const,
-      vendorKits: { some: { price: { not: null }, compareAtPrice: { not: null } } },
+      vendorKits: {
+        some: { price: { not: null }, compareAtPrice: { not: null }, inStock: true },
+      },
     },
   },
 };
@@ -308,14 +318,26 @@ export async function GET(req: NextRequest) {
       isKeyboard
         ? Promise.resolve(0)
         : prisma.groupBuy.count({ where: { ...releasedWhere, ...AVAILABLE_FILTER } }),
+      // Counted against exactly the conditions the deals=1 filter applies, so
+      // the pill's number is what clicking it returns. ON_SALE_FILTER already
+      // implies a price and stock, so PRICED_FILTER would be redundant here.
       isKeyboard
         ? Promise.resolve(0)
-        : prisma.groupBuy.count({
-            where: { ...releasedWhere, AND: [AVAILABLE_FILTER, ON_SALE_FILTER] },
-          }),
+        : prisma.groupBuy.count({ where: { ...releasedWhere, ...ON_SALE_FILTER } }),
       prisma.groupBuy.count({ where: { ...baseReleased, productType: "KEYCAPS" } }),
       prisma.groupBuy.count({ where: { ...baseReleased, productType: "KEYBOARD" } }),
     ]);
+
+  // Bundle sets that actually reach this page. bundleSetIds() answers "which
+  // sets have a bundle listing" across the whole catalog, which is a larger
+  // number: some are still in group buy, some have no priced base kit. Counting
+  // the raw id list made the pill promise more than clicking it delivered.
+  const totalBundles =
+    bundleIds == null
+      ? null
+      : await prisma.groupBuy.count({
+          where: { ...releasedWhere, AND: [PRICED_FILTER, { id: { in: bundleIds } }] },
+        });
 
   // Top designers for the filter dropdown — only returned on page 1 with no
   // active designer filter, so the list reflects the full catalog.
@@ -357,7 +379,7 @@ export async function GET(req: NextRequest) {
   let markdowns: unknown[] = [];
   if (!isKeyboard && page === 1 && !search && !year && !designer && !vendor && !bundlesOnly && !onSale && availability !== "soldout") {
     const onSaleSets = await prisma.groupBuy.findMany({
-      where: { ...releasedWhere, AND: [AVAILABLE_FILTER, ON_SALE_FILTER] },
+      where: { ...releasedWhere, ...ON_SALE_FILTER },
       include: PRICING_INCLUDE,
       take: MARKDOWN_SCAN_CAP,
     });
@@ -404,7 +426,7 @@ export async function GET(req: NextRequest) {
     totalReleased,
     totalAvailable,
     totalOnSale,
-    totalBundles: bundleIds?.length ?? null,
+    totalBundles,
     countKeycaps,
     countKeyboards,
     markdowns,
