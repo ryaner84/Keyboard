@@ -1,3 +1,5 @@
+import { displaySetName } from "@/lib/set-name";
+
 // "Lightning Keyboards" is a showcase/photo source, not a real group-buy vendor —
 // its ~548 scraped boards are someone's keyboard collection, not products you can
 // join or buy. They are excluded from every group-buy listing (Keyboards Active /
@@ -76,6 +78,10 @@ export const showcaseOnlyWhere = { vendorName: { in: SHOWCASE_VENDORS } };
 // Users shouldn't see where the photos came from, so strip that trailing
 // "<separator> Lightning Keyboards" tag (and decode the common scraped HTML
 // entities while we're at it) before the name is ever rendered.
+// Forum-thread furniture is stripped here too, so a row discovered through a
+// Geekhack thread reads as the product rather than the post — see
+// displaySetName. Both cleanups are display-only; the stored name is what the
+// matchers and the scraper keep working from.
 export function cleanDisplayName(name: string | null | undefined): string {
   if (!name) return "";
   const decoded = name
@@ -91,7 +97,7 @@ export function cleanDisplayName(name: string | null | undefined): string {
         ""
       )
       .replace(new RegExp(`\\s*${vendor}\\s*$`, "i"), "");
-    if (stripped !== decoded) return stripped.trim();
+    if (stripped !== decoded) return displaySetName(stripped.trim());
   }
-  return decoded.trim();
+  return displaySetName(decoded.trim());
 }

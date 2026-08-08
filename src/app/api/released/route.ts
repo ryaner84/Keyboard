@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { notHiddenWhere, notShowcaseWhere } from "@/lib/showcase";
+import { cleanDisplayName, notHiddenWhere, notShowcaseWhere } from "@/lib/showcase";
 import { isKeycapMaker, makerWhereOr } from "@/lib/set-name";
 import { classifyVariant, parseVariants } from "@/lib/kit-variants";
 import { bestDiscount } from "@/lib/pricing";
@@ -418,8 +418,19 @@ export async function GET(req: NextRequest) {
       .map((r) => r.set);
   }
 
+  // /api/group-buys already cleans names on the way out; the bargain page never
+  // did, which is why one Geekhack-titled row ("[GB] MW STONE Age (GB CLOSED)")
+  // still read like a forum post even though it is a real, priced, in-stock
+  // iLumKB listing. Applied last so nothing filters or sorts on the cleaned
+  // name — matching still uses what is stored.
+  const clean = (rows: unknown[]) =>
+    rows.map((row) => {
+      const set = row as { name?: string | null };
+      return { ...set, name: cleanDisplayName(set.name) };
+    });
+
   return NextResponse.json({
-    data,
+    data: clean(data),
     total,
     page,
     limit,
@@ -429,8 +440,8 @@ export async function GET(req: NextRequest) {
     totalBundles,
     countKeycaps,
     countKeyboards,
-    markdowns,
-    deals,
+    markdowns: clean(markdowns),
+    deals: clean(deals),
     topDesigners,
     topVendors,
   });

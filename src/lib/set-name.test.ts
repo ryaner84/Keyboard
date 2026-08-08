@@ -8,6 +8,7 @@ import {
   KEYCAP_MAKER_LABELS,
   makerWhereOr,
   isKeycapMaker,
+  displaySetName,
 } from "@/lib/set-name";
 
 // --- normalizeSetName keeps DCS distinct from GMK -------------------------
@@ -127,5 +128,41 @@ assert.equal(setMaker("GMK Sanctuary"), "GMK");
 // Selecting both makers unions the arms rather than intersecting them.
 assert.equal(makerWhereOr(["GMK", "SP"]).length, gmkOr.length + spOr.length);
 assert.deepEqual(makerWhereOr([]), []);
+
+// ── displaySetName ──────────────────────────────────────────────────────────
+// The live row that prompted this: a real, priced, in-stock iLumKB listing
+// whose NAME came from the Geekhack thread it was discovered through.
+assert.equal(displaySetName("[GB] MW STONE Age (GB CLOSED)"), "MW STONE Age");
+assert.equal(
+  displaySetName("[GB] DCS Dolch - Live from June 1st to July 1st!"),
+  "DCS Dolch - Live from June 1st to July 1st!"
+);
+assert.equal(displaySetName("[IC] GMK Foo"), "GMK Foo");
+assert.equal(displaySetName("(Group Buy) GMK Bar"), "GMK Bar");
+assert.equal(displaySetName("[GB][In Stock] GMK Baz"), "GMK Baz");
+assert.equal(displaySetName("GMK Qux (GB CLOSED)"), "GMK Qux");
+assert.equal(displaySetName("GMK Quux | Running Oct 17 - Nov 14"), "GMK Quux");
+assert.equal(displaySetName("GMK Corge (Closed) (Shipped)"), "GMK Corge");
+
+// Parentheticals that carry PRODUCT information must survive — this is why the
+// suffix rule names status words instead of dropping every trailing bracket.
+assert.equal(displaySetName("GMK Nautilus (2021)"), "GMK Nautilus (2021)");
+assert.equal(displaySetName("GMK Bento (R2)"), "GMK Bento (R2)");
+assert.equal(displaySetName("SA Laser (Alphas)"), "SA Laser (Alphas)");
+assert.equal(displaySetName("GMK Olivia++"), "GMK Olivia++");
+
+// A clean name is returned untouched, and a name that is nothing but tags is
+// shown verbatim rather than blanked.
+assert.equal(displaySetName("GMK Botanical"), "GMK Botanical");
+assert.equal(displaySetName("[GB]"), "[GB]");
+assert.equal(displaySetName(""), "");
+
+// Stripping is display-only: identity helpers must be unaffected, so a
+// Geekhack DCS row still resolves to Signature Plastics and never to GMK.
+assert.equal(setMaker(displaySetName("[GB] DCS Mermaid")), "SP");
+assert.equal(
+  normalizeSetName("[GB] MW STONE Age (GB CLOSED)"),
+  normalizeSetName(displaySetName("[GB] MW STONE Age (GB CLOSED)"))
+);
 
 console.log("set-name profile-identity checks passed");

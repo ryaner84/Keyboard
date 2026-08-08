@@ -165,6 +165,39 @@ export function setMaker(name: string): KeycapMaker | null {
   return MAKER_BY_PROFILE[first] ?? null;
 }
 
+// ── Display name ────────────────────────────────────────────────────────────
+// Strip forum-thread furniture from a name so a Geekhack-sourced row reads as
+// the product it is: "[GB] MW STONE Age (GB CLOSED)" -> "MW STONE Age".
+//
+// Deliberately NOT normalizeSetName, which flattens case and punctuation for
+// matching. This keeps the name exactly as stored apart from the tags, because
+// it is what a person reads.
+//
+// Only forum vocabulary is removed. A parenthetical that carries real product
+// information — "GMK Nautilus (2021)", "GMK Bento (R2)" — must survive, so the
+// suffix pattern names the status words instead of dropping every bracket.
+const FORUM_TAG_PREFIX_RE =
+  /^\s*(?:[[(]\s*(?:gb|ic|group\s*buy|interest\s*check|in\s*stock|pre[\s-]?order|extras?)\s*[\])]\s*)+/i;
+
+const FORUM_STATUS_SUFFIX_RE =
+  /\s*(?:[[(]\s*(?:gb\s*)?(?:closed|close|ended|end(?:ing)?|live|running|open|now\s*live|shipped|shipping|sold\s*out)[^\])]*[\])]|\|\s*(?:gb\s*)?(?:closed|ended|live|running|open|shipping)[^|]*)\s*$/i;
+
+export function displaySetName(name: string): string {
+  if (!name) return name;
+  let out = name.replace(FORUM_TAG_PREFIX_RE, "");
+  // A thread title can carry more than one trailing status chunk
+  // ("… (GB CLOSED) (Shipped)"), so peel until nothing changes.
+  for (let i = 0; i < 3; i++) {
+    const next = out.replace(FORUM_STATUS_SUFFIX_RE, "");
+    if (next === out) break;
+    out = next;
+  }
+  out = out.trim();
+  // Never hand back an empty string: a name that was nothing but tags is more
+  // useful shown verbatim than blank.
+  return out || name.trim();
+}
+
 // Rank a catalog row within a dedupe group: higher = better representative.
 // Prefers the official profile-named row (GMK CYL / MTNU, "… Keycaps"), and
 // penalises Geekhack "[GB] …"/"(Group Buy) …" thread names and gh- slugs.
