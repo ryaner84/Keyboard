@@ -26,30 +26,6 @@ branch's own commits are never ancestors of main. `git merge-base --is-ancestor`
 will therefore report every merged branch as "unmerged" — check the PR's state
 instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
-## Scheduled jobs
-
-All times UTC. Crons sit off the hour on purpose — GitHub's scheduler is
-heavily contended on round numbers and delays runs 10–30 minutes there.
-
-| Job | When | What it does |
-| --- | --- | --- |
-| `scraper-nightly` | **dispatch only** | The full scraper. The only job that creates SETS. Its cron is commented out until the full pass is proven on a runner — see the note in the file. |
-| `scraper-links` | 02:30 daily | Discovery + outlets. Decides WHICH page each vendor row points at. |
-| `scraper-health` | 03:40 daily | Read-only. Fails on a dead vendor origin or an empty collection. |
-| `savings-audit` | 04:20 Mondays | Flags ≥50% vendor spreads — nearly always a wrong-currency scrape. |
-| `verify-live-pricing` | 05:10 daily | Asserts live cards actually render prices. |
-| `refresh-prices` | every 6h | Re-scrapes vendor prices. |
-| `visitor-inbox` | 01:00 daily | Unresolved visitor submissions. |
-| `web-tests`, `scraper-tests` | every PR | The test gates. |
-
-`scraper-nightly`, `scraper-links` and `scraper-health` share the
-`scraper-vendor-io` concurrency group. Two browsers hitting the same stores at
-once is how you get rate-limited by your own tooling — keep any new
-vendor-fetching job in that group.
-
-The linking and health jobs do not price anything. Both clear `priceUpdatedAt`
-on rows they relink, and `refresh-prices` picks those up within 6 hours.
-
 ## Tests
 
 Six suites, all of which should pass before pushing:
