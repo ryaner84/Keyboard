@@ -39,11 +39,22 @@ export const VARIANT_CATEGORIES: Array<{ value: VariantCategory; label: string }
 // through to BASE via a stray word, and "Simple Base Kit" still lands on BASE.
 // Japanese keywords cover JP vendors (e.g. Yushakobo) whose variant titles
 // are ベースキット / ノベルティ / スペースバー / アルファ.
+// Kits a bundle can be bundled WITH — mirror of _BUNDLE_EXTRA_RE in scrape.py.
+const BUNDLE_EXTRA_RE =
+  /novelt|ノベルティ|space\s*bar|スペースバー|alpha|アルファ|num(?:ber)?\s*pad|\b40s\b|forties|accents?\b|extension|hiragana|katakana|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b/i;
+
 export function classifyVariant(title: string): VariantCategory {
   // Checked BEFORE the subkit patterns: "Base + Novelties" would otherwise
-  // match `novelt` and be filed as a novelty kit. A joiner is required, so
-  // "Novelties (fits base)" is untouched.
-  if (/base|ベース/i.test(title) && /[+&/]|\band\b|\bwith\b|\bplus\b/i.test(title)) {
+  // match `novelt` and be filed as a novelty kit.
+  //
+  // A joiner alone is NOT enough. Oblotzky sells "Teal & White Base" and
+  // Yushakobo "Two Baseセット（Teal + White）" — plain base kits whose COLOURWAY
+  // contains "&"/"+". A bundle must also name an actual extra kit.
+  if (
+    /base|ベース/i.test(title) &&
+    /[+&/]|\band\b|\bwith\b|\bplus\b/i.test(title) &&
+    BUNDLE_EXTRA_RE.test(title)
+  ) {
     return "BUNDLE";
   }
   if (/novelt|ノベルティ/i.test(title)) return "NOVELTIES";
