@@ -74,18 +74,30 @@ const BUNDLE_BASE_RE = "(base|ベース)";
 const BUNDLE_EXTRA_RE =
   "(novelt|space ?bar|alpha|num(ber)? ?pad|40s|forties|accent|extension|hiragana|katakana|hangul|cyrillic|norde|nordic|iso|icon|macro|ノベルティ|スペースバー|アルファ)";
 
-async function bundleSetIds(): Promise<string[]> {
-  const rows = await prisma.$queryRaw<Array<{ id: string; variants: unknown }>>`
-    SELECT k."groupBuyId" AS id, vk.variants
-    FROM "Kit" k
-    JOIN "VendorKit" vk ON vk."kitId" = k.id
-    WHERE k.type = 'BASE'
-      AND vk.price IS NOT NULL
-      AND vk."inStock" = true
-      AND vk.variants IS NOT NULL
-      AND vk.variants::text ~* ${BUNDLE_BASE_RE}
-      AND vk.variants::text ~* ${BUNDLE_EXTRA_RE}
-  `;
+// Returns null when the scan could not run. This is the route's only raw SQL,
+// and it runs on EVERY unfiltered page-1 load to label the pill — so a failure
+// here (an older Postgres, a permissions change) would 500 the entire bargain
+// page rather than lose one filter. Degrade instead: the pill loses its count,
+// and an active bundle filter returns nothing rather than silently returning
+// everything unfiltered under a "bundles" label.
+async function bundleSetIds(): Promise<string[] | null> {
+  let rows: Array<{ id: string; variants: unknown }>;
+  try {
+    rows = await prisma.$queryRaw<Array<{ id: string; variants: unknown }>>`
+      SELECT k."groupBuyId" AS id, vk.variants
+      FROM "Kit" k
+      JOIN "VendorKit" vk ON vk."kitId" = k.id
+      WHERE k.type = 'BASE'
+        AND vk.price IS NOT NULL
+        AND vk."inStock" = true
+        AND vk.variants IS NOT NULL
+        AND vk.variants::text ~* ${BUNDLE_BASE_RE}
+        AND vk.variants::text ~* ${BUNDLE_EXTRA_RE}
+    `;
+  } catch (err) {
+    console.error("released: bundle scan failed", err);
+    return null;
+  }
   const ids = new Set<string>();
   for (const row of rows) {
     const bundled = parseVariants(row.variants).some(
