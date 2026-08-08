@@ -80,6 +80,27 @@ export default function ReleasedContent() {
     [searchParams, router]
   );
 
+  // "On sale" means a vendor is discounting a set it will actually sell you, so
+  // it and the "Sold out" tab are mutually exclusive by construction — leaving
+  // both on would render an empty page that looks like a bug. Whichever the
+  // user picked most recently wins, and the other clears.
+  const toggleOnSale = useCallback(() => {
+    updateParams({
+      deals: onSale ? "" : "1",
+      ...(!onSale && availability === "soldout" && { availability: "" }),
+    });
+  }, [updateParams, onSale, availability]);
+
+  const setAvailability = useCallback(
+    (value: string) => {
+      updateParams({
+        availability: value,
+        ...(value === "soldout" && onSale && { deals: "" }),
+      });
+    },
+    [updateParams, onSale]
+  );
+
   const onSearchChange = (value: string) => {
     setSearchDraft(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -198,7 +219,7 @@ export default function ReleasedContent() {
                 doubles as the shortcut into the filter. */}
             {!!totalOnSale && (
               <button
-                onClick={() => updateParams({ deals: onSale ? "" : "1" })}
+                onClick={() => toggleOnSale()}
                 className={`text-left rounded-xl px-4 py-2 transition-colors ${
                   onSale
                     ? "bg-white text-rose-700 shadow-lg"
@@ -224,7 +245,7 @@ export default function ReleasedContent() {
             {AVAILABILITY_TABS.map((tab) => (
               <button
                 key={tab.value}
-                onClick={() => updateParams({ availability: tab.value })}
+                onClick={() => setAvailability(tab.value)}
                 className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                   availability === tab.value
                     ? tab.value === "available"
@@ -268,7 +289,7 @@ export default function ReleasedContent() {
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <span className="text-xs text-gray-400 mr-1">Show only</span>
         <button
-          onClick={() => updateParams({ deals: onSale ? "" : "1" })}
+          onClick={() => toggleOnSale()}
           aria-pressed={onSale}
           className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
             onSale
@@ -444,7 +465,7 @@ export default function ReleasedContent() {
                 Vendor markdowns
               </span>
               <button
-                onClick={() => updateParams({ deals: "1" })}
+                onClick={() => { if (!onSale) toggleOnSale(); }}
                 className="text-xs font-semibold text-rose-700 dark:text-rose-400 hover:text-rose-900 dark:hover:text-rose-300 transition-colors"
               >
                 See all {totalOnSale ?? ""} →
