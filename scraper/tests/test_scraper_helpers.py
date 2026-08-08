@@ -1253,6 +1253,80 @@ class OutletCollectionTests(unittest.TestCase):
         self.assertLess(adjacent_same_host(spread), adjacent_same_host(urls))
 
 
+class SubkitSetLinkingTests(unittest.TestCase):
+    """dcs.wiki catalogs subkits as sets in their own right, so the rule
+    'never link a subkit-looking product' has to know when the subkit IS the
+    tracked product."""
+
+    ENTRY = {"group_buy_id": "g1", "base_kit_id": "k1",
+             "status": "DELIVERED", "gbStart": None}
+
+    def _index(self, name):
+        entry = dict(self.ENTRY,
+                     is_subkit=bool(scrape._SUBKIT_PRODUCT_RE.search(name)))
+        full = scrape.normalize_set_name(name)
+        return {full: entry}, {scrape.strip_round(full): [entry]}
+
+    def test_these_dcs_wiki_sets_are_recognised_as_subkits(self):
+        for name in ("DCS After School 1992 40s kit", "DCS 10U Spacebars",
+                     "DCS Bae Addon", "DCS LAE Addon (Little Enter)"):
+            self.assertTrue(scrape._SUBKIT_PRODUCT_RE.search(name), name)
+        # …and an ordinary set is not, so the guard still protects it.
+        for name in ("DCS Dolch", "GMK Botanical", "DCS Superweld"):
+            self.assertIsNone(scrape._SUBKIT_PRODUCT_RE.search(name), name)
+
+    def test_subkit_product_links_to_a_subkit_set(self):
+        by_full, by_base = self._index("DCS After School 1992 40s kit")
+        for vendor_title in ("DCS After School 1992 40s Kit",
+                             "(In Stock) DCS After-School 1992 40s Keycap Set",
+                             "[Extra] DCS After School 1992 40s Kit"):
+            match = scrape.match_product_to_set(vendor_title, by_full, by_base)
+            self.assertIsNotNone(match, vendor_title)
+            # Guard applies only when the matched set is NOT itself a subkit.
+            skipped = (
+                scrape._SUBKIT_PRODUCT_RE.search(vendor_title)
+                and not match["is_subkit"]
+            )
+            self.assertFalse(skipped, vendor_title)
+
+    def test_subkit_product_still_cannot_hijack_a_normal_set(self):
+        # The reason the guard exists: "(Novelties)" is a bracketed tag, so it
+        # is stripped before matching and the product resolves to the BASE set.
+        by_full, by_base = self._index("GMK Botanical")
+        match = scrape.match_product_to_set("GMK Botanical (Novelties)", by_full, by_base)
+        self.assertIsNotNone(match)
+        self.assertFalse(match["is_subkit"])
+        self.assertTrue(scrape._SUBKIT_PRODUCT_RE.search("GMK Botanical (Novelties)"))
+
+
+class KitFillerTests(unittest.TestCase):
+    def test_kit_is_filler_so_packaging_wording_stops_splitting_a_set(self):
+        self.assertEqual(
+            scrape.normalize_set_name("DCS After School 1992 40s kit"),
+            scrape.normalize_set_name("(In Stock) DCS After-School 1992 40s Keycap Set"),
+        )
+        self.assertEqual(
+            scrape.normalize_set_name("GMK Foo Kit"),
+            scrape.normalize_set_name("GMK Foo"),
+        )
+
+    def test_kit_filler_does_not_eat_kitsune(self):
+        # "\bkits?\b" must not match inside a longer word — GMK Kitsune is a
+        # real set and losing its name would merge it with nothing at all.
+        self.assertEqual(scrape.normalize_set_name("GMK CYL Kitsune"), "gmk kitsune")
+        self.assertEqual(scrape.normalize_set_name("GMK Kitsune Keycaps"), "gmk kitsune")
+        self.assertNotEqual(
+            scrape.normalize_set_name("GMK Kitsune"),
+            scrape.normalize_set_name("GMK Sune"),
+        )
+
+    def test_kit_filler_keeps_distinct_sets_distinct(self):
+        self.assertNotEqual(
+            scrape.normalize_set_name("DCS 9009 Fix Kit"),
+            scrape.normalize_set_name("DCS 9009"),
+        )
+
+
 class StoreListingChoiceTests(unittest.TestCase):
     # The real Prototypist catalog for ONE set, verbatim (2026-08). All four
     # normalise to "gmk combobreaker", so before ranking, whichever came last

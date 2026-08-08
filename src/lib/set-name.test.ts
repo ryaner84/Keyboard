@@ -129,6 +129,19 @@ assert.equal(setMaker("GMK Sanctuary"), "GMK");
 assert.equal(makerWhereOr(["GMK", "SP"]).length, gmkOr.length + spOr.length);
 assert.deepEqual(makerWhereOr([]), []);
 
+// ── "kit" is packaging, not identity ────────────────────────────────────────
+// Mirror of KitFillerTests in scraper/tests/test_scraper_helpers.py — this
+// function is duplicated in Python, so both copies must agree.
+assert.equal(
+  normalizeSetName("DCS After School 1992 40s kit"),
+  normalizeSetName("(In Stock) DCS After-School 1992 40s Keycap Set")
+);
+assert.equal(normalizeSetName("GMK Foo Kit"), normalizeSetName("GMK Foo"));
+// `\bkits?\b` must not match inside a longer word.
+assert.equal(normalizeSetName("GMK CYL Kitsune"), "gmk kitsune");
+assert.equal(normalizeSetName("GMK Kitsune Keycaps"), "gmk kitsune");
+assert.notEqual(normalizeSetName("DCS 9009 Fix Kit"), normalizeSetName("DCS 9009"));
+
 // ── displaySetName ──────────────────────────────────────────────────────────
 // The live row that prompted this: a real, priced, in-stock iLumKB listing
 // whose NAME came from the Geekhack thread it was discovered through.
