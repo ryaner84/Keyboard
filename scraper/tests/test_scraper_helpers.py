@@ -371,11 +371,22 @@ class BaseKitIdentificationTests(unittest.TestCase):
         ]
         self.assertEqual(scrape.choose_kit_variant(variants)["price"], 110)
 
-    def test_base_novelties_bundle_is_not_the_base(self):
-        # A bundle's price is not the standalone base price; a bundle-only
-        # listing clears rather than storing the bundle number.
+    def test_bundle_never_displaces_a_real_base_kit(self):
+        # A bundle's price is not the standalone base price, so whenever the
+        # listing offers a plain base the base wins — in EITHER variant order,
+        # so the stored price can't depend on the vendor's display sort.
+        bundle = {"id": "1", "title": "Base Kit + Novelties Bundle", "price": 155}
+        base = {"id": "2", "title": "Base Kit", "price": 135}
+        self.assertEqual(scrape.choose_kit_variant([bundle, base])["price"], 135)
+        self.assertEqual(scrape.choose_kit_variant([base, bundle])["price"], 135)
+
+    def test_bundle_only_listing_is_priced_rather_than_skipped(self):
+        # Narrowed from "a bundle-only listing clears": ktechs sells four GMK
+        # sets with a single "Base + Novelties" variant, so clearing meant
+        # those listings were invisible. With no base on offer the bundle is
+        # the best available number.
         variants = [{"id": "1", "title": "Base Kit + Novelties Bundle", "price": 155}]
-        self.assertIsNone(scrape.choose_kit_variant(variants))
+        self.assertEqual(scrape.choose_kit_variant(variants)["price"], 155)
 
     def test_subkit_product_titles_are_skipped_by_discovery(self):
         for title in ("GMK Foo (Novelties)", "GMK Foo [Spacebars]",
@@ -418,14 +429,17 @@ class BaseKitIdentificationTests(unittest.TestCase):
         html = self._jsonld('{"price":"120"}')
         self.assertEqual(scrape.parse_jsonld_offer(html)["price"], 120.0)
 
-    def test_jsonld_bundle_named_base_is_excluded(self):
-        # "Base + Novelties Bundle" contains "base" but classifies NOVELTIES —
-        # the old \bbase\b test picked the bundle price as the base.
+    def test_jsonld_bundle_is_used_when_no_plain_base_is_offered(self):
+        # Was: excluded outright. Narrowed — with only a bundle and a subkit on
+        # offer, the bundle is the base-bearing option and the best number
+        # available. A plain base, when present, still wins (covered above).
         html = self._jsonld(
             '{"name":"Base Kit + Novelties Bundle","price":"155"},'
             '{"name":"Spacebars","price":"29"}'
         )
-        self.assertIs(scrape.parse_jsonld_offer(html), scrape.NO_BASE_KIT)
+        offer = scrape.parse_jsonld_offer(html)
+        self.assertIsNot(offer, scrape.NO_BASE_KIT)
+        self.assertEqual(offer["price"], 155.0)
 
 
 class GmkDirectTests(unittest.TestCase):
@@ -944,6 +958,104 @@ class DcsWikiParsingTests(unittest.TestCase):
             scrape.normalize_set_name("DCS Soju"),
             scrape.normalize_set_name("GMK Soju"),
         )
+
+
+class BundleVariantTests(unittest.TestCase):
+    """"Base + Novelties" is its own category, not BASE and not NOVELTIES.
+
+    Filed as NOVELTIES it was dropped from the base pool, so a listing whose
+    only variant is a bundle stored no price at all — ktechs sells four GMK
+    sets exactly that way (Hanami Dango $88, Tako, Orange Boi, Kitsune), and
+    iLumKB one more. Filed as BASE it could outrank a real base kit in the same
+    listing, making the stored price depend on the vendor's variant order.
+    """
+
+    def test_bundles_classify_as_bundle(self):
+        for title in (
+            "Base + Novelties",
+            "Base+Free Alphas+Spacebar",   # iLumKB Matsu — no spaces
+            "Base Kit + Novelties",
+            "Base and Novelties",
+            "Base & Spacebars",
+        ):
+            self.assertEqual(scrape.classify_variant(title), "BUNDLE", title)
+
+    def test_plain_base_and_plain_subkits_are_unchanged(self):
+        self.assertEqual(scrape.classify_variant("Base Kit"), "BASE")
+        self.assertEqual(scrape.classify_variant("Novelties"), "NOVELTIES")
+        self.assertEqual(scrape.classify_variant("Spacebars"), "SPACEBARS")
+        # A subkit that merely mentions the base is still a subkit.
+        self.assertEqual(scrape.classify_variant("Novelties (fits base)"), "NOVELTIES")
+
+    def test_bundle_only_listings_are_now_priced(self):
+        for title, price in [("Base + Novelties", 88.0),
+                             ("Base+Free Alphas+Spacebar", 239.0)]:
+            chosen = scrape.choose_kit_variant([{"id": "1", "title": title, "price": price}])
+            self.assertIsNotNone(chosen, title)
+            self.assertEqual(chosen["price"], price)
+
+    def test_cheapest_bundle_wins_when_several(self):
+        chosen = scrape.choose_kit_variant([
+            {"id": "1", "title": "Base + Novelties + Spacebars", "price": 210.0},
+            {"id": "2", "title": "Base + Novelties", "price": 180.0},
+        ])
+        self.assertEqual(chosen["price"], 180.0)
+
+    def test_a_real_base_always_beats_a_bundle_in_either_order(self):
+        bundle = {"id": "1", "title": "Base + Novelties", "price": 155.0}
+        base = {"id": "2", "title": "Base Kit", "price": 135.0}
+        self.assertEqual(scrape.choose_kit_variant([bundle, base])["price"], 135.0)
+        self.assertEqual(scrape.choose_kit_variant([base, bundle])["price"], 135.0)
+
+    def test_subkit_only_listings_still_store_nothing(self):
+        self.assertIsNone(scrape.choose_kit_variant([
+            {"id": "1", "title": "GMK Rainy Day Novelties", "price": 38.0},
+            {"id": "2", "title": "GMK Rainy Day Spacebars", "price": 30.0},
+        ]))
+
+
+class ApostropheNormalisationTests(unittest.TestCase):
+    """An apostrophe INSIDE a token used to split it and kill the match.
+
+    "40's" became "40 s" and stopped matching a set's "40s" — a real miss on
+    Prototypist / Keebz n Cables' DCS After School 1992. A TRAILING possessive
+    ("Davy Jones' Locker") always worked, which is why this stayed hidden.
+    """
+
+    def test_apostrophe_inside_a_token_no_longer_splits_it(self):
+        self.assertEqual(
+            scrape.normalize_set_name("DCS After School 1992 - 40's Keycap Kit"),
+            scrape.normalize_set_name("DCS After School 1992 40s kit"),
+        )
+        self.assertEqual(
+            scrape.normalize_set_name("KAM Li'l Dragon Keyset"),
+            scrape.normalize_set_name("KAM Lil Dragon"),
+        )
+
+    def test_trailing_possessive_still_matches(self):
+        self.assertEqual(
+            scrape.normalize_set_name("GMK Davy Jones' Locker Keycaps"),
+            scrape.normalize_set_name("GMK Davy Jones Locker"),
+        )
+
+    def test_curly_apostrophe_is_handled_too(self):
+        self.assertEqual(
+            scrape.normalize_set_name("KAM Li\u2019l Dragon"),
+            scrape.normalize_set_name("KAM Lil Dragon"),
+        )
+
+    def test_distinct_sets_still_do_not_collide(self):
+        self.assertNotEqual(
+            scrape.normalize_set_name("DCS Dolch"),
+            scrape.normalize_set_name("GMK Dolch"),
+        )
+
+
+class DiscoveryPagingTests(unittest.TestCase):
+    def test_page_cap_covers_the_largest_known_catalogue(self):
+        # Prototypist carries 1500+ products; at 250/page a cap of 4 hid 106
+        # GMK/DCS items on pages 5-6 with no log line to show for it.
+        self.assertGreaterEqual(scrape._DISCOVERY_MAX_CATALOG_PAGES, 6)
 
 
 class CompareAtPriceTests(unittest.TestCase):

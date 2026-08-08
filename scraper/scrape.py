@@ -614,6 +614,14 @@ def classify_variant(title: str) -> str:
     scraper is the one that actually reaches Yushakobo (real browser), and
     without them a JP-titled subkit (ノベルティ) classified OTHERS and could be
     stored as the base price when the base kit had sold out."""
+    # BUNDLE before the subkit tests: "Base + Novelties" would otherwise match
+    # `novelt` and be filed as a novelty kit, so a bundle-only listing yielded
+    # no base candidate and stored nothing. A joiner is required, leaving
+    # "Novelties (fits base)" alone. Mirror of kit-variants.ts.
+    if re.search(r"base|ベース", title, re.IGNORECASE) and re.search(
+        r"[+&/]|\band\b|\bwith\b|\bplus\b", title, re.IGNORECASE
+    ):
+        return "BUNDLE"
     if re.search(r"novelt|ノベルティ", title, re.IGNORECASE):
         return "NOVELTIES"
     if re.search(r"space\s*bar|スペースバー", title, re.IGNORECASE):
@@ -675,11 +683,19 @@ def choose_kit_variant(variants: list[dict]) -> dict | None:
             and not _NONBASE_SUBKIT_RE.search(v["title"])
         )
     ]
-    if not base_pool:
-        return None
     for v in base_pool:
         if classify_variant(v["title"]) == "BASE":
             return v
+    # No plain base kit on offer: fall back to the CHEAPEST bundle instead of
+    # storing nothing. A bundle costs more than the base alone, so it is used
+    # only when there is no base to be had — that keeps a dearer bundle from
+    # displacing a real base kit, and keeps the pick independent of the
+    # vendor's variant order.
+    if not base_pool:
+        bundles = [v for v in pool if classify_variant(v["title"]) == "BUNDLE"]
+        if not bundles:
+            return None
+        return min(bundles, key=lambda v: v["price"])
     # No variant is titled "base": the real base is the dearest candidate, not
     # whichever subkit happens to come first in display order (an out-of-range
     # bundle is rejected downstream by is_plausible_base_price).
@@ -949,6 +965,12 @@ def parse_jsonld_offer(html: str):
     named_base = [o for o in found if classify_variant(o["name"]) == "BASE"]
     if named_base:
         return max(named_base, key=lambda o: o["price"])
+    # No plain base offer: a bundle that includes the base ("Base + Novelties")
+    # is the base-bearing option, so use the cheapest rather than refusing to
+    # price the listing. A plain base, when present, always wins above.
+    bundles = [o for o in found if classify_variant(o["name"]) == "BUNDLE"]
+    if bundles:
+        return min(bundles, key=lambda o: o["price"])
     if len(found) > 1:
         # Multi-kit aggregate with no identifiable base — do not guess.
         return NO_BASE_KIT
@@ -2956,7 +2978,13 @@ def run_images(
 
 # Shopify caps products.json at 250/page; 4 pages = 1000 products covers every
 # keyboard store's catalog comfortably.
-_DISCOVERY_MAX_CATALOG_PAGES = 4
+# 250 products per page. Four pages covered every store when this was written;
+# Prototypist now carries 1500+, with 106 GMK/DCS products sitting on pages 5-6
+# alone — invisible to discovery and impossible to notice, because the loop
+# stopped silently. Eight pages covers it, and small stores still exit early on
+# the short-page break, so only large catalogues pay the extra requests (which
+# HostThrottle now spaces out).
+_DISCOVERY_MAX_CATALOG_PAGES = 8
 _DISCOVERY_VENDOR_LIMIT = 8
 
 
@@ -2974,6 +3002,12 @@ def normalize_set_name(name: str) -> str:
     # is the same set as "GMK Seafarer" (vendor outlets and gmk.net both add it).
     s = re.sub(r"\b(keycap\s*sets?|keycaps?|keysets?|cherry\s*profile|cyl|mtnu)\b", " ", s)
     s = re.sub(r"\bround\s*(\d+)\b", r"r\1", s)
+    # Drop apostrophes BEFORE punctuation becomes whitespace. Otherwise a
+    # vendor's "40's" splits into "40 s" and stops matching the set's "40s" —
+    # that is a real miss on Prototypist/KeebzNCables' DCS After School 1992,
+    # and on "Li'l Dragon". A trailing possessive ("Davy Jones' Locker") always
+    # matched, which is why this stayed hidden.
+    s = s.replace("'", "").replace("\u2019", "")
     s = re.sub(r"[^a-z0-9]+", " ", s)
     return re.sub(r"\s+", " ", s).strip()
 
@@ -3170,6 +3204,12 @@ def run_discovery(
                 catalog.extend(gmk_products_from_catalog(data, origin))
                 if len(products) < 250:
                     break  # last page
+                if page_num == _DISCOVERY_MAX_CATALOG_PAGES:
+                    # Still a full page at the cap: the catalogue continues and
+                    # we are choosing not to read it. Say so rather than let the
+                    # shortfall look like the store having nothing.
+                    log(f"  {origin}: page cap reached — catalogue continues "
+                        f"beyond {raw_products} products.")
 
             # This loop used to be silent on every failure path, so a run
             # reporting gmk_listings=0 gave no way to tell "every store blocked

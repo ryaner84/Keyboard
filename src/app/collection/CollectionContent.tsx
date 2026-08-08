@@ -325,7 +325,10 @@ function scrapedKitOptions(item: CollectionCatalogItem): string[] {
   const subkits = new Set<string>();
   for (const title of Array.from(titles)) {
     const category = classifyVariant(title);
-    if (category === "BASE") found.add("Base Kit");
+    // A bundle contains the base kit, so it counts as owning one. Without
+    // this it falls to the subkit branch, matches nothing, and vanishes from
+    // the chips entirely.
+    if (category === "BASE" || category === "BUNDLE") found.add("Base Kit");
     else if (category === "ALPHA") found.add("Alphas");
     else if (category === "NOVELTIES") found.add("Novelties");
     else if (category === "SPACEBARS") found.add("Spacebars");
