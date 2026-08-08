@@ -3637,6 +3637,12 @@ def run_gmk_direct(
 # which silently skips ("vendor not in DB") whenever the guess is wrong; the
 # vendor is now resolved from the URL's host against Vendor.websiteUrl, so a
 # collection can only fail loudly on the fetch itself.
+#
+# Pages per collection. 4 × 250 = 1000 products covers every collection
+# measured (the largest, Prototypist's streamsale, is 397) with headroom, while
+# still bounding a store that returns the same page forever.
+_OUTLET_MAX_PAGES = 4
+
 OUTLET_COLLECTIONS = [
     # iLumKB — the original entry; the emoji handle is percent-encoded.
     "https://ilumkb.com/collections/%F0%9F%94%A5-gmk-outlet/products.json",
@@ -3654,6 +3660,27 @@ OUTLET_COLLECTIONS = [
     "https://unikeyboards.com/collections/currently-on-sale/products.json",
     "https://prototypist.net/collections/last-chance/products.json",
     "https://prototypist.net/collections/in-stock-streamsale/products.json",
+    # Prototypist mints a NEW Shopify product at every lifecycle stage —
+    # coming-soon-… → group-buy-… → in-stock-… — rather than flipping stock on
+    # one. So a VendorKit linked during the group buy stays pointed at a handle
+    # that is now permanently sold out, and the price pass faithfully reports
+    # "sold out" forever. Measured 2026-08: 95 in-stock keycap listings on the
+    # store, 25 linked on the site; GMK Combobreaker was pinned to
+    # coming-soon-gmk-combobreaker while in-stock-gmk-cyl-combobreaker sold at
+    # £123.33. Relinking is exactly what this pass does.
+    "https://prototypist.net/collections/in-stock-gmk/products.json",
+    "https://prototypist.net/collections/in-stock-signature-plastics-keysets/products.json",
+    "https://prototypist.net/collections/summer-sale-2026/products.json",
+    # Keebz n Cables (AU) — the two in-stock keycap collections.
+    "https://www.keebzncables.com/collections/gmk-keycaps-in-stock/products.json",
+    "https://www.keebzncables.com/collections/keycaps-in-stock-1/products.json",
+    # Yushakobo (JP) — its GMK collection; the store-wide catalog is mostly
+    # switches and parts, so the collection is the cheaper, denser fetch.
+    "https://shop.yushakobo.jp/collections/gmk/products.json",
+    # Saber Keebs (US) — a Signature Plastics specialist: 9 of its 10 keycap
+    # products are DCS/DSS/SA, which is why it earns a slot despite the small
+    # catalog. Vendor row seeded by ensure_seeded_vendors().
+    "https://saberkeebs.com/collections/keycap-sets/products.json",
     "https://ktechs.store/collections/warehouse-clearance/products.json",
     # Ktechs' standing GMK collection (19 sets), not a clearance page. It is
     # here because discovery rotates only _DISCOVERY_VENDOR_LIMIT stores per
@@ -3666,9 +3693,74 @@ OUTLET_COLLECTIONS = [
     "https://pantheonkeys.com/collections/clearance/products.json",
     "https://clickclack.io/collections/sale/products.json",
     "https://klc-playground.com/collections/black-friday/products.json",
-    "https://geon.works/collections/gmk-leftover-collection/products.json",
+    # Geonworks' "gmk-leftover-collection" still resolves but is EMPTY (0
+    # products, checked 2026-08) — the store moved its stock to /collections/gmk.
+    # An empty collection reads exactly like a working one in the run summary,
+    # which is why it went unnoticed.
+    "https://geon.works/collections/gmk/products.json",
     "https://www.matrixlab.store/collections/flash/products.json",
 ]
+
+
+# Stores that OUTLET_COLLECTIONS references but that no other pass creates.
+#
+# Vendor rows are normally born from an import or from discovery crawling a
+# store the catalog already mentions, so a shop nobody links to yet never gets
+# one — and run_outlets resolves vendors by HOST, so its collection would log
+# "no tracked vendor" every night and quietly do nothing. Seeding here keeps the
+# collection list and the vendor roster from drifting apart.
+#
+# The websiteUrl is also REPOINTED on an existing row, the same way
+# ensure_zfrontier_vendor does — a vendor whose stored origin 404s is invisible
+# to discovery (which fetches "{origin}/products.json") and to run_outlets
+# (which resolves collections by host), and nothing else ever corrects it.
+#
+# (slug, name, region, country, currency, websiteUrl)
+SEEDED_VENDORS = [
+    (
+        "saber-keebs", "Saber Keebs", "US", "US", "USD",
+        "https://saberkeebs.com",
+    ),
+    # Yushakobo's storefront is the shop SUBDOMAIN: yushakobo.jp/products.json
+    # is a 404 while shop.yushakobo.jp/products.json serves the catalog, and
+    # host matching strips "www." but not "shop.", so a row pointed at the bare
+    # domain silently fails both passes.
+    (
+        "yushakobo", "Yushakobo", "ASIA", "JP", "JPY",
+        "https://shop.yushakobo.jp",
+    ),
+]
+
+
+def ensure_seeded_vendors(conn) -> int:
+    """Create or repoint the SEEDED_VENDORS rows. Returns how many were created.
+
+    Shipping zones are deliberately NOT seeded: computeCheapest() falls back to
+    the DHL lane estimate when a zone row is missing, whereas a wrong hardcoded
+    zone would quietly misprice every listing. The nightly backfillShipping in
+    db-setup fills real zones in later.
+
+    The Vendor table has no createdAt/updatedAt columns — naming them in an
+    insert has broken a nightly run before.
+    """
+    created = 0
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        for slug, name, region, country, currency, website in SEEDED_VENDORS:
+            cur.execute("""
+                INSERT INTO "Vendor"
+                    (id, slug, name, region, country, currency, "websiteUrl", "logoUrl")
+                VALUES
+                    (gen_random_uuid()::text, %s, %s, %s::"Region", %s, %s, %s, NULL)
+                ON CONFLICT (slug) DO UPDATE SET
+                    "websiteUrl" = EXCLUDED."websiteUrl"
+                RETURNING (xmax = 0) AS inserted
+            """, (slug, name, region, country, currency, website))
+            row = cur.fetchone()
+            if row and row.get("inserted"):
+                created += 1
+                log(f"Vendors: seeded {name} ({website}).")
+    conn.commit()
+    return created
 
 
 def run_outlets(
@@ -3678,11 +3770,25 @@ def run_outlets(
     scrapling: ScraplingClient | None = None,
 ) -> dict:
     """Relink VendorKits to vendors' outlet/clearance listings."""
-    stats = {"collections": 0, "products": 0, "linked": 0}
+    stats = {"collections": 0, "products": 0, "linked": 0, "skipped_hosts": 0}
+    # Before the host lookups below, or a seeded store's collection is skipped
+    # on the very run that introduces it.
+    ensure_seeded_vendors(conn)
     by_full, by_base = _build_set_index(conn)
+    # Paging multiplied this pass's request count, and OUTLET_COLLECTIONS is
+    # grouped by store — five consecutive Prototypist collections is exactly the
+    # host-clustered burst that reads as abuse. Interleave first so consecutive
+    # requests hit different stores, then throttle what's left.
+    collections = [
+        row["productUrl"]
+        for row in HostThrottle.interleave(
+            [{"productUrl": u} for u in OUTLET_COLLECTIONS]
+        )
+    ]
+    throttle = HostThrottle()
     page = context.new_page()
     try:
-        for url in OUTLET_COLLECTIONS:
+        for url in collections:
             if now_ms() > deadline:
                 log("Outlets: time budget reached — stopping.")
                 break
@@ -3691,6 +3797,10 @@ def run_outlets(
             # exist to get wrong.
             vendor_id = find_vendor_for_url(conn, url)
             if not vendor_id:
+                # Counted, not just logged: a host that silently resolves to
+                # nothing is how a whole store's collection goes unscraped for
+                # weeks without the run summary ever looking wrong.
+                stats["skipped_hosts"] += 1
                 log(f"Outlets: no tracked vendor for {_dcs_host(url)} — skipped.")
                 continue
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -3702,27 +3812,50 @@ def run_outlets(
             if not vendor:
                 continue
 
-            fetch_url = f"{url}?limit=250"
-            data = (
-                scrapling.get_json(fetch_url)
-                if scrapling and scrapling.available
-                else None
-            )
-            if data is None:
-                try:
-                    resp = page.goto(fetch_url, wait_until="domcontentloaded",
-                                     timeout=NAV_TIMEOUT_MS)
-                    if resp is not None and resp.ok:
-                        data = json.loads(resp.text())
-                except Exception:  # noqa: BLE001
-                    data = None
-            if not isinstance(data, dict):
+            # Paginated: Shopify caps a collection feed at 250 per page, and
+            # this pass read only the first one. Prototypist's streamsale
+            # (397 products) and summer sale (318) were each losing their tail
+            # silently — a full page is indistinguishable from a small
+            # collection unless you ask for the next one.
+            products: list[dict] = []
+            unreadable = False
+            for page_num in range(1, _OUTLET_MAX_PAGES + 1):
+                fetch_url = f"{url}?limit=250&page={page_num}"
+                throttle.wait(fetch_url)
+                data = (
+                    scrapling.get_json(fetch_url)
+                    if scrapling and scrapling.available
+                    else None
+                )
+                if data is None:
+                    try:
+                        resp = page.goto(fetch_url, wait_until="domcontentloaded",
+                                         timeout=NAV_TIMEOUT_MS)
+                        if resp is not None and resp.ok:
+                            data = json.loads(resp.text())
+                    except Exception:  # noqa: BLE001
+                        data = None
+                if not isinstance(data, dict):
+                    # Page 1 unreadable is a failed collection; a later page
+                    # failing still leaves the earlier ones worth processing.
+                    if page_num == 1:
+                        unreadable = True
+                    break
+                batch = data.get("products") or []
+                products.extend(batch)
+                # A short page is the last page.
+                if len(batch) < 250:
+                    break
+            else:
+                log(f"Outlets: {_dcs_host(url)} collection hit the "
+                    f"{_OUTLET_MAX_PAGES}-page cap — tail not read.")
+            if unreadable:
                 log(f"Outlets: could not read {url} — skipped.")
                 continue
             stats["collections"] += 1
 
             origin = _origin_of(url) or ""
-            for product in data.get("products") or []:
+            for product in products:
                 title = str(product.get("title") or "")
                 handle = product.get("handle")
                 if not handle:
@@ -3768,7 +3901,8 @@ def run_outlets(
     finally:
         page.close()
     log(f"Outlets -> collections={stats['collections']} "
-        f"products={stats['products']} linked={stats['linked']}")
+        f"products={stats['products']} linked={stats['linked']} "
+        f"skipped_hosts={stats['skipped_hosts']}")
     return stats
 
 
@@ -5777,7 +5911,8 @@ def main() -> int:
         f"gmk_listings={disc_stats['gmk_listings']} linked={disc_stats['linked']} "
         f"relinked={disc_stats['relinked']}")
     log(f"Outlets -> collections={out_stats['collections']} "
-        f"products={out_stats['products']} linked={out_stats['linked']}")
+        f"products={out_stats['products']} linked={out_stats['linked']} "
+        f"skipped_hosts={out_stats['skipped_hosts']}")
     log(f"GMK Direct -> pages={gd_stats['pages']} priced={gd_stats['priced']} "
         f"out_of_stock={gd_stats['out_of_stock']} unmatched={gd_stats['unmatched']}")
     log(f"Prices  -> throttle_wait={price_stats['throttled_s']:.0f}s")
