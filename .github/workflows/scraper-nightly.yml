@@ -1,0 +1,84 @@
+# The full scraper: catalog, dcs.wiki, zFrontier, KBDfans, keyboards,
+# Lightning, Geekhack, images, discovery, outlets, GMK direct, prices.
+#
+# This is the only job that creates SETS. The linking and price jobs can only
+# attach listings to sets that already exist, so without this the catalog goes
+# stale no matter how often the others run.
+#
+# ─── The schedule is intentionally commented out ────────────────────────────
+# Everything else here is proven on runners: the Geekhack backfill already runs
+# Playwright + Chromium this way, and refresh-prices confirms vendor stores
+# serve runner IPs. What is NOT proven is the FULL pass from a runner — it is
+# far heavier than the price refresh, it hits every tracked store in one
+# session, and this scraper has been rate-limited into `blocked=424` before.
+# Being throttled hurts every other job too, since they share those hosts.
+#
+# So: run it by hand from the Actions tab for a week (or keep running it
+# locally) and read the summary. When the runs come back clean — no blocked
+# spike, budget not exhausted — uncomment the two lines below and it is live.
+#
+# schedule:
+#   - cron: "0 1 * * *"   # 01:00 UTC, ahead of the 02:30 linking job
+name: Scraper nightly (full)
+
+on:
+  workflow_dispatch:
+    inputs:
+      budget_minutes:
+        description: Maximum run time (5-720)
+        required: false
+        type: string
+        default: "180"
+
+concurrency:
+  # Shared with the linking and health jobs — never two browsers against the
+  # same stores at once, and never two writers on the same rows.
+  group: scraper-vendor-io
+  cancel-in-progress: false
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scraper/requirements.txt
+
+      - name: Install scraper
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r scraper/requirements.txt
+          python -m playwright install --with-deps chromium
+
+      # Geekhack progress is resumable; carrying it between runs keeps each
+      # night's pass incremental instead of rescanning the whole forum.
+      - name: Restore resumable Geekhack progress
+        uses: actions/cache@v4
+        with:
+          path: scraper/gh_seen.json
+          key: scraper-nightly-gh-v1-${{ github.run_id }}
+          restore-keys: |
+            scraper-nightly-gh-v1-
+
+      - name: Full scraper run
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+        run: >-
+          python scraper/scrape.py
+          --budget-minutes ${{ github.event_name == 'workflow_dispatch' && inputs.budget_minutes || '180' }}
+          --headless
+          --no-scrapling
+
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraper-nightly-${{ github.run_id }}
+          path: scraper/logs/*.log
+          if-no-files-found: ignore
+          retention-days: 14

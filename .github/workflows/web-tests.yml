@@ -1,0 +1,66 @@
+# The site's test gate. Until this existed, NOTHING ran the five ts-node
+# suites, `tsc --noEmit` or `next lint` automatically — scraper-tests.yml
+# covers only Python, and only when scraper/** changes. Vercel's build
+# typechecks, but it runs after merge on main and catches no unit test.
+#
+# `next build` is deliberately NOT run here: without a database it stops at
+# "Collecting page data" with `No database configuration found`, which is
+# environmental rather than a code fault (see CLAUDE.md). `tsc --noEmit`
+# already covers what the build would tell us at this stage.
+name: Web checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: web-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Prisma's generated client lives in src/generated/prisma and is imported
+      # by the type layer, so it has to exist before tsc runs.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx next lint
+
+      # Run every suite even if an earlier one fails, so one broken suite
+      # doesn't hide the state of the other four.
+      - name: set-name
+        if: always()
+        run: npm run test:set-name
+
+      - name: csv-import
+        if: always()
+        run: npm run test:csv-import
+
+      - name: collection-import
+        if: always()
+        run: npm run test:collection-import
+
+      - name: keycap-collection
+        if: always()
+        run: npm run test:keycap-collection
+
+      - name: home-cache
+        if: always()
+        run: npm run test:home-cache
