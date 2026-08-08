@@ -2652,9 +2652,11 @@ function KeyboardCollectionCard({
   // on display (holds for single- and multi-build alike).
   const nothingPublic = owned && piecePublic && shownCount === 0;
   const catalogImageUrl = normalizeImageUrl(item.imageUrl);
+  // Every build without its own uploaded photo falls back to the catalog
+  // render — the same rule the public collection page uses. (Build 1 used to be
+  // the only one that fell back, so builds 2..N showed a blank card.)
   const imageUrl = multiBuild
-    ? activeBuild?.imageUrl ||
-      (visibleBuildIndex === 0 ? catalogImageUrl : null)
+    ? activeBuild?.imageUrl || catalogImageUrl
     : item.collection.customImageUrl || catalogImageUrl;
   // Owner-uploaded photos come in arbitrary aspect ratios — show the WHOLE
   // photo in proportion (object-contain against the card's muted backdrop)
@@ -3538,7 +3540,7 @@ function KeyboardCollectionItemEditor({
           <>
           <BuildFields
             build={builds[activeBuild] || EMPTY_UNIT}
-            fallbackImage={activeBuild === 0 ? catalogImage : null}
+            fallbackImage={catalogImage}
             purchaseCurrencies={purchaseCurrencies}
             onChange={(patch) => updateBuild(activeBuild, patch)}
             onError={setError}
