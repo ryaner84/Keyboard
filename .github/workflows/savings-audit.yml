@@ -5,6 +5,11 @@ name: Savings audit
 
 on:
   workflow_dispatch:
+  schedule:
+    # Weekly. A wrong-currency scrape is a persistent fault, not a
+    # fast-moving one — it survives until someone fixes the vendor row —
+    # so checking daily would just repeat the same findings.
+    - cron: "20 4 * * 1"
 
 jobs:
   audit:
