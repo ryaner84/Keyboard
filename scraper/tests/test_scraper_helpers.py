@@ -538,11 +538,14 @@ class GmkDirectTests(unittest.TestCase):
             ]
         }
         out = scrape.gmk_products_from_catalog(data, "https://shop.test")
+        # Asserted field-by-field rather than by whole-dict equality: the rows
+        # also carry availability/price for pick_store_listing, and this test is
+        # about WHICH products survive the profile filter, not the row's shape.
         self.assertEqual(
-            out,
+            [(p["title"], p["url"]) for p in out],
             [
-                {"title": "GMK Striker", "url": "https://shop.test/products/gmk-striker"},
-                {"title": "GMK Olive", "url": "https://shop.test/products/gmk-olive"},
+                ("GMK Striker", "https://shop.test/products/gmk-striker"),
+                ("GMK Olive", "https://shop.test/products/gmk-olive"),
             ],
         )
 
@@ -1248,6 +1251,120 @@ class OutletCollectionTests(unittest.TestCase):
             return sum(1 for a, b in zip(hosts, hosts[1:]) if a == b)
 
         self.assertLess(adjacent_same_host(spread), adjacent_same_host(urls))
+
+
+class StoreListingChoiceTests(unittest.TestCase):
+    # The real Prototypist catalog for ONE set, verbatim (2026-08). All four
+    # normalise to "gmk combobreaker", so before ranking, whichever came last
+    # out of the feed won — and the feed put the dead "(Coming Soon)" page on
+    # page 2, after the live one on page 1.
+    PROTOTYPIST_COMBOBREAKER = [
+        {"title": "(In Stock) GMK CYL Combobreaker",
+         "url": "https://prototypist.net/products/in-stock-gmk-cyl-combobreaker",
+         "available": True, "price": 123.33},
+        {"title": "(Pre-Order) GMK Combobreaker",
+         "url": "https://prototypist.net/products/pre-order-gmk-combobreaker",
+         "available": False, "price": 111.67},
+        {"title": "(Group Buy) GMK Combobreaker",
+         "url": "https://prototypist.net/products/group-buy-gmk-combobreaker",
+         "available": False, "price": 106.67},
+        {"title": "(Coming Soon) GMK Combobreaker",
+         "url": "https://prototypist.net/products/coming-soon-gmk-combobreaker",
+         "available": True, "price": 0.0},
+    ]
+
+    def test_in_stock_listing_wins_over_lifecycle_duplicates(self):
+        chosen = scrape.pick_store_listing(self.PROTOTYPIST_COMBOBREAKER)
+        self.assertEqual(
+            chosen["url"],
+            "https://prototypist.net/products/in-stock-gmk-cyl-combobreaker",
+        )
+
+    def test_choice_does_not_depend_on_catalog_order(self):
+        # The whole bug was order dependence: the winner must be a property of
+        # the listings, not of which page they landed on.
+        import itertools
+        for order in itertools.permutations(self.PROTOTYPIST_COMBOBREAKER):
+            self.assertEqual(
+                scrape.pick_store_listing(list(order))["url"],
+                "https://prototypist.net/products/in-stock-gmk-cyl-combobreaker",
+            )
+
+    def test_coming_soon_placeholder_never_beats_a_real_price(self):
+        # "(Coming Soon)" reports available=True at £0.00 — availability alone
+        # would have picked it, which is why price outranks availability.
+        coming_soon = self.PROTOTYPIST_COMBOBREAKER[3]
+        group_buy = self.PROTOTYPIST_COMBOBREAKER[2]
+        self.assertGreater(
+            scrape.score_store_listing(group_buy),
+            scrape.score_store_listing(coming_soon),
+        )
+
+    def test_buyable_always_beats_a_better_labelled_dead_listing(self):
+        # Found by running the ranking over the live catalog: with an additive
+        # score, a SOLD-OUT "(In Stock)" listing (best possible title marker,
+        # real price) could outrank an ORDERABLE one whose title says
+        # "(Coming Soon)". Buyability has to dominate outright.
+        dead_but_well_labelled = {
+            "title": "(In Stock) GMK Foo", "url": "dead",
+            "available": False, "price": 120.0,
+        }
+        orderable_but_badly_labelled = {
+            "title": "(Coming Soon) GMK Foo", "url": "live",
+            "available": True, "price": 115.0,
+        }
+        self.assertEqual(
+            scrape.pick_store_listing(
+                [dead_but_well_labelled, orderable_but_badly_labelled]
+            )["url"],
+            "live",
+        )
+
+    def test_sole_group_buy_listing_is_still_linked(self):
+        # A set that is only ever offered as a group buy must not be dropped
+        # just because nothing in-stock exists to outrank it.
+        only_gb = [self.PROTOTYPIST_COMBOBREAKER[2]]
+        self.assertEqual(scrape.pick_store_listing(only_gb)["url"],
+                         self.PROTOTYPIST_COMBOBREAKER[2]["url"])
+
+    def test_sold_out_sole_listing_is_kept(self):
+        sold_out = [{"title": "GMK Foo", "url": "https://x.com/products/gmk-foo",
+                     "available": False, "price": 120.0}]
+        self.assertIsNotNone(scrape.pick_store_listing(sold_out))
+
+    def test_empty_candidate_list_returns_none(self):
+        self.assertIsNone(scrape.pick_store_listing([]))
+
+    def test_ties_keep_the_first_candidate(self):
+        a = {"title": "GMK Foo", "url": "u1", "available": True, "price": 100.0}
+        b = {"title": "GMK Foo", "url": "u2", "available": True, "price": 100.0}
+        self.assertEqual(scrape.pick_store_listing([a, b])["url"], "u1")
+        self.assertEqual(scrape.pick_store_listing([b, a])["url"], "u2")
+
+    def test_catalog_extract_carries_availability_and_price(self):
+        data = {"products": [{
+            "title": "(In Stock) GMK CYL Combobreaker",
+            "handle": "in-stock-gmk-cyl-combobreaker",
+            "variants": [
+                {"price": "123.33", "available": True},
+                {"price": "36.67", "available": False},
+            ],
+        }]}
+        [product] = scrape.tracked_products_from_catalog(data, "https://prototypist.net")
+        self.assertTrue(product["available"])
+        self.assertEqual(product["price"], 123.33)
+        self.assertEqual(
+            product["url"],
+            "https://prototypist.net/products/in-stock-gmk-cyl-combobreaker",
+        )
+
+    def test_catalog_extract_tolerates_a_feed_without_variants(self):
+        data = {"products": [{"title": "GMK Foo", "handle": "gmk-foo"}]}
+        [product] = scrape.tracked_products_from_catalog(data, "https://x.com")
+        self.assertIsNone(product["available"])
+        self.assertEqual(product["price"], 0.0)
+        # Still linkable — a feed that omits variants must not lose the product.
+        self.assertIsNotNone(scrape.pick_store_listing([product]))
 
 
 class SeededVendorTests(unittest.TestCase):

@@ -3017,15 +3017,18 @@ def run_images(
 # Existing MANUAL prices are never touched; only the productUrl is (re)linked.
 # ----------------------------------------------------------------------------
 
-# Shopify caps products.json at 250/page; 4 pages = 1000 products covers every
-# keyboard store's catalog comfortably.
-# 250 products per page. Four pages covered every store when this was written;
-# Prototypist now carries 1500+, with 106 GMK/DCS products sitting on pages 5-6
-# alone — invisible to discovery and impossible to notice, because the loop
-# stopped silently. Eight pages covers it, and small stores still exit early on
-# the short-page break, so only large catalogues pay the extra requests (which
-# HostThrottle now spaces out).
-_DISCOVERY_MAX_CATALOG_PAGES = 8
+# Shopify caps products.json at 250/page. This constant has now been raised
+# twice for the same reason, so measure before trusting it: 4 pages covered
+# every store when it was written, then 8 when Prototypist reached 1500 —
+# and as of 2026-08 Prototypist is 4021 products over 17 pages, with 596 of
+# its 1081 GMK/DCS listings sitting beyond page 8. (Divinikey is 6 pages,
+# KBDfans 2, so nothing else is close.)
+#
+# 20 costs nothing at a small store: the loop breaks on the first short page,
+# so only genuinely large catalogues pay the extra requests — and those are
+# spaced by HostThrottle. The cap exists to bound a store that returns a full
+# page forever, not to ration reads.
+_DISCOVERY_MAX_CATALOG_PAGES = 20
 _DISCOVERY_VENDOR_LIMIT = 8
 
 
@@ -3066,17 +3069,111 @@ TRACKED_PROFILE_RE = re.compile(r"\b(?:GMK|DCS)\b", re.IGNORECASE)
 
 
 def tracked_products_from_catalog(data: dict, origin: str) -> list[dict]:
-    """Extract [{title, url}] for every tracked-profile product (GMK / DCS …) in
-    a Shopify products.json page. Other profiles and handle-less products are
-    dropped."""
+    """Extract [{title, url, available, price}] for every tracked-profile product
+    (GMK / DCS …) in a Shopify products.json page. Other profiles and
+    handle-less products are dropped.
+
+    `available` and `price` are carried so pick_store_listing() can choose
+    between a store's several products for the same set; both are best-effort,
+    since a feed may omit either.
+    """
     out: list[dict] = []
     for p in (data or {}).get("products", []) or []:
         title = str(p.get("title") or "")
         handle = p.get("handle")
         if not handle or not TRACKED_PROFILE_RE.search(title):
             continue
-        out.append({"title": title, "url": f"{origin}/products/{handle}"})
+        variants = p.get("variants") or []
+        available = any(v.get("available") for v in variants) if variants else None
+        price = 0.0
+        for v in variants:
+            try:
+                price = max(price, float(v.get("price")))
+            except (TypeError, ValueError):
+                continue
+        out.append({
+            "title": title,
+            "url": f"{origin}/products/{handle}",
+            "available": available,
+            "price": price,
+        })
     return out
+
+
+# Lifecycle words stores put in a product TITLE. Some stores (Prototypist) do
+# not flip stock on one product — they publish a new product per stage and keep
+# every old one live, so one catalog holds four products for one set:
+#
+#   (In Stock) GMK CYL Combobreaker    in-stock-…     £123.33  available
+#   (Pre-Order) GMK Combobreaker       pre-order-…    £111.67  sold out
+#   (Group Buy) GMK Combobreaker       group-buy-…    £106.67  sold out
+#   (Coming Soon) GMK Combobreaker     coming-soon-…    £0.00  "available"
+#
+# They all normalise to the same set, so linking whichever came LAST out of the
+# feed pinned the set to a dead page — and worse, non-deterministically, since
+# the winner depended on feed order rather than on anything about the listing.
+_LISTING_STAGE_SCORES = (
+    (re.compile(r"in[\s-]?stock", re.I), 3),
+    (re.compile(r"pre[\s-]?order", re.I), 1),
+    (re.compile(r"group\s*buy|\bgb\b", re.I), 1),
+    (re.compile(r"coming\s*soon|sold\s*out|\bended\b", re.I), -3),
+)
+
+
+def score_store_listing(product: dict) -> float:
+    """Rank one store product as the set's canonical listing. Higher wins.
+
+    Strictly tiered, not a weighted sum, because the tiers are not commensurate:
+
+      1. BUYABLE (available AND priced) beats everything. Worth 100 so no
+         combination of the weaker signals can outvote it — an early version
+         scored this additively and a sold-out "(In Stock) …" could still beat
+         an orderable listing, which is the same class of bug this function
+         exists to fix.
+      2. A REAL PRICE beats mere availability. The "(Coming Soon)" page reports
+         available=True at 0.00, so availability alone is the weaker evidence;
+         a £0.00 listing is never useful, since the price pass can only store a
+         nonsense zero or clear the row.
+      3. The TITLE MARKER breaks ties only. Stores word it freely, so it is the
+         least trustworthy signal of the three.
+    """
+    try:
+        price = float(product.get("price") or 0)
+    except (TypeError, ValueError):
+        price = 0.0
+    available = bool(product.get("available"))
+
+    score = 0.0
+    if available and price > 0:
+        score += 100
+    if price > 0:
+        score += 5
+    if available:
+        score += 2
+    title = str(product.get("title") or "")
+    for pattern, weight in _LISTING_STAGE_SCORES:
+        if pattern.search(title):
+            score += weight
+            break
+    return score
+
+
+def pick_store_listing(candidates: list[dict]) -> dict | None:
+    """The best of one store's products for a single set, or None if empty.
+
+    Ties keep the FIRST candidate, so the result depends only on the catalog's
+    order for listings that genuinely look identical — never on which page of
+    the feed a duplicate happened to land on.
+    """
+    if not candidates:
+        return None
+    best = candidates[0]
+    best_score = score_store_listing(best)
+    for candidate in candidates[1:]:
+        score = score_store_listing(candidate)
+        if score > best_score:
+            best, best_score = candidate, score
+    return best
 
 
 # Back-compat alias: the old name described a GMK-only filter.
@@ -3179,7 +3276,8 @@ def run_discovery(
     scrapling: ScraplingClient | None = None,
 ) -> dict:
     """Crawl vendor catalogs for GMK listings and link them to tracked sets."""
-    stats = {"vendors": 0, "gmk_listings": 0, "linked": 0, "relinked": 0}
+    stats = {"vendors": 0, "gmk_listings": 0, "linked": 0, "relinked": 0,
+             "multi_listing": 0}
 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         # Manufacturer/catalog sources aren't stores — crawling dcs.wiki or
@@ -3264,6 +3362,12 @@ def run_discovery(
             log(f"  {origin}: {raw_products} product(s), {len(catalog)} tracked listing(s).")
             stats["gmk_listings"] += len(catalog)
 
+            # Group first, write second. A store can list the same set several
+            # times (see pick_store_listing) and writing as we go meant the LAST
+            # match won, which is how sets ended up pinned to dead
+            # "(Coming Soon)" pages. Collect every candidate per kit, then link
+            # the best one exactly once.
+            by_kit: dict[str, dict] = {}
             for product in catalog:
                 # Subkit/accessory products (novelties, spacebars, deskmats…)
                 # are never the set's base listing — skip before matching.
@@ -3272,6 +3376,21 @@ def run_discovery(
                 match = match_product_to_set(product["title"], by_full, by_base)
                 if not match:
                     continue
+                bucket = by_kit.setdefault(
+                    match["base_kit_id"], {"match": match, "products": []}
+                )
+                bucket["products"].append(product)
+
+            for bucket in by_kit.values():
+                match = bucket["match"]
+                product = pick_store_listing(bucket["products"])
+                if product is None:
+                    continue
+                if len(bucket["products"]) > 1:
+                    stats["multi_listing"] += 1
+                    others = len(bucket["products"]) - 1
+                    log(f"    {others + 1} listings for one set — chose "
+                        f"{product['url'].rsplit('/', 1)[-1]} over {others} other(s)")
                 # Create the link if missing, or refresh a changed productUrl —
                 # but never touch a MANUAL price's row. RETURNING (xmax = 0)
                 # distinguishes an insert (new link) from an update (relink); a
@@ -3286,6 +3405,13 @@ def run_discovery(
                         ON CONFLICT ("kitId", "vendorId") DO UPDATE SET
                             "productUrl" = EXCLUDED."productUrl",
                             "gbUrl" = COALESCE("VendorKit"."gbUrl", EXCLUDED."gbUrl"),
+                            -- The stored price belongs to the OLD url; leaving
+                            -- it would keep showing the dead listing's "sold
+                            -- out" until this row's turn came round again.
+                            -- Nulling it re-queues the row for tonight's price
+                            -- pass, which runs after discovery. Only ever
+                            -- reached when the url actually changed (below).
+                            "priceUpdatedAt" = NULL,
                             "updatedAt" = now()
                         WHERE "VendorKit"."priceSource" IS DISTINCT FROM 'MANUAL'
                           AND "VendorKit"."productUrl" IS DISTINCT FROM EXCLUDED."productUrl"
@@ -3306,7 +3432,7 @@ def run_discovery(
         page.close()
     log(f"Discovery -> vendors={stats['vendors']} "
         f"gmk_listings={stats['gmk_listings']} linked={stats['linked']} "
-        f"relinked={stats['relinked']}")
+        f"relinked={stats['relinked']} multi_listing={stats['multi_listing']}")
     return stats
 
 
@@ -5879,7 +6005,8 @@ def main() -> int:
     if args.discovery_only:
         log(f"Discovery -> vendors={disc_stats['vendors']} "
             f"gmk_listings={disc_stats['gmk_listings']} linked={disc_stats['linked']} "
-            f"relinked={disc_stats['relinked']}")
+            f"relinked={disc_stats['relinked']} "
+            f"multi_listing={disc_stats['multi_listing']}")
         log("Discovery done. Re-run safely to crawl the next batch of vendors.")
         return 0
 
@@ -5909,7 +6036,8 @@ def main() -> int:
         f"enriched={img_stats['enriched']} failed={img_stats['failed']}")
     log(f"Discovery -> vendors={disc_stats['vendors']} "
         f"gmk_listings={disc_stats['gmk_listings']} linked={disc_stats['linked']} "
-        f"relinked={disc_stats['relinked']}")
+        f"relinked={disc_stats['relinked']} "
+        f"multi_listing={disc_stats['multi_listing']}")
     log(f"Outlets -> collections={out_stats['collections']} "
         f"products={out_stats['products']} linked={out_stats['linked']} "
         f"skipped_hosts={out_stats['skipped_hosts']}")
