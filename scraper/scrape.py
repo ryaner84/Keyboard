@@ -607,6 +607,15 @@ _SUPPORTED_CURRENCIES = {
 NO_BASE_KIT = "NO_BASE_KIT"
 
 
+# Kits a bundle can be bundled WITH. Reuses the non-base subkit vocabulary and
+# adds the three standard kit names classify_variant tests for directly.
+_BUNDLE_EXTRA_RE = re.compile(
+    r"novelt|ノベルティ|space\s*bar|スペースバー|alpha|アルファ|"
+    + _NONBASE_SUBKIT_RE.pattern,
+    re.IGNORECASE,
+)
+
+
 def classify_variant(title: str) -> str:
     """Mirror of classifyVariant in src/lib/kit-variants.ts — order matters.
 
@@ -616,10 +625,15 @@ def classify_variant(title: str) -> str:
     stored as the base price when the base kit had sold out."""
     # BUNDLE before the subkit tests: "Base + Novelties" would otherwise match
     # `novelt` and be filed as a novelty kit, so a bundle-only listing yielded
-    # no base candidate and stored nothing. A joiner is required, leaving
-    # "Novelties (fits base)" alone. Mirror of kit-variants.ts.
-    if re.search(r"base|ベース", title, re.IGNORECASE) and re.search(
-        r"[+&/]|\band\b|\bwith\b|\bplus\b", title, re.IGNORECASE
+    # no base candidate and stored nothing.
+    #
+    # A joiner alone is NOT enough. Oblotzky sells "Teal & White Base" and
+    # Yushakobo "Two Baseセット（Teal + White）" — plain base kits whose COLOURWAY
+    # happens to contain "&"/"+". A bundle must also name an actual extra kit.
+    if (
+        re.search(r"base|ベース", title, re.IGNORECASE)
+        and re.search(r"[+&/]|\band\b|\bwith\b|\bplus\b", title, re.IGNORECASE)
+        and _BUNDLE_EXTRA_RE.search(title)
     ):
         return "BUNDLE"
     if re.search(r"novelt|ノベルティ", title, re.IGNORECASE):

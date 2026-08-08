@@ -1005,6 +1005,27 @@ class BundleVariantTests(unittest.TestCase):
         ):
             self.assertEqual(scrape.classify_variant(title), "BUNDLE", title)
 
+    def test_colourway_names_with_joiners_are_not_bundles(self):
+        # Observed in production: Oblotzky's "Teal & White Base" and Yushakobo's
+        # "Two Baseセット（Teal + White）" are plain base kits whose COLOURWAY
+        # contains a joiner. Requiring a joiner alone filed them as bundles,
+        # which would have mislabelled them and changed which variant was picked.
+        for title in (
+            "Teal & White Base",
+            "Two Base\u30bb\u30c3\u30c8\uff08Teal + White\uff09",
+            "Black & Gold Base Kit",
+        ):
+            self.assertEqual(scrape.classify_variant(title), "BASE", title)
+
+    def test_bundle_must_name_an_actual_extra_kit(self):
+        # These come from live listings (KBDfans GMK Selene / Thunder God).
+        for title in (
+            "Base+Novelties+Extension+Space",
+            "Base+Novelties+Extension",
+            "Base+Novelties",
+        ):
+            self.assertEqual(scrape.classify_variant(title), "BUNDLE", title)
+
     def test_plain_base_and_plain_subkits_are_unchanged(self):
         self.assertEqual(scrape.classify_variant("Base Kit"), "BASE")
         self.assertEqual(scrape.classify_variant("Novelties"), "NOVELTIES")
