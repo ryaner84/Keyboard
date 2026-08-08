@@ -16,6 +16,16 @@ CI → merge) stays on REST and keeps working regardless of that quota.
 If a PR genuinely isn't ready to merge, say so in chat and in the PR body
 rather than reaching for draft state.
 
+**Merge as soon as CI is green — don't ask first.** Squash-merge, matching the
+existing history: 101 of main's 102 commits are one-per-PR `Title (#NN)`, so a
+merge commit would introduce a second style and put work-in-progress commits on
+main permanently.
+
+Squashing has one consequence worth remembering: it creates a NEW commit, so a
+branch's own commits are never ancestors of main. `git merge-base --is-ancestor`
+will therefore report every merged branch as "unmerged" — check the PR's state
+instead. It is also why a branch needs `--force-with-lease` after its PR merges.
+
 ## Tests
 
 Six suites, all of which should pass before pushing:
