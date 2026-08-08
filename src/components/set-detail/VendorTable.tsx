@@ -27,6 +27,9 @@ interface RowData {
   shippingLocal: number;
   totalLocal: number;
   estimatedDays: string;
+  // The vendor's own pre-markdown price, converted like kitPriceLocal, when
+  // this listing is discounted. Null on a full-price row.
+  wasLocal: number | null;
   // Some sets sell several base kits (e.g. Hiragana Base / Latin Base) —
   // when a vendor lists 2+, each is shown as its own line under the row.
   baseVariants: Array<KitVariant & { priceLocal: number }>;
@@ -192,12 +195,21 @@ export function VendorTable({
           ? Math.min(...baseVariants.map((v) => v.priceLocal))
           : kitPriceLocal;
 
+      // Only a genuine markdown, and only against the row's own kit price:
+      // when a multi-base row shows "from <cheapest>", a compare-at taken from
+      // the dearer stored variant would invent a discount that isn't offered.
+      const wasLocal =
+        vk.compareAtPrice != null && vk.compareAtPrice > (vk.price as number)
+          ? convertCurrency(vk.compareAtPrice, kitCurrency, userCurrency, rates)
+          : null;
+
       out.push({
         vk,
         kitPriceLocal: effectiveKitLocal,
         shippingLocal,
         totalLocal: effectiveKitLocal + shippingLocal,
         estimatedDays,
+        wasLocal: wasLocal != null && wasLocal > effectiveKitLocal ? wasLocal : null,
         baseVariants,
       });
     }
@@ -301,6 +313,16 @@ export function VendorTable({
                 {multiBase && <span className="text-xs text-gray-400">from </span>}
                 {formatCurrency(row.kitPriceLocal, userCurrency)}
               </p>
+              {row.wasLocal != null && (
+                <p className="text-[10px] leading-tight">
+                  <span className="text-gray-400 line-through">
+                    {formatCurrency(row.wasLocal, userCurrency)}
+                  </span>{" "}
+                  <span className="font-bold text-rose-600">
+                    −{Math.round((1 - row.kitPriceLocal / row.wasLocal) * 100)}%
+                  </span>
+                </p>
+              )}
             </div>
 
             {/* Shipping — DHL estimate */}

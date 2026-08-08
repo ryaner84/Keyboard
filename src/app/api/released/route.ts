@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { notHiddenWhere, notShowcaseWhere } from "@/lib/showcase";
 import { isKeycapMaker, makerWhereOr } from "@/lib/set-name";
+import { classifyVariant, parseVariants } from "@/lib/kit-variants";
+import { bestDiscount } from "@/lib/pricing";
 
 const RELEASED_STATUSES = ["SHIPPING", "DELIVERED", "IN_STOCK"] as const;
 const VISIBLE_LISTING_WHERE = { dataTrustLevel: { not: "DEAD" } } as const;
@@ -17,6 +19,32 @@ const AVAILABLE_FILTER = {
   },
 };
 
+// Bargain is a price-comparison page, so every row must carry a real retail
+// price from some vendor. Geekhack-sourced rows ("[GB] …" titles, gh- slugs)
+// are forum THREADS, not listings — no retailer, no price, nothing to compare.
+// They were reaching the page because the price requirement only applied on the
+// "Available now" tab: 21 of a 192-row sample were forum posts, every one
+// unpriced. Applied unconditionally, "Sold out" now means priced-but-gone
+// rather than "no price at all".
+const PRICED_FILTER = {
+  kits: {
+    some: {
+      type: "BASE" as const,
+      vendorKits: { some: { price: { not: null } } },
+    },
+  },
+};
+
+// Rows where some vendor is running a markdown (compare_at_price > price).
+const ON_SALE_FILTER = {
+  kits: {
+    some: {
+      type: "BASE" as const,
+      vendorKits: { some: { price: { not: null }, compareAtPrice: { not: null } } },
+    },
+  },
+};
+
 const PRICING_INCLUDE = {
   kits: {
     include: {
@@ -28,6 +56,57 @@ const PRICING_INCLUDE = {
 } as const;
 
 const RANKING_CAP = 400;
+// The markdown rail reads full pricing rows, but ON_SALE_FILTER is very
+// selective (a few dozen listings), so it needs nothing like RANKING_CAP.
+const MARKDOWN_SCAN_CAP = 120;
+
+// Sets sold as a "base + extras" bundle by at least one in-stock vendor.
+//
+// A bundle is not a Kit row — KitType has no BUNDLE member — it is a variant
+// title inside a listing's scraped `variants` JSON, so it cannot be expressed
+// as a Prisma `where`. Scanning every set's JSON in Node would mean pulling
+// the whole catalog's variant lists on each request, so the coarse cut happens
+// in Postgres: keep only listings whose variant blob mentions a base AND an
+// extra kit. That is a strict SUPERSET of what classifyVariant() calls BUNDLE
+// (every bundle title contains both), so re-running the real classifier on the
+// handful of survivors gives the exact set — no false positives, none missed.
+const BUNDLE_BASE_RE = "(base|ベース)";
+const BUNDLE_EXTRA_RE =
+  "(novelt|space ?bar|alpha|num(ber)? ?pad|40s|forties|accent|extension|hiragana|katakana|hangul|cyrillic|norde|nordic|iso|icon|macro|ノベルティ|スペースバー|アルファ)";
+
+// Returns null when the scan could not run. This is the route's only raw SQL,
+// and it runs on EVERY unfiltered page-1 load to label the pill — so a failure
+// here (an older Postgres, a permissions change) would 500 the entire bargain
+// page rather than lose one filter. Degrade instead: the pill loses its count,
+// and an active bundle filter returns nothing rather than silently returning
+// everything unfiltered under a "bundles" label.
+async function bundleSetIds(): Promise<string[] | null> {
+  let rows: Array<{ id: string; variants: unknown }>;
+  try {
+    rows = await prisma.$queryRaw<Array<{ id: string; variants: unknown }>>`
+      SELECT k."groupBuyId" AS id, vk.variants
+      FROM "Kit" k
+      JOIN "VendorKit" vk ON vk."kitId" = k.id
+      WHERE k.type = 'BASE'
+        AND vk.price IS NOT NULL
+        AND vk."inStock" = true
+        AND vk.variants IS NOT NULL
+        AND vk.variants::text ~* ${BUNDLE_BASE_RE}
+        AND vk.variants::text ~* ${BUNDLE_EXTRA_RE}
+    `;
+  } catch (err) {
+    console.error("released: bundle scan failed", err);
+    return null;
+  }
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const bundled = parseVariants(row.variants).some(
+      (v) => classifyVariant(v.title) === "BUNDLE" && v.available !== false
+    );
+    if (bundled) ids.add(row.id);
+  }
+  return Array.from(ids);
+}
 
 interface PricedSet {
   set: { id: string; kits: Array<{ type: string; vendorKits: Array<{ price: number | null; currency: string | null; inStock: boolean }> }> };
@@ -67,6 +146,8 @@ export async function GET(req: NextRequest) {
   // Maker filter (GMK / Signature Plastics). Keycaps only — a maker pill
   // is meaningless on the keyboards tab.
   const makers = searchParams.getAll("maker").filter(isKeycapMaker);
+  const onSale = searchParams.get("deals") === "1";
+  const bundlesOnly = searchParams.get("bundles") === "1";
   const sortBy = searchParams.get("sort") ?? "released-desc";
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
   const limit = Math.min(48, Math.max(1, parseInt(searchParams.get("limit") ?? "24")));
@@ -101,6 +182,40 @@ export async function GET(req: NextRequest) {
       ? "available"
       : availability;
 
+  // Every filter below targets `kits`, so they must be AND-ed rather than
+  // spread into the same object: a second `kits` key silently REPLACES the
+  // first, dropping whichever requirement came earlier. That collision already
+  // existed between the availability and vendor filters; adding the price and
+  // on-sale filters would have made it bite.
+  // Resolved before `where` is built so the bundle filter can be pushed into
+  // SQL as an id list — that keeps count/pagination exact instead of dropping
+  // rows out of an already-paged result. Also computed on an unfiltered page 1
+  // so the UI can label (and hide) the pill with a real number.
+  const bundleIds = bundlesOnly || (page === 1 && !isKeyboard) ? await bundleSetIds() : null;
+
+  const setConditions: Record<string, unknown>[] = [PRICED_FILTER];
+  if (bundlesOnly) setConditions.push({ id: { in: bundleIds ?? [] } });
+  if (effectiveAvailability === "available") setConditions.push(AVAILABLE_FILTER);
+  if (effectiveAvailability === "soldout") setConditions.push({ NOT: AVAILABLE_FILTER });
+  if (onSale) setConditions.push(ON_SALE_FILTER);
+  if (designer) {
+    setConditions.push({ designer: { equals: designer, mode: "insensitive" as const } });
+  }
+  if (vendor) {
+    // Vendor filter = "this vendor stocks it right now".
+    setConditions.push({
+      kits: {
+        some: {
+          type: "BASE" as const,
+          vendorKits: {
+            some: { price: { not: null }, inStock: true, vendor: { slug: vendor } },
+          },
+        },
+      },
+    });
+  }
+  if (makers.length > 0) setConditions.push({ OR: makerWhereOr(makers) });
+
   const where = {
     ...VISIBLE_LISTING_WHERE,
     status: { in: [...RELEASED_STATUSES] },
@@ -110,27 +225,7 @@ export async function GET(req: NextRequest) {
     // for sale — they must never appear in the released/bargain lists.
     ...notShowcaseWhere,
     ...yearFilter,
-    ...(effectiveAvailability === "available" && AVAILABLE_FILTER),
-    ...(effectiveAvailability === "soldout" && { NOT: AVAILABLE_FILTER }),
-    ...(designer && { designer: { equals: designer, mode: "insensitive" as const } }),
-    // Vendor filter = "this vendor stocks it right now".
-    ...(vendor && {
-      kits: {
-        some: {
-          type: "BASE" as const,
-          vendorKits: {
-            some: {
-              price: { not: null },
-              inStock: true,
-              vendor: { slug: vendor },
-            },
-          },
-        },
-      },
-    }),
-    // AND (not OR) so this composes with the search OR below instead of
-    // replacing it.
-    ...(makers.length > 0 && { AND: [{ OR: makerWhereOr(makers) }] }),
+    ...(setConditions.length > 0 && { AND: setConditions }),
     ...(search && {
       OR: [
         { name: { contains: search, mode: "insensitive" as const } },
@@ -207,14 +302,20 @@ export async function GET(req: NextRequest) {
 
   // Per-category released counts power the Keycaps / Keyboards tab badges.
   const baseReleased = { ...VISIBLE_LISTING_WHERE, status: { in: [...RELEASED_STATUSES] }, ...notHiddenWhere, ...notShowcaseWhere };
-  const [totalReleased, totalAvailable, countKeycaps, countKeyboards] = await Promise.all([
-    prisma.groupBuy.count({ where: releasedWhere }),
-    isKeyboard
-      ? Promise.resolve(0)
-      : prisma.groupBuy.count({ where: { ...releasedWhere, ...AVAILABLE_FILTER } }),
-    prisma.groupBuy.count({ where: { ...baseReleased, productType: "KEYCAPS" } }),
-    prisma.groupBuy.count({ where: { ...baseReleased, productType: "KEYBOARD" } }),
-  ]);
+  const [totalReleased, totalAvailable, totalOnSale, countKeycaps, countKeyboards] =
+    await Promise.all([
+      prisma.groupBuy.count({ where: releasedWhere }),
+      isKeyboard
+        ? Promise.resolve(0)
+        : prisma.groupBuy.count({ where: { ...releasedWhere, ...AVAILABLE_FILTER } }),
+      isKeyboard
+        ? Promise.resolve(0)
+        : prisma.groupBuy.count({
+            where: { ...releasedWhere, AND: [AVAILABLE_FILTER, ON_SALE_FILTER] },
+          }),
+      prisma.groupBuy.count({ where: { ...baseReleased, productType: "KEYCAPS" } }),
+      prisma.groupBuy.count({ where: { ...baseReleased, productType: "KEYBOARD" } }),
+    ]);
 
   // Top designers for the filter dropdown — only returned on page 1 with no
   // active designer filter, so the list reflects the full catalog.
@@ -249,6 +350,25 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  // "On sale now" rail — vendor markdowns (compare_at_price > price). This is a
+  // different claim from the savings rail below, which measures the gap BETWEEN
+  // vendors: a markdown is one shop cutting its own price, which is what a
+  // shopper recognises as a sale, so it leads.
+  let markdowns: unknown[] = [];
+  if (!isKeyboard && page === 1 && !search && !year && !designer && !vendor && !bundlesOnly && !onSale && availability !== "soldout") {
+    const onSaleSets = await prisma.groupBuy.findMany({
+      where: { ...releasedWhere, AND: [AVAILABLE_FILTER, ON_SALE_FILTER] },
+      include: PRICING_INCLUDE,
+      take: MARKDOWN_SCAN_CAP,
+    });
+    markdowns = onSaleSets
+      .map((set) => ({ set, discount: bestDiscount(set as never) }))
+      .filter((r) => r.discount !== null)
+      .sort((a, b) => b.discount!.percent - a.discount!.percent)
+      .slice(0, 4)
+      .map((r) => r.set);
+  }
+
   // "Biggest savings" deals rail (keycap-only — needs multi-vendor pricing)
   let deals: unknown[] = [];
   if (!isKeyboard && page === 1 && !search && !year && !designer && !vendor && availability !== "soldout") {
@@ -276,5 +396,20 @@ export async function GET(req: NextRequest) {
       .map((r) => r.set);
   }
 
-  return NextResponse.json({ data, total, page, limit, totalReleased, totalAvailable, countKeycaps, countKeyboards, deals, topDesigners, topVendors });
+  return NextResponse.json({
+    data,
+    total,
+    page,
+    limit,
+    totalReleased,
+    totalAvailable,
+    totalOnSale,
+    totalBundles: bundleIds?.length ?? null,
+    countKeycaps,
+    countKeyboards,
+    markdowns,
+    deals,
+    topDesigners,
+    topVendors,
+  });
 }

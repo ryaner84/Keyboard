@@ -388,6 +388,18 @@ class BaseKitIdentificationTests(unittest.TestCase):
         variants = [{"id": "1", "title": "Base Kit + Novelties Bundle", "price": 155}]
         self.assertEqual(scrape.choose_kit_variant(variants)["price"], 155)
 
+    def test_ktechs_hanami_dango_shape_is_priced(self):
+        # The live listing, verbatim: ktechs/products/gmk-hanami-dango has one
+        # variant titled "Base + Novelties" — no "Kit", no "Bundle" — at $88.
+        # The title carries neither of the words the earlier tests happen to
+        # include, so it is asserted separately rather than assumed covered.
+        variants = [{"id": "1", "title": "Base + Novelties", "price": 88.0}]
+        self.assertEqual(scrape.classify_variant("Base + Novelties"), "BUNDLE")
+        chosen = scrape.choose_kit_variant(variants)
+        self.assertIsNotNone(chosen)
+        self.assertEqual(chosen["price"], 88.0)
+        self.assertTrue(scrape.is_plausible_base_price(chosen["price"], "USD"))
+
     def test_subkit_product_titles_are_skipped_by_discovery(self):
         for title in ("GMK Foo (Novelties)", "GMK Foo [Spacebars]",
                       "GMK Bento Alphas", "GMK Foo Deskmat",
