@@ -6,6 +6,23 @@ procedure stays versioned with the code it acts on.
 
 Work on the `main` branch.
 
+## Scheduled prompt (paste this verbatim into the scheduler)
+
+The recurring scheduled task must **point at this file** rather than restate an
+abbreviated copy of the steps — an inlined prompt drifts out of sync with the
+procedure the moment either changes (e.g. it silently stops rendering the three
+ledger tables). Use exactly:
+
+> Run the wrong-price report review for the GMK group-buy tracker exactly as
+> specified in `docs/price-report-review-routine.md`. Read that file first and
+> follow every step, including re-verifying prior self-healed items and
+> rendering all three ledger tables from `price-report-ledger.md` on every run
+> — even when there are zero pending reports. Work on the `main` branch and do
+> not make code changes without tracing a report to its root cause per the doc.
+
+If the stored prompt ever diverges from the steps below, the prompt is wrong,
+not the doc — repoint it here.
+
 ## Procedure
 
 1. Dispatch the **Price reports feed** workflow (`price-reports-feed.yml`) on
