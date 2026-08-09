@@ -658,8 +658,20 @@ def is_plausible_base_price(price: float, currency: str | None) -> bool:
     return price > bounds[0] and price <= bounds[1]
 
 
-def choose_kit_variant(variants: list[dict]) -> dict | None:
+def choose_kit_variant(
+    variants: list[dict], allow_subkits: bool = False
+) -> dict | None:
     """Pick the variant that is actually the BASE kit, NOT the cheapest one.
+
+    `allow_subkits` is for a set that IS a subkit. dcs.wiki catalogs several as
+    products in their own right — "DCS After School 1992 40s kit", "DCS 10U
+    Spacebars", "DCS Bae Addon" — and on those listings the 40s/spacebar variant
+    is the base kit, not something to exclude. Saber Keebs' After School page is
+    the case that found this: its variants are "40s Monokit" $140, "BAE" $10 and
+    "LAE" $10, and dropping the 40s variant left the $10 add-ons as the only
+    candidates, so the set would have been priced at $10. Same reasoning as the
+    product-level subkit guard in run_discovery, one level down.
+
 
     Preference: a variant classified BASE by title > the DEAREST remaining
     candidate. The base kit is the comprehensive, full-price kit; the other
@@ -694,7 +706,7 @@ def choose_kit_variant(variants: list[dict]) -> dict | None:
         if classify_variant(v["title"]) == "BASE"
         or (
             classify_variant(v["title"]) == "OTHERS"
-            and not _NONBASE_SUBKIT_RE.search(v["title"])
+            and (allow_subkits or not _NONBASE_SUBKIT_RE.search(v["title"]))
         )
     ]
     for v in base_pool:
@@ -768,13 +780,15 @@ def _parse_shopify_variants(raw_variants: list) -> list[dict]:
     return out
 
 
-def _pick_variant(variants: list[dict], pinned_id: str | None) -> dict | None:
+def _pick_variant(
+    variants: list[dict], pinned_id: str | None, allow_subkits: bool = False
+) -> dict | None:
     """Pinned ?variant=<id> beats any title heuristic (mirrors prices.ts)."""
     if pinned_id:
         for v in variants:
             if v["id"] == pinned_id:
                 return v
-    return choose_kit_variant(variants)
+    return choose_kit_variant(variants, allow_subkits=allow_subkits)
 
 
 def _relevant_base_variants(
@@ -1005,6 +1019,7 @@ def shopify_price(
     product_url: str,
     vendor_currency: str | None,
     scrapling: ScraplingClient | None = None,
+    allow_subkits: bool = False,
 ) -> dict | None:
     """Fetch Shopify price/stock while preserving application-specific rules.
 
@@ -1108,7 +1123,7 @@ def shopify_price(
                 return NO_BASE_KIT
 
         variants = _parse_shopify_variants(data["product"].get("variants") or [])
-        chosen = _pick_variant(variants, pinned_id)
+        chosen = _pick_variant(variants, pinned_id, allow_subkits)
         if chosen is None:
             # We read the product fine but it has no base candidate (only
             # subkits) and the vendor didn't pin a variant. Signal a CLEAR so a
@@ -1276,7 +1291,7 @@ def shopify_price(
                     repin = browser_json(clean + ".json")
                 if repin and "product" in repin:
                     v2 = _parse_shopify_variants(repin["product"].get("variants") or [])
-                    c2 = _pick_variant(v2, pinned_id)
+                    c2 = _pick_variant(v2, pinned_id, allow_subkits)
                     if c2 is not None:
                         variants, chosen = v2, c2
             except Exception:  # noqa: BLE001
@@ -1497,9 +1512,11 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
     # Manufacturer/catalog rows (GMK -> gmk.net, DCS -> dcs.wiki) only carry a
     # catalog URL for the catalog/image passes and must never be priced.
     sql = """
-        SELECT vk.id, vk."productUrl", v.currency AS vendor_currency
+        SELECT vk.id, vk."productUrl", v.currency AS vendor_currency,
+               gb.name AS set_name
           FROM "VendorKit" vk
           JOIN "Kit" k ON k.id = vk."kitId"
+          JOIN "GroupBuy" gb ON gb.id = k."groupBuyId"
           JOIN "Vendor" v ON v.id = vk."vendorId"
          WHERE vk."productUrl" IS NOT NULL
            AND btrim(vk."productUrl") <> ''
@@ -3468,6 +3485,7 @@ def generic_price(
     product_url: str,
     vendor_currency: str | None,
     scrapling: ScraplingClient | None = None,
+    allow_subkits: bool = False,
 ) -> dict | None:
     """Price path for non-Shopify storefronts (WooCommerce: Latamkeys, STACKS).
 
@@ -3506,7 +3524,7 @@ def generic_price(
     # WooCommerce variable product: pick the base kit, not the cheapest subkit.
     variants = parse_woocommerce_variations(html)
     if variants:
-        chosen = choose_kit_variant(variants)
+        chosen = choose_kit_variant(variants, allow_subkits=allow_subkits)
         if chosen is None:
             # Only subkits on offer — clear so the wrong number stops showing.
             return NO_BASE_KIT
@@ -4100,11 +4118,21 @@ def run_prices(
                 shopify_price if "/products/" in product_url else generic_price
             )
             stats["throttled_s"] += throttle.wait(product_url)
+            # A set that IS a subkit (dcs.wiki catalogs "…40s kit", "10U
+            # Spacebars", "Bae Addon" as products) must not have its own kind of
+            # variant excluded — on those listings the 40s/spacebar variant is
+            # the base kit. Without this, Saber Keebs' After School page priced
+            # at $10 (a BAE add-on) instead of $140, because the $140 variant is
+            # titled "40s Monokit".
+            allow_subkits = bool(
+                _SUBKIT_PRODUCT_RE.search(vk.get("set_name") or "")
+            )
             result = price_fn(
                 page,
                 product_url,
                 vk.get("vendor_currency"),
                 scrapling,
+                allow_subkits,
             )
             if result == NO_BASE_KIT:
                 # Listing has no base kit (only subkits) — clear any stale price

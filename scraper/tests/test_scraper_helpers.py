@@ -1327,6 +1327,62 @@ class KitFillerTests(unittest.TestCase):
         )
 
 
+class SubkitSetPricingTests(unittest.TestCase):
+    """A set that IS a subkit must not have its own kind of variant excluded."""
+
+    # Saber Keebs' live After School page, verbatim (2026-08).
+    SABER_KEEBS = [
+        {"id": "0", "title": "40s Monokit", "price": 140.0},
+        {"id": "1", "title": "BAE", "price": 10.0},
+        {"id": "2", "title": "LAE", "price": 10.0},
+    ]
+
+    def test_without_the_flag_a_ten_dollar_addon_wins(self):
+        # Documents the bug this flag fixes: the $140 variant is titled
+        # "40s Monokit", _NONBASE_SUBKIT_RE drops it, and the only survivors
+        # are the $10 add-ons — so a $140 set would have been priced at $10.
+        chosen = scrape.choose_kit_variant(self.SABER_KEEBS)
+        self.assertEqual(chosen["price"], 10.0)
+
+    def test_with_the_flag_the_real_kit_wins(self):
+        chosen = scrape.choose_kit_variant(self.SABER_KEEBS, allow_subkits=True)
+        self.assertEqual(chosen["title"], "40s Monokit")
+        self.assertEqual(chosen["price"], 140.0)
+
+    def test_the_flag_is_derived_from_the_SET_name(self):
+        # Which sets turn it on. dcs.wiki catalogs these as products.
+        for name in ("DCS After School 1992 40s kit", "DCS 10U Spacebars",
+                     "DCS Bae Addon"):
+            self.assertTrue(scrape._SUBKIT_PRODUCT_RE.search(name), name)
+        for name in ("DCS Dolch", "GMK Botanical", "DCS Superweld"):
+            self.assertIsNone(scrape._SUBKIT_PRODUCT_RE.search(name), name)
+
+    def test_a_normal_set_is_unaffected(self):
+        # The flag is off for ordinary sets, so a cheap 40s subkit still can't
+        # displace the base kit — nor stand in for one when it is all there is.
+        variants = [
+            {"id": "0", "title": "Base Kit", "price": 135.0},
+            {"id": "1", "title": "40s Kit", "price": 45.0},
+        ]
+        self.assertEqual(scrape.choose_kit_variant(variants)["price"], 135.0)
+        self.assertIsNone(scrape.choose_kit_variant([variants[1]]))
+
+    def test_a_titled_base_still_wins_even_with_the_flag_on(self):
+        # Prototypist's listing for the same set names its base explicitly;
+        # turning the flag on must not change a listing that was already right.
+        variants = [
+            {"id": "0", "title": "DCS After School - 40s Base Kit", "price": 121.67},
+            {"id": "1", "title": "DCS After School - BAE", "price": 8.33},
+            {"id": "2", "title": "DCS After School - LAE", "price": 8.33},
+        ]
+        for flag in (False, True):
+            self.assertEqual(
+                scrape.choose_kit_variant(variants, allow_subkits=flag)["price"],
+                121.67,
+                flag,
+            )
+
+
 class StoreListingChoiceTests(unittest.TestCase):
     # The real Prototypist catalog for ONE set, verbatim (2026-08). All four
     # normalise to "gmk combobreaker", so before ranking, whichever came last
