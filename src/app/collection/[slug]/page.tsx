@@ -416,6 +416,7 @@ function PublicCollectionCard({
                 key={originalIndex}
                 build={build}
                 index={originalIndex}
+                fallbackImageUrl={groupImage}
                 collectionSlug={collectionSlug}
                 trackerItemId={item.id}
                 label={setName}
@@ -690,6 +691,7 @@ function assemblePublicBuilds(item: {
 function PublicBuild({
   build,
   index,
+  fallbackImageUrl = null,
   collectionSlug,
   trackerItemId,
   label,
@@ -697,6 +699,10 @@ function PublicBuild({
 }: {
   build: PublicBuildShape;
   index: number;
+  // The shared catalog render, shown when this build has no photo of its own.
+  // The gallery above already falls back this way for every slide; the rows
+  // did not, so a build could appear photographed in one and blank in the other.
+  fallbackImageUrl?: string | null;
   collectionSlug: string;
   trackerItemId: string;
   label: string;
@@ -716,15 +722,20 @@ function PublicBuild({
   ].filter(Boolean) as string[];
   return (
     <div className="flex gap-3">
-      {build.imageUrl ? (
+      {build.imageUrl || fallbackImageUrl ? (
         <div className="relative h-14 w-14 shrink-0">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={build.imageUrl}
+            src={build.imageUrl || (fallbackImageUrl as string)}
             alt={`Build ${index + 1}`}
-            className="h-full w-full rounded-lg bg-gray-100 object-contain dark:bg-gray-800"
+            className={`h-full w-full rounded-lg bg-gray-100 dark:bg-gray-800 ${
+              build.imageUrl ? "object-contain" : "object-cover"
+            }`}
           />
-          {index > 0 && (
+          {/* Only an OWNER-UPLOADED photo can be reported — a catalog render
+              belongs to the set, not to this collection, so offering to flag
+              it would send a report nobody can act on. */}
+          {index > 0 && build.imageUrl && (
             <ReportPhotoButton
               collectionSlug={collectionSlug}
               trackerItemId={trackerItemId}

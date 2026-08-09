@@ -346,6 +346,7 @@ function scrapedKitOptions(item: CollectionCatalogItem): string[] {
 function BuildSummary({
   build,
   index,
+  fallbackImageUrl = null,
   selected = false,
   onSelect,
   showVisibility = false,
@@ -353,6 +354,10 @@ function BuildSummary({
 }: {
   build: CollectionUnit;
   index: number;
+  // The catalog render, shown when this build has no photo of its own — the
+  // same rule the carousel above applies, so a row and its slide never
+  // disagree about whether a build has an image.
+  fallbackImageUrl?: string | null;
   selected?: boolean;
   onSelect?: () => void;
   // When the piece is publicly displayed, each build carries its own
@@ -384,12 +389,16 @@ function BuildSummary({
           : "border-transparent bg-gray-50 hover:border-gray-200 hover:bg-white dark:bg-white/[0.04] dark:hover:border-gray-700 dark:hover:bg-white/[0.07]"
       }`}
     >
-      {build.imageUrl ? (
+      {build.imageUrl || fallbackImageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={build.imageUrl}
+          src={build.imageUrl || (fallbackImageUrl as string)}
           alt={`Build ${index + 1}`}
-          className="h-12 w-12 shrink-0 rounded-lg bg-gray-100 object-contain dark:bg-gray-800"
+          // An owner's photo is an arbitrary crop, so contain it; a catalog
+          // render is pre-framed and fills the square properly.
+          className={`h-12 w-12 shrink-0 rounded-lg bg-gray-100 dark:bg-gray-800 ${
+            build.imageUrl ? "object-contain" : "object-cover"
+          }`}
         />
       ) : (
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-gray-200 text-base text-gray-400 dark:bg-gray-800">
@@ -2652,9 +2661,14 @@ function KeyboardCollectionCard({
   // on display (holds for single- and multi-build alike).
   const nothingPublic = owned && piecePublic && shownCount === 0;
   const catalogImageUrl = normalizeImageUrl(item.imageUrl);
+  // Any build without its own photo falls back to the catalog render. This used
+  // to apply to build 1 ONLY, which read as the stock photo being "assigned" to
+  // build 1 while builds 2..N showed an empty ⌨ — confusing, because every
+  // build is the same product and none of them had an uploaded photo. Repeating
+  // the render across slides is the honest picture: it says "this is the board,
+  // you just haven't photographed this one yet".
   const imageUrl = multiBuild
-    ? activeBuild?.imageUrl ||
-      (visibleBuildIndex === 0 ? catalogImageUrl : null)
+    ? activeBuild?.imageUrl || catalogImageUrl
     : item.collection.customImageUrl || catalogImageUrl;
   // Owner-uploaded photos come in arbitrary aspect ratios — show the WHOLE
   // photo in proportion (object-contain against the card's muted backdrop)
@@ -2914,6 +2928,7 @@ function KeyboardCollectionCard({
                 key={index}
                 build={build}
                 index={index}
+                fallbackImageUrl={catalogImageUrl}
                 selected={index === visibleBuildIndex}
                 onSelect={() => setActiveBuildIndex(index)}
                 showVisibility={showBuildVisibility}
