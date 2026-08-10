@@ -475,36 +475,139 @@ function BuildSummary({
 // read as unfinished. Date and price stay OPTIONAL once open — marking
 // something sold before you have the figures to hand is normal, which is also
 // why isSold is a flag rather than inferred from soldAt.
+// Every setting that applies to the WHOLE record, in one place.
+//
+// Shared by the keyboard and keycap editors so the two can't drift. The three
+// switches were briefly scattered into the per-unit boxes; they are back here
+// because a record-wide setting shown inside a per-unit box appears once per
+// tab and silently applies to all of them. The boxes keep a read-only line
+// stating the current rule, so the cue beside the figure survives without the
+// control having two homes.
+//
+// Order matters: the two visibility switches first, then "Display this piece
+// publicly" last in its own bordered box — it is the master switch the other
+// two depend on, so it reads as the conclusion rather than another option.
+function PieceSummaryPanel({
+  blurbTitle,
+  blurbBody,
+  children,
+  unitNoun,
+  isPublic,
+  onIsPublicChange,
+  publicDescription,
+  showPurchasePrice,
+  onShowPurchasePriceChange,
+  showSoldStatus,
+  onShowSoldStatusChange,
+  pieceHasSale,
+}: {
+  blurbTitle: string;
+  blurbBody: string;
+  // Editor-specific extras — the keyboard's "Units owned" stepper. Keycaps add
+  // purchases instead of setting a quantity, so they pass nothing.
+  children?: React.ReactNode;
+  unitNoun: string;
+  isPublic: boolean;
+  onIsPublicChange: (value: boolean) => void;
+  publicDescription: string;
+  showPurchasePrice: boolean;
+  onShowPurchasePriceChange: (value: boolean) => void;
+  showSoldStatus: boolean;
+  onShowSoldStatusChange: (value: boolean) => void;
+  // Nothing sold anywhere on this piece means the sold switch would be a dead
+  // control, so it is not rendered at all.
+  pieceHasSale: boolean;
+}) {
+  return (
+    <div className="space-y-6">
+      <div
+        className={
+          children
+            ? "grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(240px,0.8fr)]"
+            : ""
+        }
+      >
+        <div className="rounded-xl bg-gray-50 px-4 py-3 dark:bg-white/[0.04]">
+          <p className="text-xs font-semibold text-gray-900 dark:text-white">
+            {blurbTitle}
+          </p>
+          <p className="mt-1 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+            {blurbBody}
+          </p>
+        </div>
+        {children}
+      </div>
+
+      <CheckRow
+        checked={showPurchasePrice}
+        onChange={onShowPurchasePriceChange}
+        title="Show purchase prices publicly"
+        description={`Off by default. Every ${unitNoun.replace(/s$/, "")} amount stays private unless both this and public display are on.`}
+      />
+
+      {pieceHasSale && (
+        <CheckRow
+          checked={showSoldStatus}
+          onChange={onShowSoldStatusChange}
+          title="Show sold status publicly"
+          description={
+            showSoldStatus
+              ? showPurchasePrice
+                ? `Visitors can see which ${unitNoun} you sold, when, and for how much.`
+                : `Visitors can see which ${unitNoun} you sold and when — but not for how much, because purchase prices are off.`
+              : "Off by default: visitors cannot tell this piece was ever sold. Sale amounts additionally need the purchase-price switch above."
+          }
+        />
+      )}
+
+      <div className="rounded-xl border border-[#ddcfb4] bg-[#faf7f0] p-4 dark:border-[#4a3e29] dark:bg-[#211d16]">
+        <CheckRow
+          checked={isPublic}
+          onChange={onIsPublicChange}
+          title="Display this piece publicly"
+          description={publicDescription}
+        />
+      </div>
+    </div>
+  );
+}
+
+// A one-line, READ-ONLY statement of a record-wide visibility rule, shown in
+// the per-unit boxes. Deliberately not a control: the switch lives in Summary,
+// and two live controls for one setting is the split this replaced.
+function VisibilityNote({ on, onText, offText }: {
+  on: boolean;
+  onText: string;
+  offText: string;
+}) {
+  return (
+    <p className="mt-3 flex items-center gap-1.5 border-t border-black/[0.06] pt-2.5 text-[11px] leading-4 text-gray-500 dark:border-white/10 dark:text-gray-400">
+      <span
+        aria-hidden
+        className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+          on ? "bg-emerald-500" : "bg-gray-400"
+        }`}
+      />
+      {on ? onText : offText}
+      <span className="text-gray-400 dark:text-gray-500">· change in Summary</span>
+    </p>
+  );
+}
+
 function SaleRecordFields({
   build,
   purchaseCurrencies,
   onChange,
-  unitNoun = "builds",
   showSoldStatus,
-  onShowSoldStatusChange,
   showPurchasePrice,
-  pieceHasSale,
 }: {
   build: CollectionUnit;
   purchaseCurrencies: PurchaseCurrencyOption[];
   onChange: (patch: Partial<CollectionUnit>) => void;
-  // "builds" for a keyboard, "purchases" for a keycap set — the publish switch
-  // has to name what it covers, and the two editors count different things.
-  unitNoun?: string;
-  // PIECE-level, not per build. It lives in this box so the rule is readable
-  // beside the figure it governs, but ticking it here affects every unit — the
-  // label says so, because a switch inside a per-unit box otherwise reads as
-  // applying only to the unit on screen.
+  // Both READ-ONLY here. These are record-wide settings owned by the Summary
+  // tab; this box only states the rule so it is visible beside the figure.
   showSoldStatus: boolean;
-  onShowSoldStatusChange: (value: boolean) => void;
-  // Read-only here: the sale amount also needs the purchase-price switch, and
-  // the description has to be able to say whether that one is on.
   showPurchasePrice: boolean;
-  // Whether ANY unit of the piece is sold. Gates the publish switch so it isn't
-  // a dead control on a piece that has never been sold — and gating on the
-  // piece rather than the visible unit keeps it present while editing an unsold
-  // build of a partly-sold piece.
-  pieceHasSale: boolean;
 }) {
   const sold = build.isSold === true;
   return (
@@ -610,21 +713,16 @@ function SaleRecordFields({
         </>
       )}
 
-      {pieceHasSale && (
-        <div className="mt-4 border-t border-rose-200/70 pt-3 dark:border-rose-900/50">
-          <CheckRow
-            checked={showSoldStatus}
-            onChange={onShowSoldStatusChange}
-            title={`Show sold status publicly · all ${unitNoun}`}
-            description={
-              showSoldStatus
-                ? showPurchasePrice
-                  ? `Visitors can see which ${unitNoun} you sold, when, and for how much.`
-                  : `Visitors can see which ${unitNoun} you sold and when — but not for how much, because the purchase-price switch above is off.`
-                : `Off by default: visitors cannot tell this piece was ever sold. One switch for the whole record, not just this one. Sale amounts additionally need the purchase-price switch above.`
-            }
-          />
-        </div>
+      {sold && (
+        <VisibilityNote
+          on={showSoldStatus}
+          onText={
+            showPurchasePrice
+              ? "Sold status and amount are public"
+              : "Sold status is public, the amount is not"
+          }
+          offText="Visitors cannot tell this was sold"
+        />
       )}
     </div>
   );
@@ -1116,24 +1214,18 @@ function BuildFields({
   onChange,
   onError,
   showPurchasePrice,
-  onShowPurchasePriceChange,
   showSoldStatus,
-  onShowSoldStatusChange,
-  pieceHasSale,
 }: {
   build: CollectionUnit;
   fallbackImage: string | null;
   purchaseCurrencies: PurchaseCurrencyOption[];
   onChange: (patch: Partial<CollectionUnit>) => void;
   onError: (message: string) => void;
-  // Both PIECE-level, rendered here so each rule sits beside the figure it
-  // governs. This component shows one build at a time, so the labels have to
-  // say "all builds" or a switch on the Build 2 tab reads as Build 2's alone.
+  // Both READ-ONLY: record-wide settings owned by the Summary tab. Shown here
+  // so the rule is legible beside the figure it governs, without the control
+  // having two homes.
   showPurchasePrice: boolean;
-  onShowPurchasePriceChange: (value: boolean) => void;
   showSoldStatus: boolean;
-  onShowSoldStatusChange: (value: boolean) => void;
-  pieceHasSale: boolean;
 }) {
   return (
     <div className="space-y-4">
@@ -1189,14 +1281,11 @@ function BuildFields({
           Each build has its own purchase amount and date. These private values
           power your total and monthly trend.
         </p>
-        <div className="mt-4 border-t border-[#e6d9bf] pt-3 dark:border-[#4a3e29]">
-          <CheckRow
-            checked={showPurchasePrice}
-            onChange={onShowPurchasePriceChange}
-            title="Show purchase prices publicly · all builds"
-            description="Off by default, and one switch for the whole record — not just this build. Amounts stay private unless this and public display are both on."
-          />
-        </div>
+        <VisibilityNote
+          on={showPurchasePrice}
+          onText="Purchase prices are shown publicly"
+          offText="Purchase prices are private"
+        />
       </div>
 
       <SaleRecordFields
@@ -1204,9 +1293,7 @@ function BuildFields({
         purchaseCurrencies={purchaseCurrencies}
         onChange={onChange}
         showSoldStatus={showSoldStatus}
-        onShowSoldStatusChange={onShowSoldStatusChange}
         showPurchasePrice={showPurchasePrice}
-        pieceHasSale={pieceHasSale}
       />
 
       <FieldBlock label="Photo">
@@ -4068,61 +4155,58 @@ function KeyboardCollectionItemEditor({
           </div>
 
           {onSummary ? (
-            <div className="space-y-6">
-        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(240px,0.8fr)]">
-          <div className="rounded-xl bg-gray-50 px-4 py-3 dark:bg-white/[0.04]">
-            <p className="text-xs font-semibold text-gray-900 dark:text-white">
-              One record per physical build
-            </p>
-            <p className="mt-1 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
-              Use the Build tabs below to record a different date, price, currency,
-              photo, and specification for every unit.
-            </p>
-          </div>
-          <Field label="Units owned">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setQuantity(form.quantity - 1)}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-lg font-medium text-gray-600 hover:border-gray-400 hover:text-gray-950 dark:border-gray-700 dark:text-gray-300 dark:hover:text-white"
-              >
-                −
-              </button>
-              <span className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-center text-sm font-semibold text-gray-950 dark:border-gray-700 dark:bg-gray-950 dark:text-white">
-                {form.quantity}
-              </span>
-              <button
-                type="button"
-                onClick={() => setQuantity(form.quantity + 1)}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-lg font-medium text-gray-600 hover:border-gray-400 hover:text-gray-950 dark:border-gray-700 dark:text-gray-300 dark:hover:text-white"
-              >
-                +
-              </button>
-            </div>
-          </Field>
-        </div>
-
-        <div className="rounded-xl border border-[#ddcfb4] bg-[#faf7f0] p-4 dark:border-[#4a3e29] dark:bg-[#211d16]">
-          <CheckRow
-            checked={form.isPublic}
-            onChange={(checked) => setForm({ ...form, isPublic: checked })}
-            title="Display this piece publicly"
-            description={(() => {
-              const visible =
-                form.quantity -
-                Array.from(hiddenBuilds).filter((i) => i < form.quantity).length;
-              if (form.quantity <= 1) {
-                return "Only owned items with this enabled appear at your shared collection URL.";
+            <PieceSummaryPanel
+              blurbTitle="One record per physical build"
+              blurbBody="Use the Build tabs below to record a different date, price, currency, photo, and specification for every unit."
+              unitNoun="builds"
+              isPublic={form.isPublic}
+              onIsPublicChange={(isPublic) => setForm({ ...form, isPublic })}
+              publicDescription={(() => {
+                const visible =
+                  form.quantity -
+                  Array.from(hiddenBuilds).filter((i) => i < form.quantity).length;
+                if (form.quantity <= 1) {
+                  return "Only owned items with this enabled appear at your shared collection URL.";
+                }
+                // State-aware phrasing: with the switch OFF, "will be shown"
+                // read as if something was being published right now.
+                return form.isPublic
+                  ? `${visible} of ${form.quantity} builds are shown on your public page — choose per build in the Build tabs.`
+                  : `Currently private — nothing is shown. If you enable this, ${visible} of ${form.quantity} builds would appear (choose per build in the Build tabs).`;
+              })()}
+              showPurchasePrice={form.showPurchasePrice}
+              onShowPurchasePriceChange={(showPurchasePrice) =>
+                setForm({ ...form, showPurchasePrice })
               }
-              // State-aware phrasing: with the switch OFF, "will be shown"
-              // read as if something was being published right now.
-              return form.isPublic
-                ? `${visible} of ${form.quantity} builds are shown on your public page — choose per build in the Build tabs.`
-                : `Currently private — nothing is shown. If you enable this, ${visible} of ${form.quantity} builds would appear (choose per build in the Build tabs).`;
-            })()}
-          />
-        </div>
-            </div>
+              showSoldStatus={form.showSoldStatus}
+              onShowSoldStatusChange={(showSoldStatus) =>
+                setForm({ ...form, showSoldStatus })
+              }
+              // Any build, not just the visible one — the setting is the piece's.
+              pieceHasSale={builds.some((unit) => unit.isSold)}
+            >
+              <Field label="Units owned">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setQuantity(form.quantity - 1)}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-lg font-medium text-gray-600 hover:border-gray-400 hover:text-gray-950 dark:border-gray-700 dark:text-gray-300 dark:hover:text-white"
+                  >
+                    −
+                  </button>
+                  <span className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-center text-sm font-semibold text-gray-950 dark:border-gray-700 dark:bg-gray-950 dark:text-white">
+                    {form.quantity}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setQuantity(form.quantity + 1)}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-lg font-medium text-gray-600 hover:border-gray-400 hover:text-gray-950 dark:border-gray-700 dark:text-gray-300 dark:hover:text-white"
+                  >
+                    +
+                  </button>
+                </div>
+              </Field>
+            </PieceSummaryPanel>
           ) : (
           <>
           <BuildFields
@@ -4132,16 +4216,7 @@ function KeyboardCollectionItemEditor({
             onChange={(patch) => updateBuild(activeBuild, patch)}
             onError={setError}
             showPurchasePrice={form.showPurchasePrice}
-            onShowPurchasePriceChange={(showPurchasePrice) =>
-              setForm({ ...form, showPurchasePrice })
-            }
             showSoldStatus={form.showSoldStatus}
-            onShowSoldStatusChange={(showSoldStatus) =>
-              setForm({ ...form, showSoldStatus })
-            }
-            // Any build, not just the visible one — the switch belongs to the
-            // whole piece.
-            pieceHasSale={builds.some((unit) => unit.isSold)}
           />
           {form.quantity > 1 && (
             <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800">
@@ -4218,6 +4293,10 @@ function KeycapCollectionEditor({
     normalizeKeycapAcquisitions(item.collection, defaultCurrency)
   );
   const [activePurchase, setActivePurchase] = useState(0);
+  // Same shape as the keyboard editor's. Summary is the default so the
+  // record-wide settings are the first thing you land on.
+  const [activeTab, setActiveTab] = useState<"summary" | number>("summary");
+  const onSummary = activeTab === "summary";
   const [form, setForm] = useState({
     isPublic: item.collection.isPublic,
     showPurchasePrice: item.collection.showPurchasePrice,
@@ -4343,14 +4422,37 @@ function KeycapCollectionEditor({
           <button type="button" onClick={() => { setPurchases((current) => [...current, createKeycapAcquisition(defaultCurrency)]); setActivePurchase(purchases.length); }} className="rounded-full border border-[#c9ab72] px-3.5 py-2 text-xs font-semibold text-[#80632f] hover:bg-[#f7f1e5] dark:text-[#d5b779]">+ Add purchase</button>
         </div>
 
-        {purchases.length > 1 && (
-          <div className="flex flex-wrap gap-2">
-            {purchases.map((purchase, index) => (
-              <button key={purchase.id} type="button" onClick={() => setActivePurchase(index)} className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${activePurchase === index ? "bg-gray-950 text-white dark:bg-white dark:text-gray-950" : "border border-gray-200 text-gray-500 hover:text-gray-900 dark:border-gray-700 dark:text-gray-400 dark:hover:text-white"}`}>Purchase {index + 1}</button>
-            ))}
-          </div>
-        )}
+        {/* Always rendered. This used to be gated on purchases.length > 1, so
+            a set with a single purchase showed no tabs at all — and therefore
+            no home for the settings that apply to the whole record. */}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab("summary")}
+            className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${onSummary ? "bg-gray-950 text-white dark:bg-white dark:text-gray-950" : "border border-gray-200 text-gray-500 hover:text-gray-900 dark:border-gray-700 dark:text-gray-400 dark:hover:text-white"}`}
+          >
+            Summary
+          </button>
+          {purchases.map((purchase, index) => (
+            <button key={purchase.id} type="button" onClick={() => { setActiveTab(index); setActivePurchase(index); }} className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${!onSummary && activePurchase === index ? "bg-gray-950 text-white dark:bg-white dark:text-gray-950" : "border border-gray-200 text-gray-500 hover:text-gray-900 dark:border-gray-700 dark:text-gray-400 dark:hover:text-white"}`}>Purchase {index + 1}</button>
+          ))}
+        </div>
 
+        {onSummary ? (
+          <PieceSummaryPanel
+            blurbTitle="One record per keycap set"
+            blurbBody="Use the Purchase tabs above when the date, price, kits or condition differ — each purchase keeps its own record."
+            unitNoun="purchases"
+            isPublic={form.isPublic}
+            onIsPublicChange={(isPublic) => setForm((current) => ({ ...current, isPublic }))}
+            publicDescription={`${purchases.filter((purchase) => purchase.isPublic).length} of ${purchases.length} purchase record${purchases.length === 1 ? "" : "s"} are selected for your shared collection URL.`}
+            showPurchasePrice={form.showPurchasePrice}
+            onShowPurchasePriceChange={(showPurchasePrice) => setForm((current) => ({ ...current, showPurchasePrice }))}
+            showSoldStatus={form.showSoldStatus}
+            onShowSoldStatusChange={(showSoldStatus) => setForm((current) => ({ ...current, showSoldStatus }))}
+            pieceHasSale={purchases.some((purchase) => purchase.isSold)}
+          />
+        ) : (
         <div className="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
           <div className="rounded-xl border border-[#ddcfb4] bg-[#faf7f0] p-4 dark:border-[#4a3e29] dark:bg-[#211d16]">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#80632f] dark:text-[#d5b779]">Purchase record</p>
@@ -4384,13 +4486,8 @@ function KeycapCollectionEditor({
                 soldCurrency: active.soldCurrency ?? null,
               }}
               purchaseCurrencies={purchaseCurrencies}
-              unitNoun="purchases"
               showSoldStatus={form.showSoldStatus}
-              onShowSoldStatusChange={(showSoldStatus) =>
-                setForm((current) => ({ ...current, showSoldStatus }))
-              }
               showPurchasePrice={form.showPurchasePrice}
-              pieceHasSale={purchases.some((purchase) => purchase.isSold)}
               onChange={(patch) =>
                 updatePurchase(activePurchase, {
                   ...(patch.isSold !== undefined && { isSold: patch.isSold }),
@@ -4496,11 +4593,11 @@ function KeycapCollectionEditor({
           </div>
           {active.pairing && <div className="mt-4"><CheckRow checked={active.pairing.showPublic} onChange={(showPublic) => updatePurchase(activePurchase, { pairing: { ...active.pairing!, showPublic } as KeycapPairing })} title="Show this pairing publicly" description="Only explicit pairings are shown to visitors. A linked keyboard must also be publicly visible." /></div>}
           <div className="mt-4"><Field label="Private notes"><textarea value={active.notes || ""} onChange={(event) => updatePurchase(activePurchase, { notes: event.target.value })} rows={3} placeholder="Kit details, trade notes, or anything you want to remember. Never shown publicly." className={inputClass} /></Field></div>
-          <div className="mt-4"><CheckRow checked={active.isPublic} onChange={(isPublic) => updatePurchase(activePurchase, { isPublic })} title={`Show Purchase ${activePurchase + 1} on your public page`} description={form.isPublic ? "This purchase is eligible to appear when the set is publicly displayed." : "The whole keycap set is private until you enable public display below."} /></div>
+          <div className="mt-4"><CheckRow checked={active.isPublic} onChange={(isPublic) => updatePurchase(activePurchase, { isPublic })} title={`Show Purchase ${activePurchase + 1} on your public page`} description={form.isPublic ? "This purchase is eligible to appear when the set is publicly displayed." : "The whole keycap set is private until you enable public display in the Summary tab."} /></div>
           {purchases.length > 1 && <button type="button" onClick={() => { setPurchases((current) => current.filter((_, index) => index !== activePurchase)); setActivePurchase((current) => Math.max(0, current - 1)); }} className="mt-4 text-xs font-semibold text-gray-500 hover:text-red-600">Remove this purchase</button>}
         </div>
+        )}
 
-        <div className="rounded-xl border border-[#ddcfb4] bg-[#faf7f0] p-4 dark:border-[#4a3e29] dark:bg-[#211d16]"><CheckRow checked={form.isPublic} onChange={(isPublic) => setForm((current) => ({ ...current, isPublic }))} title="Display this keycap set publicly" description={`${purchases.filter((purchase) => purchase.isPublic).length} of ${purchases.length} purchase record${purchases.length === 1 ? "" : "s"} are selected for your shared collection URL.`} /></div>
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       </div>
 
