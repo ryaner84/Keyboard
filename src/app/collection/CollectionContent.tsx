@@ -531,10 +531,32 @@ function SaleRecordFields({
   build,
   purchaseCurrencies,
   onChange,
+  unitNoun = "builds",
+  showSoldStatus,
+  onShowSoldStatusChange,
+  showPurchasePrice,
+  pieceHasSale,
 }: {
   build: CollectionUnit;
   purchaseCurrencies: PurchaseCurrencyOption[];
   onChange: (patch: Partial<CollectionUnit>) => void;
+  // "builds" for a keyboard, "purchases" for a keycap set — the publish switch
+  // has to name what it covers, and the two editors count different things.
+  unitNoun?: string;
+  // PIECE-level, not per build. It lives in this box so the rule is readable
+  // beside the figure it governs, but ticking it here affects every unit — the
+  // label says so, because a switch inside a per-unit box otherwise reads as
+  // applying only to the unit on screen.
+  showSoldStatus: boolean;
+  onShowSoldStatusChange: (value: boolean) => void;
+  // Read-only here: the sale amount also needs the purchase-price switch, and
+  // the description has to be able to say whether that one is on.
+  showPurchasePrice: boolean;
+  // Whether ANY unit of the piece is sold. Gates the publish switch so it isn't
+  // a dead control on a piece that has never been sold — and gating on the
+  // piece rather than the visible unit keeps it present while editing an unsold
+  // build of a partly-sold piece.
+  pieceHasSale: boolean;
 }) {
   const sold = build.isSold === true;
   return (
@@ -638,6 +660,23 @@ function SaleRecordFields({
             in? Change it here — nothing assumes they match.
           </p>
         </>
+      )}
+
+      {pieceHasSale && (
+        <div className="mt-4 border-t border-rose-200/70 pt-3 dark:border-rose-900/50">
+          <CheckRow
+            checked={showSoldStatus}
+            onChange={onShowSoldStatusChange}
+            title={`Show sold status publicly · all ${unitNoun}`}
+            description={
+              showSoldStatus
+                ? showPurchasePrice
+                  ? `Visitors can see which ${unitNoun} you sold, when, and for how much.`
+                  : `Visitors can see which ${unitNoun} you sold and when — but not for how much, because the purchase-price switch above is off.`
+                : `Off by default: visitors cannot tell this piece was ever sold. One switch for the whole record, not just this one. Sale amounts additionally need the purchase-price switch above.`
+            }
+          />
+        </div>
       )}
     </div>
   );
@@ -1128,12 +1167,25 @@ function BuildFields({
   purchaseCurrencies,
   onChange,
   onError,
+  showPurchasePrice,
+  onShowPurchasePriceChange,
+  showSoldStatus,
+  onShowSoldStatusChange,
+  pieceHasSale,
 }: {
   build: CollectionUnit;
   fallbackImage: string | null;
   purchaseCurrencies: PurchaseCurrencyOption[];
   onChange: (patch: Partial<CollectionUnit>) => void;
   onError: (message: string) => void;
+  // Both PIECE-level, rendered here so each rule sits beside the figure it
+  // governs. This component shows one build at a time, so the labels have to
+  // say "all builds" or a switch on the Build 2 tab reads as Build 2's alone.
+  showPurchasePrice: boolean;
+  onShowPurchasePriceChange: (value: boolean) => void;
+  showSoldStatus: boolean;
+  onShowSoldStatusChange: (value: boolean) => void;
+  pieceHasSale: boolean;
 }) {
   return (
     <div className="space-y-4">
@@ -1189,12 +1241,24 @@ function BuildFields({
           Each build has its own purchase amount and date. These private values
           power your total and monthly trend.
         </p>
+        <div className="mt-4 border-t border-[#e6d9bf] pt-3 dark:border-[#4a3e29]">
+          <CheckRow
+            checked={showPurchasePrice}
+            onChange={onShowPurchasePriceChange}
+            title="Show purchase prices publicly · all builds"
+            description="Off by default, and one switch for the whole record — not just this build. Amounts stay private unless this and public display are both on."
+          />
+        </div>
       </div>
 
       <SaleRecordFields
         build={build}
         purchaseCurrencies={purchaseCurrencies}
         onChange={onChange}
+        showSoldStatus={showSoldStatus}
+        onShowSoldStatusChange={onShowSoldStatusChange}
+        showPurchasePrice={showPurchasePrice}
+        pieceHasSale={pieceHasSale}
       />
 
       <FieldBlock label="Photo">
@@ -3809,26 +3873,6 @@ function KeyboardCollectionItemEditor({
           </Field>
         </div>
 
-        <CheckRow
-          checked={form.showPurchasePrice}
-          onChange={(checked) => setForm({ ...form, showPurchasePrice: checked })}
-          title="Show build purchase prices publicly"
-          description="Off by default. Every build amount remains private unless both this and public display are enabled."
-        />
-
-        <CheckRow
-          checked={form.showSoldStatus}
-          onChange={(checked) => setForm({ ...form, showSoldStatus: checked })}
-          title="Show sold status publicly"
-          description={
-            form.showSoldStatus
-              ? form.showPurchasePrice
-                ? "Visitors can see which builds you sold, when, and for how much."
-                : "Visitors can see which builds you sold and when — but not for how much, because build purchase prices are off."
-              : "Off by default: visitors cannot tell this piece was ever sold. Sale amounts additionally need the purchase-price switch above."
-          }
-        />
-
         <div className="rounded-xl border border-[#ddcfb4] bg-[#faf7f0] p-4 dark:border-[#4a3e29] dark:bg-[#211d16]">
           <CheckRow
             checked={form.isPublic}
@@ -3858,6 +3902,17 @@ function KeyboardCollectionItemEditor({
             purchaseCurrencies={purchaseCurrencies}
             onChange={(patch) => updateBuild(activeBuild, patch)}
             onError={setError}
+            showPurchasePrice={form.showPurchasePrice}
+            onShowPurchasePriceChange={(showPurchasePrice) =>
+              setForm({ ...form, showPurchasePrice })
+            }
+            showSoldStatus={form.showSoldStatus}
+            onShowSoldStatusChange={(showSoldStatus) =>
+              setForm({ ...form, showSoldStatus })
+            }
+            // Any build, not just the visible one — the switch belongs to the
+            // whole piece.
+            pieceHasSale={builds.some((unit) => unit.isSold)}
           />
           {form.quantity > 1 && (
             <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800">
@@ -4076,6 +4131,14 @@ function KeycapCollectionEditor({
               <div><span className="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-200">Currency</span><CurrencyCombobox value={active.purchaseCurrency || purchaseCurrencies[0]?.code || "USD"} options={purchaseCurrencies} onChange={(purchaseCurrency) => updatePurchase(activePurchase, { purchaseCurrency })} /></div>
             </div>
             <p className="mt-2 text-[11px] leading-4 text-gray-500 dark:text-gray-400">This is the total paid for this purchase, even when it contains several kits or identical copies.</p>
+            <div className="mt-4 border-t border-[#e6d9bf] pt-3 dark:border-[#4a3e29]">
+              <CheckRow
+                checked={form.showPurchasePrice}
+                onChange={(showPurchasePrice) => setForm((current) => ({ ...current, showPurchasePrice }))}
+                title="Show purchase prices publicly · all purchases"
+                description="Off by default, and one switch for the whole record — not just this purchase. Amounts stay private unless this and public display are both on."
+              />
+            </div>
           </div>
 
           {/* Sold applies per PURCHASE: a set bought twice can have one lot
@@ -4092,6 +4155,13 @@ function KeycapCollectionEditor({
                 soldCurrency: active.soldCurrency ?? null,
               }}
               purchaseCurrencies={purchaseCurrencies}
+              unitNoun="purchases"
+              showSoldStatus={form.showSoldStatus}
+              onShowSoldStatusChange={(showSoldStatus) =>
+                setForm((current) => ({ ...current, showSoldStatus }))
+              }
+              showPurchasePrice={form.showPurchasePrice}
+              pieceHasSale={purchases.some((purchase) => purchase.isSold)}
               onChange={(patch) =>
                 updatePurchase(activePurchase, {
                   ...(patch.isSold !== undefined && { isSold: patch.isSold }),
@@ -4201,20 +4271,6 @@ function KeycapCollectionEditor({
           {purchases.length > 1 && <button type="button" onClick={() => { setPurchases((current) => current.filter((_, index) => index !== activePurchase)); setActivePurchase((current) => Math.max(0, current - 1)); }} className="mt-4 text-xs font-semibold text-gray-500 hover:text-red-600">Remove this purchase</button>}
         </div>
 
-        <CheckRow checked={form.showPurchasePrice} onChange={(showPurchasePrice) => setForm((current) => ({ ...current, showPurchasePrice }))} title="Show purchase prices publicly" description="Off by default. Every amount remains private unless this and public display are both enabled." />
-
-        <CheckRow
-          checked={form.showSoldStatus}
-          onChange={(showSoldStatus) => setForm((current) => ({ ...current, showSoldStatus }))}
-          title="Show sold status publicly"
-          description={
-            form.showSoldStatus
-              ? form.showPurchasePrice
-                ? "Visitors can see which purchases you sold, when, and for how much."
-                : "Visitors can see which purchases you sold and when — but not for how much, because purchase prices are off."
-              : "Off by default: visitors cannot tell this set was ever sold. Sale amounts additionally need the purchase-price switch above."
-          }
-        />
         <div className="rounded-xl border border-[#ddcfb4] bg-[#faf7f0] p-4 dark:border-[#4a3e29] dark:bg-[#211d16]"><CheckRow checked={form.isPublic} onChange={(isPublic) => setForm((current) => ({ ...current, isPublic }))} title="Display this keycap set publicly" description={`${purchases.filter((purchase) => purchase.isPublic).length} of ${purchases.length} purchase record${purchases.length === 1 ? "" : "s"} are selected for your shared collection URL.`} /></div>
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       </div>
