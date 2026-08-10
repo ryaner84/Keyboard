@@ -45,6 +45,11 @@ const getPublicCollection = cache(async (slug: string) =>
           purchasePrice: true,
           purchaseCurrency: true,
           showPurchasePrice: true,
+          isSold: true,
+          soldAt: true,
+          soldPrice: true,
+          soldCurrency: true,
+          showSoldStatus: true,
           switches: true,
           keycaps: true,
           buildDetails: true,
@@ -284,6 +289,11 @@ function PublicCollectionCard({
     purchasePrice: number | null;
     purchaseCurrency: string | null;
     showPurchasePrice: boolean;
+    isSold: boolean;
+    soldAt: Date | null;
+    soldPrice: number | null;
+    soldCurrency: string | null;
+    showSoldStatus: boolean;
     switches: string | null;
     keycaps: string | null;
     buildDetails: string | null;
@@ -401,6 +411,29 @@ function PublicCollectionCard({
                 value={`${item.purchaseCurrency || "USD"} ${item.purchasePrice.toLocaleString()}`}
               />
             )}
+            {/* Two independent gates: showSoldStatus reveals THAT it sold,
+                showPurchasePrice reveals FOR HOW MUCH. Enabling sold status
+                must never publish a figure the owner kept private. */}
+            {item.showSoldStatus && item.isSold && (
+              <PublicSpec
+                label="Sold"
+                value={
+                  [
+                    item.soldAt
+                      ? new Date(item.soldAt).toLocaleDateString("en-SG", {
+                          month: "short",
+                          year: "numeric",
+                        })
+                      : "Yes",
+                    item.showPurchasePrice && item.soldPrice != null
+                      ? `${item.soldCurrency || item.purchaseCurrency || "USD"} ${item.soldPrice.toLocaleString()}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+                }
+              />
+            )}
           </dl>
         )}
         {!multiBuild && item.buildDetails && (
@@ -421,6 +454,7 @@ function PublicCollectionCard({
                 trackerItemId={item.id}
                 label={setName}
                 showPurchasePrice={item.showPurchasePrice}
+                showSoldStatus={item.showSoldStatus}
               />
             ))}
           </div>
@@ -443,6 +477,9 @@ function PublicKeycapCollectionCard({
     purchasePrice: number | null;
     purchaseCurrency: string | null;
     showPurchasePrice: boolean;
+    // Gates the sold indicator; the amount additionally needs
+    // showPurchasePrice above.
+    showSoldStatus: boolean;
     quantity: number;
     customImageUrl: string | null;
     keycapAcquisitions: unknown;
@@ -513,9 +550,29 @@ function PublicKeycapCollectionCard({
                 ? `${purchase.purchaseCurrency || "USD"} ${purchase.purchasePrice.toLocaleString()}`
                 : null,
             ].filter(Boolean);
+            // Same two gates as the keyboard path: showSoldStatus reveals THAT
+            // it sold, showPurchasePrice reveals FOR HOW MUCH.
+            const soldPublicly = item.showSoldStatus && purchase.isSold === true;
+            if (soldPublicly) {
+              const when = purchase.soldAt
+                ? `Sold ${new Date(purchase.soldAt).getFullYear()}`
+                : "Sold";
+              const amount =
+                item.showPurchasePrice && purchase.soldPrice != null
+                  ? `${purchase.soldCurrency || purchase.purchaseCurrency || "USD"} ${purchase.soldPrice.toLocaleString()}`
+                  : null;
+              specs.unshift([when, amount].filter(Boolean).join(" · "));
+            }
             return (
               <div key={purchase.id} className="rounded-xl bg-gray-50 p-3 dark:bg-white/[0.04]">
-                <p className="text-[11px] font-semibold text-gray-900 dark:text-white">Purchase {index + 1}</p>
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-900 dark:text-white">
+                  Purchase {index + 1}
+                  {soldPublicly && (
+                    <span className="inline-flex items-center rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">
+                      Sold
+                    </span>
+                  )}
+                </p>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {purchase.kits.map((kit) => (
                     <span key={`${kit.kitId || "custom"}-${kit.name}`} className="rounded-full bg-[#f7f1e5] px-2 py-0.5 text-[10px] font-semibold text-[#71552b] dark:bg-[#2b251b] dark:text-[#dfc284]">{kit.name}</span>
@@ -539,6 +596,10 @@ function publicKeycapAcquisitions(item: {
   quantity: number;
   customImageUrl: string | null;
   keycapAcquisitions: unknown;
+  isSold?: boolean;
+  soldAt?: Date | null;
+  soldPrice?: number | null;
+  soldCurrency?: string | null;
 }) {
   const details = {
     isTracking: false,
@@ -559,6 +620,13 @@ function publicKeycapAcquisitions(item: {
     customImageUrl: item.customImageUrl,
     units: null,
     hiddenBuilds: null,
+    // A keycap entry with no per-purchase records synthesises one from these
+    // top-level columns; without them a sale recorded before the owner first
+    // opened the newer editor would be invisible on the public page.
+    isSold: item.isSold === true,
+    soldAt: item.soldAt ?? null,
+    soldPrice: item.soldPrice ?? null,
+    soldCurrency: item.soldCurrency ?? null,
     keycapAcquisitions: Array.isArray(item.keycapAcquisitions)
       ? item.keycapAcquisitions
       : null,
@@ -618,6 +686,14 @@ type PublicBuildShape = {
   keycaps: string | null;
   buildDetails: string | null;
   imageUrl: string | null;
+  // Carried through regardless of the owner's switches; every render site
+  // gates on showSoldStatus, so the raw value never reaches a visitor on its
+  // own. Keeping the gate at the render site rather than the query means one
+  // rule to audit instead of two places that must agree.
+  isSold: boolean;
+  soldAt: string | null;
+  soldPrice: number | null;
+  soldCurrency: string | null;
 };
 
 // Expand a public item into per-build rows (build 1 = top-level fields, the
@@ -634,6 +710,10 @@ function assemblePublicBuilds(item: {
   customImageUrl: string | null;
   quantity: number;
   units: unknown;
+  isSold: boolean;
+  soldAt: Date | null;
+  soldPrice: number | null;
+  soldCurrency: string | null;
 }): PublicBuildShape[] {
   const qty = Math.max(1, item.quantity || 1);
   const first: PublicBuildShape = {
@@ -646,6 +726,10 @@ function assemblePublicBuilds(item: {
     keycaps: item.keycaps,
     buildDetails: item.buildDetails,
     imageUrl: item.customImageUrl,
+    isSold: item.isSold === true,
+    soldAt: item.soldAt?.toISOString() ?? null,
+    soldPrice: item.soldPrice,
+    soldCurrency: item.soldCurrency,
   };
   const extra = Array.isArray(item.units)
     ? (item.units as Record<string, unknown>[]).map((u) => ({
@@ -669,6 +753,12 @@ function assemblePublicBuilds(item: {
         keycaps: (u?.keycaps as string) ?? null,
         buildDetails: (u?.buildDetails as string) ?? null,
         imageUrl: (u?.imageUrl as string) ?? null,
+        // Unlike the purchase fields above there is NO inheritance from the
+        // top-level record: build 1 being sold says nothing about build 2.
+        isSold: u?.isSold === true,
+        soldAt: (u?.soldAt as string) ?? null,
+        soldPrice: typeof u?.soldPrice === "number" ? u.soldPrice : null,
+        soldCurrency: (u?.soldCurrency as string) ?? null,
       }))
     : [];
   const builds = [first, ...extra].slice(0, qty);
@@ -683,6 +773,10 @@ function assemblePublicBuilds(item: {
       keycaps: null,
       buildDetails: null,
       imageUrl: null,
+      isSold: false,
+      soldAt: null,
+      soldPrice: null,
+      soldCurrency: null,
     });
   }
   return builds;
@@ -696,6 +790,7 @@ function PublicBuild({
   trackerItemId,
   label,
   showPurchasePrice,
+  showSoldStatus = false,
 }: {
   build: PublicBuildShape;
   index: number;
@@ -707,6 +802,9 @@ function PublicBuild({
   trackerItemId: string;
   label: string;
   showPurchasePrice: boolean;
+  // Whether the owner has opted to reveal sold state at all. Off by default,
+  // and independent of showPurchasePrice, which separately gates the amount.
+  showSoldStatus?: boolean;
 }) {
   const specs = [
     build.acquiredAt
@@ -720,6 +818,18 @@ function PublicBuild({
     build.switches,
     build.keycaps,
   ].filter(Boolean) as string[];
+  // Only when the owner opted in; the amount needs the price switch as well.
+  const soldPublicly = showSoldStatus && build.isSold;
+  if (soldPublicly) {
+    const when = build.soldAt
+      ? `Sold ${new Date(build.soldAt).getFullYear()}`
+      : "Sold";
+    const amount =
+      showPurchasePrice && build.soldPrice != null
+        ? `${build.soldCurrency || build.purchaseCurrency || "USD"} ${build.soldPrice.toLocaleString()}`
+        : null;
+    specs.unshift([when, amount].filter(Boolean).join(" · "));
+  }
   return (
     <div className="flex gap-3">
       {build.imageUrl || fallbackImageUrl ? (
@@ -751,8 +861,13 @@ function PublicBuild({
         </div>
       )}
       <div className="min-w-0">
-        <p className="text-xs font-semibold text-gray-900 dark:text-white">
+        <p className="flex items-center gap-1.5 text-xs font-semibold text-gray-900 dark:text-white">
           Build {index + 1}
+          {soldPublicly && (
+            <span className="inline-flex items-center rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">
+              Sold
+            </span>
+          )}
         </p>
         <p className="mt-0.5 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
           {specs.join(" · ") || "Details coming soon"}

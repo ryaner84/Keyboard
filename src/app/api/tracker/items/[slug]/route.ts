@@ -9,6 +9,9 @@ import { isCustomSlug } from "@/lib/showcase";
 import {
   cleanKeycapAcquisition,
   cleanOptionalText,
+  cleanSaleDate,
+  cleanSaleFields,
+  cleanSalePrice,
   cleanUnitCurrency,
   cleanUnitPrice,
 } from "@/lib/keycap-acquisition-server";
@@ -56,6 +59,11 @@ export async function PATCH(
     purchasePrice?: number | null;
     purchaseCurrency?: string | null;
     showPurchasePrice?: boolean;
+    isSold?: boolean;
+    soldAt?: Date | null;
+    soldPrice?: number | null;
+    soldCurrency?: string | null;
+    showSoldStatus?: boolean;
     hiddenBuilds?: Prisma.InputJsonValue | typeof Prisma.JsonNull;
     switches?: string | null;
     keycaps?: string | null;
@@ -104,6 +112,18 @@ export async function PATCH(
   }
   if (typeof body.showPurchasePrice === "boolean") {
     data.showPurchasePrice = body.showPurchasePrice;
+  }
+  // Build 1's sale record. Reuses the same sanitizers as the per-unit records
+  // in `units` so the two paths can never diverge on what they accept.
+  if (typeof body.isSold === "boolean") data.isSold = body.isSold;
+  if ("soldAt" in body) {
+    const iso = cleanSaleDate(body.soldAt);
+    data.soldAt = iso ? new Date(iso) : null;
+  }
+  if ("soldPrice" in body) data.soldPrice = cleanSalePrice(body.soldPrice);
+  if ("soldCurrency" in body) data.soldCurrency = cleanUnitCurrency(body.soldCurrency);
+  if (typeof body.showSoldStatus === "boolean") {
+    data.showSoldStatus = body.showSoldStatus;
   }
   if ("hiddenBuilds" in body) {
     // Build indexes (0-based) excluded from the public page — lets an owner
@@ -202,6 +222,9 @@ export async function PATCH(
   if (!willBeInCollection) {
     data.isPublic = false;
     data.showPurchasePrice = false;
+    // Sold state is a fact about the piece and is kept; only the decision to
+    // PUBLISH it resets, exactly like the other two publication switches.
+    data.showSoldStatus = false;
   }
   const willBeTracking = data.isTracking ?? item.isTracking;
   if (!willBeTracking && !willBeInCollection) {
@@ -225,6 +248,11 @@ export async function PATCH(
       purchasePrice: updated.purchasePrice,
       purchaseCurrency: updated.purchaseCurrency,
       showPurchasePrice: updated.showPurchasePrice,
+      isSold: updated.isSold,
+      soldAt: updated.soldAt,
+      soldPrice: updated.soldPrice,
+      soldCurrency: updated.soldCurrency,
+      showSoldStatus: updated.showSoldStatus,
       switches: updated.switches,
       keycaps: updated.keycaps,
       buildDetails: updated.buildDetails,
@@ -296,6 +324,7 @@ function cleanUnit(u: unknown): CollectionUnit {
     buildDetails: cleanOptionalText(o.buildDetails, 500),
     notes: cleanOptionalText(o.notes, 1000),
     imageUrl: cleanCollectionPhoto(o.imageUrl),
+    ...cleanSaleFields(o),
   };
 }
 

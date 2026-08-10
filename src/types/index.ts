@@ -145,6 +145,15 @@ export interface CollectionUnit {
   buildDetails: string | null;
   notes: string | null;
   imageUrl: string | null;
+  // Sale record. Selling ONE of several units is normal, so this lives per
+  // build rather than per piece. isSold is its own flag because marking a unit
+  // sold before you have the date or figure to hand is the common case, and
+  // soldCurrency is separate from purchaseCurrency because selling in a
+  // different currency from the one you bought in is routine.
+  isSold?: boolean;
+  soldAt?: Date | string | null;
+  soldPrice?: number | null;
+  soldCurrency?: string | null;
 }
 
 export type KeycapCondition =
@@ -191,6 +200,12 @@ export interface KeycapAcquisition {
   notes: string | null;
   isPublic: boolean;
   pairing: KeycapPairing;
+  // Sale record, per PURCHASE — a set bought twice can have one lot sold and
+  // the other kept. Same shape and reasoning as CollectionUnit's.
+  isSold?: boolean;
+  soldAt?: Date | string | null;
+  soldPrice?: number | null;
+  soldCurrency?: string | null;
 }
 
 export interface CollectionItemDetails {
@@ -202,6 +217,15 @@ export interface CollectionItemDetails {
   purchasePrice: number | null;
   purchaseCurrency: string | null;
   showPurchasePrice: boolean;
+  // Build 1's sale record (builds 2..N carry theirs in `units`).
+  isSold?: boolean;
+  soldAt?: Date | string | null;
+  soldPrice?: number | null;
+  soldCurrency?: string | null;
+  // Piece-level. Off by default: with it off a visitor cannot tell the piece
+  // was sold. The sale AMOUNT additionally requires showPurchasePrice, so
+  // enabling this can never leak a figure kept private.
+  showSoldStatus?: boolean;
   switches: string | null;
   keycaps: string | null;
   buildDetails: string | null;

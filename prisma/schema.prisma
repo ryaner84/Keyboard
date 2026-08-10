@@ -301,6 +301,23 @@ model TrackerItem {
   purchasePrice     Float?
   purchaseCurrency  String?
   showPurchasePrice Boolean   @default(false)
+  // Sale record for BUILD 1 of a keyboard (builds 2..N carry their own inside
+  // `units`), and for a legacy keycap entry that predates keycapAcquisitions.
+  // isSold is its own flag rather than "soldAt is set": marking a piece sold
+  // before you have the date or the figure to hand is the common case.
+  isSold            Boolean   @default(false)
+  soldAt            DateTime?
+  soldPrice         Float?
+  // The SALE's own currency. Selling in a different currency from the one you
+  // bought in is normal (bought USD, sold locally), so this must not be assumed
+  // to equal purchaseCurrency.
+  soldCurrency      String?
+  // Piece-level, not per build — one switch for the whole record, like
+  // showPurchasePrice. Off by default: with it off a visitor cannot tell the
+  // piece was ever sold. The sale AMOUNT additionally requires
+  // showPurchasePrice, so enabling sold status can never leak a figure the
+  // owner chose to keep private.
+  showSoldStatus    Boolean   @default(false)
   switches          String?
   keycaps           String?
   buildDetails      String?

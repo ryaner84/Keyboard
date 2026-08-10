@@ -38,6 +38,48 @@ export function cleanUnitCurrency(value: unknown): string | null {
   return currency || null;
 }
 
+// ── Sale record ─────────────────────────────────────────────────────────────
+// A sold unit's date/price/currency. Separate from the purchase validators
+// above only so the thrown message names the right field — telling someone
+// their "purchase price" is invalid when they typed a sale figure sends them
+// looking in the wrong place.
+
+export function cleanSalePrice(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const price = Number(value);
+  if (!Number.isFinite(price) || price < 0 || price > 10_000_000) {
+    throw new Error("Invalid sale price for one of the builds");
+  }
+  return price;
+}
+
+export function cleanSaleDate(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Invalid sale date for one of the builds");
+  }
+  return date.toISOString();
+}
+
+// The four sale fields, sanitized. Shared by the per-build (`units`) and
+// per-purchase (`keycapAcquisitions`) paths so the two can never disagree
+// about what a stored sale record may contain.
+export function cleanSaleFields(source: unknown): {
+  isSold: boolean;
+  soldAt: string | null;
+  soldPrice: number | null;
+  soldCurrency: string | null;
+} {
+  const o = (source ?? {}) as Record<string, unknown>;
+  return {
+    isSold: o.isSold === true,
+    soldAt: cleanSaleDate(o.soldAt),
+    soldPrice: cleanSalePrice(o.soldPrice),
+    soldCurrency: cleanUnitCurrency(o.soldCurrency),
+  };
+}
+
 export function cleanIdentifier(value: unknown): string | null {
   const id = String(value ?? "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 100);
   return id || null;
@@ -150,5 +192,6 @@ export function cleanKeycapAcquisition(
     notes: cleanOptionalText(source.notes, 1000),
     isPublic: source.isPublic !== false,
     pairing: cleanKeycapPairing(source.pairing),
+    ...cleanSaleFields(source),
   };
 }
