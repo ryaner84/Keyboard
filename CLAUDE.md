@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Six suites, all of which should pass before pushing:
+Seven suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -36,15 +36,21 @@ npm run test:set-name
 npm run test:csv-import
 npm run test:collection-import
 npm run test:keycap-collection
+npm run test:collection-sales
 npm run test:home-cache
 npx tsc --noEmit
 ```
 
-CI (`.github/workflows/scraper-tests.yml`) only runs the Python suite, and only
-when `scraper/**` changes — so TypeScript changes are gated by Vercel's build
-alone, and NONE of the `npm run test:*` suites run in CI at all. Run them,
-`npx tsc --noEmit` and `npx next lint` locally before pushing; nothing else
-will catch a break.
+Two CI workflows gate these. `scraper-tests.yml` runs the Python suite, but only
+when `scraper/**` changes. `web-tests.yml` runs every `npm run test:*` suite plus
+`npx tsc --noEmit` and `npx next lint` on every PR and push to main, each suite
+with `if: always()` so one break doesn't hide the others.
+
+**Adding a suite means three edits, not one:** the script in `package.json`, a
+step in `web-tests.yml`, and the list above. A suite that exists but isn't wired
+into the workflow is worse than no suite — it looks covered and isn't.
+
+Run them locally before pushing anyway; the gate is a backstop, not a substitute.
 
 `npx next build` will compile and typecheck without a database, then stop at
 "Collecting page data" with a `No database configuration found` error. That
