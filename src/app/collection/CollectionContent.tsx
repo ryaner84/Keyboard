@@ -48,6 +48,13 @@ import type {
 
 type CollectionTab = "collection" | "tracking" | "public";
 type CollectionCategory = "all" | "keyboards" | "keycaps";
+// Ownership filter, composed WITH the category filter rather than replacing it
+// — "sold keycap sets" is a question an owner will ask.
+//
+// Defaults to "all", NOT "owned": marking a piece sold must not make it vanish
+// from the cabinet. A sold piece stays where it was with a Sold badge, and the
+// filter is for narrowing on purpose — the badge does the telling.
+type CollectionOwnership = "owned" | "sold" | "all";
 
 const EMPTY_DETAILS: CollectionItemDetails = {
   isTracking: true,
@@ -81,6 +88,10 @@ const EMPTY_UNIT: CollectionUnit = {
   buildDetails: null,
   notes: null,
   imageUrl: null,
+  isSold: false,
+  soldAt: null,
+  soldPrice: null,
+  soldCurrency: null,
 };
 
 const CONDITION_LABELS: Record<string, string> = {
@@ -279,6 +290,10 @@ function assembleBuilds(c: CollectionItemDetails): CollectionUnit[] {
     buildDetails: c.buildDetails,
     notes: c.notes,
     imageUrl: c.customImageUrl,
+    isSold: c.isSold === true,
+    soldAt: c.soldAt ?? null,
+    soldPrice: c.soldPrice ?? null,
+    soldCurrency: c.soldCurrency ?? null,
   };
   const extra = Array.isArray(c.units)
     ? c.units.map((unit) => ({
@@ -300,6 +315,49 @@ function assembleBuilds(c: CollectionItemDetails): CollectionUnit[] {
   const builds = [first, ...extra].slice(0, qty);
   while (builds.length < qty) builds.push({ ...EMPTY_UNIT });
   return builds;
+}
+
+// ── Sold state ──────────────────────────────────────────────────────────────
+// Sold is recorded per BUILD, so a piece is only "sold" once every unit is.
+// Selling one of three is the ordinary case and must read as "Sold · 1/3",
+// never as the whole piece being gone.
+interface SoldState {
+  soldCount: number;
+  total: number;
+  allSold: boolean;
+  anySold: boolean;
+}
+
+function soldState(builds: CollectionUnit[]): SoldState {
+  const soldCount = builds.filter((build) => build.isSold).length;
+  return {
+    soldCount,
+    total: builds.length,
+    allSold: builds.length > 0 && soldCount === builds.length,
+    anySold: soldCount > 0,
+  };
+}
+
+// The units of a piece, whichever shape it stores them in. Keyboards keep
+// builds; keycap sets keep purchases. Both are "things that can be sold", and
+// every sold-state consumer wants them without caring which is which.
+function sellableUnits(
+  item: CollectionCatalogItem,
+  fallbackCurrency: string
+): CollectionUnit[] {
+  if (item.productType === "KEYBOARD") return assembleBuilds(item.collection);
+  return normalizeKeycapAcquisitions(item.collection, fallbackCurrency).map(
+    (purchase) => ({
+      ...EMPTY_UNIT,
+      acquiredAt: purchase.acquiredAt,
+      purchasePrice: purchase.purchasePrice,
+      purchaseCurrency: purchase.purchaseCurrency,
+      isSold: purchase.isSold === true,
+      soldAt: purchase.soldAt ?? null,
+      soldPrice: purchase.soldPrice ?? null,
+      soldCurrency: purchase.soldCurrency ?? null,
+    })
+  );
 }
 
 function dateInputValue(value: Date | string | null): string {
@@ -378,6 +436,21 @@ function BuildSummary({
     build.switches,
     build.keycaps,
   ].filter(Boolean) as string[];
+  const sold = build.isSold === true;
+  if (sold) {
+    // Prepended, not appended: once a unit is gone, that is the first thing
+    // the owner needs to read about it.
+    const soldYear = build.soldAt
+      ? new Date(build.soldAt).getFullYear()
+      : null;
+    const amount =
+      build.soldPrice != null
+        ? `${build.soldCurrency || build.purchaseCurrency || "USD"} ${build.soldPrice.toLocaleString()}`
+        : null;
+    specs.unshift(
+      [soldYear ? `Sold ${soldYear}` : "Sold", amount].filter(Boolean).join(" · ")
+    );
+  }
   return (
     <button
       type="button"
@@ -410,6 +483,11 @@ function BuildSummary({
           <p className="text-[11px] font-semibold text-gray-900 dark:text-white">
             Build {index + 1}
           </p>
+          {sold && (
+            <span className="inline-flex items-center rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">
+              Sold
+            </span>
+          )}
           {showVisibility &&
             (hidden ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
@@ -438,6 +516,130 @@ function BuildSummary({
         </span>
       )}
     </button>
+  );
+}
+
+// The sale half of a unit's record, shared by the keyboard build editor and
+// the keycap purchase editor so both capture a sale identically.
+//
+// Collapsed until "Sold" is ticked: an unsold unit is the overwhelmingly common
+// case, and three permanently-empty inputs on every build would make the form
+// read as unfinished. Date and price stay OPTIONAL once open — marking
+// something sold before you have the figures to hand is normal, which is also
+// why isSold is a flag rather than inferred from soldAt.
+function SaleRecordFields({
+  build,
+  purchaseCurrencies,
+  onChange,
+}: {
+  build: CollectionUnit;
+  purchaseCurrencies: PurchaseCurrencyOption[];
+  onChange: (patch: Partial<CollectionUnit>) => void;
+}) {
+  const sold = build.isSold === true;
+  return (
+    <div
+      className={`rounded-xl border p-4 transition-colors ${
+        sold
+          ? "border-rose-200 bg-rose-50/70 dark:border-rose-900/60 dark:bg-rose-950/25"
+          : "border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-white/[0.04]"
+      }`}
+    >
+      <label className="flex cursor-pointer items-start gap-2.5">
+        <input
+          type="checkbox"
+          checked={sold}
+          onChange={(event) =>
+            onChange(
+              event.target.checked
+                ? {
+                    isSold: true,
+                    // Default the sale currency to what it was bought in —
+                    // the same currency is the common case, and it stays
+                    // editable for a cross-currency sale.
+                    soldCurrency:
+                      build.soldCurrency ||
+                      build.purchaseCurrency ||
+                      purchaseCurrencies[0]?.code ||
+                      "USD",
+                  }
+                : // Unticking keeps the figures. Mis-clicking "Sold" should not
+                  // silently destroy a date and price the owner typed.
+                  { isSold: false }
+            )
+          }
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-rose-600 focus:ring-rose-500"
+        />
+        <span>
+          <span className="block text-xs font-semibold text-gray-900 dark:text-white">
+            This one has been sold
+          </span>
+          <span className="mt-0.5 block text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+            It stays in your collection with its photos and purchase history —
+            your spend totals do not change.
+          </span>
+        </span>
+      </label>
+
+      {sold && (
+        <>
+          <div className="mt-3 grid gap-4 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_190px]">
+            <Field label="Date sold">
+              <input
+                type="date"
+                value={dateInputValue(build.soldAt ?? null)}
+                onChange={(event) =>
+                  onChange({ soldAt: event.target.value || null })
+                }
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Sale price">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={build.soldPrice ?? ""}
+                onChange={(event) =>
+                  onChange({
+                    soldPrice:
+                      event.target.value === ""
+                        ? null
+                        : Number(event.target.value),
+                    soldCurrency:
+                      build.soldCurrency ||
+                      build.purchaseCurrency ||
+                      purchaseCurrencies[0]?.code ||
+                      "USD",
+                  })
+                }
+                placeholder="Optional"
+                className={inputClass}
+              />
+            </Field>
+            <div>
+              <span className="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-200">
+                Currency
+              </span>
+              <CurrencyCombobox
+                value={
+                  build.soldCurrency ||
+                  build.purchaseCurrency ||
+                  purchaseCurrencies[0]?.code ||
+                  "USD"
+                }
+                options={purchaseCurrencies}
+                onChange={(soldCurrency) => onChange({ soldCurrency })}
+              />
+            </div>
+          </div>
+          <p className="mt-2 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+            Both are optional. Sold in a different currency from the one you paid
+            in? Change it here — nothing assumes they match.
+          </p>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -989,6 +1191,12 @@ function BuildFields({
         </p>
       </div>
 
+      <SaleRecordFields
+        build={build}
+        purchaseCurrencies={purchaseCurrencies}
+        onChange={onChange}
+      />
+
       <FieldBlock label="Photo">
         <PhotoUploadField
           value={build.imageUrl}
@@ -1080,6 +1288,7 @@ export default function CollectionContent() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<CollectionTab>("collection");
   const [category, setCategory] = useState<CollectionCategory>("all");
+  const [ownership, setOwnership] = useState<CollectionOwnership>("all");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [editingItem, setEditingItem] = useState<CollectionCatalogItem | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
@@ -1264,15 +1473,38 @@ export default function CollectionContent() {
     [currency, owned]
   );
 
+  // Sold state per piece, computed once. A piece counts as sold only when EVERY
+  // unit is — one sold unit of three still belongs under "Owned".
+  const soldByItem = useMemo(() => {
+    const map = new Map<string, SoldState>();
+    for (const item of owned) {
+      map.set(item.slug, soldState(sellableUnits(item, currency)));
+    }
+    return map;
+  }, [owned, currency]);
+  const soldCount = useMemo(
+    () => owned.filter((item) => soldByItem.get(item.slug)?.allSold).length,
+    [owned, soldByItem]
+  );
+
   const tabItems =
     tab === "collection" ? owned : tab === "tracking" ? watching : publicItems;
-  const visibleItems = tabItems.filter((item) =>
-    category === "all"
-      ? true
-      : category === "keyboards"
-        ? item.productType === "KEYBOARD"
-        : item.productType !== "KEYBOARD"
-  );
+  const visibleItems = tabItems
+    .filter((item) =>
+      category === "all"
+        ? true
+        : category === "keyboards"
+          ? item.productType === "KEYBOARD"
+          : item.productType !== "KEYBOARD"
+    )
+    // Ownership applies to the collection cabinet only — "sold" is meaningless
+    // on the tracking list (you never owned it) and the public tab is defined
+    // by its own rule.
+    .filter((item) => {
+      if (tab !== "collection" || ownership === "all") return true;
+      const fullySold = soldByItem.get(item.slug)?.allSold === true;
+      return ownership === "sold" ? fullySold : !fullySold;
+    });
   const keyboardCount = owned.filter((item) => item.productType === "KEYBOARD").length;
   const keycapCount = owned.length - keyboardCount;
 
@@ -1635,6 +1867,34 @@ export default function CollectionContent() {
                 label="Keycap sets"
                 count={keycapCount}
               />
+              {/* Only meaningful on the cabinet, and only worth the row's space
+                  once something has actually been sold. */}
+              {tab === "collection" && soldCount > 0 && (
+                <>
+                  <span
+                    aria-hidden
+                    className="mx-1 h-5 w-px bg-gray-200 dark:bg-white/15"
+                  />
+                  <CollectionCategoryButton
+                    active={ownership === "owned"}
+                    onClick={() => setOwnership("owned")}
+                    label="Still owned"
+                    count={owned.length - soldCount}
+                  />
+                  <CollectionCategoryButton
+                    active={ownership === "sold"}
+                    onClick={() => setOwnership("sold")}
+                    label="Sold"
+                    count={soldCount}
+                  />
+                  <CollectionCategoryButton
+                    active={ownership === "all"}
+                    onClick={() => setOwnership("all")}
+                    label="All"
+                    count={owned.length}
+                  />
+                </>
+              )}
             </div>
             {/* Grid / list toggle — a dense list helps collectors with 100+ pieces. */}
             <div
@@ -2660,6 +2920,7 @@ function KeyboardCollectionCard({
   // the public page drops all-hidden pieces — so the badge must not claim it's
   // on display (holds for single- and multi-build alike).
   const nothingPublic = owned && piecePublic && shownCount === 0;
+  const sold = soldState(builds);
   const catalogImageUrl = normalizeImageUrl(item.imageUrl);
   // Any build without its own photo falls back to the catalog render. This used
   // to apply to build 1 ONLY, which read as the stock photo being "assigned" to
@@ -2684,9 +2945,11 @@ function KeyboardCollectionCard({
     <img
       src={imageUrl}
       alt={multiBuild ? `${item.name}, Build ${visibleBuildIndex + 1}` : item.name}
+      // Desaturated only when EVERY unit is gone. Greying a card because one of
+      // three sold would misrepresent a piece the owner still has.
       className={`absolute inset-0 h-full w-full transition duration-500 group-hover:scale-[1.025] ${
         isUserPhoto ? "object-contain" : "object-cover"
-      }`}
+      } ${sold.allSold ? "opacity-70 grayscale" : ""}`}
     />
   ) : (
     <div className="absolute inset-0 flex items-center justify-center text-5xl text-gray-300 dark:text-gray-700">
@@ -2730,7 +2993,13 @@ function KeyboardCollectionCard({
             </span>
             <DataTrustBadge item={item} compact />
           </div>
-          {owned && (
+          {/* Sold outranks the display badge: "I no longer own this" is the
+              more important fact about a piece than whether it is on show. */}
+          {owned && sold.anySold ? (
+            <span className="rounded-full bg-rose-600/95 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur">
+              {sold.allSold ? "Sold" : `Sold · ${sold.soldCount}/${sold.total}`}
+            </span>
+          ) : owned ? (
             <span
               className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider backdrop-blur ${
                 !piecePublic
@@ -2748,7 +3017,7 @@ function KeyboardCollectionCard({
                     ? `On display · ${shownCount}/${builds.length}`
                     : "On display"}
             </span>
-          )}
+          ) : null}
         </div>
 
         {multiBuild && (
@@ -3049,6 +3318,12 @@ function KeycapCollectionCard({
     !isCustomPhoto && namedKits.length >= 2 && galleryImages.length >= 2
       ? galleryImages.slice(0, 2)
       : null;
+  const sold = soldState(
+    acquisitions.map((purchase) => ({
+      ...EMPTY_UNIT,
+      isSold: purchase.isSold === true,
+    }))
+  );
   const visiblePurchaseCount = acquisitions.filter((purchase) => purchase.isPublic).length;
   // Per-purchase public/hidden state only matters when the whole set is on
   // display and there's more than one purchase (mirrors the keyboard builds).
@@ -3110,7 +3385,12 @@ function KeycapCollectionCard({
         )}
         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4">
           <span className="rounded-full bg-black/65 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur">Keycap set</span>
-          {owned && (
+          {/* Same precedence as the keyboard card: sold outranks display state. */}
+          {owned && sold.anySold ? (
+            <span className="rounded-full bg-rose-600/95 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur">
+              {sold.allSold ? "Sold" : `Sold · ${sold.soldCount}/${sold.total}`}
+            </span>
+          ) : owned ? (
             <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider backdrop-blur ${
               !item.collection.isPublic
                 ? "bg-white/85 text-gray-800"
@@ -3124,7 +3404,7 @@ function KeycapCollectionCard({
                   ? `On display · ${visiblePurchaseCount}/${acquisitions.length}`
                   : "No purchases shown"}
             </span>
-          )}
+          ) : null}
         </div>
         {acquisitions.length > 1 && (
           <>
@@ -3334,6 +3614,7 @@ function KeyboardCollectionItemEditor({
   const [form, setForm] = useState({
     quantity: item.collection.quantity ?? 1,
     showPurchasePrice: item.collection.showPurchasePrice,
+    showSoldStatus: item.collection.showSoldStatus === true,
     isPublic: item.collection.isPublic,
   });
   const [builds, setBuilds] = useState<CollectionUnit[]>(() =>
@@ -3419,6 +3700,7 @@ function KeyboardCollectionItemEditor({
         inCollection: true,
         quantity: qty,
         showPurchasePrice: form.showPurchasePrice,
+        showSoldStatus: form.showSoldStatus,
         isPublic: form.isPublic,
         // Build 1 lives on the top-level fields.
         acquiredAt: first.acquiredAt || null,
@@ -3431,6 +3713,12 @@ function KeyboardCollectionItemEditor({
         buildDetails: first.buildDetails || null,
         notes: first.notes || null,
         customImageUrl: first.imageUrl || null,
+        // Build 1's sale record rides on the top-level columns, the same split
+        // as its purchase record above.
+        isSold: first.isSold === true,
+        soldAt: first.soldAt || null,
+        soldPrice: first.soldPrice ?? null,
+        soldCurrency: first.soldCurrency || null,
         // Builds 2..N.
         units: extra,
         // 0-based build indexes kept off the public page (bounded to qty).
@@ -3526,6 +3814,19 @@ function KeyboardCollectionItemEditor({
           onChange={(checked) => setForm({ ...form, showPurchasePrice: checked })}
           title="Show build purchase prices publicly"
           description="Off by default. Every build amount remains private unless both this and public display are enabled."
+        />
+
+        <CheckRow
+          checked={form.showSoldStatus}
+          onChange={(checked) => setForm({ ...form, showSoldStatus: checked })}
+          title="Show sold status publicly"
+          description={
+            form.showSoldStatus
+              ? form.showPurchasePrice
+                ? "Visitors can see which builds you sold, when, and for how much."
+                : "Visitors can see which builds you sold and when — but not for how much, because build purchase prices are off."
+              : "Off by default: visitors cannot tell this piece was ever sold. Sale amounts additionally need the purchase-price switch above."
+          }
         />
 
         <div className="rounded-xl border border-[#ddcfb4] bg-[#faf7f0] p-4 dark:border-[#4a3e29] dark:bg-[#211d16]">
@@ -3636,6 +3937,7 @@ function KeycapCollectionEditor({
   const [form, setForm] = useState({
     isPublic: item.collection.isPublic,
     showPurchasePrice: item.collection.showPurchasePrice,
+    showSoldStatus: item.collection.showSoldStatus === true,
   });
   const [customKit, setCustomKit] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3725,6 +4027,7 @@ function KeycapCollectionEditor({
         inCollection: true,
         isPublic: form.isPublic,
         showPurchasePrice: form.showPurchasePrice,
+        showSoldStatus: form.showSoldStatus,
         keycapAcquisitions: purchases,
       });
     } catch (saveError) {
@@ -3773,6 +4076,33 @@ function KeycapCollectionEditor({
               <div><span className="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-200">Currency</span><CurrencyCombobox value={active.purchaseCurrency || purchaseCurrencies[0]?.code || "USD"} options={purchaseCurrencies} onChange={(purchaseCurrency) => updatePurchase(activePurchase, { purchaseCurrency })} /></div>
             </div>
             <p className="mt-2 text-[11px] leading-4 text-gray-500 dark:text-gray-400">This is the total paid for this purchase, even when it contains several kits or identical copies.</p>
+          </div>
+
+          {/* Sold applies per PURCHASE: a set bought twice can have one lot
+              flipped and the other kept. Same component the keyboard build
+              editor uses, so both capture a sale identically. */}
+          <div className="mt-4">
+            <SaleRecordFields
+              build={{
+                ...EMPTY_UNIT,
+                purchaseCurrency: active.purchaseCurrency,
+                isSold: active.isSold === true,
+                soldAt: active.soldAt ?? null,
+                soldPrice: active.soldPrice ?? null,
+                soldCurrency: active.soldCurrency ?? null,
+              }}
+              purchaseCurrencies={purchaseCurrencies}
+              onChange={(patch) =>
+                updatePurchase(activePurchase, {
+                  ...(patch.isSold !== undefined && { isSold: patch.isSold }),
+                  ...(patch.soldAt !== undefined && { soldAt: patch.soldAt }),
+                  ...(patch.soldPrice !== undefined && { soldPrice: patch.soldPrice }),
+                  ...(patch.soldCurrency !== undefined && {
+                    soldCurrency: patch.soldCurrency,
+                  }),
+                })
+              }
+            />
           </div>
 
           <div className="mt-5">
@@ -3872,6 +4202,19 @@ function KeycapCollectionEditor({
         </div>
 
         <CheckRow checked={form.showPurchasePrice} onChange={(showPurchasePrice) => setForm((current) => ({ ...current, showPurchasePrice }))} title="Show purchase prices publicly" description="Off by default. Every amount remains private unless this and public display are both enabled." />
+
+        <CheckRow
+          checked={form.showSoldStatus}
+          onChange={(showSoldStatus) => setForm((current) => ({ ...current, showSoldStatus }))}
+          title="Show sold status publicly"
+          description={
+            form.showSoldStatus
+              ? form.showPurchasePrice
+                ? "Visitors can see which purchases you sold, when, and for how much."
+                : "Visitors can see which purchases you sold and when — but not for how much, because purchase prices are off."
+              : "Off by default: visitors cannot tell this set was ever sold. Sale amounts additionally need the purchase-price switch above."
+          }
+        />
         <div className="rounded-xl border border-[#ddcfb4] bg-[#faf7f0] p-4 dark:border-[#4a3e29] dark:bg-[#211d16]"><CheckRow checked={form.isPublic} onChange={(isPublic) => setForm((current) => ({ ...current, isPublic }))} title="Display this keycap set publicly" description={`${purchases.filter((purchase) => purchase.isPublic).length} of ${purchases.length} purchase record${purchases.length === 1 ? "" : "s"} are selected for your shared collection URL.`} /></div>
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       </div>

@@ -36,6 +36,10 @@ export function createKeycapAcquisition(
     notes: null,
     isPublic: true,
     pairing: null,
+    isSold: false,
+    soldAt: null,
+    soldPrice: null,
+    soldCurrency: null,
   };
 }
 
@@ -111,6 +115,18 @@ function normalizeOne(value: unknown, fallbackCurrency: string): KeycapAcquisiti
     notes: safeText(data.notes, 1000),
     isPublic: data.isPublic !== false,
     pairing: normalizePairing(data.pairing),
+    // Client-side normalisation, so unlike the server sanitizers this coerces
+    // rather than throws — a malformed stored value must not break rendering
+    // the collection.
+    isSold: data.isSold === true,
+    soldAt: safeText(data.soldAt, 80),
+    soldPrice:
+      data.soldPrice === null || data.soldPrice === ""
+        ? null
+        : Number.isFinite(Number(data.soldPrice))
+          ? Number(data.soldPrice)
+          : null,
+    soldCurrency: safeText(data.soldCurrency, 8)?.toUpperCase() || null,
   };
 }
 
@@ -141,6 +157,12 @@ export function normalizeKeycapAcquisitions(
       photoSource: details.customImageUrl ? "CUSTOM" : "CATALOG",
       notes: details.notes,
       isPublic: true,
+      // A sale recorded against the legacy top-level columns must ride along,
+      // or it would vanish the moment the collector next opened the editor.
+      isSold: details.isSold === true,
+      soldAt: details.soldAt ?? null,
+      soldPrice: details.soldPrice ?? null,
+      soldCurrency: details.soldCurrency ?? null,
     },
   ];
 }

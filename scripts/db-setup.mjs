@@ -187,6 +187,25 @@ async function ensureKeycapAcquisitionsColumn(client) {
   }
 }
 
+// Sale record for build 1 / a legacy keycap purchase, plus the piece-level
+// switch that decides whether the public page reveals sold state at all.
+// Builds 2..N and per-purchase keycap records keep theirs inside the existing
+// `units` / `keycapAcquisitions` jsonb, so they need no column.
+async function ensureSoldColumns(client) {
+  try {
+    await client.query(
+      `ALTER TABLE public."TrackerItem"
+       ADD COLUMN IF NOT EXISTS "isSold" boolean NOT NULL DEFAULT false,
+       ADD COLUMN IF NOT EXISTS "soldAt" timestamp(3) without time zone,
+       ADD COLUMN IF NOT EXISTS "soldPrice" double precision,
+       ADD COLUMN IF NOT EXISTS "soldCurrency" text,
+       ADD COLUMN IF NOT EXISTS "showSoldStatus" boolean NOT NULL DEFAULT false`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] sold columns setup skipped: ${err.message}`);
+  }
+}
+
 async function healBlankVendorUrls(client) {
   try {
     const res = await client.query(
@@ -442,6 +461,7 @@ async function main() {
         await healBlankVendorUrls(client);
         await ensureHiddenBuildsColumn(client);
         await ensureKeycapAcquisitionsColumn(client);
+        await ensureSoldColumns(client);
         await healWarehouseGalleries(client);
         await expireEndedGroupBuys(client);
         await ensureDiscoveryColumn(client);
@@ -498,6 +518,7 @@ async function main() {
     await ensurePersonalTrackerTables(client);
     await ensureCollectionPhotoReportTable(client);
     await ensureKeycapAcquisitionsColumn(client);
+    await ensureSoldColumns(client);
     await purgeBlockedVendors(client);
     await purgeCancelledSets(client);
     await purgeBlockedVendorSetPairs(client);
