@@ -19,6 +19,12 @@ import {
 } from "@/lib/kit-variants";
 import { dedupeKey } from "@/lib/set-name";
 import {
+  assembleBuilds,
+  calculateCollectionSales,
+  EMPTY_UNIT,
+  type CollectionSales,
+} from "@/lib/collection-sales";
+import {
   createKeycapAcquisition,
   KEYCAP_CONDITION_LABELS,
   keycapKitLabel,
@@ -77,22 +83,6 @@ const EMPTY_DETAILS: CollectionItemDetails = {
   keycapAcquisitions: null,
 };
 
-const EMPTY_UNIT: CollectionUnit = {
-  acquiredAt: null,
-  purchasePrice: null,
-  purchaseCurrency: null,
-  color: null,
-  condition: null,
-  switches: null,
-  keycaps: null,
-  buildDetails: null,
-  notes: null,
-  imageUrl: null,
-  isSold: false,
-  soldAt: null,
-  soldPrice: null,
-  soldCurrency: null,
-};
 
 const CONDITION_LABELS: Record<string, string> = {
   UNBUILT: "New / unbuilt",
@@ -274,48 +264,6 @@ function calculateCollectionSpending(
   };
 }
 
-// Expand a collection record into per-build rows. Build 1 lives on the record's
-// top-level fields; builds 2..N come from the `units` array. Always returns
-// exactly `quantity` builds, padding with blanks if details are missing.
-function assembleBuilds(c: CollectionItemDetails): CollectionUnit[] {
-  const qty = Math.max(1, c.quantity || 1);
-  const first: CollectionUnit = {
-    acquiredAt: c.acquiredAt,
-    purchasePrice: c.purchasePrice,
-    purchaseCurrency: c.purchaseCurrency,
-    color: c.color,
-    condition: c.condition,
-    switches: c.switches,
-    keycaps: c.keycaps,
-    buildDetails: c.buildDetails,
-    notes: c.notes,
-    imageUrl: c.customImageUrl,
-    isSold: c.isSold === true,
-    soldAt: c.soldAt ?? null,
-    soldPrice: c.soldPrice ?? null,
-    soldCurrency: c.soldCurrency ?? null,
-  };
-  const extra = Array.isArray(c.units)
-    ? c.units.map((unit) => ({
-        ...unit,
-        // Records saved before per-build pricing used one shared purchase
-        // record. Carry it into legacy extra builds until the owner edits them.
-        acquiredAt:
-          unit.acquiredAt === undefined ? c.acquiredAt : unit.acquiredAt,
-        purchasePrice:
-          unit.purchasePrice === undefined
-            ? c.purchasePrice
-            : unit.purchasePrice,
-        purchaseCurrency:
-          unit.purchaseCurrency === undefined
-            ? c.purchaseCurrency
-            : unit.purchaseCurrency,
-      }))
-    : [];
-  const builds = [first, ...extra].slice(0, qty);
-  while (builds.length < qty) builds.push({ ...EMPTY_UNIT });
-  return builds;
-}
 
 // ── Sold state ──────────────────────────────────────────────────────────────
 // Sold is recorded per BUILD, so a piece is only "sold" once every unit is.
@@ -1524,6 +1472,12 @@ export default function CollectionContent() {
     () => calculateCollectionSpending(owned, currency, rates),
     [currency, owned, rates]
   );
+  // Realised gains, computed independently of the spend ledger above — see
+  // calculateCollectionSales. Private, like everything else on this card.
+  const sales = useMemo(
+    () => calculateCollectionSales(owned, currency, rates),
+    [currency, owned, rates]
+  );
   const firstKeyboardMissingSpend = useMemo(
     () =>
       owned.find((item) =>
@@ -1861,6 +1815,7 @@ export default function CollectionContent() {
         {authenticated && owned.length > 0 && (
           <CollectionSpendingPanel
             spending={spending}
+            sales={sales}
             currency={currency}
             loading={ratesLoading}
             onAddDetails={
@@ -2229,11 +2184,15 @@ export default function CollectionContent() {
 
 function CollectionSpendingPanel({
   spending,
+  sales,
   currency,
   loading,
   onAddDetails,
 }: {
   spending: CollectionSpending;
+  // Realised gains, computed separately from `spending` — selling something
+  // does not un-spend the money, so the two never merge.
+  sales: CollectionSales;
   currency: string;
   loading: boolean;
   onAddDetails?: () => void;
@@ -2448,7 +2407,277 @@ function CollectionSpendingPanel({
           </div>
         </div>
       </div>
+
+      {/* Sales & returns sits directly beneath the spend card: same private
+          money story, told in the other direction. It renders only once
+          something has been sold, so a collector who has never sold anything
+          never sees an empty panel. */}
+      {sales.soldUnits > 0 && (
+        <SalesReturnsCard sales={sales} currency={currency} />
+      )}
     </section>
+  );
+}
+
+// Realised gains and losses. PRIVATE — this never appears on the shared
+// collection page, only in the owner's own view, exactly like the spend card
+// it sits beneath.
+function SalesReturnsCard({
+  sales,
+  currency,
+}: {
+  sales: CollectionSales;
+  currency: string;
+}) {
+  const positive = sales.net >= 0;
+  // One scale for gains and losses so a small profit month can't out-draw a
+  // large loss month. Bars grow up or down from a shared zero line.
+  const peak = Math.max(
+    ...sales.months.map((month) => Math.abs(month.net)),
+    1
+  );
+  const charted = sales.months.filter((month) => month.sales > 0).length;
+  const unaccounted =
+    sales.missingSalePrice + sales.unconvertedCount;
+
+  return (
+    <div className="mt-6 overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_10px_35px_rgba(25,22,16,0.05)] dark:border-white/10 dark:bg-[#111417]">
+      <div className="border-b border-gray-100 p-5 dark:border-white/10 sm:p-7">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9a7a42] dark:text-[#c9ab72]">
+              <SpendIcon />
+              Sales &amp; returns
+            </div>
+            <h2 className="mt-2 text-xl font-semibold tracking-tight text-gray-950 dark:text-white">
+              What your sales came to
+            </h2>
+          </div>
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1.5 text-[10px] font-semibold text-gray-500 dark:bg-white/10 dark:text-gray-300">
+            <PrivateIcon />
+            Private
+          </span>
+        </div>
+
+        <div className="mt-7">
+          <p className="text-xs font-medium text-gray-400">
+            Realised {positive ? "gain" : "loss"}
+          </p>
+          <p
+            className={`mt-1 font-serif text-4xl tracking-tight sm:text-5xl ${
+              positive
+                ? "text-emerald-700 dark:text-emerald-400"
+                : "text-rose-700 dark:text-rose-400"
+            }`}
+          >
+            {positive ? "+" : "−"}
+            {formatCurrency(Math.abs(sales.net), currency)}
+          </p>
+          <p className="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
+            Across {sales.comparableUnits}{" "}
+            {sales.comparableUnits === 1 ? "unit" : "units"} where both figures
+            are recorded
+            {sales.comparableUnits !== sales.soldUnits &&
+              ` of ${sales.soldUnits} sold`}
+            , comparing each one&apos;s sale price with what you paid for that
+            same unit. Pieces you still own aren&apos;t valued here.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold">
+            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+              Recovered {formatCurrency(sales.recovered, currency)}
+            </span>
+            {sales.recovered !== sales.comparableRecovered && (
+              <span
+                className="rounded-full bg-gray-100 px-2.5 py-1 text-gray-500 dark:bg-white/10 dark:text-gray-300"
+                title="Money back from sales with no purchase price on file — real, but not comparable, so excluded from the gain above."
+              >
+                of which {formatCurrency(sales.comparableRecovered, currency)}{" "}
+                comparable
+              </span>
+            )}
+            <span className="rounded-full bg-[#f7f1e5] px-2.5 py-1 text-[#80632f] dark:bg-[#2b251b] dark:text-[#dfc284]">
+              Originally paid {formatCurrency(sales.costOfSold, currency)}
+            </span>
+            {sales.returnPercent != null && (
+              <span
+                className={`rounded-full px-2.5 py-1 ${
+                  positive
+                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200"
+                    : "bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-200"
+                }`}
+              >
+                {sales.returnPercent > 0 ? "+" : ""}
+                {sales.returnPercent}% return
+              </span>
+            )}
+          </div>
+        </div>
+
+        {unaccounted + sales.missingCost > 0 && (
+          <div className="mt-5 rounded-xl bg-[#f7f3ea] px-4 py-3 dark:bg-[#211d16]">
+            <p className="text-xs font-semibold text-[#725729] dark:text-[#d5b779]">
+              Not counted above
+            </p>
+            <p className="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-400">
+              {[
+                sales.missingSalePrice > 0
+                  ? `${sales.missingSalePrice} sold ${sales.missingSalePrice === 1 ? "unit has" : "units have"} no sale price recorded`
+                  : null,
+                sales.missingCost > 0
+                  ? `${sales.missingCost} ${sales.missingCost === 1 ? "has" : "have"} no purchase price to compare against`
+                  : null,
+                sales.unconvertedCount > 0
+                  ? `${sales.unconvertedCount} ${sales.unconvertedCount === 1 ? "is" : "are"} in a currency with no rate today`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+              . Add the missing figures in the piece&apos;s Sale record to include them.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Monthly realised P/L */}
+      <div className="border-b border-gray-100 p-5 dark:border-white/10 sm:p-7">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+              Profit &amp; loss trend
+            </p>
+            <h3 className="mt-1 text-lg font-semibold text-gray-950 dark:text-white">
+              Realised result by month
+            </h3>
+          </div>
+          <p className="text-xs text-gray-400">Based on sale date · {currency}</p>
+        </div>
+
+        <div className="mt-7 overflow-x-auto pb-1">
+          <div className="grid min-w-[610px] grid-cols-12 gap-2">
+            {sales.months.map((month) => {
+              const magnitude =
+                month.net === 0
+                  ? 0
+                  : Math.max(6, Math.round((Math.abs(month.net) / peak) * 50));
+              const gain = month.net >= 0;
+              return (
+                <div key={month.key} className="flex min-w-0 flex-col items-center">
+                  <div className="flex h-36 w-full flex-col justify-center rounded-lg bg-gray-50 px-1.5 dark:bg-white/[0.035]">
+                    {/* Top half = gains, bottom half = losses, meeting at a
+                        shared zero line so direction is readable at a glance. */}
+                    <div className="flex h-1/2 w-full items-end">
+                      {gain && magnitude > 0 && (
+                        <span
+                          className="w-full rounded-t-md bg-gradient-to-t from-emerald-600 to-emerald-400"
+                          style={{ height: `${magnitude * 2}%` }}
+                          title={`${month.label}: +${formatCurrency(month.net, currency)}`}
+                        />
+                      )}
+                    </div>
+                    <span className="h-px w-full bg-gray-200 dark:bg-white/15" />
+                    <div className="flex h-1/2 w-full items-start">
+                      {!gain && magnitude > 0 && (
+                        <span
+                          className="w-full rounded-b-md bg-gradient-to-b from-rose-500 to-rose-400"
+                          style={{ height: `${magnitude * 2}%` }}
+                          title={`${month.label}: −${formatCurrency(Math.abs(month.net), currency)}`}
+                        />
+                      )}
+                    </div>
+                  </div>
+                  <span className="mt-2 text-[9px] font-semibold uppercase tracking-wide text-gray-400">
+                    {month.shortLabel}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <p className="mt-2 text-center text-[10px] text-gray-400">
+          {charted > 0
+            ? `${charted} month${charted === 1 ? "" : "s"} with a recorded sale`
+            : "Add sale dates to populate the trend"}
+        </p>
+      </div>
+
+      {/* The sets behind the numbers */}
+      <div className="p-5 sm:p-7">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+          Behind the numbers
+        </p>
+        <h3 className="mt-1 text-lg font-semibold text-gray-950 dark:text-white">
+          What you sold
+        </h3>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          Best result first. A unit with no purchase price recorded shows what
+          you recovered but no verdict.
+        </p>
+        <div className="mt-5 space-y-2.5">
+          {sales.results.map((result) => (
+            <div
+              key={result.id}
+              className="flex items-center gap-3 rounded-xl bg-gray-50 p-2.5 dark:bg-white/[0.04]"
+            >
+              {result.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={result.imageUrl}
+                  alt={result.name}
+                  className="h-11 w-11 shrink-0 rounded-lg bg-gray-100 object-cover dark:bg-gray-800"
+                />
+              ) : (
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-gray-200 text-base text-gray-400 dark:bg-gray-800">
+                  {result.isKeycap ? "⎄" : "⌨"}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-semibold text-gray-900 dark:text-white">
+                  {result.name}
+                </p>
+                <p className="mt-0.5 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+                  {[
+                    result.unitLabel,
+                    result.soldAt
+                      ? `sold ${new Date(result.soldAt).toLocaleDateString("en-SG", {
+                          month: "short",
+                          year: "numeric",
+                        })}`
+                      : "date not recorded",
+                    result.cost != null
+                      ? `${formatCurrency(result.cost, currency)} → ${formatCurrency(result.recovered, currency)}`
+                      : `recovered ${formatCurrency(result.recovered, currency)}`,
+                  ].join(" · ")}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                {result.net == null ? (
+                  <span className="text-[11px] text-gray-400">No cost on file</span>
+                ) : (
+                  <>
+                    <p
+                      className={`text-sm font-bold ${
+                        result.net >= 0
+                          ? "text-emerald-700 dark:text-emerald-400"
+                          : "text-rose-700 dark:text-rose-400"
+                      }`}
+                    >
+                      {result.net >= 0 ? "+" : "−"}
+                      {formatCurrency(Math.abs(result.net), currency)}
+                    </p>
+                    {result.returnPercent != null && (
+                      <p className="text-[10px] font-semibold text-gray-400">
+                        {result.returnPercent > 0 ? "+" : ""}
+                        {result.returnPercent}%
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

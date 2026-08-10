@@ -61,6 +61,10 @@ jobs:
         if: always()
         run: npm run test:keycap-collection
 
+      - name: collection-sales
+        if: always()
+        run: npm run test:collection-sales
+
       - name: home-cache
         if: always()
         run: npm run test:home-cache
