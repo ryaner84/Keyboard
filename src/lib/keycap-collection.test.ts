@@ -28,6 +28,15 @@ const baseDetails: CollectionItemDetails = {
   keycapAcquisitions: null,
 };
 
+// A purchase as it would have been stored before per-purchase visibility
+// existed: no showPurchasePrice / showSoldStatus keys at all.
+function createKeycapAcquisitionWithoutFlags(): KeycapAcquisition {
+  const purchase = createKeycapAcquisition("SGD") as unknown as Record<string, unknown>;
+  delete purchase.showPurchasePrice;
+  delete purchase.showSoldStatus;
+  return purchase as unknown as KeycapAcquisition;
+}
+
 const legacy = normalizeKeycapAcquisitions(baseDetails, "SGD");
 assert.equal(legacy.length, 1);
 assert.equal(legacy[0].quantity, 2);
@@ -128,5 +137,63 @@ assert.equal(legacySold.length, 1);
 assert.equal(legacySold[0].isSold, true);
 assert.equal(legacySold[0].soldPrice, 95);
 assert.equal(legacySold[0].soldCurrency, "EUR");
+
+// ── Per-purchase visibility ─────────────────────────────────────────────────
+// Price and sold visibility belong to the PURCHASE for keycaps: a set bought
+// twice can have one lot's figures published and the other's kept private.
+
+// A purchase that has never had its own flags set inherits the record-wide
+// value. Without this, every existing keycap set would silently flip to
+// "prices private" the first time it was read after this shipped.
+const inheritedOn = normalizeKeycapAcquisitions(
+  {
+    ...baseDetails,
+    showPurchasePrice: true,
+    showSoldStatus: true,
+    keycapAcquisitions: [createKeycapAcquisitionWithoutFlags()],
+  },
+  "SGD"
+);
+assert.equal(inheritedOn[0].showPurchasePrice, true);
+assert.equal(inheritedOn[0].showSoldStatus, true);
+
+const inheritedOff = normalizeKeycapAcquisitions(
+  {
+    ...baseDetails,
+    showPurchasePrice: false,
+    keycapAcquisitions: [createKeycapAcquisitionWithoutFlags()],
+  },
+  "SGD"
+);
+assert.equal(inheritedOff[0].showPurchasePrice, false);
+
+// An explicit per-purchase value always wins over the inherited one — that is
+// the whole point of the setting being per purchase.
+const explicitOff = createKeycapAcquisition("SGD");
+explicitOff.showPurchasePrice = false;
+const overridden = normalizeKeycapAcquisitions(
+  { ...baseDetails, showPurchasePrice: true, keycapAcquisitions: [explicitOff] },
+  "SGD"
+);
+assert.equal(overridden[0].showPurchasePrice, false, "explicit false beats inherited true");
+
+// Two purchases of one set, published differently.
+const shown = createKeycapAcquisition("SGD");
+shown.showPurchasePrice = true;
+const hidden = createKeycapAcquisition("SGD");
+hidden.showPurchasePrice = false;
+const mixedVisibility = normalizeKeycapAcquisitions(
+  { ...baseDetails, keycapAcquisitions: [shown, hidden] },
+  "SGD"
+);
+assert.equal(mixedVisibility[0].showPurchasePrice, true);
+assert.equal(mixedVisibility[1].showPurchasePrice, false);
+
+// The legacy single-purchase fallback inherits too.
+const legacyVisible = normalizeKeycapAcquisitions(
+  { ...baseDetails, showPurchasePrice: true, keycapAcquisitions: null },
+  "SGD"
+);
+assert.equal(legacyVisible[0].showPurchasePrice, true);
 
 console.log("keycap collection normalization checks passed");

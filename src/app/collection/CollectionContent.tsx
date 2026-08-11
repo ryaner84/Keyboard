@@ -495,11 +495,12 @@ function PieceSummaryPanel({
   isPublic,
   onIsPublicChange,
   publicDescription,
-  showPurchasePrice,
+  showPurchasePrice = false,
   onShowPurchasePriceChange,
-  showSoldStatus,
+  showSoldStatus = false,
   onShowSoldStatusChange,
-  pieceHasSale,
+  pieceHasSale = false,
+  showPerUnitVisibility = true,
 }: {
   blurbTitle: string;
   blurbBody: string;
@@ -510,13 +511,18 @@ function PieceSummaryPanel({
   isPublic: boolean;
   onIsPublicChange: (value: boolean) => void;
   publicDescription: string;
-  showPurchasePrice: boolean;
-  onShowPurchasePriceChange: (value: boolean) => void;
-  showSoldStatus: boolean;
-  onShowSoldStatusChange: (value: boolean) => void;
+  showPurchasePrice?: boolean;
+  onShowPurchasePriceChange?: (value: boolean) => void;
+  showSoldStatus?: boolean;
+  onShowSoldStatusChange?: (value: boolean) => void;
   // Nothing sold anywhere on this piece means the sold switch would be a dead
   // control, so it is not rendered at all.
-  pieceHasSale: boolean;
+  pieceHasSale?: boolean;
+  // Keyboards keep ONE record-wide price/sold switch here, because their
+  // builds are units of the same purchase decision. Keycaps set false: each
+  // purchase is a separate transaction and owns its own visibility, so those
+  // switches live in the Purchase tabs instead.
+  showPerUnitVisibility?: boolean;
 }) {
   return (
     <div className="space-y-6">
@@ -538,14 +544,16 @@ function PieceSummaryPanel({
         {children}
       </div>
 
+      {showPerUnitVisibility && onShowPurchasePriceChange && (
       <CheckRow
         checked={showPurchasePrice}
         onChange={onShowPurchasePriceChange}
         title="Show purchase prices publicly"
         description={`Off by default. Every ${unitNoun.replace(/s$/, "")} amount stays private unless both this and public display are on.`}
       />
+      )}
 
-      {pieceHasSale && (
+      {showPerUnitVisibility && onShowSoldStatusChange && pieceHasSale && (
         <CheckRow
           checked={showSoldStatus}
           onChange={onShowSoldStatusChange}
@@ -600,14 +608,19 @@ function SaleRecordFields({
   onChange,
   showSoldStatus,
   showPurchasePrice,
+  onShowSoldStatusChange,
 }: {
   build: CollectionUnit;
   purchaseCurrencies: PurchaseCurrencyOption[];
   onChange: (patch: Partial<CollectionUnit>) => void;
-  // Both READ-ONLY here. These are record-wide settings owned by the Summary
-  // tab; this box only states the rule so it is visible beside the figure.
   showSoldStatus: boolean;
   showPurchasePrice: boolean;
+  // Supplied ONLY by the keycap editor, where sold visibility belongs to the
+  // individual purchase — a set bought twice can have one lot's sale published
+  // and the other's kept quiet. When given, this box owns the switch; when
+  // omitted (keyboards) the setting is record-wide and lives in Summary, so
+  // the box states the rule read-only instead.
+  onShowSoldStatusChange?: (value: boolean) => void;
 }) {
   const sold = build.isSold === true;
   return (
@@ -713,17 +726,31 @@ function SaleRecordFields({
         </>
       )}
 
-      {sold && (
-        <VisibilityNote
-          on={showSoldStatus}
-          onText={
-            showPurchasePrice
-              ? "Sold status and amount are public"
-              : "Sold status is public, the amount is not"
-          }
-          offText="Visitors cannot tell this was sold"
-        />
-      )}
+      {sold &&
+        (onShowSoldStatusChange ? (
+          <div className="mt-4 border-t border-rose-200/70 pt-3 dark:border-rose-900/50">
+            <CheckRow
+              checked={showSoldStatus}
+              onChange={onShowSoldStatusChange}
+              title="Show this sale publicly"
+              description={
+                showSoldStatus
+                  ? "Visitors can see that this purchase sold, when, and for how much."
+                  : "Off by default: visitors cannot tell this purchase was sold. Turning it on shows the date and the sale amount."
+              }
+            />
+          </div>
+        ) : (
+          <VisibilityNote
+            on={showSoldStatus}
+            onText={
+              showPurchasePrice
+                ? "Sold status and amount are public"
+                : "Sold status is public, the amount is not"
+            }
+            offText="Visitors cannot tell this was sold"
+          />
+        ))}
     </div>
   );
 }
@@ -4446,11 +4473,11 @@ function KeycapCollectionEditor({
             isPublic={form.isPublic}
             onIsPublicChange={(isPublic) => setForm((current) => ({ ...current, isPublic }))}
             publicDescription={`${purchases.filter((purchase) => purchase.isPublic).length} of ${purchases.length} purchase record${purchases.length === 1 ? "" : "s"} are selected for your shared collection URL.`}
-            showPurchasePrice={form.showPurchasePrice}
-            onShowPurchasePriceChange={(showPurchasePrice) => setForm((current) => ({ ...current, showPurchasePrice }))}
-            showSoldStatus={form.showSoldStatus}
-            onShowSoldStatusChange={(showSoldStatus) => setForm((current) => ({ ...current, showSoldStatus }))}
-            pieceHasSale={purchases.some((purchase) => purchase.isSold)}
+            // Price and sold visibility are PER PURCHASE for keycaps — a set
+            // bought twice can have one lot's figures published and the
+            // other's kept private — so they live in the Purchase tabs, not
+            // here. Summary keeps only what is genuinely record-wide.
+            showPerUnitVisibility={false}
           />
         ) : (
         <div className="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
@@ -4464,10 +4491,10 @@ function KeycapCollectionEditor({
             <p className="mt-2 text-[11px] leading-4 text-gray-500 dark:text-gray-400">This is the total paid for this purchase, even when it contains several kits or identical copies.</p>
             <div className="mt-4 border-t border-[#e6d9bf] pt-3 dark:border-[#4a3e29]">
               <CheckRow
-                checked={form.showPurchasePrice}
-                onChange={(showPurchasePrice) => setForm((current) => ({ ...current, showPurchasePrice }))}
-                title="Show purchase prices publicly · all purchases"
-                description="Off by default, and one switch for the whole record — not just this purchase. Amounts stay private unless this and public display are both on."
+                checked={active.showPurchasePrice === true}
+                onChange={(showPurchasePrice) => updatePurchase(activePurchase, { showPurchasePrice })}
+                title="Show this purchase price publicly"
+                description="Off by default, and set per purchase — another purchase of the same set can stay private. Needs public display on too."
               />
             </div>
           </div>
@@ -4486,8 +4513,9 @@ function KeycapCollectionEditor({
                 soldCurrency: active.soldCurrency ?? null,
               }}
               purchaseCurrencies={purchaseCurrencies}
-              showSoldStatus={form.showSoldStatus}
-              showPurchasePrice={form.showPurchasePrice}
+              showSoldStatus={active.showSoldStatus === true}
+              showPurchasePrice={active.showPurchasePrice === true}
+              onShowSoldStatusChange={(showSoldStatus) => updatePurchase(activePurchase, { showSoldStatus })}
               onChange={(patch) =>
                 updatePurchase(activePurchase, {
                   ...(patch.isSold !== undefined && { isSold: patch.isSold }),
