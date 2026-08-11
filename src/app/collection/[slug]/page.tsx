@@ -546,19 +546,28 @@ function PublicKeycapCollectionCard({
                 ? KEYCAP_CONDITION_LABELS[purchase.condition] || purchase.condition
                 : null,
               purchase.quantity > 1 ? `${purchase.quantity} copies` : null,
-              item.showPurchasePrice && purchase.purchasePrice != null
+              // PER PURCHASE for keycaps. normalizeKeycapAcquisitions already
+              // inherits the record-wide value for a set saved before these
+              // flags existed, so reading the purchase alone is correct here.
+              purchase.showPurchasePrice && purchase.purchasePrice != null
                 ? `${purchase.purchaseCurrency || "USD"} ${purchase.purchasePrice.toLocaleString()}`
                 : null,
             ].filter(Boolean);
-            // Same two gates as the keyboard path: showSoldStatus reveals THAT
-            // it sold, showPurchasePrice reveals FOR HOW MUCH.
-            const soldPublicly = item.showSoldStatus && purchase.isSold === true;
+            // ONE gate here, unlike the keyboard path's two: this switch is
+            // per purchase and sits in the same box as the sale figure, so
+            // ticking it is an explicit choice about this purchase's money.
+            const soldPublicly =
+              purchase.showSoldStatus === true && purchase.isSold === true;
             if (soldPublicly) {
               const when = purchase.soldAt
                 ? `Sold ${new Date(purchase.soldAt).getFullYear()}`
                 : "Sold";
               const amount =
-                item.showPurchasePrice && purchase.soldPrice != null
+                // One switch: revealing a purchase's sale reveals its amount
+                // too. Unlike the keyboard path there is no second gate,
+                // because this switch sits in the same box as the figure and
+                // is an explicit choice about THIS purchase.
+                purchase.soldPrice != null
                   ? `${purchase.soldCurrency || purchase.purchaseCurrency || "USD"} ${purchase.soldPrice.toLocaleString()}`
                   : null;
               specs.unshift([when, amount].filter(Boolean).join(" · "));

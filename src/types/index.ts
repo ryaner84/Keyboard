@@ -206,6 +206,15 @@ export interface KeycapAcquisition {
   soldAt?: Date | string | null;
   soldPrice?: number | null;
   soldCurrency?: string | null;
+  // Visibility is PER PURCHASE for keycaps: a set bought twice can have one
+  // lot's figures published and the other's kept private. Keyboards keep one
+  // record-wide switch instead (see CollectionItemDetails), because a build is
+  // a unit of the same purchase decision rather than a separate transaction.
+  //
+  // Undefined means "never set" — normalizeKeycapAcquisitions falls back to the
+  // record-wide value so existing sets keep the visibility they already had.
+  showPurchasePrice?: boolean;
+  showSoldStatus?: boolean;
 }
 
 export interface CollectionItemDetails {

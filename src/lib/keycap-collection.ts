@@ -40,6 +40,8 @@ export function createKeycapAcquisition(
     soldAt: null,
     soldPrice: null,
     soldCurrency: null,
+    showPurchasePrice: false,
+    showSoldStatus: false,
   };
 }
 
@@ -91,7 +93,17 @@ function normalizePairing(value: unknown): KeycapPairing {
   return null;
 }
 
-function normalizeOne(value: unknown, fallbackCurrency: string): KeycapAcquisition | null {
+function normalizeOne(
+  value: unknown,
+  fallbackCurrency: string,
+  // The record-wide values, used only when a purchase has never had its own
+  // set. Without this, every existing keycap set would silently flip to
+  // "prices private" the first time it was read after this shipped.
+  inherited: { showPurchasePrice: boolean; showSoldStatus: boolean } = {
+    showPurchasePrice: false,
+    showSoldStatus: false,
+  }
+): KeycapAcquisition | null {
   const data = (value ?? {}) as Record<string, unknown>;
   const id = safeText(data.id, 100) || clientId();
   const quantity = Math.max(1, Math.min(99, Number(data.quantity) || 1));
@@ -127,6 +139,14 @@ function normalizeOne(value: unknown, fallbackCurrency: string): KeycapAcquisiti
           ? Number(data.soldPrice)
           : null,
     soldCurrency: safeText(data.soldCurrency, 8)?.toUpperCase() || null,
+    showPurchasePrice:
+      typeof data.showPurchasePrice === "boolean"
+        ? data.showPurchasePrice
+        : inherited.showPurchasePrice,
+    showSoldStatus:
+      typeof data.showSoldStatus === "boolean"
+        ? data.showSoldStatus
+        : inherited.showSoldStatus,
   };
 }
 
@@ -136,10 +156,14 @@ export function normalizeKeycapAcquisitions(
   details: CollectionItemDetails,
   fallbackCurrency = "USD"
 ): KeycapAcquisition[] {
+  const inherited = {
+    showPurchasePrice: details.showPurchasePrice === true,
+    showSoldStatus: details.showSoldStatus === true,
+  };
   if (Array.isArray(details.keycapAcquisitions) && details.keycapAcquisitions.length > 0) {
     return details.keycapAcquisitions
       .slice(0, 50)
-      .map((item) => normalizeOne(item, fallbackCurrency))
+      .map((item) => normalizeOne(item, fallbackCurrency, inherited))
       .filter((item): item is KeycapAcquisition => Boolean(item));
   }
 
@@ -163,6 +187,7 @@ export function normalizeKeycapAcquisitions(
       soldAt: details.soldAt ?? null,
       soldPrice: details.soldPrice ?? null,
       soldCurrency: details.soldCurrency ?? null,
+      ...inherited,
     },
   ];
 }

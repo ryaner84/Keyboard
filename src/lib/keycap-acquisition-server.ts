@@ -193,5 +193,14 @@ export function cleanKeycapAcquisition(
     isPublic: source.isPublic !== false,
     pairing: cleanKeycapPairing(source.pairing),
     ...cleanSaleFields(source),
+    // Per-purchase visibility. Absent means "never set" and is preserved as
+    // absent, so normalizeKeycapAcquisitions can still inherit the record-wide
+    // value for a set saved before these existed.
+    ...(typeof source.showPurchasePrice === "boolean"
+      ? { showPurchasePrice: source.showPurchasePrice }
+      : {}),
+    ...(typeof source.showSoldStatus === "boolean"
+      ? { showSoldStatus: source.showSoldStatus }
+      : {}),
   };
 }
