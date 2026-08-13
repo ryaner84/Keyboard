@@ -289,7 +289,16 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
     stoppedEarly: false,
   };
 
+  // A vendor with a blank websiteUrl can never be crawled: `new URL("")` throws
+  // below, so the store is skipped — but only AFTER it has taken one of the
+  // `vendorLimit` slots and had lastDiscoveredAt stamped, which also counts it
+  // into vendorsScanned. It therefore reads as "scanned" in the run summary
+  // while never having been fetched. 28 of the 125 seeded vendors shipped with
+  // '' here, so roughly a fifth of every rotation was spent on stores that
+  // cannot produce a listing. Exclude them so the budget goes to crawlable
+  // stores; db-setup's ensureVendorRoster refills the ones the roster knows.
   const vendors = await prisma.vendor.findMany({
+    where: { websiteUrl: { not: "" } },
     orderBy: [{ lastDiscoveredAt: { sort: "asc", nulls: "first" } }],
     take: vendorLimit,
     select: { id: true, slug: true, websiteUrl: true },

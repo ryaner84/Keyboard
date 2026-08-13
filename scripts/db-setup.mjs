@@ -68,6 +68,108 @@ async function purgeBlockedVendors(client) {
   }
 }
 
+// The vendor roster (src/data/seed/vendors.json) is the declared list of stores
+// the catalog discovery crawler should walk. It only ever reached the database
+// through `prisma/seed.ts` (`npm run db:seed`), which is NOT part of the build
+// — that runs `db-setup.mjs`, and nothing here ever INSERTed a Vendor. So a
+// store added to the roster never got a row, and discoverGmkProducts() iterates
+// Vendor rows: no row, no crawl, no VendorKit, no listing on the site, ever.
+//
+// Two repairs, both idempotent and every deploy:
+//   a) INSERT roster stores that have no row yet. ON CONFLICT DO NOTHING keeps
+//      existing rows (and their manual edits) untouched — backfillShipping owns
+//      region/currency corrections, so this must not fight it.
+//   b) Fill a BLANK "websiteUrl" from the roster. discovery.ts does
+//      `new URL(vendor.websiteUrl)`, which THROWS on '' — that vendor is
+//      skipped on every pass forever. 28 of the 125 rows in supabase-setup.sql
+//      shipped with '' here, iLumKB among them, which is why the store the
+//      LINK_VENDORS comment calls "guaranteed-present so the crawler always
+//      scans it" has never actually been crawled.
+//
+// Deliberately NOT named in the INSERT: createdAt/updatedAt (the Vendor table
+// has no such columns) and lastDiscoveredAt (added later by
+// ensureDiscoveryColumn; leaving it NULL is what puts a new store at the FRONT
+// of the crawler's NULLS FIRST rotation).
+const VENDOR_ROSTER_PATH = join(__dirname, "..", "src", "data", "seed", "vendors.json");
+
+async function ensureVendorRoster(client) {
+  let roster;
+  try {
+    roster = JSON.parse(readFileSync(VENDOR_ROSTER_PATH, "utf8"));
+  } catch (err) {
+    console.warn(`[db-setup] vendor roster skipped (unreadable): ${err.message}`);
+    return;
+  }
+
+  // Never re-create a vendor purgeBlockedVendors is about to delete.
+  const blocked = new Set(["fancycustoms", "fancy-customs"]);
+  const rows = (Array.isArray(roster) ? roster : []).filter(
+    (v) => v && v.slug && !blocked.has(v.slug) && String(v.websiteUrl || "").trim() !== ""
+  );
+  if (rows.length === 0) return;
+
+  const col = (key) => rows.map((v) => (v[key] == null ? null : String(v[key])));
+
+  try {
+    const inserted = await client.query(
+      `INSERT INTO public."Vendor"
+         (id, name, slug, region, country, currency, "websiteUrl", "logoUrl")
+       SELECT gen_random_uuid()::text, r.name, r.slug, r.region::public."Region",
+              r.country, r.currency, r.website, r.logo
+         FROM unnest($1::text[], $2::text[], $3::text[], $4::text[],
+                     $5::text[], $6::text[], $7::text[])
+           AS r(name, slug, region, country, currency, website, logo)
+       ON CONFLICT (slug) DO NOTHING
+       RETURNING slug`,
+      [col("name"), col("slug"), col("region"), col("country"), col("currency"),
+       col("websiteUrl"), col("logoUrl")]
+    );
+    if (inserted.rowCount > 0) {
+      console.log(
+        `[db-setup] Added ${inserted.rowCount} roster vendor(s) to the crawl: ` +
+          inserted.rows.map((r) => r.slug).join(", ")
+      );
+    }
+
+    const healed = await client.query(
+      `UPDATE public."Vendor" AS v
+          SET "websiteUrl" = r.website
+         FROM unnest($1::text[], $2::text[]) AS r(slug, website)
+        WHERE v.slug = r.slug
+          AND btrim(coalesce(v."websiteUrl", '')) = ''
+       RETURNING v.slug`,
+      [col("slug"), col("websiteUrl")]
+    );
+    if (healed.rowCount > 0) {
+      console.log(
+        `[db-setup] Restored ${healed.rowCount} blank vendor websiteUrl(s): ` +
+          healed.rows.map((r) => r.slug).join(", ")
+      );
+    }
+  } catch (err) {
+    console.warn(`[db-setup] vendor roster sync skipped: ${err.message}`);
+    return;
+  }
+
+  // Anything still blank can't be crawled and isn't in the roster to repair
+  // from. Name them in the build log so they can be filled in or removed.
+  try {
+    const stranded = await client.query(
+      `SELECT slug FROM public."Vendor"
+        WHERE btrim(coalesce("websiteUrl", '')) = ''
+        ORDER BY slug`
+    );
+    if (stranded.rowCount > 0) {
+      console.warn(
+        `[db-setup] ${stranded.rowCount} vendor(s) still have no websiteUrl and are ` +
+          `excluded from catalog discovery: ${stranded.rows.map((r) => r.slug).join(", ")}`
+      );
+    }
+  } catch {
+    /* diagnostic only */
+  }
+}
+
 // Sets labelled "Canceled"/"Cancelled" (in the name, straight from
 // KeycapLendar) or carrying the CANCELLED status never went to production —
 // there is nothing to price or buy, so they're removed from the site
@@ -468,6 +570,10 @@ async function main() {
         await ensureDataTrustLayer(client);
         await ensureCurrencies(client);
         await resetPollutedGalleries(client);
+        // Before backfillShipping: a store inserted here needs that pass to give
+        // it shipping zones in the SAME deploy, or the price table hides every
+        // listing it publishes until the next nightly self-heal.
+        await ensureVendorRoster(client);
         await backfillShipping(client);
         await cleanupInterestChecks(client);
         await ensureVariantsColumn(client);
@@ -526,6 +632,7 @@ async function main() {
     await ensureDataTrustLayer(client);
     await ensureCurrencies(client);
     await resetPollutedGalleries(client);
+    await ensureVendorRoster(client);
     await backfillShipping(client);
     await cleanupInterestChecks(client);
     await reclassifyMisflaggedKeycaps(client);
