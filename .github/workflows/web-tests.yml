@@ -68,3 +68,9 @@ jobs:
       - name: home-cache
         if: always()
         run: npm run test:home-cache
+
+      # Plain node, not ts-node: the helper it covers is imported by
+      # scripts/db-setup.mjs, which runs in the build before any TS exists.
+      - name: vendor-urls
+        if: always()
+        run: npm run test:vendor-urls
