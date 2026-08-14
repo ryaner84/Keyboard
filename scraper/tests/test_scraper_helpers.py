@@ -400,6 +400,29 @@ class BaseKitIdentificationTests(unittest.TestCase):
         self.assertEqual(chosen["price"], 88.0)
         self.assertTrue(scrape.is_plausible_base_price(chosen["price"], "USD"))
 
+    def test_discovery_refuses_vendors_it_cannot_crawl(self):
+        # A blank websiteUrl makes _origin_of return None, so the store is
+        # skipped — but the skip happens AFTER the row has taken one of the
+        # eight rotation slots and been stamped lastDiscoveredAt, so it counts
+        # as "scanned" without a single fetch. 26 vendors are in that state.
+        # discovery.ts started excluding them in #131; the nightly pass — the
+        # one that actually crawls — kept spending a fifth of every rotation on
+        # them until the same filter was added here.
+        self.assertIsNone(scrape._origin_of(""))
+        self.assertIsNone(scrape._origin_of("   "))
+        self.assertIsNone(scrape._origin_of("mekibo.com"))  # no scheme
+        self.assertEqual(
+            scrape._origin_of("https://mekibo.com/products/gmk-a"),
+            "https://mekibo.com",
+        )
+        sql = scrape._DISCOVERY_VENDOR_SQL
+        self.assertIn('btrim(coalesce("websiteUrl", \'\')) <> \'\'', sql)
+        # The manufacturer exclusion and the oldest-first rotation must survive
+        # alongside it: dropping either would price gmk.net or re-crawl one
+        # store every night.
+        self.assertIn("NOT (slug = ANY(%s))", sql)
+        self.assertIn('ORDER BY "lastDiscoveredAt" ASC NULLS FIRST', sql)
+
     def test_subkit_product_titles_are_skipped_by_discovery(self):
         for title in ("GMK Foo (Novelties)", "GMK Foo [Spacebars]",
                       "GMK Bento Alphas", "GMK Foo Deskmat",

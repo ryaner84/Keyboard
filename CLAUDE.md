@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Seven suites, all of which should pass before pushing:
+Eight suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -38,6 +38,7 @@ npm run test:collection-import
 npm run test:keycap-collection
 npm run test:collection-sales
 npm run test:home-cache
+npm run test:vendor-urls
 npx tsc --noEmit
 ```
 
@@ -79,6 +80,20 @@ no price timestamp, sort ahead of every real listing.
 
 The `Vendor` table has no `createdAt`/`updatedAt` columns. Naming them in an
 insert has broken a nightly run before.
+
+**Discovery is written twice** — `run_discovery` in `scrape.py` (the nightly
+that actually crawls) and `discoverGmkProducts` in `src/lib/import/discovery.ts`
+(the Vercel cron). A fix to one is only half a fix; #131 excluded blank-URL
+vendors in the TS copy alone and the nightly kept spending a fifth of every
+rotation on stores it could not fetch.
+
+A vendor is identified by its **site**, not its slug: the roster spells five
+stores differently from the database (`cannonkeys`/`cannon-keys`,
+`thekeyco`/`the-key-company`, …), so anything that inserts a Vendor must match
+on the host or it creates a second row for one shop — which is then crawled
+twice and published twice. A store with no usable `websiteUrl` publishes
+nothing at all; `db-setup` recovers what it can from the vendor's own listing
+URLs and names the rest in the build log.
 
 Stores rate-limit per IP and HTTP 429 counts as "blocked". Any pass that fetches
 many URLs must go through `HostThrottle`, and `HostThrottle.interleave()` should

@@ -12,6 +12,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import pg from "pg";
+import {
+  hostKey,
+  hostOfUrl,
+  isStorefrontHost,
+  planVendorUrlHeal,
+} from "./lib/vendor-urls.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SQL_PATH = join(__dirname, "..", "supabase-setup.sql");
@@ -103,10 +109,48 @@ async function ensureVendorRoster(client) {
 
   // Never re-create a vendor purgeBlockedVendors is about to delete.
   const blocked = new Set(["fancycustoms", "fancy-customs"]);
-  const rows = (Array.isArray(roster) ? roster : []).filter(
+  let rows = (Array.isArray(roster) ? roster : []).filter(
     (v) => v && v.slug && !blocked.has(v.slug) && String(v.websiteUrl || "").trim() !== ""
   );
   if (rows.length === 0) return;
+
+  // ON CONFLICT (slug) only catches a store the database already knows under
+  // the SAME slug — and the roster's slugs are not the database's. Five roster
+  // entries are stores that have had a row (and their listings) all along under
+  // a different spelling: cannonkeys/cannon-keys, thekeyco/the-key-company,
+  // mykeyboard-eu/mykeyboard, mech-land/mechland, toro-studio/toro-studios.
+  // Inserting those made a SECOND Vendor row for one store, which discovery
+  // then crawls twice and publishes twice — two rows for the same shop in the
+  // set's price table, competing on price. A store is identified by its site,
+  // so match on the host too and leave the existing row alone.
+  try {
+    const existing = await client.query(
+      `SELECT slug, "websiteUrl" FROM public."Vendor"`
+    );
+    const slugs = new Set(existing.rows.map((r) => r.slug));
+    const byHost = new Map();
+    for (const r of existing.rows) {
+      const key = hostKey(hostOfUrl(r.websiteUrl));
+      if (key && !byHost.has(key)) byHost.set(key, r.slug);
+    }
+    const aliases = [];
+    rows = rows.filter((v) => {
+      if (slugs.has(v.slug)) return true; // same slug: the INSERT no-ops, the heal still runs
+      const owner = byHost.get(hostKey(hostOfUrl(v.websiteUrl)));
+      if (!owner) return true;
+      aliases.push(`${v.slug} → ${owner}`);
+      return false;
+    });
+    if (aliases.length > 0) {
+      console.log(
+        `[db-setup] ${aliases.length} roster store(s) already exist under another slug ` +
+          `— left as they are: ${aliases.join(", ")}`
+      );
+    }
+    if (rows.length === 0) return;
+  } catch (err) {
+    console.warn(`[db-setup] roster alias check skipped: ${err.message}`);
+  }
 
   const col = (key) => rows.map((v) => (v[key] == null ? null : String(v[key])));
 
@@ -163,6 +207,134 @@ async function ensureVendorRoster(client) {
       console.warn(
         `[db-setup] ${stranded.rowCount} vendor(s) still have no websiteUrl and are ` +
           `excluded from catalog discovery: ${stranded.rows.map((r) => r.slug).join(", ")}`
+      );
+    }
+  } catch {
+    /* diagnostic only */
+  }
+}
+
+// The roster can only repair a store it lists — 17 of them. The other blank
+// "websiteUrl" rows have to be repaired from what the database already knows:
+// their own listings. A vendor's VendorKit rows carry the product URLs an
+// earlier import stored, and those name the storefront (BaseKeys' 34 links are
+// all basekeys.jp, Mekibo's are mekibo.com). Reading the host back off them
+// turns an uncrawlable vendor into a crawlable one without anyone having to
+// look a URL up by hand, and — because the vendor then gets a real catalogue
+// pass — gives its URL-less listings a productUrl and finally a price.
+//
+// Runs AFTER ensureVendorRoster so the hand-written roster always wins, and
+// after healBlankVendorUrls so '' has already become NULL on the kit rows.
+// Deliberately conservative (see scripts/lib/vendor-urls.mjs): a marketplace
+// or shortener host is never adopted, a tie is never broken by guessing, and a
+// host that already belongs to another vendor is reported as a duplicate store
+// rather than crawled under two names.
+async function healVendorUrlsFromListings(client) {
+  let blanks;
+  try {
+    blanks = await client.query(
+      `SELECT v.id, v.slug,
+              coalesce(
+                array_agg(u.url) FILTER (WHERE u.url IS NOT NULL AND btrim(u.url) <> ''),
+                '{}'
+              ) AS urls
+         FROM public."Vendor" v
+         LEFT JOIN public."VendorKit" vk ON vk."vendorId" = v.id
+         LEFT JOIN LATERAL (VALUES (vk."productUrl"), (vk."gbUrl")) AS u(url) ON true
+        WHERE btrim(coalesce(v."websiteUrl", '')) = ''
+        GROUP BY v.id, v.slug
+        ORDER BY v.slug`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] vendor URL heal skipped: ${err.message}`);
+    return;
+  }
+  if (blanks.rowCount === 0) return;
+
+  // Hosts already spoken for. One store, one Vendor row.
+  const taken = new Set();
+  try {
+    const owned = await client.query(
+      `SELECT "websiteUrl" FROM public."Vendor"
+        WHERE btrim(coalesce("websiteUrl", '')) <> ''`
+    );
+    for (const r of owned.rows) {
+      const key = hostKey(hostOfUrl(r.websiteUrl));
+      if (key) taken.add(key);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] vendor URL heal skipped: ${err.message}`);
+    return;
+  }
+
+  // purgeBlockedVendors removes the vendor and its listings, but a stray link
+  // to a banned store can survive on someone else's row — never adopt one as a
+  // storefront and re-create by the back door what that pass just deleted.
+  const bannedHosts = new Set(["fancycustoms.com"]);
+  const { heal, duplicate, stranded } = planVendorUrlHeal(
+    blanks.rows.map((r) => ({
+      id: r.id,
+      slug: r.slug,
+      listingUrls: r.urls.filter((u) => !bannedHosts.has(hostKey(hostOfUrl(u)))),
+    })),
+    taken
+  );
+
+  if (heal.length > 0) {
+    try {
+      await client.query(
+        `UPDATE public."Vendor" AS v
+            SET "websiteUrl" = r.url
+           FROM unnest($1::text[], $2::text[]) AS r(id, url)
+          WHERE v.id = r.id
+            AND btrim(coalesce(v."websiteUrl", '')) = ''`,
+        [heal.map((v) => v.id), heal.map((v) => v.websiteUrl)]
+      );
+      console.log(
+        `[db-setup] Recovered ${heal.length} vendor storefront(s) from their own ` +
+          `listings: ${heal.map((v) => `${v.slug} → ${v.host}`).join(", ")}`
+      );
+    } catch (err) {
+      console.warn(`[db-setup] vendor URL heal skipped: ${err.message}`);
+      return;
+    }
+  }
+
+  // Not failures — findings. Both lists are stores the site currently shows
+  // nothing for, and neither can be fixed from data we already hold.
+  if (duplicate.length > 0) {
+    console.warn(
+      `[db-setup] ${duplicate.length} vendor(s) look like a duplicate row for a store ` +
+        `that already has one — merge or remove them: ` +
+        duplicate.map((v) => `${v.slug} (${v.host})`).join(", ")
+    );
+  }
+  if (stranded.length > 0) {
+    console.warn(
+      `[db-setup] ${stranded.length} vendor(s) still have no storefront and can never ` +
+        `publish a listing — add them to src/data/seed/vendors.json or remove them: ` +
+        stranded.map((v) => `${v.slug} (${v.reason})`).join(", ")
+    );
+  }
+
+  // The other shape of the same problem: a websiteUrl that isn't blank but
+  // isn't a shop either — two vendors registered as `https://goo.gl`, one as
+  // Instagram, one as a Google Doc. Discovery dutifully asks each of them for
+  // /products.json every rotation and will never get a catalogue back. Nothing
+  // here can be repaired automatically (their listings point at the same
+  // shortener), so name them.
+  try {
+    const all = await client.query(
+      `SELECT slug, "websiteUrl" FROM public."Vendor"
+        WHERE btrim(coalesce("websiteUrl", '')) <> '' ORDER BY slug`
+    );
+    const notShops = all.rows.filter((r) => !isStorefrontHost(hostOfUrl(r.websiteUrl)));
+    if (notShops.length > 0) {
+      console.warn(
+        `[db-setup] ${notShops.length} vendor(s) point at a link shortener / social / ` +
+          `marketplace page rather than a storefront, so discovery can never read a ` +
+          `catalogue for them: ` +
+          notShops.map((r) => `${r.slug} (${r.websiteUrl})`).join(", ")
       );
     }
   } catch {
@@ -574,6 +746,7 @@ async function main() {
         // it shipping zones in the SAME deploy, or the price table hides every
         // listing it publishes until the next nightly self-heal.
         await ensureVendorRoster(client);
+        await healVendorUrlsFromListings(client);
         await backfillShipping(client);
         await cleanupInterestChecks(client);
         await ensureVariantsColumn(client);
@@ -633,6 +806,7 @@ async function main() {
     await ensureCurrencies(client);
     await resetPollutedGalleries(client);
     await ensureVendorRoster(client);
+    await healVendorUrlsFromListings(client);
     await backfillShipping(client);
     await cleanupInterestChecks(client);
     await reclassifyMisflaggedKeycaps(client);

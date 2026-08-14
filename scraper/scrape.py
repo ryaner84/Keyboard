@@ -3048,6 +3048,28 @@ def run_images(
 _DISCOVERY_MAX_CATALOG_PAGES = 20
 _DISCOVERY_VENDOR_LIMIT = 8
 
+# The rotation's guest list. Two kinds of Vendor row are refused:
+#
+#   * Manufacturer/catalog sources (gmk.net, dcs.wiki) aren't stores — asking
+#     them for a products.json just burns a vendor slot on a 404.
+#   * Rows with a BLANK websiteUrl. `_origin_of("")` returns None, so the store
+#     is skipped a few lines below — but only AFTER taking one of the eight
+#     slots and having lastDiscoveredAt stamped, which also counts it into
+#     stats["vendors"]. It reads as "scanned" in the nightly summary while
+#     never having been fetched. 26 of the roster's vendors are in that state,
+#     so a fifth of every rotation was spent on stores that cannot produce a
+#     listing. discovery.ts got this filter in #131; the nightly, which is the
+#     pass that actually crawls, did not. db-setup repairs the URLs it can
+#     (roster, then each vendor's own listing hosts); the rest are logged.
+_DISCOVERY_VENDOR_SQL = """
+    SELECT id, "websiteUrl", currency
+      FROM "Vendor"
+     WHERE NOT (slug = ANY(%s))
+       AND btrim(coalesce("websiteUrl", '')) <> ''
+     ORDER BY "lastDiscoveredAt" ASC NULLS FIRST
+     LIMIT %s
+"""
+
 
 def normalize_set_name(name: str) -> str:
     """Mirror of normalizeSetName in discovery.ts — lowercase, drop bracketed
@@ -3314,16 +3336,20 @@ def run_discovery(
              "multi_listing": 0}
 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        # Manufacturer/catalog sources aren't stores — crawling dcs.wiki or
-        # gmk.net for a products.json just burns a vendor slot on a 404.
-        cur.execute("""
-            SELECT id, "websiteUrl", currency
-              FROM "Vendor"
-             WHERE NOT (slug = ANY(%s))
-             ORDER BY "lastDiscoveredAt" ASC NULLS FIRST
-             LIMIT %s
-        """, (list(MANUFACTURER_VENDOR_SLUGS), _DISCOVERY_VENDOR_LIMIT))
+        cur.execute(_DISCOVERY_VENDOR_SQL,
+                    (list(MANUFACTURER_VENDOR_SLUGS), _DISCOVERY_VENDOR_LIMIT))
         vendors = cur.fetchall()
+        # Vendors the query just refused. Naming them is the only signal that a
+        # store exists but is unreachable — otherwise it simply never appears.
+        cur.execute("""
+            SELECT slug FROM "Vendor"
+             WHERE btrim(coalesce("websiteUrl", '')) = ''
+             ORDER BY slug
+        """)
+        blank = [r["slug"] for r in cur.fetchall()]
+    if blank:
+        log(f"Discovery: {len(blank)} vendor(s) have no websiteUrl and cannot be "
+            f"crawled — {', '.join(blank)}")
     if not vendors:
         return stats
 
