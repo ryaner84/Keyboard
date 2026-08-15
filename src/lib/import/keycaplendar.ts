@@ -4,6 +4,10 @@ import { unwrapFields, type FirestoreDoc } from "./firestore";
 import { applyVendorOverride, BLOCKED_VENDOR_SLUGS } from "./vendor-overrides";
 import { buildShippingZones } from "./shipping";
 import { normalizeSetName } from "@/lib/set-name";
+// Storefront rules live with db-setup's blank-URL heal so the two agree on what
+// counts as a store — a second copy of the marketplace/forum list here would be
+// the "written twice" hazard the discovery pass already taught us about.
+import { nextVendorWebsiteUrl } from "../../../scripts/lib/vendor-urls.mjs";
 import type { GBStatus, Region } from "@/generated/prisma";
 
 const PROJECT_ID = process.env.KEYCAPLENDAR_PROJECT_ID || "keycaplendar";
@@ -63,15 +67,6 @@ function deriveStatus(ks: Keyset, now: Date): GBStatus {
   if (launch && end && launch <= now && now <= end) return "ACTIVE_GB";
   if (launch && now < launch) return "INTEREST_CHECK";
   return "INTEREST_CHECK";
-}
-
-function originOf(url?: string): string {
-  if (!url) return "";
-  try {
-    return new URL(url).origin;
-  } catch {
-    return "";
-  }
 }
 
 // KeycapLendar's `image` field points at the original upload under `keysets/`,
@@ -356,9 +351,15 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
       if (!vSlug || BLOCKED_VENDOR_SLUGS.has(vSlug)) continue;
       // Correct known-mislabelled vendors (e.g. SG stores tagged as "America").
       const { region, currency, country } = applyVendorOverride(vSlug, mapRegion(v.region));
-      const websiteUrl = originOf(v.storeLink) || v.storeLink || "";
 
       let vendor = vendorBySlug.get(vSlug);
+      // KeycapLendar's storeLink is per SET, so the same shop is described once
+      // per keyset and the entries disagree. Only a link that names a storefront
+      // may replace what the vendor already has: a blank one (13.6% of entries)
+      // or a marketplace/forum link would otherwise un-crawl a working store and
+      // stop it publishing anything at all. See nextVendorWebsiteUrl.
+      const websiteUrl = nextVendorWebsiteUrl(vendor?.websiteUrl ?? "", v.storeLink);
+
       if (!vendor) {
         const created = await prisma.vendor.create({
           data: { slug: vSlug, name: v.name, region, country, currency, websiteUrl },

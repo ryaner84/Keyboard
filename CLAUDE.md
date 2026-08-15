@@ -95,6 +95,20 @@ twice and published twice. A store with no usable `websiteUrl` publishes
 nothing at all; `db-setup` recovers what it can from the vendor's own listing
 URLs and names the rest in the build log.
 
+**`Vendor.websiteUrl` is per-store; every upstream catalog describes it
+per-SET.** KeycapLendar carries one `storeLink` on each of a shop's ~300 keyset
+entries and they disagree — 1228 of its 9031 vendor entries have none at all,
+and 142 stores have both linked and blank entries. Last-write-wins therefore
+erased a working storefront whenever a blank entry happened to import last: 12
+stores per run, CannonKeys and KBDfans among them, and it is a different 12 each
+time. Blanking a vendor un-crawls it (#131's discovery filter), so it gets no
+new VendorKit, the price pass skips its URL-less rows, and it publishes nothing
+until the next deploy heals it — which the next night's import undoes. Any
+import may only ever *replace a storefront with another storefront*:
+`nextVendorWebsiteUrl` in `scripts/lib/vendor-urls.mjs` is that rule, and it is
+imported by the TS import path rather than copied, so the marketplace/forum host
+list stays in one place.
+
 Stores rate-limit per IP and HTTP 429 counts as "blocked". Any pass that fetches
 many URLs must go through `HostThrottle`, and `HostThrottle.interleave()` should
 spread a queue across hosts first — a host-clustered queue costs roughly 14x more

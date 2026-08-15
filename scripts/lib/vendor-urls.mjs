@@ -24,9 +24,14 @@ const NON_STOREFRONT_HOSTS = [
   // Link shorteners and file/doc hosts (a GB spreadsheet is not a shop)
   "goo.gl", "bit.ly", "t.co", "tinyurl.com", "linktr.ee",
   "google.com", "docs.google.com", "drive.google.com", "forms.gle",
+  // Image and static-page hosts. KeycapLendar files Drop listings under
+  // imgur.com and matrixzj.github.io — an album and a docs site, neither of
+  // which is Drop's shop.
+  "imgur.com", "github.io", "github.com",
   // Social and community platforms
   "instagram.com", "facebook.com", "twitter.com", "x.com", "reddit.com",
-  "discord.com", "discord.gg", "youtube.com", "notion.so", "notion.site",
+  "discord.com", "discord.gg", "discord.link", "youtube.com",
+  "notion.so", "notion.site",
   // Keyboard forums — a thread is a listing, not a catalogue
   "geekhack.org", "deskthority.net",
   // Marketplaces: the seller has a shop page, but the site is not theirs and
@@ -34,6 +39,9 @@ const NON_STOREFRONT_HOSTS = [
   "taobao.com", "tmall.com", "aliexpress.com", "alibaba.com", "1688.com",
   "etsy.com", "ebay.com", "amazon.com", "shopee.com", "lazada.com",
   "mercari.com", "kickstarter.com", "indiegogo.com",
+  // Naver's marketplace, not the seller's own site: GEONWORKS and Swagkeys are
+  // both filed under it upstream while running geon.works and swagkeys.com.
+  "smartstore.naver.com",
 ];
 
 /** Host of a URL, lowercased, or "" when it isn't an http(s) URL. */
@@ -93,6 +101,44 @@ export function storefrontHostFromUrls(urls) {
 
   const [, winner] = ranked[0];
   return [...winner.spellings.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+/**
+ * The websiteUrl a vendor should be left with after a catalog import offers
+ * `incoming` as that vendor's store link.
+ *
+ * The upstream catalog (KeycapLendar) records a storeLink PER SET, not per
+ * store, so one shop is described 300 times over and the entries disagree:
+ * 1228 of its 9031 vendor entries carry no storeLink at all, and 142 stores
+ * have both linked and blank entries. A plain last-write-wins overwrite
+ * therefore erases a working storefront whenever a blank entry happens to be
+ * imported last — 79 of the 112 crawlable vendors are one nightly run away
+ * from that, iLumKB and CannonKeys included. A blanked vendor is excluded from
+ * discovery, so it gets no fresh VendorKit, the price pass skips its URL-less
+ * rows, and the store publishes nothing at all until the next deploy heals it.
+ *
+ * The same overwrite can DOWNGRADE rather than erase: iLumKB has entries
+ * pointing at item.taobao.com, NovelKeys at geekhack.org, Drop at imgur.com.
+ * Those are real places that listing lives, and they stay on the VendorKit —
+ * but as a storefront they are worse than nothing, because /products.json 404s
+ * there forever AND the row is no longer blank, so no heal ever revisits it.
+ *
+ * So an import may only ever REPLACE a storefront with another storefront.
+ * Blank, unparseable, and marketplace/forum/shortener links leave what's
+ * already there alone; on a brand-new vendor they leave it blank, which is the
+ * state planVendorUrlHeal above can still recover from.
+ */
+export function nextVendorWebsiteUrl(current, incoming) {
+  const currentUrl = String(current ?? "").trim();
+  let origin = "";
+  try {
+    const parsed = new URL(String(incoming ?? "").trim());
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") origin = parsed.origin;
+  } catch {
+    origin = "";
+  }
+  if (!origin || !isStorefrontHost(hostOfUrl(origin))) return currentUrl;
+  return origin;
 }
 
 /**

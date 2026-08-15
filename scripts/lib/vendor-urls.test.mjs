@@ -5,6 +5,7 @@ import {
   isStorefrontHost,
   storefrontHostFromUrls,
   planVendorUrlHeal,
+  nextVendorWebsiteUrl,
 } from "./vendor-urls.mjs";
 
 // Every fixture below is a real row from supabase-setup.sql — these are the
@@ -36,6 +37,16 @@ assert.equal(isStorefrontHost("goo.gl"), false);
 assert.equal(isStorefrontHost("docs.google.com"), false);
 assert.equal(isStorefrontHost("www.instagram.com"), false);
 assert.equal(isStorefrontHost("geekhack.org"), false);
+// Hosts KeycapLendar files real stores under that are not shops: an Imgur
+// album and a GitHub Pages docs site (both Drop), Naver's marketplace
+// (GEONWORKS, Swagkeys), a Discord invite (Mechaland).
+assert.equal(isStorefrontHost("imgur.com"), false);
+assert.equal(isStorefrontHost("matrixzj.github.io"), false);
+assert.equal(isStorefrontHost("smartstore.naver.com"), false);
+assert.equal(isStorefrontHost("discord.link"), false);
+// The block is on Naver's storefront subdomain only — a shop that merely
+// happens to sit under some other naver.com host is not a marketplace.
+assert.equal(isStorefrontHost("shop.naver.com"), true);
 // A bare token is not a host.
 assert.equal(isStorefrontHost("localhost"), false);
 
@@ -134,5 +145,66 @@ assert.deepEqual(twins.duplicate.map((v) => v.slug), ["store-b"]);
 // blank rows only. Guard the empty case anyway.
 assert.deepEqual(planVendorUrlHeal([]), { heal: [], duplicate: [], stranded: [] });
 assert.deepEqual(planVendorUrlHeal(undefined), { heal: [], duplicate: [], stranded: [] });
+
+// --- nextVendorWebsiteUrl --------------------------------------------------
+// The nightly KeycapLendar import offers a storeLink per SET, so one shop is
+// described once per keyset. These are the shapes those entries actually take.
+
+// A real storefront link is adopted, reduced to its origin — the store link
+// points at one product page, the storefront is the site.
+assert.equal(
+  nextVendorWebsiteUrl("", "https://ilumkb.com/products/gmk-bento"),
+  "https://ilumkb.com"
+);
+// …and it replaces a previous storefront: a store that genuinely moved should
+// follow. (KeycapLendar has kbdfans under kbdfans.com AND kbd.fans.)
+assert.equal(
+  nextVendorWebsiteUrl("https://kbd.fans", "https://kbdfans.com/products/x"),
+  "https://kbdfans.com"
+);
+
+// THE REGRESSION: 1228 of 9031 upstream vendor entries carry no storeLink, and
+// 142 stores have both linked and blank entries. Under the old last-write-wins
+// the blank one erased the storefront, discovery's `websiteUrl <> ''` filter
+// then dropped the store, and it published nothing until the next deploy.
+for (const nothing of ["", "   ", null, undefined]) {
+  assert.equal(
+    nextVendorWebsiteUrl("https://ilumkb.com", nothing),
+    "https://ilumkb.com",
+    JSON.stringify(nothing)
+  );
+}
+
+// The same overwrite could DOWNGRADE instead of erase. iLumKB has entries on
+// item.taobao.com, NovelKeys on geekhack.org, Drop on imgur.com. Those are
+// where that listing lives — they stay on the VendorKit — but as a storefront
+// they are worse than blank: /products.json 404s there forever, and a non-blank
+// row is never revisited by planVendorUrlHeal.
+assert.equal(
+  nextVendorWebsiteUrl("https://ilumkb.com", "https://item.taobao.com/item.htm?id=1"),
+  "https://ilumkb.com"
+);
+assert.equal(
+  nextVendorWebsiteUrl("https://novelkeys.xyz", "https://geekhack.org/index.php?topic=1"),
+  "https://novelkeys.xyz"
+);
+assert.equal(
+  nextVendorWebsiteUrl("https://drop.com", "https://imgur.com/a/abc"),
+  "https://drop.com"
+);
+
+// On a BRAND-NEW vendor those same links leave the row blank rather than
+// storing an uncrawlable one. Blank is the strictly better state: it is the
+// only one planVendorUrlHeal and ensureVendorRoster can still recover from,
+// and #131's discovery filter keeps it from eating a rotation slot meanwhile.
+assert.equal(nextVendorWebsiteUrl("", "https://item.taobao.com/item.htm?id=1"), "");
+assert.equal(nextVendorWebsiteUrl("", "https://goo.gl/abc"), "");
+assert.equal(nextVendorWebsiteUrl("", ""), "");
+
+// Junk that `new URL()` rejects, and non-http(s) schemes, are not links either.
+// The old code fell back to storing the raw string as the websiteUrl.
+assert.equal(nextVendorWebsiteUrl("https://mekibo.com", "TBA"), "https://mekibo.com");
+assert.equal(nextVendorWebsiteUrl("https://mekibo.com", "mekibo.com"), "https://mekibo.com");
+assert.equal(nextVendorWebsiteUrl("", "mailto:sales@mekibo.com"), "");
 
 console.log("vendor-url heal checks passed");
