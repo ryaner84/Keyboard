@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { verifyAdminToken } from "@/lib/auth";
+import { PURCHASABLE_VENDOR_KIT_WHERE } from "@/lib/import/manufacturer-vendors";
 import type { Region } from "@/generated/prisma";
 
 export async function GET(
@@ -17,14 +18,12 @@ export async function GET(
       kits: {
         include: {
           vendorKits: {
-            // GMK is the manufacturer, not a vendor — its rows only carry the
-            // gmk.net catalog/image URL and are never shown as a place to buy.
-            // The OR keeps NULL-productUrl rows (manual prices) visible: a bare
-            // NOT-contains would drop them under SQL three-valued logic.
-            where: {
-              vendor: { slug: { not: "gmk" } },
-              OR: [{ productUrl: null }, { NOT: { productUrl: { contains: "gmk.net" } } }],
-            },
+            // GMK and dcs.wiki are catalog sources, not vendors — their rows
+            // only carry a catalog/image URL and are never shown as a place to
+            // buy. Shares the set page's filter so the two surfaces can't
+            // disagree about what is purchasable: this route used to drop
+            // gmk-direct's Warehouse Finds listings, which the page shows.
+            where: PURCHASABLE_VENDOR_KIT_WHERE,
             include: {
               vendor: {
                 include: {
