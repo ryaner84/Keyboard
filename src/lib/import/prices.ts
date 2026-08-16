@@ -6,6 +6,10 @@ import {
   NONBASE_SUBKIT_RE,
   PRODUCT_ACCESSORY_RE,
 } from "@/lib/kit-variants";
+import {
+  NOT_MANUFACTURER_LISTING,
+  isManufacturerListingUrl,
+} from "./manufacturer-vendors";
 
 const BROWSER_HEADERS = {
   "User-Agent":
@@ -812,9 +816,12 @@ async function fetchJsonLdPrice(
 // base currency rather than whatever the runner's IP geo-detects.
 export async function fetchVendorPrice(productUrl: string, vendorCurrency?: string): Promise<FetchPriceOutcome> {
   if (!productUrl) return null;
-  // GMK is the manufacturer, not a vendor — gmk.net links are catalog/image
-  // references and must never produce a price.
-  if (/gmk\.net/i.test(productUrl)) return null;
+  // GMK and dcs.wiki are catalog sources, not vendors — their links are
+  // catalog/image references and must never produce a price. A JSON-LD reader
+  // pointed at an archive page will happily return a number otherwise, and a
+  // number is all it takes for the wiki to be published as a set's cheapest
+  // vendor.
+  if (isManufacturerListingUrl(productUrl)) return null;
   // A priced result OR the NO_BASE_KIT sentinel (both truthy) is a definitive
   // answer from the Shopify path — only a null (transient) falls through to the
   // JSON-LD reader.
@@ -919,10 +926,12 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
       // they pass a bare IS NOT NULL filter and once sent a whole nightly
       // price pass to navigate to "".
       productUrl: { not: null, notIn: [""] },
-      // GMK is the manufacturer, not a vendor — its rows only carry the
-      // gmk.net URL for the image pass and must never enter the price queue.
-      vendor: { slug: { not: "gmk" } },
-      NOT: { productUrl: { contains: "gmk.net" } },
+      // Manufacturer/catalog rows (gmk → gmk.net, dcs-wiki → dcs.wiki) only
+      // carry a catalog URL for the catalog and image passes and must never
+      // enter the price queue: they can never be priced, yet with no price
+      // timestamp they sort AHEAD of every real listing under the NULLS FIRST
+      // ordering below, and this run is time-boxed to ~35s of a 60s function.
+      ...NOT_MANUFACTURER_LISTING,
       // Buyers decide on the base kit first — only base kit prices are shown
       // on the site, so scraping is limited to BASE kits only.
       kit: { type: "BASE" },

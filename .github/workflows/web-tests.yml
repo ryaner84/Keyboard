@@ -74,3 +74,9 @@ jobs:
       - name: vendor-urls
         if: always()
         run: npm run test:vendor-urls
+
+      # Reads scrape.py as well as the TS sources: the manufacturer registry is
+      # written in both languages and a divergence is silent at runtime.
+      - name: manufacturer-vendors
+        if: always()
+        run: npm run test:manufacturer-vendors

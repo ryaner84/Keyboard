@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Eight suites, all of which should pass before pushing:
+Nine suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -39,6 +39,7 @@ npm run test:keycap-collection
 npm run test:collection-sales
 npm run test:home-cache
 npm run test:vendor-urls
+npm run test:manufacturer-vendors
 npx tsc --noEmit
 ```
 
@@ -77,6 +78,13 @@ catalog URL for the catalog and image passes. They are never priced and never
 crawled for listings — register any new one in `MANUFACTURER_VENDOR_SLUGS` and
 `MANUFACTURER_URL_PATTERNS`, or its rows will land in the price queue and, having
 no price timestamp, sort ahead of every real listing.
+
+**That registry is written twice too**, and for a year only the Python half
+knew about dcs.wiki: `src/lib/import/manufacturer-vendors.ts` is the TS copy,
+and `test:manufacturer-vendors` fails if the two lists disagree or if a call
+site hand-writes `slug: { not: "gmk" }` again. A bare "gmk" filter reads as
+correct and silently lets the other source through — into the price queue, into
+the discovery rotation, and onto the set page as a place to buy.
 
 The `Vendor` table has no `createdAt`/`updatedAt` columns. Naming them in an
 insert has broken a nightly run before.

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SetImageCarousel } from "@/components/set-detail/SetImageCarousel";
 import { prisma } from "@/lib/prisma";
+import { PURCHASABLE_VENDOR_KIT_WHERE } from "@/lib/import/manufacturer-vendors";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { COUNTRY_BY_CODE, DEFAULT_COUNTRY } from "@/data/countries";
 import { formatDateRange, normalizeImageUrl } from "@/lib/utils";
@@ -98,20 +99,11 @@ export default async function SetDetailPage({ params, searchParams }: PageProps)
         where: { type: "BASE" },
         include: {
           vendorKits: {
-            // GMK is the manufacturer, not a vendor — its rows only carry the
-            // gmk.net catalog/image URL and are never shown as a place to buy.
-            // EXCEPT gmk-direct: GMK's own Warehouse Finds sale, a real
-            // purchasable vendor whose listings legitimately live on gmk.net.
-            // The OR keeps NULL-productUrl rows (manual prices) visible: a bare
-            // NOT-contains would drop them under SQL three-valued logic.
-            where: {
-              vendor: { slug: { not: "gmk" } },
-              OR: [
-                { vendor: { slug: "gmk-direct" } },
-                { productUrl: null },
-                { NOT: { productUrl: { contains: "gmk.net" } } },
-              ],
-            },
+            // GMK and dcs.wiki are catalog sources, not vendors — their rows
+            // only carry a catalog/image URL and are never shown as a place to
+            // buy. gmk-direct (GMK's own Warehouse Finds sale) is the one real
+            // storefront on gmk.net and stays. See manufacturer-vendors.ts.
+            where: PURCHASABLE_VENDOR_KIT_WHERE,
             include: {
               vendor: {
                 include: {

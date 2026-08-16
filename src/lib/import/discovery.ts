@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { isBlockedVendorSet } from "./vendor-overrides";
+import { NOT_MANUFACTURER_VENDOR } from "./manufacturer-vendors";
 import { NONBASE_SUBKIT_RE, PRODUCT_ACCESSORY_RE } from "@/lib/kit-variants";
 
 // A catalog product whose RAW title names a subkit or accessory must never be
@@ -297,8 +298,16 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
   // '' here, so roughly a fifth of every rotation was spent on stores that
   // cannot produce a listing. Exclude them so the budget goes to crawlable
   // stores; db-setup's ensureVendorRoster refills the ones the roster knows.
+  //
+  // Manufacturer/catalog sources are refused for the same reason: gmk.net and
+  // dcs.wiki aren't stores, so a slot spent on one is a slot a real store
+  // doesn't get. dcs.wiki is the worse of the two — it serves no
+  // products.json, so it falls through to the generic HTML crawl, where every
+  // "DCS …" anchor on a wiki index reads as a product and is written back as a
+  // VendorKit that can never be priced. Mirrors _DISCOVERY_VENDOR_SQL in
+  // scrape.py, which has refused both since dcs.wiki was added.
   const vendors = await prisma.vendor.findMany({
-    where: { websiteUrl: { not: "" } },
+    where: { websiteUrl: { not: "" }, ...NOT_MANUFACTURER_VENDOR },
     orderBy: [{ lastDiscoveredAt: { sort: "asc", nulls: "first" } }],
     take: vendorLimit,
     select: { id: true, slug: true, websiteUrl: true },
