@@ -177,6 +177,81 @@ export function planVendorUrlHeal(vendors, takenHostKeys = new Set()) {
   return { heal, duplicate, stranded };
 }
 
+/**
+ * Reconcile the hand-written roster (src/data/seed/vendors.json) with the
+ * Vendor rows that exist.
+ *
+ * The roster is the LAST rung of the storefront ladder. Above it,
+ * `nextVendorWebsiteUrl` refuses to adopt a marketplace link and
+ * `planVendorUrlHeal` refuses to derive a storefront from listings that are
+ * marketplace-only — both correct, and both leave the same residue: a store
+ * whose upstream entries only ever name a marketplace keeps a BLANK
+ * websiteUrl forever. GEONWORKS (geon.works) and Swagkeys (swagkeys.com) are
+ * filed under smartstore.naver.com by KeycapLendar and are exactly that case.
+ * Blank means uncrawlable (both discovery halves exclude it), invisible to
+ * run_outlets (which resolves a collection's vendor by HOST), and unpriceable
+ * (its listings point at the marketplace) — so the store publishes nothing at
+ * all. Only a hand-written entry can break the cycle.
+ *
+ * Matching by slug alone is not enough to do that, because the roster's slugs
+ * are not always the database's: `cannonkeys`/`cannon-keys`,
+ * `thekeyco`/`the-key-company`, … A store that already HAS a websiteUrl is
+ * recognised by host (one store, one Vendor row), but the rows this function
+ * exists to repair have no host to match on — so a blank row spelled
+ * differently would be missed and the INSERT would create a SECOND row for
+ * the same shop, leaving the original stranded. `aliases` names those
+ * spellings explicitly rather than guessing at them.
+ *
+ * `existing` is [{ slug, websiteUrl }]. Returns, all pure:
+ *   insert    — roster rows with no row under any of their slugs and no other
+ *               vendor already owning their host
+ *   heal      — { slug, websiteUrl } for a blank row this roster entry names
+ *   aliased   — roster rows a differently-slugged vendor already covers by host
+ *   duplicate — extra rows matching the same roster entry: two Vendor rows for
+ *               one shop, which is a merge nobody can do automatically
+ */
+export function planRosterSync(roster, existing) {
+  const urlBySlug = new Map();
+  for (const row of existing ?? []) {
+    if (row?.slug) urlBySlug.set(row.slug, String(row.websiteUrl ?? "").trim());
+  }
+  // Hosts already spoken for by a vendor that has a storefront.
+  const ownerByHost = new Map();
+  for (const row of existing ?? []) {
+    const key = hostKey(hostOfUrl(row?.websiteUrl));
+    if (key && !ownerByHost.has(key)) ownerByHost.set(key, row.slug);
+  }
+
+  const insert = [];
+  const heal = [];
+  const aliased = [];
+  const duplicate = [];
+  for (const entry of roster ?? []) {
+    const websiteUrl = String(entry?.websiteUrl ?? "").trim();
+    if (!entry?.slug || !websiteUrl) continue;
+
+    // Declared order is the priority order: the canonical slug wins when both
+    // spellings exist, so the heal never lands on the row we'd rather retire.
+    const present = [entry.slug, ...(entry.aliases ?? [])].filter((s) => urlBySlug.has(s));
+    if (present.length > 0) {
+      const target = present[0];
+      if (urlBySlug.get(target) === "") heal.push({ slug: target, websiteUrl });
+      for (const extra of present.slice(1)) duplicate.push({ slug: extra, keeps: target });
+      continue;
+    }
+
+    const key = hostKey(hostOfUrl(websiteUrl));
+    const owner = ownerByHost.get(key);
+    if (owner) {
+      aliased.push({ slug: entry.slug, owner });
+      continue;
+    }
+    insert.push(entry);
+    if (key) ownerByHost.set(key, entry.slug);
+  }
+  return { insert, heal, aliased, duplicate };
+}
+
 /** Why no storefront could be derived — reported so the log is actionable. */
 function reasonForNoHost(urls) {
   const hosts = (urls ?? []).map(hostOfUrl).filter(Boolean);

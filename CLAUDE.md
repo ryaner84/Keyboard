@@ -117,6 +117,30 @@ import may only ever *replace a storefront with another storefront*:
 imported by the TS import path rather than copied, so the marketplace/forum host
 list stays in one place.
 
+**A store whose upstream links are marketplace-only can only be repaired by
+hand.** `nextVendorWebsiteUrl` won't adopt a marketplace link and
+`planVendorUrlHeal` won't derive a storefront from marketplace-only listings —
+both correct, and both leave the same residue: a permanently blank
+`websiteUrl`. Blank un-crawls the store (both discovery halves), hides it from
+`find_vendor_for_url` so `run_outlets` skips its collection nightly, and leaves
+its listings pointing somewhere no price can be scraped — and unpriced listings
+are hidden on released sets, so the store publishes *nothing at all*.
+`src/data/seed/vendors.json` is the only rung that breaks that cycle; GEONWORKS
+and Swagkeys (both filed under smartstore.naver.com upstream) sat outside it for
+a year while db-setup named them "stranded" every deploy.
+
+Roster entries carry `aliases` because the rows the roster exists to repair are
+the ones host matching cannot see: a blank vendor has no host, so a blank
+`cannon-keys` row reads as a store nobody owns and the roster's `cannonkeys`
+entry used to insert a *second* row beside it. Add the DB's spelling to
+`aliases` rather than adding a second entry.
+
+**`OUTLET_COLLECTIONS` and the vendor registry are two halves of one thing.**
+`run_outlets` resolves each collection's vendor by HOST, so a host no Vendor row
+carries logs "no tracked vendor" and does nothing, forever — `test:vendor-urls`
+fails if any outlet host is registered by neither the roster nor
+`SEEDED_VENDORS`.
+
 Stores rate-limit per IP and HTTP 429 counts as "blocked". Any pass that fetches
 many URLs must go through `HostThrottle`, and `HostThrottle.interleave()` should
 spread a queue across hosts first — a host-clustered queue costs roughly 14x more
