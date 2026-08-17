@@ -16,6 +16,7 @@ import {
   hostKey,
   hostOfUrl,
   isStorefrontHost,
+  planRosterSync,
   planVendorUrlHeal,
 } from "./lib/vendor-urls.mjs";
 
@@ -109,7 +110,7 @@ async function ensureVendorRoster(client) {
 
   // Never re-create a vendor purgeBlockedVendors is about to delete.
   const blocked = new Set(["fancycustoms", "fancy-customs"]);
-  let rows = (Array.isArray(roster) ? roster : []).filter(
+  const rows = (Array.isArray(roster) ? roster : []).filter(
     (v) => v && v.slug && !blocked.has(v.slug) && String(v.websiteUrl || "").trim() !== ""
   );
   if (rows.length === 0) return;
@@ -123,72 +124,86 @@ async function ensureVendorRoster(client) {
   // then crawls twice and publishes twice — two rows for the same shop in the
   // set's price table, competing on price. A store is identified by its site,
   // so match on the host too and leave the existing row alone.
+  //
+  // Host matching alone cannot see the rows this pass exists to repair: a
+  // BLANK vendor has no host, so a blank row spelled `cannon-keys` reads as a
+  // store nobody owns and gets a second row while staying stranded itself.
+  // planRosterSync also matches the `aliases` each roster entry declares, so
+  // the heal reaches the existing row instead of duplicating it.
+  let plan = null;
   try {
     const existing = await client.query(
       `SELECT slug, "websiteUrl" FROM public."Vendor"`
     );
-    const slugs = new Set(existing.rows.map((r) => r.slug));
-    const byHost = new Map();
-    for (const r of existing.rows) {
-      const key = hostKey(hostOfUrl(r.websiteUrl));
-      if (key && !byHost.has(key)) byHost.set(key, r.slug);
-    }
-    const aliases = [];
-    rows = rows.filter((v) => {
-      if (slugs.has(v.slug)) return true; // same slug: the INSERT no-ops, the heal still runs
-      const owner = byHost.get(hostKey(hostOfUrl(v.websiteUrl)));
-      if (!owner) return true;
-      aliases.push(`${v.slug} → ${owner}`);
-      return false;
-    });
-    if (aliases.length > 0) {
+    plan = planRosterSync(rows, existing.rows);
+    if (plan.aliased.length > 0) {
       console.log(
-        `[db-setup] ${aliases.length} roster store(s) already exist under another slug ` +
-          `— left as they are: ${aliases.join(", ")}`
+        `[db-setup] ${plan.aliased.length} roster store(s) already exist under another slug ` +
+          `— left as they are: ${plan.aliased.map((v) => `${v.slug} → ${v.owner}`).join(", ")}`
       );
     }
-    if (rows.length === 0) return;
+    if (plan.duplicate.length > 0) {
+      console.warn(
+        `[db-setup] ${plan.duplicate.length} vendor row(s) duplicate a roster store that ` +
+          `already has one — merge or remove them: ` +
+          plan.duplicate.map((v) => `${v.slug} (kept ${v.keeps})`).join(", ")
+      );
+    }
   } catch (err) {
+    // Reconciliation is an optimisation, not a precondition: fall back to the
+    // slug-only behaviour rather than skipping the roster entirely.
     console.warn(`[db-setup] roster alias check skipped: ${err.message}`);
+    plan = { insert: rows, heal: rows.map((v) => ({ slug: v.slug, websiteUrl: v.websiteUrl })) };
   }
 
-  const col = (key) => rows.map((v) => (v[key] == null ? null : String(v[key])));
+  const col = (list, pick) => list.map((v) => (pick(v) == null ? null : String(pick(v))));
 
   try {
-    const inserted = await client.query(
-      `INSERT INTO public."Vendor"
-         (id, name, slug, region, country, currency, "websiteUrl", "logoUrl")
-       SELECT gen_random_uuid()::text, r.name, r.slug, r.region::public."Region",
-              r.country, r.currency, r.website, r.logo
-         FROM unnest($1::text[], $2::text[], $3::text[], $4::text[],
-                     $5::text[], $6::text[], $7::text[])
-           AS r(name, slug, region, country, currency, website, logo)
-       ON CONFLICT (slug) DO NOTHING
-       RETURNING slug`,
-      [col("name"), col("slug"), col("region"), col("country"), col("currency"),
-       col("websiteUrl"), col("logoUrl")]
-    );
-    if (inserted.rowCount > 0) {
-      console.log(
-        `[db-setup] Added ${inserted.rowCount} roster vendor(s) to the crawl: ` +
-          inserted.rows.map((r) => r.slug).join(", ")
+    if (plan.insert.length > 0) {
+      const inserted = await client.query(
+        `INSERT INTO public."Vendor"
+           (id, name, slug, region, country, currency, "websiteUrl", "logoUrl")
+         SELECT gen_random_uuid()::text, r.name, r.slug, r.region::public."Region",
+                r.country, r.currency, r.website, r.logo
+           FROM unnest($1::text[], $2::text[], $3::text[], $4::text[],
+                       $5::text[], $6::text[], $7::text[])
+             AS r(name, slug, region, country, currency, website, logo)
+         ON CONFLICT (slug) DO NOTHING
+         RETURNING slug`,
+        [
+          col(plan.insert, (v) => v.name),
+          col(plan.insert, (v) => v.slug),
+          col(plan.insert, (v) => v.region),
+          col(plan.insert, (v) => v.country),
+          col(plan.insert, (v) => v.currency),
+          col(plan.insert, (v) => v.websiteUrl),
+          col(plan.insert, (v) => v.logoUrl),
+        ]
       );
+      if (inserted.rowCount > 0) {
+        console.log(
+          `[db-setup] Added ${inserted.rowCount} roster vendor(s) to the crawl: ` +
+            inserted.rows.map((r) => r.slug).join(", ")
+        );
+      }
     }
 
-    const healed = await client.query(
-      `UPDATE public."Vendor" AS v
-          SET "websiteUrl" = r.website
-         FROM unnest($1::text[], $2::text[]) AS r(slug, website)
-        WHERE v.slug = r.slug
-          AND btrim(coalesce(v."websiteUrl", '')) = ''
-       RETURNING v.slug`,
-      [col("slug"), col("websiteUrl")]
-    );
-    if (healed.rowCount > 0) {
-      console.log(
-        `[db-setup] Restored ${healed.rowCount} blank vendor websiteUrl(s): ` +
-          healed.rows.map((r) => r.slug).join(", ")
+    if (plan.heal.length > 0) {
+      const healed = await client.query(
+        `UPDATE public."Vendor" AS v
+            SET "websiteUrl" = r.website
+           FROM unnest($1::text[], $2::text[]) AS r(slug, website)
+          WHERE v.slug = r.slug
+            AND btrim(coalesce(v."websiteUrl", '')) = ''
+         RETURNING v.slug`,
+        [col(plan.heal, (v) => v.slug), col(plan.heal, (v) => v.websiteUrl)]
       );
+      if (healed.rowCount > 0) {
+        console.log(
+          `[db-setup] Restored ${healed.rowCount} blank vendor websiteUrl(s): ` +
+            healed.rows.map((r) => r.slug).join(", ")
+        );
+      }
     }
   } catch (err) {
     console.warn(`[db-setup] vendor roster sync skipped: ${err.message}`);

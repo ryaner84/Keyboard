@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import {
   hostOfUrl,
   hostKey,
   isStorefrontHost,
   storefrontHostFromUrls,
+  planRosterSync,
   planVendorUrlHeal,
   nextVendorWebsiteUrl,
 } from "./vendor-urls.mjs";
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 // Every fixture below is a real row from supabase-setup.sql — these are the
 // 28 vendors that shipped with a blank websiteUrl, and the URLs are the ones
@@ -206,5 +212,141 @@ assert.equal(nextVendorWebsiteUrl("", ""), "");
 assert.equal(nextVendorWebsiteUrl("https://mekibo.com", "TBA"), "https://mekibo.com");
 assert.equal(nextVendorWebsiteUrl("https://mekibo.com", "mekibo.com"), "https://mekibo.com");
 assert.equal(nextVendorWebsiteUrl("", "mailto:sales@mekibo.com"), "");
+
+// --- planRosterSync --------------------------------------------------------
+// The roster is the only rung that can give a storefront to a store whose
+// upstream entries name nothing but a marketplace. These are the shapes the
+// database actually presents it with.
+const sync = planRosterSync(
+  [
+    // Already correct under its own slug — nothing to do.
+    { slug: "ilumkb", websiteUrl: "https://ilumkb.com" },
+    // Blank under its own slug: the case the roster exists for.
+    { slug: "geonworks", websiteUrl: "https://geon.works" },
+    // Blank under an ALIAS spelling. Slug matching misses it and host matching
+    // cannot see it (a blank row has no host), so the old code inserted a
+    // second row and left the original stranded and unpublishable.
+    { slug: "cannonkeys", websiteUrl: "https://cannonkeys.com", aliases: ["cannon-keys"] },
+    // Present under an alias that ALREADY has the right storefront — no insert,
+    // no heal, no duplicate row.
+    { slug: "thekeyco", websiteUrl: "https://thekey.company", aliases: ["the-key-company"] },
+    // A different slug already owns this host: one store, one Vendor row.
+    { slug: "mech-land", websiteUrl: "https://mech.land" },
+    // Genuinely new.
+    { slug: "saber-keebs", websiteUrl: "https://saberkeebs.com" },
+  ],
+  [
+    { slug: "ilumkb", websiteUrl: "https://ilumkb.com" },
+    { slug: "geonworks", websiteUrl: "" },
+    { slug: "cannon-keys", websiteUrl: "" },
+    { slug: "the-key-company", websiteUrl: "https://thekey.company" },
+    { slug: "mechland", websiteUrl: "https://mech.land" },
+  ]
+);
+assert.deepEqual(sync.insert.map((v) => v.slug), ["saber-keebs"]);
+assert.deepEqual(
+  sync.heal.map((v) => [v.slug, v.websiteUrl]),
+  [
+    ["geonworks", "https://geon.works"],
+    ["cannon-keys", "https://cannonkeys.com"],
+  ]
+);
+assert.deepEqual(sync.aliased.map((v) => [v.slug, v.owner]), [["mech-land", "mechland"]]);
+assert.deepEqual(sync.duplicate, []);
+
+// Both spellings exist as rows: that is two Vendor rows for one shop, which
+// only a human can merge. Heal the canonical one, name the other.
+const twinRows = planRosterSync(
+  [{ slug: "cannonkeys", websiteUrl: "https://cannonkeys.com", aliases: ["cannon-keys"] }],
+  [
+    { slug: "cannonkeys", websiteUrl: "" },
+    { slug: "cannon-keys", websiteUrl: "" },
+  ]
+);
+assert.deepEqual(twinRows.heal.map((v) => v.slug), ["cannonkeys"]);
+assert.deepEqual(twinRows.duplicate, [{ slug: "cannon-keys", keeps: "cannonkeys" }]);
+assert.deepEqual(twinRows.insert, []);
+
+// Two roster entries pointing at one host: the first claims it, so the second
+// cannot create a second row for the same store on a fresh database.
+const sameHost = planRosterSync(
+  [
+    { slug: "store-a", websiteUrl: "https://store.example" },
+    { slug: "store-b", websiteUrl: "https://www.store.example" },
+  ],
+  []
+);
+assert.deepEqual(sameHost.insert.map((v) => v.slug), ["store-a"]);
+assert.deepEqual(sameHost.aliased.map((v) => [v.slug, v.owner]), [["store-b", "store-a"]]);
+
+// Entries with nothing to act on are dropped, not inserted blank.
+assert.deepEqual(
+  planRosterSync([{ slug: "x", websiteUrl: "  " }, { slug: "", websiteUrl: "https://y.com" }], []),
+  { insert: [], heal: [], aliased: [], duplicate: [] }
+);
+assert.deepEqual(planRosterSync(undefined, undefined), {
+  insert: [],
+  heal: [],
+  aliased: [],
+  duplicate: [],
+});
+
+// --- the roster file itself ------------------------------------------------
+const roster = JSON.parse(
+  readFileSync(join(REPO_ROOT, "src", "data", "seed", "vendors.json"), "utf8")
+);
+const rosterHosts = new Map();
+for (const entry of roster) {
+  assert.ok(entry.slug, `roster entry without a slug: ${JSON.stringify(entry)}`);
+  const host = hostKey(hostOfUrl(entry.websiteUrl));
+  assert.ok(host, `roster entry ${entry.slug} has no parseable websiteUrl`);
+  // A roster entry that isn't a storefront would point discovery at a
+  // marketplace — the exact thing nextVendorWebsiteUrl refuses to store.
+  assert.ok(isStorefrontHost(host), `roster entry ${entry.slug} is not a storefront: ${host}`);
+  // One store, one entry: two entries on one host race to own it.
+  assert.equal(rosterHosts.has(host), false, `roster lists ${host} twice`);
+  rosterHosts.set(host, entry.slug);
+}
+// A slug may only appear once, as itself or as somebody's alias — otherwise
+// planRosterSync's "first candidate wins" would depend on file order.
+const claimedSlugs = new Set();
+for (const entry of roster) {
+  for (const slug of [entry.slug, ...(entry.aliases ?? [])]) {
+    assert.equal(claimedSlugs.has(slug), false, `roster claims the slug ${slug} twice`);
+    claimedSlugs.add(slug);
+  }
+}
+
+// --- OUTLET_COLLECTIONS must resolve to a vendor ---------------------------
+// run_outlets resolves a collection's vendor from the URL's HOST against
+// Vendor.websiteUrl (find_vendor_for_url) — a host no Vendor row carries logs
+// "no tracked vendor" and does nothing, every night, forever. That is how
+// geon.works sat in the list while GEONWORKS itself had a blank websiteUrl
+// (KeycapLendar files it under smartstore.naver.com, which every automatic
+// repair correctly refuses to adopt) and published no listing at all.
+//
+// So the collection list and the vendor registry are two halves of one thing:
+// every outlet host must be registered by the roster or by SEEDED_VENDORS in
+// scrape.py, which exists for exactly the stores the roster doesn't carry.
+const scrapePy = readFileSync(join(REPO_ROOT, "scraper", "scrape.py"), "utf8");
+const pyList = (name) => {
+  const start = scrapePy.indexOf(`${name} = [`);
+  assert.notEqual(start, -1, `${name} not found in scrape.py`);
+  const end = scrapePy.indexOf("\n]", start);
+  assert.notEqual(end, -1, `${name} is not terminated in scrape.py`);
+  return [...scrapePy.slice(start, end).matchAll(/"(https?:\/\/[^"]+)"/g)].map((m) => m[1]);
+};
+const seededHosts = new Set(pyList("SEEDED_VENDORS").map((u) => hostKey(hostOfUrl(u))));
+const registered = new Set([...rosterHosts.keys(), ...seededHosts]);
+const unresolvable = [
+  ...new Set(pyList("OUTLET_COLLECTIONS").map((u) => hostKey(hostOfUrl(u)))),
+].filter((host) => !registered.has(host));
+assert.deepEqual(
+  unresolvable,
+  [],
+  `OUTLET_COLLECTIONS names host(s) no Vendor row is guaranteed to carry, so ` +
+    `run_outlets skips them silently: ${unresolvable.join(", ")}. Add them to ` +
+    `src/data/seed/vendors.json or to SEEDED_VENDORS in scraper/scrape.py.`
+);
 
 console.log("vendor-url heal checks passed");
