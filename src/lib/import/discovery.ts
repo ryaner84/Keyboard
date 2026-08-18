@@ -1,6 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { isBlockedVendorSet } from "./vendor-overrides";
 import { NOT_MANUFACTURER_VENDOR } from "./manufacturer-vendors";
+// One host list, one definition of "is this a shop" — shared with db-setup's
+// storefront repairs rather than re-listed here.
+import { needsStorefront } from "../../../scripts/lib/vendor-urls.mjs";
 import { NONBASE_SUBKIT_RE, PRODUCT_ACCESSORY_RE } from "@/lib/kit-variants";
 
 // A catalog product whose RAW title names a subkit or accessory must never be
@@ -35,6 +38,12 @@ const FETCH_TIMEOUT_MS = 8000;
 // Shopify caps products.json at 250 per page; 4 pages = 1000 products covers
 // every keyboard store's full catalog comfortably.
 const MAX_CATALOG_PAGES = 4;
+
+// How many rows to read for each rotation slot before the storefront test
+// below throws the uncrawlable ones away. Non-storefront rows are a handful
+// out of ~125 and db-setup shrinks that set every deploy, so 4x leaves plenty
+// of headroom; the cost of guessing low is a short rotation, not a wrong one.
+const DISCOVERY_OVERFETCH = 4;
 
 async function fetchWithTimeout(url: string): Promise<Response> {
   const controller = new AbortController();
@@ -306,12 +315,23 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
   // "DCS …" anchor on a wiki index reads as a product and is written back as a
   // VendorKit that can never be priced. Mirrors _DISCOVERY_VENDOR_SQL in
   // scrape.py, which has refused both since dcs.wiki was added.
-  const vendors = await prisma.vendor.findMany({
+  //
+  // A blank URL is only half of "cannot be crawled", though. A row pointed at
+  // goo.gl, item.taobao.com or an Instagram profile answers /products.json
+  // with a 404 just as reliably, and it sorts to the FRONT of the rotation
+  // (lastDiscoveredAt NULLS FIRST) — five of the seeded vendors are in exactly
+  // that state. SQL can't tell a host from a substring (`LIKE '%x.com%'` also
+  // matches mybox.com), so the storefront test runs here, over a deliberately
+  // over-fetched page, and `vendorLimit` is applied to what survives.
+  const candidates = await prisma.vendor.findMany({
     where: { websiteUrl: { not: "" }, ...NOT_MANUFACTURER_VENDOR },
     orderBy: [{ lastDiscoveredAt: { sort: "asc", nulls: "first" } }],
-    take: vendorLimit,
+    take: vendorLimit * DISCOVERY_OVERFETCH,
     select: { id: true, slug: true, websiteUrl: true },
   });
+  const vendors = candidates
+    .filter((v) => !needsStorefront(v.websiteUrl))
+    .slice(0, vendorLimit);
   if (vendors.length === 0) return result;
 
   const index = await buildSetIndex();

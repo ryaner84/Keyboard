@@ -6,10 +6,12 @@ import {
   hostOfUrl,
   hostKey,
   isStorefrontHost,
+  needsStorefront,
   storefrontHostFromUrls,
   planRosterSync,
   planVendorUrlHeal,
   nextVendorWebsiteUrl,
+  NON_STOREFRONT_HOSTS,
 } from "./vendor-urls.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -55,6 +57,34 @@ assert.equal(isStorefrontHost("discord.link"), false);
 assert.equal(isStorefrontHost("shop.naver.com"), true);
 // A bare token is not a host.
 assert.equal(isStorefrontHost("localhost"), false);
+
+// --- needsStorefront -------------------------------------------------------
+// The predicate every storefront repair is keyed on. Blank was only half of
+// it: a row an import parked on goo.gl is exactly as uncrawlable, and because
+// it is NOT blank it was the shape nothing ever revisited — the store dropped
+// off the site the day it was downgraded and stayed off.
+assert.equal(needsStorefront("https://basekeys.jp"), false);
+assert.equal(needsStorefront("https://www.keebzncables.com"), false);
+for (const blank of ["", "   ", null, undefined]) {
+  assert.equal(needsStorefront(blank), true, JSON.stringify(blank));
+}
+// The four shapes actually sitting in supabase-setup.sql, plus the downgrades
+// KeycapLendar offers for stores that already have a real site.
+for (const parked of [
+  "https://goo.gl",
+  "https://www.instagram.com",
+  "https://docs.google.com",
+  "https://world.taobao.com",
+  "https://item.taobao.com/item.htm?id=1",
+  "https://geekhack.org/index.php?topic=1",
+  "https://imgur.com/a/abc",
+]) {
+  assert.equal(needsStorefront(parked), true, parked);
+}
+// Junk `new URL()` rejects is not a storefront either — hostOfUrl returns "",
+// which isStorefrontHost already refuses.
+assert.equal(needsStorefront("TBA"), true);
+assert.equal(needsStorefront("mekibo.com"), true);
 
 // --- storefrontHostFromUrls ------------------------------------------------
 // BaseKeys: 34 listing URLs, all one host.
@@ -146,9 +176,58 @@ const twins = planVendorUrlHeal([
 assert.deepEqual(twins.heal.map((v) => v.slug), ["store-a"]);
 assert.deepEqual(twins.duplicate.map((v) => v.slug), ["store-b"]);
 
-// A vendor that already has a websiteUrl never reaches the planner, so the
-// planner never has to defend against overwriting one: the callers select
-// blank rows only. Guard the empty case anyway.
+// A row parked on a shortener is repaired the same way a blank one is — that
+// is the whole point of the widening. `current` travels with the plan so the
+// caller can guard its UPDATE on the value the plan was built from, and so the
+// build log can say what was replaced.
+const parked = planVendorUrlHeal([
+  {
+    id: "v1",
+    slug: "cocobrais",
+    websiteUrl: "https://goo.gl",
+    listingUrls: ["https://cocobrais.com/products/gmk-a"],
+  },
+  // The residue: parked AND its own listings are the same shortener. Nothing
+  // to derive from, so it is reported rather than left looking crawlable.
+  {
+    id: "v2",
+    slug: "kekkon",
+    websiteUrl: "https://goo.gl",
+    listingUrls: ["https://goo.gl/forms/SNkHTJJ7zZ9Ht4Hf2"],
+  },
+]);
+assert.deepEqual(
+  parked.heal.map((v) => [v.slug, v.current, v.websiteUrl]),
+  [["cocobrais", "https://goo.gl", "https://cocobrais.com"]]
+);
+assert.deepEqual(parked.stranded.map((v) => v.slug), ["kekkon"]);
+assert.equal(parked.stranded[0].reason, "links are marketplace/forum pages only");
+// Two vendors parked on the SAME shortener must not block each other: goo.gl
+// is nobody's storefront, so it is not a host anyone can own.
+assert.equal(parked.duplicate.length, 0);
+
+// A blank row still reports "" as its previous value, so the caller's guard
+// works for both shapes with one code path.
+assert.deepEqual(
+  planVendorUrlHeal([{ id: "v", slug: "basekeys", listingUrls: ["https://basekeys.jp/p/1"] }])
+    .heal.map((v) => v.current),
+  [""]
+);
+
+// A vendor that already has a real storefront must never be touched, even if a
+// caller widens its selection by mistake — the planner refuses it outright.
+assert.deepEqual(
+  planVendorUrlHeal([
+    {
+      id: "v",
+      slug: "mekibo",
+      websiteUrl: "https://mekibo.com",
+      listingUrls: ["https://www.us.txkeyboards.com/products/gmk-a"],
+    },
+  ]),
+  { heal: [], duplicate: [], stranded: [] }
+);
+
 assert.deepEqual(planVendorUrlHeal([]), { heal: [], duplicate: [], stranded: [] });
 assert.deepEqual(planVendorUrlHeal(undefined), { heal: [], duplicate: [], stranded: [] });
 
@@ -253,6 +332,39 @@ assert.deepEqual(
 );
 assert.deepEqual(sync.aliased.map((v) => [v.slug, v.owner]), [["mech-land", "mechland"]]);
 assert.deepEqual(sync.duplicate, []);
+// The heal carries what it replaced, so db-setup's UPDATE can be guarded on it.
+assert.deepEqual(sync.heal.map((v) => v.current), ["", ""]);
+
+// The roster repairs a DOWNGRADED row too, not just a blank one. iLumKB has
+// upstream entries on item.taobao.com and NovelKeys on geekhack.org; before
+// nextVendorWebsiteUrl existed either could have been written over the real
+// storefront, and nothing since would have put it back — the roster's heal was
+// keyed on blank, so the store stayed uncrawlable and published nothing.
+const downgraded = planRosterSync(
+  [
+    { slug: "ilumkb", websiteUrl: "https://ilumkb.com" },
+    { slug: "novelkeys", websiteUrl: "https://novelkeys.com" },
+    // Parked under an ALIAS spelling: still the same store, still repaired.
+    { slug: "cannonkeys", websiteUrl: "https://cannonkeys.com", aliases: ["cannon-keys"] },
+  ],
+  [
+    { slug: "ilumkb", websiteUrl: "https://item.taobao.com/item.htm?id=1" },
+    { slug: "novelkeys", websiteUrl: "https://geekhack.org/index.php?topic=1" },
+    { slug: "cannon-keys", websiteUrl: "https://www.instagram.com/cannonkeys" },
+  ]
+);
+assert.deepEqual(
+  downgraded.heal.map((v) => [v.slug, v.websiteUrl]),
+  [
+    ["ilumkb", "https://ilumkb.com"],
+    ["novelkeys", "https://novelkeys.com"],
+    ["cannon-keys", "https://cannonkeys.com"],
+  ]
+);
+assert.deepEqual(downgraded.insert, []);
+// item.taobao.com is not a storefront, so the downgraded row never "owned"
+// that host — otherwise a second roster entry could be mistaken for its alias.
+assert.deepEqual(downgraded.aliased, []);
 
 // Both spellings exist as rows: that is two Vendor rows for one shop, which
 // only a human can merge. Heal the canonical one, name the other.
@@ -347,6 +459,49 @@ assert.deepEqual(
   `OUTLET_COLLECTIONS names host(s) no Vendor row is guaranteed to carry, so ` +
     `run_outlets skips them silently: ${unresolvable.join(", ")}. Add them to ` +
     `src/data/seed/vendors.json or to SEEDED_VENDORS in scraper/scrape.py.`
+);
+
+// --- the two discovery halves must refuse the same hosts -------------------
+// Discovery is written twice: run_discovery in scrape.py is the nightly that
+// actually crawls, discoverGmkProducts in discovery.ts is the Vercel cron.
+// #131 excluded blank-URL vendors in the TS copy alone and the nightly kept
+// spending a fifth of every rotation on stores it could not fetch. The
+// storefront test excludes the OTHER uncrawlable shape, so both halves have to
+// agree on which hosts that is.
+const pyHosts = (() => {
+  const m = /_NON_STOREFRONT_HOSTS\s*=\s*\(([\s\S]*?)\n\)/.exec(scrapePy);
+  assert.ok(m, "scrape.py must keep _NON_STOREFRONT_HOSTS");
+  return [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+})();
+assert.deepEqual(
+  pyHosts,
+  [...NON_STOREFRONT_HOSTS],
+  "scrape.py and scripts/lib/vendor-urls.mjs must refuse the same non-storefront hosts"
+);
+
+// Both halves must actually apply it, not just carry the list.
+assert.ok(
+  /_crawlable_vendors\(cur\.fetchall\(\), _DISCOVERY_VENDOR_LIMIT\)/.test(scrapePy),
+  "run_discovery must filter its rotation through _crawlable_vendors"
+);
+const discoveryTs = readFileSync(
+  join(REPO_ROOT, "src", "lib", "import", "discovery.ts"),
+  "utf8"
+);
+assert.ok(
+  /needsStorefront/.test(discoveryTs),
+  "discoverGmkProducts must skip vendors with no usable storefront"
+);
+// The over-fetch is what makes the Python-side filter safe: filtering a page
+// sized exactly to the rotation limit would shorten the rotation instead of
+// replacing the refused rows.
+assert.ok(
+  /_DISCOVERY_VENDOR_LIMIT \* _DISCOVERY_OVERFETCH/.test(scrapePy),
+  "run_discovery must over-fetch so the storefront filter still fills the rotation"
+);
+assert.ok(
+  /vendorLimit \* DISCOVERY_OVERFETCH/.test(discoveryTs),
+  "discoverGmkProducts must over-fetch so the storefront filter still fills the rotation"
 );
 
 console.log("vendor-url heal checks passed");

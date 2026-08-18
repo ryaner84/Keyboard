@@ -16,6 +16,7 @@ import {
   hostKey,
   hostOfUrl,
   isStorefrontHost,
+  needsStorefront,
   planRosterSync,
   planVendorUrlHeal,
 } from "./lib/vendor-urls.mjs";
@@ -153,6 +154,8 @@ async function ensureVendorRoster(client) {
     // Reconciliation is an optimisation, not a precondition: fall back to the
     // slug-only behaviour rather than skipping the roster entirely.
     console.warn(`[db-setup] roster alias check skipped: ${err.message}`);
+    // No `current` to guard on here — the UPDATE below then falls back to
+    // repairing blanks only, which is what this path did before.
     plan = { insert: rows, heal: rows.map((v) => ({ slug: v.slug, websiteUrl: v.websiteUrl })) };
   }
 
@@ -189,19 +192,32 @@ async function ensureVendorRoster(client) {
     }
 
     if (plan.heal.length > 0) {
+      // Two shapes, one repair: a blank websiteUrl, and one pointed at a
+      // shortener / marketplace / social page by an import that predates
+      // nextVendorWebsiteUrl. Both are uncrawlable; only the blank one was
+      // ever revisited, so a downgraded store stayed off the site for good.
+      // `r.current` is the value planRosterSync saw, so a row that changed
+      // since is left alone rather than overwritten blind.
       const healed = await client.query(
         `UPDATE public."Vendor" AS v
             SET "websiteUrl" = r.website
-           FROM unnest($1::text[], $2::text[]) AS r(slug, website)
+           FROM unnest($1::text[], $2::text[], $3::text[]) AS r(slug, website, current)
           WHERE v.slug = r.slug
-            AND btrim(coalesce(v."websiteUrl", '')) = ''
-         RETURNING v.slug`,
-        [col(plan.heal, (v) => v.slug), col(plan.heal, (v) => v.websiteUrl)]
+            AND (btrim(coalesce(v."websiteUrl", '')) = ''
+                 OR btrim(coalesce(v."websiteUrl", '')) = r.current)
+         RETURNING v.slug, r.current`,
+        [
+          col(plan.heal, (v) => v.slug),
+          col(plan.heal, (v) => v.websiteUrl),
+          col(plan.heal, (v) => v.current),
+        ]
       );
       if (healed.rowCount > 0) {
         console.log(
-          `[db-setup] Restored ${healed.rowCount} blank vendor websiteUrl(s): ` +
-            healed.rows.map((r) => r.slug).join(", ")
+          `[db-setup] Restored ${healed.rowCount} vendor storefront(s) from the roster: ` +
+            healed.rows
+              .map((r) => `${r.slug}${r.current ? ` (was ${r.current})` : ""}`)
+              .join(", ")
         );
       }
     }
@@ -229,14 +245,22 @@ async function ensureVendorRoster(client) {
   }
 }
 
-// The roster can only repair a store it lists — 17 of them. The other blank
-// "websiteUrl" rows have to be repaired from what the database already knows:
-// their own listings. A vendor's VendorKit rows carry the product URLs an
+// The roster can only repair a store it lists — 25 of them. Every other vendor
+// with no usable storefront has to be repaired from what the database already
+// knows: its own listings. A vendor's VendorKit rows carry the product URLs an
 // earlier import stored, and those name the storefront (BaseKeys' 34 links are
 // all basekeys.jp, Mekibo's are mekibo.com). Reading the host back off them
 // turns an uncrawlable vendor into a crawlable one without anyone having to
 // look a URL up by hand, and — because the vendor then gets a real catalogue
 // pass — gives its URL-less listings a productUrl and finally a price.
+//
+// "No usable storefront" is BOTH shapes, not just the blank one (see
+// needsStorefront in scripts/lib/vendor-urls.mjs). A row pointed at goo.gl,
+// item.taobao.com or an Instagram profile cannot be crawled either — and
+// unlike a blank row it was never revisited by anything, because every repair
+// here was keyed on `websiteUrl = ''`. So the shape that #133 stopped anyone
+// from CREATING was also the shape nobody could ever undo: the store dropped
+// off the site the day an import downgraded it and stayed off.
 //
 // Runs AFTER ensureVendorRoster so the hand-written roster always wins, and
 // after healBlankVendorUrls so '' has already become NULL on the kit rows.
@@ -245,35 +269,21 @@ async function ensureVendorRoster(client) {
 // host that already belongs to another vendor is reported as a duplicate store
 // rather than crawled under two names.
 async function healVendorUrlsFromListings(client) {
-  let blanks;
+  // Which rows need one is a host question, not a SQL one — `websiteUrl LIKE
+  // '%x.com%'` would match mybox.com — so pick them in JS off the cheap list
+  // and only then aggregate listings for the ones that qualify.
+  let needing;
+  let taken;
   try {
-    blanks = await client.query(
-      `SELECT v.id, v.slug,
-              coalesce(
-                array_agg(u.url) FILTER (WHERE u.url IS NOT NULL AND btrim(u.url) <> ''),
-                '{}'
-              ) AS urls
-         FROM public."Vendor" v
-         LEFT JOIN public."VendorKit" vk ON vk."vendorId" = v.id
-         LEFT JOIN LATERAL (VALUES (vk."productUrl"), (vk."gbUrl")) AS u(url) ON true
-        WHERE btrim(coalesce(v."websiteUrl", '')) = ''
-        GROUP BY v.id, v.slug
-        ORDER BY v.slug`
+    const all = await client.query(
+      `SELECT id, slug, "websiteUrl" FROM public."Vendor" ORDER BY slug`
     );
-  } catch (err) {
-    console.warn(`[db-setup] vendor URL heal skipped: ${err.message}`);
-    return;
-  }
-  if (blanks.rowCount === 0) return;
-
-  // Hosts already spoken for. One store, one Vendor row.
-  const taken = new Set();
-  try {
-    const owned = await client.query(
-      `SELECT "websiteUrl" FROM public."Vendor"
-        WHERE btrim(coalesce("websiteUrl", '')) <> ''`
-    );
-    for (const r of owned.rows) {
+    needing = all.rows.filter((r) => needsStorefront(r.websiteUrl));
+    // Hosts already spoken for. One store, one Vendor row — and a row parked
+    // on a shortener speaks for nothing, so it must not reserve goo.gl.
+    taken = new Set();
+    for (const r of all.rows) {
+      if (needsStorefront(r.websiteUrl)) continue;
       const key = hostKey(hostOfUrl(r.websiteUrl));
       if (key) taken.add(key);
     }
@@ -281,6 +291,29 @@ async function healVendorUrlsFromListings(client) {
     console.warn(`[db-setup] vendor URL heal skipped: ${err.message}`);
     return;
   }
+  if (needing.length === 0) return;
+
+  let blanks;
+  try {
+    blanks = await client.query(
+      `SELECT v.id, v.slug, v."websiteUrl",
+              coalesce(
+                array_agg(u.url) FILTER (WHERE u.url IS NOT NULL AND btrim(u.url) <> ''),
+                '{}'
+              ) AS urls
+         FROM public."Vendor" v
+         LEFT JOIN public."VendorKit" vk ON vk."vendorId" = v.id
+         LEFT JOIN LATERAL (VALUES (vk."productUrl"), (vk."gbUrl")) AS u(url) ON true
+        WHERE v.id = ANY($1)
+        GROUP BY v.id, v.slug, v."websiteUrl"
+        ORDER BY v.slug`,
+      [needing.map((r) => r.id)]
+    );
+  } catch (err) {
+    console.warn(`[db-setup] vendor URL heal skipped: ${err.message}`);
+    return;
+  }
+  if (blanks.rowCount === 0) return;
 
   // purgeBlockedVendors removes the vendor and its listings, but a stray link
   // to a banned store can survive on someone else's row — never adopt one as a
@@ -290,6 +323,11 @@ async function healVendorUrlsFromListings(client) {
     blanks.rows.map((r) => ({
       id: r.id,
       slug: r.slug,
+      websiteUrl: r.websiteUrl,
+      // A vendor's own bad storefront is usually also its listings' host
+      // (cocobrais is goo.gl in both places). storefrontHostFromUrls rejects
+      // those anyway, so no filtering is needed here — it simply reports the
+      // vendor as stranded rather than re-adopting what it just refused.
       listingUrls: r.urls.filter((u) => !bannedHosts.has(hostKey(hostOfUrl(u)))),
     })),
     taken
@@ -297,17 +335,26 @@ async function healVendorUrlsFromListings(client) {
 
   if (heal.length > 0) {
     try {
+      // Guarded on the exact value the plan was built from, so a row another
+      // pass changed in the meantime is left alone. Blank and downgraded rows
+      // both land here; `coalesce` makes the NULL case comparable.
       await client.query(
         `UPDATE public."Vendor" AS v
             SET "websiteUrl" = r.url
-           FROM unnest($1::text[], $2::text[]) AS r(id, url)
+           FROM unnest($1::text[], $2::text[], $3::text[]) AS r(id, url, current)
           WHERE v.id = r.id
-            AND btrim(coalesce(v."websiteUrl", '')) = ''`,
-        [heal.map((v) => v.id), heal.map((v) => v.websiteUrl)]
+            AND btrim(coalesce(v."websiteUrl", '')) = btrim(r.current)`,
+        [
+          heal.map((v) => v.id),
+          heal.map((v) => v.websiteUrl),
+          heal.map((v) => v.current ?? ""),
+        ]
       );
       console.log(
         `[db-setup] Recovered ${heal.length} vendor storefront(s) from their own ` +
-          `listings: ${heal.map((v) => `${v.slug} → ${v.host}`).join(", ")}`
+          `listings: ${heal
+            .map((v) => `${v.slug}${v.current ? ` (was ${v.current})` : ""} → ${v.host}`)
+            .join(", ")}`
       );
     } catch (err) {
       console.warn(`[db-setup] vendor URL heal skipped: ${err.message}`);
@@ -328,16 +375,23 @@ async function healVendorUrlsFromListings(client) {
     console.warn(
       `[db-setup] ${stranded.length} vendor(s) still have no storefront and can never ` +
         `publish a listing — add them to src/data/seed/vendors.json or remove them: ` +
-        stranded.map((v) => `${v.slug} (${v.reason})`).join(", ")
+        stranded
+          .map(
+            (v) =>
+              `${v.slug} (${v.reason}${
+                String(v.websiteUrl ?? "").trim() ? `; parked on ${v.websiteUrl}` : ""
+              })`
+          )
+          .join(", ")
     );
   }
 
-  // The other shape of the same problem: a websiteUrl that isn't blank but
-  // isn't a shop either — two vendors registered as `https://goo.gl`, one as
-  // Instagram, one as a Google Doc. Discovery dutifully asks each of them for
-  // /products.json every rotation and will never get a catalogue back. Nothing
-  // here can be repaired automatically (their listings point at the same
-  // shortener), so name them.
+  // What survived both repairs: a websiteUrl that isn't blank and isn't a shop
+  // either — two vendors registered as `https://goo.gl`, one as Instagram, one
+  // as a Google Doc, and their own listings point at the same shortener, so
+  // there is nothing to derive a storefront from. Discovery no longer wastes a
+  // rotation slot asking them for /products.json, but they still publish
+  // nothing until someone gives them a real URL, so name them.
   try {
     const all = await client.query(
       `SELECT slug, "websiteUrl" FROM public."Vendor"
@@ -348,7 +402,8 @@ async function healVendorUrlsFromListings(client) {
       console.warn(
         `[db-setup] ${notShops.length} vendor(s) point at a link shortener / social / ` +
           `marketplace page rather than a storefront, so discovery can never read a ` +
-          `catalogue for them: ` +
+          `catalogue for them — give them a storefront in src/data/seed/vendors.json ` +
+          `or remove them: ` +
           notShops.map((r) => `${r.slug} (${r.websiteUrl})`).join(", ")
       );
     }

@@ -20,7 +20,11 @@
 // link shortener, where /products.json is a 404 — which costs a rotation slot
 // every few days and never produces a listing. A vendor whose only links are
 // these is better reported as having no storefront than pointed at Taobao.
-const NON_STOREFRONT_HOSTS = [
+//
+// Exported because the same list decides who enters the discovery rotation,
+// in both halves of it: `_NON_STOREFRONT_HOSTS` in scraper/scrape.py is the
+// Python copy and vendor-urls.test.mjs fails if the two disagree.
+export const NON_STOREFRONT_HOSTS = [
   // Link shorteners and file/doc hosts (a GB spreadsheet is not a shop)
   "goo.gl", "bit.ly", "t.co", "tinyurl.com", "linktr.ee",
   "google.com", "docs.google.com", "drive.google.com", "forms.gle",
@@ -72,6 +76,29 @@ export function isStorefrontHost(host) {
   return !NON_STOREFRONT_HOSTS.some(
     (blocked) => key === blocked || key.endsWith(`.${blocked}`)
   );
+}
+
+/**
+ * True when a Vendor row's stored `websiteUrl` cannot serve as a storefront —
+ * the one predicate every storefront repair should be keyed on.
+ *
+ * Blank is only HALF of that failure. `nextVendorWebsiteUrl` refuses to write
+ * a marketplace/forum/shortener link over a storefront, but it can only guard
+ * writes made after it existed: rows an earlier import downgraded (iLumKB has
+ * upstream entries on item.taobao.com, NovelKeys on geekhack.org, Drop on
+ * imgur.com) and rows that shipped that way in supabase-setup.sql (two vendors
+ * registered as `https://goo.gl`, one as Instagram, one as a Google Doc) are
+ * still sitting there. They are exactly as uncrawlable as a blank row —
+ * `{websiteUrl}/products.json` 404s on goo.gl forever, `find_vendor_for_url`
+ * matches no outlet collection to them, and their listings can never be
+ * priced, which on a released set means hidden — but because they are NOT
+ * blank, every repair keyed on `websiteUrl = ''` skipped them and the store
+ * published nothing, permanently.
+ */
+export function needsStorefront(websiteUrl) {
+  const url = String(websiteUrl ?? "").trim();
+  if (!url) return true;
+  return !isStorefrontHost(hostOfUrl(url));
 }
 
 /**
@@ -142,23 +169,32 @@ export function nextVendorWebsiteUrl(current, incoming) {
 }
 
 /**
- * Decide what to do with every vendor that has no websiteUrl.
+ * Decide what to do with every vendor that has no usable storefront.
  *
- * `vendors` is [{ id, slug, listingUrls: string[] }]; `takenHostKeys` is the
- * set of host keys already registered to a vendor that HAS a websiteUrl — a
- * host may only belong to one Vendor row, so a blank vendor whose listings
- * point at an existing store is a duplicate of that store, not a new one, and
- * gets reported rather than silently pointed at the same catalogue (which
- * would then be crawled twice and publish the same listing under two names).
+ * `vendors` is [{ id, slug, websiteUrl?, listingUrls: string[] }] — rows whose
+ * `websiteUrl` is blank OR isn't a shop (see needsStorefront; a row parked on
+ * goo.gl is no more crawlable than a blank one, and until this planner took
+ * both shapes it was the only one nothing ever revisited). `takenHostKeys` is
+ * the set of host keys already registered to a vendor that HAS a real
+ * storefront — a host may only belong to one Vendor row, so a vendor whose
+ * listings point at an existing store is a duplicate of that store, not a new
+ * one, and gets reported rather than silently pointed at the same catalogue
+ * (which would then be crawled twice and publish the same listing under two
+ * names).
  *
  * Returns { heal, duplicate, stranded } — pure, so the callers' SQL stays
- * dumb and this stays testable.
+ * dumb and this stays testable. Each entry carries the vendor's own fields
+ * through, so a caller can guard its UPDATE on the `websiteUrl` it planned
+ * against and say in the log what was replaced.
  */
 export function planVendorUrlHeal(vendors, takenHostKeys = new Set()) {
   const heal = [];
   const duplicate = [];
   const stranded = [];
   for (const vendor of vendors ?? []) {
+    // Defensive: a caller that widened its selection must not overwrite a
+    // storefront that is already fine.
+    if (!needsStorefront(vendor.websiteUrl)) continue;
     const host = storefrontHostFromUrls(vendor.listingUrls);
     if (!host) {
       stranded.push({ ...vendor, reason: reasonForNoHost(vendor.listingUrls) });
@@ -169,7 +205,14 @@ export function planVendorUrlHeal(vendors, takenHostKeys = new Set()) {
       duplicate.push({ ...vendor, host });
       continue;
     }
-    heal.push({ ...vendor, host, websiteUrl: `https://${host}` });
+    // `websiteUrl` is the repaired value, so the one being replaced is kept
+    // separately — a caller guarding its UPDATE on it needs both.
+    heal.push({
+      ...vendor,
+      host,
+      current: String(vendor.websiteUrl ?? "").trim(),
+      websiteUrl: `https://${host}`,
+    });
     // One host, one vendor — a later blank vendor pointing here is a duplicate
     // of this one, not a second store.
     takenHostKeys.add(key);
@@ -202,10 +245,18 @@ export function planVendorUrlHeal(vendors, takenHostKeys = new Set()) {
  * the same shop, leaving the original stranded. `aliases` names those
  * spellings explicitly rather than guessing at them.
  *
+ * The roster repairs BOTH shapes of a missing storefront, not just the blank
+ * one: a row an import downgraded to item.taobao.com or geekhack.org is as
+ * uncrawlable as a blank row, and it is the shape nothing else revisits (see
+ * needsStorefront). The roster is hand-written, so when it names a store the
+ * database has parked on a marketplace, the roster is simply right.
+ *
  * `existing` is [{ slug, websiteUrl }]. Returns, all pure:
  *   insert    — roster rows with no row under any of their slugs and no other
  *               vendor already owning their host
- *   heal      — { slug, websiteUrl } for a blank row this roster entry names
+ *   heal      — { slug, websiteUrl, current } for a row this roster entry
+ *               names that has no usable storefront; `current` is what it is
+ *               being replaced with, so the caller can guard its UPDATE
  *   aliased   — roster rows a differently-slugged vendor already covers by host
  *   duplicate — extra rows matching the same roster entry: two Vendor rows for
  *               one shop, which is a merge nobody can do automatically
@@ -215,9 +266,12 @@ export function planRosterSync(roster, existing) {
   for (const row of existing ?? []) {
     if (row?.slug) urlBySlug.set(row.slug, String(row.websiteUrl ?? "").trim());
   }
-  // Hosts already spoken for by a vendor that has a storefront.
+  // Hosts already spoken for by a vendor that has a storefront. A row parked
+  // on a shortener owns nothing — counting goo.gl as "taken" would make the
+  // roster treat a store it is trying to repair as somebody else's shop.
   const ownerByHost = new Map();
   for (const row of existing ?? []) {
+    if (needsStorefront(row?.websiteUrl)) continue;
     const key = hostKey(hostOfUrl(row?.websiteUrl));
     if (key && !ownerByHost.has(key)) ownerByHost.set(key, row.slug);
   }
@@ -235,7 +289,8 @@ export function planRosterSync(roster, existing) {
     const present = [entry.slug, ...(entry.aliases ?? [])].filter((s) => urlBySlug.has(s));
     if (present.length > 0) {
       const target = present[0];
-      if (urlBySlug.get(target) === "") heal.push({ slug: target, websiteUrl });
+      const current = urlBySlug.get(target);
+      if (needsStorefront(current)) heal.push({ slug: target, websiteUrl, current });
       for (const extra of present.slice(1)) duplicate.push({ slug: extra, keeps: target });
       continue;
     }
