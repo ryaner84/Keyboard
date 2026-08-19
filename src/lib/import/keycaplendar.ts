@@ -7,7 +7,7 @@ import { normalizeSetName } from "@/lib/set-name";
 // Storefront rules live with db-setup's blank-URL heal so the two agree on what
 // counts as a store — a second copy of the marketplace/forum list here would be
 // the "written twice" hazard the discovery pass already taught us about.
-import { nextVendorWebsiteUrl } from "../../../scripts/lib/vendor-urls.mjs";
+import { nextVendorWebsiteUrl, hostKey, hostOfUrl } from "../../../scripts/lib/vendor-urls.mjs";
 import type { GBStatus, Region } from "@/generated/prisma";
 
 const PROJECT_ID = process.env.KEYCAPLENDAR_PROJECT_ID || "keycaplendar";
@@ -183,6 +183,26 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
   }
   const kitByGroupBuy = new Map(baseKits.map((k) => [k.groupBuyId, k.id]));
   const vendorBySlug = new Map(existingVendors.map((v) => [v.slug, v]));
+  // Which store already owns which host. A storeLink pointing at another
+  // vendor's site is a shop, so nextVendorWebsiteUrl would happily adopt it —
+  // and the vendor is then parked on a catalogue that isn't its own, which
+  // discovery crawls under this vendor's name (see planStorefrontOwnership).
+  // One of Swagkeys (KR)'s upstream entries names mokbstore.com, so this is
+  // what keeps the deploy-time repair from being undone the same night.
+  const ownerByHost = new Map<string, string>();
+  for (const v of existingVendors) {
+    const key = hostKey(hostOfUrl(v.websiteUrl));
+    if (key && !ownerByHost.has(key)) ownerByHost.set(key, v.slug);
+  }
+  // Duck-typed as a Set for nextVendorWebsiteUrl, but resolved per candidate so
+  // a store keeps its OWN host: rebuilding a real Set for each of the 9031
+  // upstream vendor entries would be 125 hosts copied every time.
+  const hostsOwnedByOthers = (slug: string) => ({
+    has: (host: string) => {
+      const owner = ownerByHost.get(host);
+      return owner != null && owner !== slug;
+    },
+  });
   const vkByKey = new Map(existingVendorKits.map((vk) => [`${vk.kitId}:${vk.vendorId}`, vk]));
 
   const result: ImportResult = { sets: 0, vendors: 0, vendorKits: 0, unchanged: 0, stoppedEarly: false };
@@ -358,7 +378,15 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
       // may replace what the vendor already has: a blank one (13.6% of entries)
       // or a marketplace/forum link would otherwise un-crawl a working store and
       // stop it publishing anything at all. See nextVendorWebsiteUrl.
-      const websiteUrl = nextVendorWebsiteUrl(vendor?.websiteUrl ?? "", v.storeLink);
+      const websiteUrl = nextVendorWebsiteUrl(
+        vendor?.websiteUrl ?? "",
+        v.storeLink,
+        hostsOwnedByOthers(vSlug)
+      );
+      // A host this run just handed out belongs to that store for the rest of
+      // it, or the next entry for a different shop would take it right back.
+      const claimedHost = hostKey(hostOfUrl(websiteUrl));
+      if (claimedHost && !ownerByHost.has(claimedHost)) ownerByHost.set(claimedHost, vSlug);
 
       if (!vendor) {
         const created = await prisma.vendor.create({

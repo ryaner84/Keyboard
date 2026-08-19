@@ -154,8 +154,22 @@ export function storefrontHostFromUrls(urls) {
  * Blank, unparseable, and marketplace/forum/shortener links leave what's
  * already there alone; on a brand-new vendor they leave it blank, which is the
  * state planVendorUrlHeal above can still recover from.
+ *
+ * `otherHostKeys` is the set of host keys that already belong to a DIFFERENT
+ * vendor row (hostKey form, www-insensitive). A storeLink on one of those is
+ * refused for the same reason a marketplace link is: it is a shop, but it is
+ * not this shop. Adopting it parks the vendor on someone else's catalogue,
+ * which discovery then crawls under this vendor's name — see
+ * planStorefrontOwnership, which repairs the rows that reached that state
+ * before this guard existed. One of Swagkeys (KR)'s 13 upstream entries names
+ * mokbstore.com, so without this the deploy-time repair is undone by the very
+ * next nightly import.
+ *
+ * @param {string | null | undefined} current
+ * @param {string | null | undefined} incoming
+ * @param {{ has(host: string): boolean }} [otherHostKeys]
  */
-export function nextVendorWebsiteUrl(current, incoming) {
+export function nextVendorWebsiteUrl(current, incoming, otherHostKeys = new Set()) {
   const currentUrl = String(current ?? "").trim();
   let origin = "";
   try {
@@ -165,6 +179,7 @@ export function nextVendorWebsiteUrl(current, incoming) {
     origin = "";
   }
   if (!origin || !isStorefrontHost(hostOfUrl(origin))) return currentUrl;
+  if (otherHostKeys?.has?.(hostKey(hostOfUrl(origin)))) return currentUrl;
   return origin;
 }
 
@@ -218,6 +233,130 @@ export function planVendorUrlHeal(vendors, takenHostKeys = new Set()) {
     takenHostKeys.add(key);
   }
   return { heal, duplicate, stranded };
+}
+
+/**
+ * Resolve Vendor rows that are parked on a storefront belonging to a DIFFERENT
+ * store.
+ *
+ * `needsStorefront` asks whether a URL is *a* shop. It cannot ask the question
+ * that matters here — whether it is *this vendor's* shop — so a row carrying
+ * another store's host reads as perfectly healthy and no repair ever revisits
+ * it. Swagkeys (KR) shipped registered as `https://mokbstore.com`, which is
+ * Mokb Store's site and Mokb Store's own row carries it too. That row is
+ * uncrawlable *as itself*, and every downstream pass keys on the host:
+ *
+ *   - both discovery halves fetch `{websiteUrl}/products.json`, so Mokb's
+ *     catalogue is linked as Swagkeys (KR) VendorKits, at Mokb's prices — the
+ *     set page publishes one shop's listing twice, under two shop names, and
+ *     one of them is wrong;
+ *   - `find_vendor_for_url` resolves a URL to the FIRST Vendor row on that
+ *     host, so which of the two a dcs.wiki group-buy page attaches to is
+ *     whichever Postgres returns first;
+ *   - the store's real site is never crawled, so its own listings are never
+ *     relinked and it publishes nothing of its own — permanently.
+ *
+ * The evidence needed to fix it is already in the database: the row's own
+ * VendorKit URLs name its real storefront (11 of Swagkeys (KR)'s 13 listings
+ * are on www.swagkey.kr). So a host carried by two or more rows is settled by
+ * asking whose listings agree with it, and the row that loses is repaired to
+ * the storefront its own listings name.
+ *
+ * `vendors` is [{ id, slug, websiteUrl, listingUrls }] — every vendor, not
+ * just the colliding ones, because a host is only contested relative to the
+ * rest of the table. `roster` is the hand-written seed: a row whose storefront
+ * the roster assigns wins its host outright, since the roster is the rung that
+ * exists to be right about exactly this.
+ *
+ * Deliberately narrow: a row that does not share its host with another row is
+ * never touched, and a collision nothing can settle is reported rather than
+ * guessed at. Protozoa Studio and Protozoa Studio (US) both list on
+ * protozoa.studio and both are telling the truth — that is two rows for one
+ * shop, a merge no automatic pass should perform.
+ *
+ * Returns { heal, contested }, both pure:
+ *   heal      — { ...vendor, host, current, websiteUrl } for a row moved off
+ *               somebody else's storefront onto its own; `current` is what it
+ *               was parked on, so the caller can guard its UPDATE
+ *   contested  — rows sharing a host that the data cannot settle, each with the
+ *               reason, for the build log
+ */
+export function planStorefrontOwnership(vendors, roster = []) {
+  const pinnedBySlug = new Map();
+  for (const entry of roster ?? []) {
+    const key = hostKey(hostOfUrl(entry?.websiteUrl));
+    if (!entry?.slug || !key) continue;
+    for (const slug of [entry.slug, ...(entry.aliases ?? [])]) pinnedBySlug.set(slug, key);
+  }
+
+  // Only rows that HAVE a storefront can collide over one. The blank and
+  // parked-on-a-shortener shapes are planVendorUrlHeal's business.
+  const rows = (vendors ?? []).filter((v) => !needsStorefront(v.websiteUrl));
+  const byHost = new Map();
+  for (const row of rows) {
+    const key = hostKey(hostOfUrl(row.websiteUrl));
+    if (!key) continue;
+    byHost.set(key, [...(byHost.get(key) ?? []), row]);
+  }
+
+  const heal = [];
+  const contested = [];
+  for (const [host, group] of byHost) {
+    if (group.length < 2) continue;
+
+    // The roster decides when it names one; otherwise the row whose own
+    // listings sell from this host does.
+    const pinned = group.filter((row) => pinnedBySlug.get(row.slug) === host);
+    const claimants =
+      pinned.length > 0
+        ? pinned
+        : group.filter(
+            (row) => hostKey(storefrontHostFromUrls(row.listingUrls) ?? "") === host
+          );
+    if (claimants.length !== 1) {
+      const reason =
+        claimants.length === 0
+          ? "no row's own listings sell from it"
+          : "several rows' listings sell from it — one shop, two rows, merge them";
+      for (const row of group) contested.push({ ...row, host, owner: null, reason });
+      continue;
+    }
+
+    const owner = claimants[0];
+    for (const row of group) {
+      if (row === owner) continue;
+      const own = storefrontHostFromUrls(row.listingUrls);
+      const ownKey = hostKey(own ?? "");
+      if (!ownKey || ownKey === host) {
+        contested.push({
+          ...row,
+          host,
+          owner: owner.slug,
+          reason: own
+            ? "its listings sell from the same host — one shop, two rows, merge them"
+            : "its listings name no storefront of its own",
+        });
+        continue;
+      }
+      if (byHost.has(ownKey)) {
+        contested.push({
+          ...row,
+          host,
+          owner: owner.slug,
+          reason: `its own storefront ${own} already belongs to ${byHost.get(ownKey)[0].slug}`,
+        });
+        continue;
+      }
+      byHost.set(ownKey, [row]); // one host, one row — including the repaired one
+      heal.push({
+        ...row,
+        host: own,
+        current: String(row.websiteUrl ?? "").trim(),
+        websiteUrl: `https://${own}`,
+      });
+    }
+  }
+  return { heal, contested };
 }
 
 /**

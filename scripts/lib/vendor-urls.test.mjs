@@ -9,6 +9,7 @@ import {
   needsStorefront,
   storefrontHostFromUrls,
   planRosterSync,
+  planStorefrontOwnership,
   planVendorUrlHeal,
   nextVendorWebsiteUrl,
   NON_STOREFRONT_HOSTS,
@@ -502,6 +503,175 @@ assert.ok(
 assert.ok(
   /vendorLimit \* DISCOVERY_OVERFETCH/.test(discoveryTs),
   "discoverGmkProducts must over-fetch so the storefront filter still fills the rotation"
+);
+
+// --- planStorefrontOwnership -----------------------------------------------
+// The third shape of "no storefront of its own": a row parked on a host that
+// belongs to a DIFFERENT store. It is a shop, so needsStorefront calls it
+// healthy and no repair revisits it — while discovery crawls that shop's
+// catalogue under this vendor's name and this vendor's own site is never
+// fetched at all. Fixtures are the real rows: Swagkeys (KR) shipped as
+// https://mokbstore.com, the host Mokb Store's own row carries, and 11 of its
+// 13 listings are on www.swagkey.kr.
+const misparked = planStorefrontOwnership([
+  {
+    id: "v1",
+    slug: "swagkeys-kr",
+    websiteUrl: "https://mokbstore.com",
+    listingUrls: [
+      "https://www.swagkey.kr/915144507/?idx=1413",
+      "https://www.swagkey.kr/915144507/?idx=735",
+      "https://www.swagkey.kr/40/?idx=692",
+      "https://mokbstore.com/gb-mv-expo-gmk-cyl",
+      "https://swagkeys.com/products/gmk-cyl-pandemonium",
+    ],
+  },
+  {
+    id: "v2",
+    slug: "mokb-store",
+    websiteUrl: "https://mokbstore.com",
+    listingUrls: [
+      "https://mokbstore.com/gb-mv-expo-gmk-cyl",
+      "https://mokbstore.com/gb-mv-t3rminal-gmk-cyl",
+    ],
+  },
+  // Uncontested rows are never touched, whatever their listings say.
+  { id: "v3", slug: "swagkeys", websiteUrl: "https://swagkeys.com", listingUrls: [] },
+]);
+assert.deepEqual(
+  misparked.heal.map((v) => [v.slug, v.current, v.websiteUrl]),
+  [["swagkeys-kr", "https://mokbstore.com", "https://www.swagkey.kr"]]
+);
+assert.deepEqual(misparked.contested, []);
+
+// Two rows whose listings BOTH sell from the shared host are two rows for one
+// shop (Protozoa Studio / Protozoa Studio (US)) — a merge, which no automatic
+// pass should perform. Report, change nothing.
+const twinShop = planStorefrontOwnership([
+  {
+    id: "p1",
+    slug: "protozoa-studio",
+    websiteUrl: "https://protozoa.studio",
+    listingUrls: ["https://protozoa.studio/products/uk-gmk-blot", "https://protozoa.studio/products/uk-gmk-diner"],
+  },
+  {
+    id: "p2",
+    slug: "protozoa-studio-us",
+    websiteUrl: "https://protozoa.studio",
+    listingUrls: ["https://protozoa.studio/products/usa-gmk-diner"],
+  },
+]);
+assert.deepEqual(twinShop.heal, []);
+assert.deepEqual(
+  twinShop.contested.map((v) => v.slug),
+  ["protozoa-studio", "protozoa-studio-us"]
+);
+
+// Neither row's listings name the shared host: nothing to settle it with.
+const noEvidence = planStorefrontOwnership([
+  { id: "a", slug: "a", websiteUrl: "https://shared.example", listingUrls: [] },
+  { id: "b", slug: "b", websiteUrl: "https://www.shared.example", listingUrls: [] },
+]);
+assert.deepEqual(noEvidence.heal, []);
+assert.deepEqual(noEvidence.contested.map((v) => v.reason), [
+  "no row's own listings sell from it",
+  "no row's own listings sell from it",
+]);
+
+// The roster outranks the listings: it is the hand-written rung that exists to
+// be right about which store owns which site. Here the loser's listings agree
+// with the shared host, so the evidence rule alone would have called it a tie.
+const rosterWins = planStorefrontOwnership(
+  [
+    {
+      id: "r1",
+      slug: "kbdfans",
+      websiteUrl: "https://kbdfans.com",
+      listingUrls: ["https://kbdfans.com/products/gmk-a", "https://kbdfans.com/products/gmk-b"],
+    },
+    {
+      id: "r2",
+      slug: "kbd-reseller",
+      websiteUrl: "https://kbdfans.com",
+      listingUrls: ["https://kbdfans.com/products/gmk-a", "https://reseller.example/gmk-b", "https://reseller.example/gmk-c"],
+    },
+  ],
+  [{ slug: "kbdfans", websiteUrl: "https://kbdfans.com" }]
+);
+assert.deepEqual(
+  rosterWins.heal.map((v) => [v.slug, v.websiteUrl]),
+  [["kbd-reseller", "https://reseller.example"]]
+);
+
+// A loser whose own storefront is ALREADY somebody else's row is a duplicate of
+// that row, not a store waiting for a URL — moving it there would have two
+// vendors crawling one catalogue again, which is the state being repaired.
+const wouldCollide = planStorefrontOwnership([
+  {
+    id: "c1",
+    slug: "shop",
+    websiteUrl: "https://shop.example",
+    listingUrls: ["https://shop.example/a", "https://shop.example/b"],
+  },
+  {
+    id: "c2",
+    slug: "shop-twin",
+    websiteUrl: "https://shop.example",
+    listingUrls: ["https://other.example/a", "https://other.example/b"],
+  },
+  { id: "c3", slug: "other", websiteUrl: "https://other.example", listingUrls: [] },
+]);
+assert.deepEqual(wouldCollide.heal, []);
+assert.deepEqual(
+  wouldCollide.contested.map((v) => [v.slug, v.reason]),
+  [["shop-twin", "its own storefront other.example already belongs to other"]]
+);
+
+// Blank and parked-on-a-shortener rows are planVendorUrlHeal's business: two
+// vendors both registered as https://goo.gl are not fighting over a storefront.
+assert.deepEqual(
+  planStorefrontOwnership([
+    { id: "g1", slug: "cocobrais", websiteUrl: "https://goo.gl", listingUrls: [] },
+    { id: "g2", slug: "kekkon", websiteUrl: "https://goo.gl", listingUrls: [] },
+    { id: "g3", slug: "vertex", websiteUrl: "", listingUrls: [] },
+    { id: "g4", slug: "photekq", websiteUrl: "", listingUrls: [] },
+  ]),
+  { heal: [], contested: [] }
+);
+assert.deepEqual(planStorefrontOwnership(), { heal: [], contested: [] });
+assert.deepEqual(planStorefrontOwnership([], []), { heal: [], contested: [] });
+
+// --- nextVendorWebsiteUrl vs. another vendor's storefront -------------------
+// One of Swagkeys (KR)'s upstream entries names mokbstore.com. Without this the
+// nightly import re-parks the row the deploy just repaired, every night.
+const takenByOthers = new Set(["mokbstore.com"]);
+assert.equal(
+  nextVendorWebsiteUrl("https://www.swagkey.kr", "https://mokbstore.com/gb-mv-expo", takenByOthers),
+  "https://www.swagkey.kr"
+);
+// …and it does not invent one for a brand-new vendor either.
+assert.equal(nextVendorWebsiteUrl("", "https://mokbstore.com/gb-mv-expo", takenByOthers), "");
+// The store that OWNS the host still adopts it — the set is "hosts owned by
+// someone else", so a vendor is never refused its own site.
+assert.equal(
+  nextVendorWebsiteUrl("", "https://mokbstore.com/gb-mv-expo", new Set()),
+  "https://mokbstore.com"
+);
+// www-insensitive, like every other host comparison here.
+assert.equal(
+  nextVendorWebsiteUrl("", "https://www.mokbstore.com/gb-mv-expo", takenByOthers),
+  ""
+);
+// The import must actually pass the set through, not merely compute it.
+const keycaplendarTs = readFileSync(
+  join(REPO_ROOT, "src", "lib", "import", "keycaplendar.ts"),
+  "utf8"
+);
+assert.ok(
+  /nextVendorWebsiteUrl\(\s*vendor\?\.websiteUrl \?\? "",\s*v\.storeLink,\s*hostsOwnedByOthers\(vSlug\)/.test(
+    keycaplendarTs
+  ),
+  "the KeycapLendar import must refuse a storeLink on another vendor's host"
 );
 
 console.log("vendor-url heal checks passed");
