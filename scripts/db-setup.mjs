@@ -18,6 +18,7 @@ import {
   isStorefrontHost,
   needsStorefront,
   planRosterSync,
+  planStorefrontOwnership,
   planVendorUrlHeal,
 } from "./lib/vendor-urls.mjs";
 
@@ -245,7 +246,112 @@ async function ensureVendorRoster(client) {
   }
 }
 
-// The roster can only repair a store it lists — 25 of them. Every other vendor
+// A third shape of "no storefront of its own": a row parked on ANOTHER store's
+// site. `needsStorefront` reads mokbstore.com as healthy whichever vendor row
+// carries it, so Swagkeys (KR) — registered as https://mokbstore.com, a host
+// Mokb Store's own row also carries — was never revisited by either repair
+// above. Discovery crawls that host under BOTH vendor ids, so Mokb's catalogue
+// is published twice on a set page, once under a shop that does not sell it,
+// while Swagkeys (KR)'s own site (www.swagkey.kr, where 11 of its 13 listings
+// live) is never crawled at all and it publishes nothing of its own.
+//
+// Runs after ensureVendorRoster so a roster-assigned storefront is already in
+// place and wins its host, and before healVendorUrlsFromListings so that pass
+// sees ownership settled — a row moved off a host frees it, and a row that
+// keeps one holds it against a blank vendor's claim.
+async function healMisparkedVendorUrls(client) {
+  let roster = [];
+  try {
+    const parsed = JSON.parse(readFileSync(VENDOR_ROSTER_PATH, "utf8"));
+    if (Array.isArray(parsed)) roster = parsed;
+  } catch {
+    // The roster only breaks ties; listings can still settle them without it.
+  }
+
+  let rows;
+  try {
+    const all = await client.query(
+      `SELECT id, slug, "websiteUrl" FROM public."Vendor" ORDER BY slug`
+    );
+    rows = all.rows;
+  } catch (err) {
+    console.warn(`[db-setup] vendor ownership check skipped: ${err.message}`);
+    return;
+  }
+
+  // Only rows sharing a host with another row can be misparked, and they are a
+  // handful of ~125 — so find them on the cheap list first and read listing
+  // URLs for those alone rather than aggregating every vendor's kits.
+  const slugsByHost = new Map();
+  for (const r of rows) {
+    if (needsStorefront(r.websiteUrl)) continue;
+    const key = hostKey(hostOfUrl(r.websiteUrl));
+    if (key) slugsByHost.set(key, [...(slugsByHost.get(key) ?? []), r]);
+  }
+  const colliding = [...slugsByHost.values()].filter((g) => g.length > 1).flat();
+  if (colliding.length === 0) return;
+
+  let listings;
+  try {
+    listings = await client.query(
+      `SELECT v.id,
+              coalesce(
+                array_agg(u.url) FILTER (WHERE u.url IS NOT NULL AND btrim(u.url) <> ''),
+                '{}'
+              ) AS urls
+         FROM public."Vendor" v
+         LEFT JOIN public."VendorKit" vk ON vk."vendorId" = v.id
+         LEFT JOIN LATERAL (VALUES (vk."productUrl"), (vk."gbUrl")) AS u(url) ON true
+        WHERE v.id = ANY($1)
+        GROUP BY v.id`,
+      [colliding.map((r) => r.id)]
+    );
+  } catch (err) {
+    console.warn(`[db-setup] vendor ownership check skipped: ${err.message}`);
+    return;
+  }
+  const urlsById = new Map(listings.rows.map((r) => [r.id, r.urls]));
+
+  const { heal, contested } = planStorefrontOwnership(
+    rows.map((r) => ({ ...r, listingUrls: urlsById.get(r.id) ?? [] })),
+    roster
+  );
+
+  if (heal.length > 0) {
+    try {
+      // Guarded on the host it was parked on, so a row another pass moved in
+      // the meantime keeps whatever that pass decided.
+      await client.query(
+        `UPDATE public."Vendor" AS v
+            SET "websiteUrl" = r.url
+           FROM unnest($1::text[], $2::text[], $3::text[]) AS r(id, url, current)
+          WHERE v.id = r.id
+            AND btrim(coalesce(v."websiteUrl", '')) = btrim(r.current)`,
+        [heal.map((v) => v.id), heal.map((v) => v.websiteUrl), heal.map((v) => v.current)]
+      );
+      console.log(
+        `[db-setup] Moved ${heal.length} vendor(s) off a storefront they do not own ` +
+          `onto their own: ${heal.map((v) => `${v.slug} (was ${v.current}) → ${v.host}`).join(", ")}`
+      );
+    } catch (err) {
+      console.warn(`[db-setup] vendor ownership repair skipped: ${err.message}`);
+      return;
+    }
+  }
+
+  // Not a failure — two rows for one shop, which is a merge no pass should do
+  // on its own. Left alone, both crawl the same catalogue and the set page
+  // lists one store twice.
+  if (contested.length > 0) {
+    console.warn(
+      `[db-setup] ${contested.length} vendor row(s) share a storefront with another row ` +
+        `— merge or remove them: ` +
+        contested.map((v) => `${v.slug} (${v.host}: ${v.reason})`).join(", ")
+    );
+  }
+}
+
+// The roster can only repair a store it lists — 26 of them. Every other vendor
 // with no usable storefront has to be repaired from what the database already
 // knows: its own listings. A vendor's VendorKit rows carry the product URLs an
 // earlier import stored, and those name the storefront (BaseKeys' 34 links are
@@ -816,6 +922,7 @@ async function main() {
         // it shipping zones in the SAME deploy, or the price table hides every
         // listing it publishes until the next nightly self-heal.
         await ensureVendorRoster(client);
+        await healMisparkedVendorUrls(client);
         await healVendorUrlsFromListings(client);
         await backfillShipping(client);
         await cleanupInterestChecks(client);
@@ -876,6 +983,7 @@ async function main() {
     await ensureCurrencies(client);
     await resetPollutedGalleries(client);
     await ensureVendorRoster(client);
+    await healMisparkedVendorUrls(client);
     await healVendorUrlsFromListings(client);
     await backfillShipping(client);
     await cleanupInterestChecks(client);

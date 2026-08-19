@@ -18,7 +18,8 @@
   { "name": "Toro Studio", "slug": "toro-studio", "region": "AU", "country": "AU", "currency": "AUD", "websiteUrl": "https://torokeeb.store", "logoUrl": null, "aliases": ["toro-studios"] },
 
   { "name": "GEONWORKS", "slug": "geonworks", "region": "ASIA", "country": "KR", "currency": "USD", "websiteUrl": "https://geon.works", "logoUrl": null, "aliases": ["geon-works"] },
-  { "name": "Swagkeys", "slug": "swagkeys", "region": "ASIA", "country": "KR", "currency": "USD", "websiteUrl": "https://swagkeys.com", "logoUrl": null, "aliases": ["swagkeys-kr"] },
+  { "name": "Swagkeys", "slug": "swagkeys", "region": "ASIA", "country": "KR", "currency": "USD", "websiteUrl": "https://swagkeys.com", "logoUrl": null },
+  { "name": "Swagkeys (KR)", "slug": "swagkeys-kr", "region": "ASIA", "country": "KR", "currency": "USD", "websiteUrl": "https://www.swagkey.kr", "logoUrl": null },
   { "name": "Ktechs", "slug": "ktechs", "region": "SG", "country": "SG", "currency": "SGD", "websiteUrl": "https://ktechs.store", "logoUrl": null, "aliases": ["ktech"] },
   { "name": "UniKeys", "slug": "unikeys", "region": "CA", "country": "CA", "currency": "USD", "websiteUrl": "https://unikeyboards.com", "logoUrl": null, "aliases": ["unikeyboards", "uni-keys"] },
   { "name": "Keebz N Cables", "slug": "keebz-n-cables", "region": "AU", "country": "AU", "currency": "AUD", "websiteUrl": "https://www.keebzncables.com", "logoUrl": null, "aliases": ["keebzncables"] },

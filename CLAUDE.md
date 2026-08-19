@@ -145,6 +145,26 @@ code rather than in SQL. `NON_STOREFRONT_HOSTS` is written twice
 (`_NON_STOREFRONT_HOSTS` in `scrape.py` is the Python copy) and
 `test:vendor-urls` fails if the two lists disagree.
 
+**Three shapes, in fact: the third is a row parked on ANOTHER store's
+storefront.** `needsStorefront` asks whether a URL is *a* shop, never whether it
+is *this* shop, so `Swagkeys (KR)` registered as `https://mokbstore.com` — the
+host Mokb Store's own row carries — read as healthy to every repair. It is
+uncrawlable *as itself*: discovery fetches that host under both vendor ids, so
+one shop's catalogue is published twice on a set page and once under a shop that
+doesn't sell it; `find_vendor_for_url` returns whichever of the two rows
+Postgres happens to hand back first; and the store's real site is never crawled,
+so it publishes nothing of its own. The evidence to fix it is already in the
+database — 11 of Swagkeys (KR)'s 13 listings are on `www.swagkey.kr` — so
+`planStorefrontOwnership` settles a contested host by asking whose listings sell
+from it (the roster outranks that when it names one) and moves the loser onto
+the storefront its own listings name. It only ever touches a row that SHARES its
+host: two rows whose listings both sell from it are one shop with two rows
+(Protozoa Studio / Protozoa Studio (US)), which is a merge no pass should do by
+itself, so it is reported instead. `nextVendorWebsiteUrl` refuses a storeLink on
+another vendor's host for the same reason it refuses a marketplace link —
+without that the nightly import re-parks the row the deploy just repaired, since
+one of Swagkeys (KR)'s own upstream entries names mokbstore.com.
+
 Roster entries carry `aliases` because the rows the roster exists to repair are
 the ones host matching cannot see: a blank vendor has no host, so a blank
 `cannon-keys` row reads as a store nobody owns and the roster's `cannonkeys`
