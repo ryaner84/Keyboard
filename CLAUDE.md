@@ -129,6 +129,22 @@ are hidden on released sets, so the store publishes *nothing at all*.
 and Swagkeys (both filed under smartstore.naver.com upstream) sat outside it for
 a year while db-setup named them "stranded" every deploy.
 
+**"No storefront" has two shapes, and every repair must take both.** Blank is
+the obvious one; a `websiteUrl` pointed at something that isn't a shop —
+`goo.gl`, an Instagram profile, a Google Form, `item.taobao.com` — is the other,
+and it is strictly worse, because a blank row was at least revisited by the
+roster heal and the listings heal while a downgraded one matched neither
+(`websiteUrl = ''`) and so was frozen forever, publishing nothing, named only in
+a build-log line. `nextVendorWebsiteUrl` stops new downgrades but cannot undo
+one already written, and four shipped in `supabase-setup.sql`. `needsStorefront`
+in `scripts/lib/vendor-urls.mjs` is the single predicate both halves of the heal
+and both halves of the discovery rotation key on — never re-derive it as
+`websiteUrl = ''`. It is a HOST test, not a substring test: `ILIKE '%x.com%'`
+also matches `mybox.com`, which is why the rotation over-fetches and filters in
+code rather than in SQL. `NON_STOREFRONT_HOSTS` is written twice
+(`_NON_STOREFRONT_HOSTS` in `scrape.py` is the Python copy) and
+`test:vendor-urls` fails if the two lists disagree.
+
 Roster entries carry `aliases` because the rows the roster exists to repair are
 the ones host matching cannot see: a blank vendor has no host, so a blank
 `cannon-keys` row reads as a store nobody owns and the roster's `cannonkeys`

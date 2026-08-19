@@ -1142,6 +1142,70 @@ class DiscoveryPagingTests(unittest.TestCase):
         self.assertGreaterEqual(scrape._DISCOVERY_MAX_CATALOG_PAGES, 6)
 
 
+class CrawlableVendorTests(unittest.TestCase):
+    """The rotation's guest list — who is worth asking for a products.json.
+
+    A blank websiteUrl was already refused (#131 in the TS half, later here).
+    The other half of "cannot be crawled" is a row pointed at somewhere that
+    isn't a shop: goo.gl, an Instagram profile, a Google Form, item.taobao.com.
+    Four of the seeded vendors shipped in that state, they sort to the FRONT of
+    the rotation (lastDiscoveredAt NULLS FIRST), and because they are not blank
+    nothing ever revisited them — so they burned a slot every run and the store
+    published nothing, permanently.
+    """
+
+    def test_a_store_is_a_storefront(self):
+        for url in (
+            "https://basekeys.jp",
+            "https://www.keebzncables.com",
+            "https://shop.yushakobo.jp",
+            "https://en.zfrontier.com",
+        ):
+            self.assertTrue(scrape._is_storefront_url(url), url)
+
+    def test_shorteners_socials_and_marketplaces_are_not(self):
+        for url in (
+            "https://goo.gl",
+            "https://www.instagram.com",
+            "https://docs.google.com",
+            "https://world.taobao.com",
+            "https://item.taobao.com/item.htm?id=1",
+            "https://geekhack.org/index.php?topic=1",
+            "https://smartstore.naver.com/geonworks",
+            "",
+            "TBA",
+        ):
+            self.assertFalse(scrape._is_storefront_url(url), url)
+
+    def test_naver_block_is_the_marketplace_subdomain_only(self):
+        # Mirrors isStorefrontHost: a shop that merely sits under some other
+        # naver.com host is not Naver's marketplace.
+        self.assertTrue(scrape._is_storefront_url("https://shop.naver.com"))
+
+    def test_refused_rows_do_not_shorten_the_rotation(self):
+        rows = [
+            {"slug": "cocobrais", "websiteUrl": "https://goo.gl"},
+            {"slug": "pluskb", "websiteUrl": "https://www.instagram.com"},
+            {"slug": "basekeys", "websiteUrl": "https://basekeys.jp"},
+            {"slug": "mekibo", "websiteUrl": "https://mekibo.com"},
+        ]
+        vendors, refused = scrape._crawlable_vendors(rows, 2)
+        self.assertEqual([v["slug"] for v in vendors], ["basekeys", "mekibo"])
+        # Named, not silently dropped: a store that is never crawled and never
+        # mentioned is how one publishes nothing for a year unnoticed.
+        self.assertEqual(len(refused), 2)
+        self.assertIn("cocobrais (https://goo.gl)", refused)
+
+    def test_over_fetch_leaves_room_for_the_refused_rows(self):
+        # The filter runs in Python, so the SQL page has to be bigger than the
+        # rotation limit or filtering would shorten the rotation instead of
+        # replacing what it threw away.
+        self.assertGreater(scrape._DISCOVERY_OVERFETCH, 1)
+
+    def test_the_rotation_query_selects_the_slug_it_reports(self):
+        self.assertIn("slug", scrape._DISCOVERY_VENDOR_SQL)
+
+
 class CompareAtPriceTests(unittest.TestCase):
     def test_markdown_is_captured_when_compare_exceeds_price(self):
         out = scrape._parse_shopify_variants([

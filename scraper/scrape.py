@@ -3061,14 +3061,82 @@ _DISCOVERY_VENDOR_LIMIT = 8
 #     listing. discovery.ts got this filter in #131; the nightly, which is the
 #     pass that actually crawls, did not. db-setup repairs the URLs it can
 #     (roster, then each vendor's own listing hosts); the rest are logged.
+#   * Rows whose websiteUrl is NOT A SHOP — goo.gl, an Instagram profile, a
+#     Google Form, item.taobao.com. Blank is only half of "cannot be crawled":
+#     these 404 on /products.json just as reliably, they sort to the FRONT of
+#     the rotation (lastDiscoveredAt NULLS FIRST), and until db-setup learned
+#     to repair them they were the shape nothing ever revisited, because every
+#     repair was keyed on websiteUrl = ''.
+#
+# The last one is a HOST test, not a substring test — `ILIKE '%x.com%'` also
+# matches mybox.com — so the SQL over-fetches and _crawlable_vendors() applies
+# it in Python, taking the first _DISCOVERY_VENDOR_LIMIT survivors.
 _DISCOVERY_VENDOR_SQL = """
-    SELECT id, "websiteUrl", currency
+    SELECT id, slug, "websiteUrl", currency
       FROM "Vendor"
      WHERE NOT (slug = ANY(%s))
        AND btrim(coalesce("websiteUrl", '')) <> ''
      ORDER BY "lastDiscoveredAt" ASC NULLS FIRST
      LIMIT %s
 """
+
+# Rows read per rotation slot before the storefront test throws the
+# uncrawlable ones away. See DISCOVERY_OVERFETCH in discovery.ts.
+_DISCOVERY_OVERFETCH = 4
+
+# Mirror of NON_STOREFRONT_HOSTS in scripts/lib/vendor-urls.mjs — the hosts a
+# listing may legitimately live on that are nobody's storefront. Kept in
+# agreement by `npm run test:vendor-urls`, which parses both lists: a host that
+# exists on one side only is how #131's discovery filter ended up half-applied.
+_NON_STOREFRONT_HOSTS = (
+    "goo.gl", "bit.ly", "t.co", "tinyurl.com", "linktr.ee",
+    "google.com", "docs.google.com", "drive.google.com", "forms.gle",
+    "imgur.com", "github.io", "github.com",
+    "instagram.com", "facebook.com", "twitter.com", "x.com", "reddit.com",
+    "discord.com", "discord.gg", "discord.link", "youtube.com",
+    "notion.so", "notion.site",
+    "geekhack.org", "deskthority.net",
+    "taobao.com", "tmall.com", "aliexpress.com", "alibaba.com", "1688.com",
+    "etsy.com", "ebay.com", "amazon.com", "shopee.com", "lazada.com",
+    "mercari.com", "kickstarter.com", "indiegogo.com",
+    "smartstore.naver.com",
+)
+
+
+def _is_storefront_url(url: str) -> bool:
+    """True when `url`'s host is a store's own site, not a marketplace/forum.
+
+    Mirror of isStorefrontHost in scripts/lib/vendor-urls.mjs: only the leading
+    "www." is folded away (en.zfrontier.com and www.zfrontier.com are two
+    different sites), and a blocked host matches itself or any subdomain of it.
+    """
+    host = _dcs_host(url or "")
+    if not host or "." not in host:
+        return False
+    return not any(
+        host == blocked or host.endswith("." + blocked)
+        for blocked in _NON_STOREFRONT_HOSTS
+    )
+
+
+def _crawlable_vendors(rows: list[dict], limit: int) -> tuple[list[dict], list[str]]:
+    """Split fetched vendors into the ones worth crawling and the ones refused.
+
+    Returns (vendors, refused_slugs) with at most `limit` vendors — the refused
+    ones are named by the caller rather than silently dropped, because a store
+    that quietly never gets crawled is exactly how one publishes nothing for a
+    year without any run summary looking wrong.
+    """
+    keep: list[dict] = []
+    refused: list[str] = []
+    for row in rows:
+        if len(keep) >= limit:
+            break
+        if _is_storefront_url(row.get("websiteUrl") or ""):
+            keep.append(row)
+        else:
+            refused.append(f"{row.get('slug')} ({row.get('websiteUrl')})")
+    return keep, refused
 
 
 def normalize_set_name(name: str) -> str:
@@ -3336,9 +3404,14 @@ def run_discovery(
              "multi_listing": 0}
 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute(_DISCOVERY_VENDOR_SQL,
-                    (list(MANUFACTURER_VENDOR_SLUGS), _DISCOVERY_VENDOR_LIMIT))
-        vendors = cur.fetchall()
+        cur.execute(
+            _DISCOVERY_VENDOR_SQL,
+            (
+                list(MANUFACTURER_VENDOR_SLUGS),
+                _DISCOVERY_VENDOR_LIMIT * _DISCOVERY_OVERFETCH,
+            ),
+        )
+        vendors, not_shops = _crawlable_vendors(cur.fetchall(), _DISCOVERY_VENDOR_LIMIT)
         # Vendors the query just refused. Naming them is the only signal that a
         # store exists but is unreachable — otherwise it simply never appears.
         cur.execute("""
@@ -3350,6 +3423,10 @@ def run_discovery(
     if blank:
         log(f"Discovery: {len(blank)} vendor(s) have no websiteUrl and cannot be "
             f"crawled — {', '.join(blank)}")
+    if not_shops:
+        log(f"Discovery: {len(not_shops)} vendor(s) point at a shortener / social / "
+            f"marketplace page rather than a storefront and cannot be crawled — "
+            f"{', '.join(not_shops)}")
     if not vendors:
         return stats
 
