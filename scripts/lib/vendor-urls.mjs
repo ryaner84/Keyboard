@@ -446,6 +446,51 @@ export function planRosterSync(roster, existing) {
   return { insert, heal, aliased, duplicate };
 }
 
+/**
+ * Vendors that publish nothing on the site despite having a healthy storefront.
+ *
+ * The storefront chain above (planRosterSync → planStorefrontOwnership →
+ * planVendorUrlHeal) exists because a Vendor row with no usable `websiteUrl`
+ * publishes nothing at all: discovery can't crawl it, run_outlets can't resolve
+ * a collection to it, and its URL-less listings can never be priced. Every step
+ * of that chain repairs a shape the DATA lets us repair — a blank or
+ * shortener-parked URL, a row on another shop's host — and names the residue
+ * (`stranded`, `contested`, "not shops") so the owner can act on the rest.
+ *
+ * There is a fourth shape those repairs cannot see. A vendor can carry a real
+ * storefront and still publish nothing on any set page — because its catalog
+ * pass never matched a tracked set, or its /products.json turned to a redirect,
+ * or its every scraped price landed at null and the sets it lists are all
+ * RELEASED (which hides unpriced rows). The row LOOKS healthy to every planner
+ * above; the site just never shows anything from it.
+ *
+ * A visible listing is a VendorKit whose kit is a BASE and that either has a
+ * price (rendered as a priced row on any set) or has a store link on an ACTIVE
+ * GB (rendered as an unpriced link — released sets suppress those). The caller
+ * counts those in SQL — this planner has no DB — and passes each vendor's
+ * `visibleListings`. A vendor with zero of them AND a healthy storefront
+ * (`!needsStorefront`) is one the site never surfaces on any set page.
+ *
+ * `excludeSlugs` skips the vendor rows that are catalog markers (gmk, dcs-wiki)
+ * or that this deploy is about to purge (blocked vendors). Passed in rather
+ * than named here to keep this file free of the manufacturer registry, which
+ * is TypeScript.
+ *
+ * @param {Array<{ slug: string, websiteUrl?: string | null, visibleListings?: number }>} vendors
+ * @param {Set<string>} [excludeSlugs]
+ */
+export function planPublishingReport(vendors, excludeSlugs = new Set()) {
+  return (vendors ?? [])
+    .filter((v) => v && v.slug && !excludeSlugs.has(v.slug))
+    // Blank / shortener / marketplace rows and rows parked on another shop's
+    // host are already named by the storefront chain — reporting them here too
+    // would just double the noise on the deploy log.
+    .filter((v) => !needsStorefront(v.websiteUrl))
+    .filter((v) => Number(v.visibleListings ?? 0) === 0)
+    .map((v) => ({ slug: v.slug, websiteUrl: String(v.websiteUrl ?? "").trim() }))
+    .sort((a, b) => a.slug.localeCompare(b.slug));
+}
+
 /** Why no storefront could be derived — reported so the log is actionable. */
 function reasonForNoHost(urls) {
   const hosts = (urls ?? []).map(hostOfUrl).filter(Boolean);
