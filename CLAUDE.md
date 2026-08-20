@@ -165,6 +165,21 @@ another vendor's host for the same reason it refuses a marketplace link —
 without that the nightly import re-parks the row the deploy just repaired, since
 one of Swagkeys (KR)'s own upstream entries names mokbstore.com.
 
+**A fifth shape gets past every one of those repairs**: a `websiteUrl` that IS
+a real shop belonging to this vendor and still publishes nothing. The row looks
+healthy — `needsStorefront` returns false, `planStorefrontOwnership` sees no
+collision — but the site surfaces zero of its listings on any set page, because
+its catalog pass never matched a tracked set (the store stopped selling GMK /
+DCS), its /products.json turned to a redirect the crawler can't follow, or its
+every scraped price landed at null and the sets it lists are all RELEASED
+(which hides unpriced rows). No automatic pass can undo those, but
+`planPublishingReport` names them in the deploy log alongside the four heal
+residues so the owner can act on them — remove the row, chase down why
+discovery isn't matching, or force a re-scrape. A "visible listing" is what
+`PURCHASABLE_VENDOR_KIT_WHERE` + `showUnpriced` (in `VendorTable`) would render,
+counted in SQL; the planner has the shape rules so a blank / shortener /
+marketplace row belongs to `planVendorUrlHeal`, not to this report.
+
 Roster entries carry `aliases` because the rows the roster exists to repair are
 the ones host matching cannot see: a blank vendor has no host, so a blank
 `cannon-keys` row reads as a store nobody owns and the roster's `cannonkeys`

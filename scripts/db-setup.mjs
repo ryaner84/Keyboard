@@ -17,6 +17,7 @@ import {
   hostOfUrl,
   isStorefrontHost,
   needsStorefront,
+  planPublishingReport,
   planRosterSync,
   planStorefrontOwnership,
   planVendorUrlHeal,
@@ -518,6 +519,117 @@ async function healVendorUrlsFromListings(client) {
   }
 }
 
+// Vendors that publish NOTHING on any set page, despite having a real
+// storefront — the residue every heal above cannot see.
+//
+// The three healers (planRosterSync, planStorefrontOwnership,
+// planVendorUrlHeal) exist because a Vendor with no usable `websiteUrl`
+// publishes nothing. They each name their own residue in the log — the
+// stranded, the contested, the not-a-shops — so the four shapes of "no
+// storefront of its own" all reach the owner one way or another.
+//
+// A fifth shape gets past every one of them. The row's `websiteUrl` is a real
+// shop, so `needsStorefront` reads it as healthy. Discovery crawls it and
+// run_outlets resolves collections to it. And still, the site never surfaces a
+// single listing from it — because its catalog pass never matched a tracked
+// set (a store that stopped selling GMK / DCS), or its /products.json turned
+// to a redirect the crawler can't follow, or its every scraped price landed at
+// null and the sets it lists are all RELEASED (which hides unpriced rows). No
+// automatic pass can tell those apart, and none can undo them from data we
+// hold — but until this diagnostic named them, they were exactly the "publish
+// nothing" case nobody could see.
+//
+// A "visible listing" is a VendorKit that would actually render on a set page:
+// its kit is BASE, its productUrl isn't a manufacturer catalog page (unless
+// the vendor is gmk-direct, the one real shop on gmk.net), and either it has a
+// price (priced row, on any set status) OR its parent GB is ACTIVE and it
+// carries a store link (unpriced link — RELEASED sets suppress those; see
+// showUnpriced in SetDetailClient). The count is computed in SQL; the plan
+// itself is pure so the shape rules (a blank / shortener / marketplace row
+// belongs to planVendorUrlHeal, not to this report) live with the rest of
+// them in vendor-urls.mjs.
+//
+// Manufacturer / catalog markers ("gmk", "dcs-wiki") and blocked vendors are
+// excluded — they PUBLISH nothing by design, and reporting them would just
+// dilute the actionable list.
+// RELEASED_STATUSES is the set the site's set page hides unpriced rows on (see
+// RELEASED_STATUSES in SetDetailClient.tsx). Named inline in the SQL below so
+// there's exactly one list to read; that copy is the authoritative one for
+// this pass.
+const _NON_PUBLISHING_SLUGS = new Set([
+  // MANUFACTURER_VENDOR_SLUGS in src/lib/import/manufacturer-vendors.ts — kept
+  // in agreement by manufacturer-vendors.test.ts and vendor-urls.test.mjs.
+  "gmk",
+  "dcs-wiki",
+  // purgeBlockedVendors is about to remove these; naming them here is noise.
+  "fancycustoms",
+  "fancy-customs",
+]);
+
+async function reportVendorsPublishingNothing(client) {
+  let rows;
+  try {
+    // Per-vendor count of the VendorKits that WOULD render on a set page,
+    // computed with the same shape the site's PURCHASABLE_VENDOR_KIT_WHERE and
+    // VendorTable's showUnpriced use. A LATERAL subquery keeps the vendor row
+    // singular even when it has hundreds of kits and lets Postgres short-
+    // circuit as soon as one visible kit is found — cheap on ~125 vendors.
+    ({ rows } = await client.query(
+      `SELECT v.id, v.slug, v."websiteUrl",
+              (
+                SELECT count(*)::int
+                  FROM public."VendorKit" vk
+                  JOIN public."Kit" k ON k.id = vk."kitId"
+                  JOIN public."GroupBuy" gb ON gb.id = k."groupBuyId"
+                 WHERE vk."vendorId" = v.id
+                   AND k.type = 'BASE'
+                   AND (
+                     v.slug = 'gmk-direct'
+                     OR vk."productUrl" IS NULL
+                     OR (vk."productUrl" NOT ILIKE '%gmk.net%'
+                         AND vk."productUrl" NOT ILIKE '%dcs.wiki%')
+                   )
+                   AND (
+                     vk.price IS NOT NULL
+                     OR (
+                       gb.status::text NOT IN (
+                         'SHIPPING','DELIVERED','IN_STOCK','CANCELLED'
+                       )
+                       AND (
+                         btrim(coalesce(vk."gbUrl", '')) <> ''
+                         OR btrim(coalesce(vk."productUrl", '')) <> ''
+                       )
+                     )
+                   )
+              ) AS visible_listings
+         FROM public."Vendor" v
+        ORDER BY v.slug`
+    ));
+  } catch (err) {
+    console.warn(`[db-setup] silent-vendor report skipped: ${err.message}`);
+    return;
+  }
+
+  const silent = planPublishingReport(
+    rows.map((r) => ({
+      slug: r.slug,
+      websiteUrl: r.websiteUrl,
+      visibleListings: r.visible_listings,
+    })),
+    _NON_PUBLISHING_SLUGS
+  );
+  if (silent.length === 0) return;
+
+  console.warn(
+    `[db-setup] ${silent.length} vendor(s) have a storefront but publish no ` +
+      `listing on any set page — the catalog pass has not matched a tracked ` +
+      `set for them, or their listings are all unpriced on RELEASED sets ` +
+      `(which hides them). Check discovery for the first case, refresh-prices ` +
+      `for the second, or remove the row if the store no longer sells tracked ` +
+      `sets: ${silent.map((v) => `${v.slug} (${v.websiteUrl})`).join(", ")}`
+  );
+}
+
 // Sets labelled "Canceled"/"Cancelled" (in the name, straight from
 // KeycapLendar) or carrying the CANCELLED status never went to production —
 // there is nothing to price or buy, so they're removed from the site
@@ -924,6 +1036,10 @@ async function main() {
         await ensureVendorRoster(client);
         await healMisparkedVendorUrls(client);
         await healVendorUrlsFromListings(client);
+        // The residue every heal above misses: a healthy storefront that still
+        // publishes nothing on any set page. Report-only — no automatic pass
+        // can undo a stale catalog or a store that stopped selling GMK/DCS.
+        await reportVendorsPublishingNothing(client);
         await backfillShipping(client);
         await cleanupInterestChecks(client);
         await ensureVariantsColumn(client);

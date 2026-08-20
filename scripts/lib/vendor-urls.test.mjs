@@ -8,6 +8,7 @@ import {
   isStorefrontHost,
   needsStorefront,
   storefrontHostFromUrls,
+  planPublishingReport,
   planRosterSync,
   planStorefrontOwnership,
   planVendorUrlHeal,
@@ -672,6 +673,87 @@ assert.ok(
     keycaplendarTs
   ),
   "the KeycapLendar import must refuse a storeLink on another vendor's host"
+);
+
+// --- planPublishingReport --------------------------------------------------
+// The residue nothing above sees: a Vendor row with a real storefront that the
+// site never actually surfaces. Fixtures are the concrete cases this planner
+// exists to sort out.
+const silent = planPublishingReport(
+  [
+    // Healthy storefront, zero visible listings — the case this reports.
+    { slug: "quiet-shop", websiteUrl: "https://quietshop.com", visibleListings: 0 },
+    // Same story but the count arrived as a string from the DB driver, or was
+    // omitted — both must read as zero.
+    { slug: "no-count", websiteUrl: "https://nocount.com" },
+    { slug: "string-count", websiteUrl: "https://stringcount.com", visibleListings: "0" },
+    // Healthy storefront that DOES publish — must be silent (not reported).
+    { slug: "cannonkeys", websiteUrl: "https://cannonkeys.com", visibleListings: 12 },
+    // Blank websiteUrl / parked on a shortener / on a marketplace: these are
+    // planVendorUrlHeal's territory and reporting them here would just double
+    // the noise on the deploy log.
+    { slug: "blank", websiteUrl: "", visibleListings: 0 },
+    { slug: "shortener", websiteUrl: "https://goo.gl", visibleListings: 0 },
+    { slug: "marketplace", websiteUrl: "https://item.taobao.com/x", visibleListings: 0 },
+    // Catalog markers and about-to-be-purged rows publish nothing by design —
+    // the caller passes their slugs in so this planner stays free of the
+    // manufacturer registry (which is TypeScript, out of reach here).
+    { slug: "gmk", websiteUrl: "https://www.gmk.net", visibleListings: 0 },
+    { slug: "dcs-wiki", websiteUrl: "https://dcs.wiki", visibleListings: 0 },
+    { slug: "fancycustoms", websiteUrl: "https://fancycustoms.com", visibleListings: 0 },
+  ],
+  new Set(["gmk", "dcs-wiki", "fancycustoms", "fancy-customs"])
+);
+assert.deepEqual(
+  silent.map((v) => v.slug),
+  ["no-count", "quiet-shop", "string-count"]
+);
+// Report shape is {slug, websiteUrl} — the caller wants both, for a log line.
+assert.deepEqual(silent[0], { slug: "no-count", websiteUrl: "https://nocount.com" });
+// Deterministic order (alphabetical by slug), so the deploy log doesn't churn.
+assert.deepEqual(
+  planPublishingReport([
+    { slug: "b", websiteUrl: "https://b.com", visibleListings: 0 },
+    { slug: "a", websiteUrl: "https://a.com", visibleListings: 0 },
+    { slug: "c", websiteUrl: "https://c.com", visibleListings: 0 },
+  ]).map((v) => v.slug),
+  ["a", "b", "c"]
+);
+// A row that other passes should own (blank/parked) counts here as OK for the
+// purposes of this report even if `excludeSlugs` doesn't name it — the shape
+// filter takes precedence over the count.
+assert.deepEqual(
+  planPublishingReport([
+    { slug: "someone", websiteUrl: "https://goo.gl", visibleListings: 0 },
+  ]),
+  []
+);
+// Empty / undefined inputs — this is called every deploy, so it must not
+// throw when the DB pass hands back nothing at all.
+assert.deepEqual(planPublishingReport(), []);
+assert.deepEqual(planPublishingReport([]), []);
+assert.deepEqual(planPublishingReport(undefined, undefined), []);
+// A row missing a slug (defensive — should never happen from SQL) is skipped
+// rather than crashing the planner with a null-key comparison.
+assert.deepEqual(
+  planPublishingReport([
+    { websiteUrl: "https://a.com", visibleListings: 0 },
+    { slug: "ok", websiteUrl: "https://ok.com", visibleListings: 0 },
+  ]).map((v) => v.slug),
+  ["ok"]
+);
+
+// db-setup must actually run the report — the plan is only useful if the SQL
+// pass that feeds it is wired into main(). Without this, the whole diagnostic
+// is one file edit away from silently disabled.
+const dbSetup = readFileSync(join(REPO_ROOT, "scripts", "db-setup.mjs"), "utf8");
+assert.ok(
+  /planPublishingReport/.test(dbSetup),
+  "scripts/db-setup.mjs must call planPublishingReport to surface silent vendors"
+);
+assert.ok(
+  /reportVendorsPublishingNothing\(client\)/.test(dbSetup),
+  "scripts/db-setup.mjs's main() must invoke reportVendorsPublishingNothing"
 );
 
 console.log("vendor-url heal checks passed");
