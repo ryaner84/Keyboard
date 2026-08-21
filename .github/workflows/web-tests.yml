@@ -65,6 +65,10 @@ jobs:
         if: always()
         run: npm run test:collection-sales
 
+      - name: http-json
+        if: always()
+        run: npm run test:http-json
+
       - name: home-cache
         if: always()
         run: npm run test:home-cache

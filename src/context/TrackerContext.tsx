@@ -9,6 +9,7 @@ import React, {
   useState,
 } from "react";
 import { useLocation } from "@/context/LocationContext";
+import { errorMessage, readJsonBody } from "@/lib/http-json";
 
 const STORAGE_KEY = "tracked_sets";
 const PROMPT_SEEN_KEY = "tracker_save_prompt_seen";
@@ -44,6 +45,7 @@ function writeLocalTracker(slugs: string[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(slugs));
 }
 
+
 export function TrackerProvider({ children }: { children: React.ReactNode }) {
   const { countryCode, region, currency } = useLocation();
   const [tracked, setTracked] = useState<string[]>([]);
@@ -72,8 +74,10 @@ export function TrackerProvider({ children }: { children: React.ReactNode }) {
         }),
       });
       if (!response.ok) return;
-      const data = await response.json();
-      applyTracker(Array.isArray(data.slugs) ? data.slugs : localSlugs);
+      const data = await readJsonBody(response);
+      applyTracker(
+        Array.isArray(data.slugs) ? (data.slugs as string[]) : localSlugs
+      );
     },
     [applyTracker, countryCode, region, currency]
   );
@@ -82,16 +86,19 @@ export function TrackerProvider({ children }: { children: React.ReactNode }) {
     async (localSlugs = readLocalTracker()) => {
       try {
         const response = await fetch("/api/auth/session", { cache: "no-store" });
-        const data = await response.json();
-        if (!data.authenticated) {
+        const data = await readJsonBody(response);
+        const user = data.user as
+          | { email?: string; alertsEnabled?: boolean }
+          | undefined;
+        if (!data.authenticated || !user?.email) {
           setAuthenticated(false);
           setEmail(null);
           applyTracker(localSlugs);
           return false;
         }
         setAuthenticated(true);
-        setEmail(data.user.email);
-        setAlertsState(data.user.alertsEnabled !== false);
+        setEmail(user.email);
+        setAlertsState(user.alertsEnabled !== false);
         await syncAuthenticatedTracker(localSlugs);
         return true;
       } catch {
@@ -257,7 +264,7 @@ function SaveTrackerModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, slugs, countryCode, region, currency }),
       });
-      const data = await response.json();
+      const data = await readJsonBody(response);
       if (response.status === 429 && data.canVerify) {
         setStage("code");
         setResent(true);
@@ -266,7 +273,9 @@ function SaveTrackerModal({
         );
         return;
       }
-      if (!response.ok) throw new Error(data.error || "Could not send email");
+      if (!response.ok) {
+        throw new Error(errorMessage(data, response, "Could not send email"));
+      }
       setStage("code");
       setResent(true);
       setNotice("Email sent. Use the link or 6-digit code within 10 minutes.");
@@ -287,8 +296,10 @@ function SaveTrackerModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, otp }),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not verify code");
+      const data = await readJsonBody(response);
+      if (!response.ok) {
+        throw new Error(errorMessage(data, response, "Could not verify code"));
+      }
       await onVerified();
     } catch (verifyError) {
       setError(verifyError instanceof Error ? verifyError.message : "Could not verify code");
