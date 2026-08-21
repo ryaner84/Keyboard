@@ -1832,6 +1832,15 @@ export default function CollectionContent() {
             That sign-in link expired or was already used. Request a new code from the account button.
           </div>
         )}
+        {/* The link was VALID but something failed while signing in. Worth its
+            own message: telling someone their working link "expired" sends
+            them hunting for a problem that isn't theirs. */}
+        {authMessage === "error" && (
+          <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300">
+            Something went wrong signing you in — the link itself was fine.
+            Request a new one from the account button and try again.
+          </div>
+        )}
         {notice && (
           <div
             role="status"
