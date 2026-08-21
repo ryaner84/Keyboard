@@ -3182,8 +3182,29 @@ def strip_round(normalized: str) -> str:
 # Keycap profiles we track. A vendor listing must name one of these to be
 # considered — the profile token is what makes "DCS Dolch" a different product
 # from "GMK Dolch", so it is matched here and deliberately kept in the set name.
-# Mirror of TRACKED_PROFILE_RE in src/lib/import/discovery.ts — keep in sync.
-TRACKED_PROFILE_RE = re.compile(r"\b(?:GMK|DCS)\b", re.IGNORECASE)
+#
+# Mirror of TRACKED_PROFILES in src/lib/set-name.ts, which is where the site's
+# maker registry lives — `npm run test:set-name` parses this literal and fails
+# if the two disagree. It is deliberately the SAME list rather than a shorter
+# one: this gate is the first thing every store product passes through, and
+# when it read `\b(?:GMK|DCS)\b` it was narrower than what the site publishes.
+#
+# MAKER_NAME_PREFIXES carries "SA ", "DSS " and "DSA " because _GH_KEYCAP_PROFILE
+# (below) files those Geekhack threads as keycap sets and /browse offers them
+# under the Signature Plastics pill; MAKER_SLUG_PREFIXES carries "cyl-"/"mtnu-"
+# for the same reason. The sets existed and the site listed them — but a store
+# selling them published NOTHING, because tracked_products_from_catalog dropped
+# every one of its products before match_product_to_set ever saw a title. A
+# Signature Plastics specialist (Saber Keebs: 9 of its 10 keycap products are
+# DCS/DSS/SA) came back "0 tracked listing(s)" on every rotation, forever, and
+# no run summary ever looked wrong.
+#
+# Whole-word matching keeps the two-letter tokens safe: "SA" cannot match
+# inside "Salamander" or "Sanctuary", both of which are GMK sets.
+TRACKED_PROFILES = ("gmk", "cyl", "mtnu", "dcs", "sa", "dss", "dsa")
+TRACKED_PROFILE_RE = re.compile(
+    r"\b(?:" + "|".join(TRACKED_PROFILES) + r")\b", re.IGNORECASE
+)
 
 
 def tracked_products_from_catalog(data: dict, origin: str) -> list[dict]:

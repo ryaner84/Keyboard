@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   dedupeKey,
   normalizeSetName,
@@ -6,9 +8,12 @@ import {
   roundNumber,
   setMaker,
   KEYCAP_MAKER_LABELS,
+  MAKER_NAME_PREFIXES,
   makerWhereOr,
   isKeycapMaker,
   displaySetName,
+  TRACKED_PROFILES,
+  TRACKED_PROFILE_RE,
 } from "@/lib/set-name";
 
 // --- normalizeSetName keeps DCS distinct from GMK -------------------------
@@ -176,6 +181,88 @@ assert.equal(setMaker(displaySetName("[GB] DCS Mermaid")), "SP");
 assert.equal(
   normalizeSetName("[GB] MW STONE Age (GB CLOSED)"),
   normalizeSetName(displaySetName("[GB] MW STONE Age (GB CLOSED)"))
+);
+
+// ── The tracked-profile gate ────────────────────────────────────────────────
+// Discovery keeps only the catalog products whose title names a tracked
+// profile, and that gate is the FIRST thing every store listing meets. When it
+// was a local `\b(?:GMK|DCS)\b` it was narrower than the maker registry above,
+// so every SA / DSS / DSA / MTNU / CYL product in every store catalog was
+// dropped before matchProduct ever saw it — and a store that sells only those
+// (a Signature Plastics specialist) published nothing at all while every
+// storefront repair read its row as healthy.
+
+// Every profile the site files under a maker must get through the gate.
+for (const profile of TRACKED_PROFILES) {
+  assert.ok(
+    TRACKED_PROFILE_RE.test(`${profile} Dolch`),
+    `${profile} is a tracked profile but the discovery gate refuses it`
+  );
+  assert.ok(setMaker(`${profile} Dolch`), `${profile} must resolve to a maker`);
+}
+
+// …and the registry must not carry a prefix the gate has never heard of. This
+// is the assertion that would have failed the day "SA " was added to
+// MAKER_NAME_PREFIXES while the gate stayed on GMK|DCS.
+for (const prefixes of Object.values(MAKER_NAME_PREFIXES)) {
+  for (const prefix of prefixes) {
+    assert.ok(
+      TRACKED_PROFILE_RE.test(`${prefix.trim()} Dolch`),
+      `MAKER_NAME_PREFIXES lists "${prefix}" but the discovery gate refuses it — ` +
+        `the site would publish those sets while no vendor could ever be linked to one`
+    );
+  }
+}
+
+// The real listings this went wrong on.
+assert.ok(TRACKED_PROFILE_RE.test("SA Laser"));
+assert.ok(TRACKED_PROFILE_RE.test("(In Stock) DSS Fjord Keycap Set"));
+assert.ok(TRACKED_PROFILE_RE.test("DSA Magic Girl"));
+assert.ok(TRACKED_PROFILE_RE.test("MTNU Electronic Control"));
+assert.ok(TRACKED_PROFILE_RE.test("CYL Alter Redux"));
+
+// Whole-word only. This is what lets the gate carry the two-letter tokens that
+// MAKER_NAME_PREFIXES has to spell as "SA " with a trailing space: "Salamander"
+// and "Sanctuary" are GMK sets and must not be read as Signature Plastics ones,
+// and a profile named mid-word is not a profile.
+assert.ok(!TRACKED_PROFILE_RE.test("Salamander"));
+assert.ok(!TRACKED_PROFILE_RE.test("Sanctuary"));
+assert.ok(!TRACKED_PROFILE_RE.test("USA Keyboards"));
+assert.ok(!TRACKED_PROFILE_RE.test("PBT Heavy Industry"));
+assert.ok(!TRACKED_PROFILE_RE.test("KAT Milkshake"), "KAT is not a profile we track");
+
+// ── Agreement with the Python scraper ───────────────────────────────────────
+// Discovery is written twice — run_discovery in scrape.py is the nightly that
+// actually crawls, discoverGmkProducts is the Vercel cron. A gate widened on
+// one side only would leave the nightly still refusing the very listings this
+// exists to link, which is precisely how #131's discovery filter went half
+// applied for a year.
+
+const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+
+const scraperSource = read("scraper/scrape.py");
+const pyProfiles = /TRACKED_PROFILES\s*=\s*\(([^)]*)\)/.exec(scraperSource);
+assert.ok(pyProfiles, "scrape.py must keep TRACKED_PROFILES");
+const pyTokens: string[] = [];
+const tokenRe = /"([^"]+)"/g;
+let tokenMatch: RegExpExecArray | null;
+while ((tokenMatch = tokenRe.exec(pyProfiles[1])) !== null) pyTokens.push(tokenMatch[1]);
+assert.deepEqual(
+  pyTokens,
+  TRACKED_PROFILES,
+  "scrape.py and set-name.ts must gate vendor catalogs on the same profiles"
+);
+
+// And the TS half must take the gate from here rather than re-declaring one —
+// a local literal is how the two drifted in the first place.
+const discoverySource = read("src/lib/import/discovery.ts");
+assert.ok(
+  /import\s*\{[^}]*TRACKED_PROFILE_RE[^}]*\}\s*from\s*"@\/lib\/set-name"/.test(discoverySource),
+  "discovery.ts must import TRACKED_PROFILE_RE from set-name.ts"
+);
+assert.ok(
+  !/const\s+TRACKED_PROFILE_RE\s*=/.test(discoverySource),
+  "discovery.ts still declares its own tracked-profile regex"
 );
 
 console.log("set-name profile-identity checks passed");
