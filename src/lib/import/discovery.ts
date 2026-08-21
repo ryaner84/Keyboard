@@ -5,6 +5,7 @@ import { NOT_MANUFACTURER_VENDOR } from "./manufacturer-vendors";
 // storefront repairs rather than re-listed here.
 import { needsStorefront } from "../../../scripts/lib/vendor-urls.mjs";
 import { NONBASE_SUBKIT_RE, PRODUCT_ACCESSORY_RE } from "@/lib/kit-variants";
+import { TRACKED_PROFILE_RE } from "@/lib/set-name";
 
 // A catalog product whose RAW title names a subkit or accessory must never be
 // linked as a set's VendorKit: normalizeSetName strips bracketed qualifiers,
@@ -63,8 +64,13 @@ interface CatalogProduct {
 // Keycap profiles we track. A vendor listing must name one of these to be
 // considered — the profile token is what makes "DCS Dolch" a different product
 // from "GMK Dolch", so it is matched here and deliberately kept in the set name.
-// Mirror of TRACKED_PROFILE_RE in scraper/scrape.py — keep in sync.
-const TRACKED_PROFILE_RE = /\b(?:GMK|DCS)\b/i;
+//
+// The list comes from set-name.ts, which is where the site's maker registry
+// lives. It used to be a local `\b(?:GMK|DCS)\b`, narrower than that registry:
+// every SA / DSS / DSA / MTNU / CYL product in every store catalog was dropped
+// before matching, so a store selling those sets published nothing at all.
+// Mirrored in scraper/scrape.py; `npm run test:set-name` fails if they drift.
+// (Imported at the top of the file, with the other set-name helpers.)
 
 // ── Shopify path ────────────────────────────────────────────────────────────
 // Pull every product for a tracked profile (GMK / DCS …) from a Shopify store's

@@ -788,13 +788,38 @@ class TrackedProfileCatalogTests(unittest.TestCase):
             {
                 "products": [
                     {"title": "KAT Milkshake", "handle": "kat-milkshake"},
-                    {"title": "SA Laser", "handle": "sa-laser"},
+                    {"title": "MT3 Susuwatari", "handle": "mt3-susuwatari"},
                     {"title": "GMK No Handle"},  # unusable without a handle
                 ]
             },
             "https://x.test",
         )
         self.assertEqual(out, [])
+
+    def test_keeps_every_profile_the_site_publishes(self):
+        # The gate used to be GMK|DCS while the site filed SA / DSS / DSA under
+        # the Signature Plastics pill and CYL / MTNU under GMK. Those products
+        # were dropped before match_product_to_set ever saw a title, so a store
+        # selling them could never be linked to anything — it read as healthy to
+        # every storefront repair and published NOTHING. Saber Keebs is the live
+        # case: 9 of its 10 keycap products are DCS/DSS/SA.
+        titles = [
+            "SA Laser",
+            "DSS Fjord",
+            "DSA Magic Girl",
+            "MTNU Electronic Control",
+            "CYL Alter Redux",
+        ]
+        out = scrape.tracked_products_from_catalog(self._data(*titles), "https://saberkeebs.com")
+        self.assertEqual([p["title"] for p in out], titles)
+
+    def test_profile_tokens_match_whole_words_only(self):
+        # Two-letter tokens are why MAKER_NAME_PREFIXES has to spell the SQL
+        # rule as "SA " with a trailing space. A word-boundary regex needs no
+        # such workaround, and must not acquire one by accident.
+        for title in ("Salamander", "Sanctuary", "USA Keycaps", "PBT Heavy Industry"):
+            self.assertIsNone(scrape.TRACKED_PROFILE_RE.search(title), title)
+        self.assertIsNotNone(scrape.TRACKED_PROFILE_RE.search("GMK Salamander"))
 
     def test_legacy_alias_still_exposed(self):
         # run_discovery calls the old name; it must keep working.

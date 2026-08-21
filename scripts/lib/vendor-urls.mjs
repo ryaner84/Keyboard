@@ -476,7 +476,33 @@ export function planRosterSync(roster, existing) {
  * than named here to keep this file free of the manufacturer registry, which
  * is TypeScript.
  *
- * @param {Array<{ slug: string, websiteUrl?: string | null, visibleListings?: number }>} vendors
+ * Each vendor is also given a REASON, because "one of three things went wrong"
+ * is not a diagnosis — it named the vendor and then left the owner to work out
+ * which pass to look at. The three causes leave different residue in the DB and
+ * the counts separate them cleanly:
+ *
+ *   listings = 0                 discovery has never linked this store to a
+ *                                tracked set. The catalog pass is the one to
+ *                                look at — a store whose catalogue is entirely
+ *                                profiles the tracked-profile gate refused
+ *                                lands here, which is exactly how every
+ *                                Signature Plastics specialist read as healthy
+ *                                while publishing nothing.
+ *   listings > 0, priced = 0     linked but never priced. Unpriced rows are
+ *                                hidden outright on RELEASED sets, which is
+ *                                where most listings live — so the store has
+ *                                rows and still shows nothing. refresh-prices.
+ *   priced > 0, visible = 0      priced, but every row is filtered off the set
+ *                                page: a non-BASE kit, or a catalog URL that
+ *                                PURCHASABLE_VENDOR_KIT_WHERE refuses.
+ *
+ * `listings` counts the vendor's VendorKit rows of ANY kit type and
+ * `pricedListings` the ones carrying a price, so the three cases stay disjoint;
+ * `visibleListings` is the narrow site-visible count described above. All are
+ * counted in SQL by the caller — this planner has no DB.
+ *
+ * @param {Array<{ slug: string, websiteUrl?: string | null, visibleListings?: number,
+ *                 listings?: number, pricedListings?: number }>} vendors
  * @param {Set<string>} [excludeSlugs]
  */
 export function planPublishingReport(vendors, excludeSlugs = new Set()) {
@@ -487,8 +513,23 @@ export function planPublishingReport(vendors, excludeSlugs = new Set()) {
     // would just double the noise on the deploy log.
     .filter((v) => !needsStorefront(v.websiteUrl))
     .filter((v) => Number(v.visibleListings ?? 0) === 0)
-    .map((v) => ({ slug: v.slug, websiteUrl: String(v.websiteUrl ?? "").trim() }))
+    .map((v) => ({
+      slug: v.slug,
+      websiteUrl: String(v.websiteUrl ?? "").trim(),
+      reason: publishingFailureReason(v),
+    }))
     .sort((a, b) => a.slug.localeCompare(b.slug));
+}
+
+/** Which pass to look at for a vendor the site never surfaces. */
+function publishingFailureReason(vendor) {
+  const listings = Number(vendor.listings ?? 0);
+  const priced = Number(vendor.pricedListings ?? 0);
+  if (!(listings > 0)) return "no listing linked — discovery has never matched a tracked set";
+  if (!(priced > 0)) {
+    return `${listings} listing(s) linked, none priced — unpriced rows are hidden on released sets`;
+  }
+  return `${priced} of ${listings} listing(s) priced but none visible — non-BASE kit or catalog URL`;
 }
 
 /** Why no storefront could be derived — reported so the log is actionable. */

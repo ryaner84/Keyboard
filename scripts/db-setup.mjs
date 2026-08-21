@@ -534,10 +534,14 @@ async function healVendorUrlsFromListings(client) {
 // single listing from it — because its catalog pass never matched a tracked
 // set (a store that stopped selling GMK / DCS), or its /products.json turned
 // to a redirect the crawler can't follow, or its every scraped price landed at
-// null and the sets it lists are all RELEASED (which hides unpriced rows). No
-// automatic pass can tell those apart, and none can undo them from data we
-// hold — but until this diagnostic named them, they were exactly the "publish
-// nothing" case nobody could see.
+// null and the sets it lists are all RELEASED (which hides unpriced rows).
+// None can be UNDONE from data we hold — but they can be told apart, and the
+// report names which of them applies to each vendor, because "one of three
+// things went wrong" sent the owner to the wrong pass as often as the right
+// one. The first cause is the one that had a code bug behind it: discovery's
+// tracked-profile gate refused every SA / DSS / DSA / MTNU / CYL product, so a
+// Signature Plastics specialist could never be linked to anything and sat in
+// this report reading as "the store stopped selling tracked sets".
 //
 // A "visible listing" is a VendorKit that would actually render on a set page:
 // its kit is BASE, its productUrl isn't a manufacturer catalog page (unless
@@ -601,7 +605,16 @@ async function reportVendorsPublishingNothing(client) {
                        )
                      )
                    )
-              ) AS visible_listings
+              ) AS visible_listings,
+              -- The two counts that tell the three causes apart (see
+              -- planPublishingReport): how many rows the store has at all, and
+              -- how many of those carry a price. Deliberately unfiltered by kit
+              -- type or URL, so "has rows but none visible" stays distinct from
+              -- "has no rows".
+              (SELECT count(*)::int FROM public."VendorKit" vk
+                WHERE vk."vendorId" = v.id) AS listings,
+              (SELECT count(*)::int FROM public."VendorKit" vk
+                WHERE vk."vendorId" = v.id AND vk.price IS NOT NULL) AS priced_listings
          FROM public."Vendor" v
         ORDER BY v.slug`
     ));
@@ -615,6 +628,8 @@ async function reportVendorsPublishingNothing(client) {
       slug: r.slug,
       websiteUrl: r.websiteUrl,
       visibleListings: r.visible_listings,
+      listings: r.listings,
+      pricedListings: r.priced_listings,
     })),
     _NON_PUBLISHING_SLUGS
   );
@@ -622,12 +637,14 @@ async function reportVendorsPublishingNothing(client) {
 
   console.warn(
     `[db-setup] ${silent.length} vendor(s) have a storefront but publish no ` +
-      `listing on any set page — the catalog pass has not matched a tracked ` +
-      `set for them, or their listings are all unpriced on RELEASED sets ` +
-      `(which hides them). Check discovery for the first case, refresh-prices ` +
-      `for the second, or remove the row if the store no longer sells tracked ` +
-      `sets: ${silent.map((v) => `${v.slug} (${v.websiteUrl})`).join(", ")}`
+      `listing on any set page. Each is named with the pass to look at — ` +
+      `"no listing linked" is discovery, "none priced" is refresh-prices, ` +
+      `"none visible" is a non-BASE/catalog row. Removing the Vendor row is ` +
+      `the right answer only when the store no longer sells tracked sets.`
   );
+  for (const v of silent) {
+    console.warn(`[db-setup]   ${v.slug} (${v.websiteUrl}) — ${v.reason}`);
+  }
 }
 
 // Sets labelled "Canceled"/"Cancelled" (in the name, straight from

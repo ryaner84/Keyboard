@@ -708,8 +708,50 @@ assert.deepEqual(
   silent.map((v) => v.slug),
   ["no-count", "quiet-shop", "string-count"]
 );
-// Report shape is {slug, websiteUrl} — the caller wants both, for a log line.
-assert.deepEqual(silent[0], { slug: "no-count", websiteUrl: "https://nocount.com" });
+// Report shape is {slug, websiteUrl, reason} — the caller wants all three, for
+// a log line the owner can act on without opening a psql session.
+assert.deepEqual(silent[0], {
+  slug: "no-count",
+  websiteUrl: "https://nocount.com",
+  reason: "no listing linked — discovery has never matched a tracked set",
+});
+
+// --- the reason, which is the whole point of naming them -------------------
+// "one of three things went wrong" sent the owner to the wrong pass as often as
+// the right one. The three causes leave different residue, and the counts
+// separate them: no rows at all is discovery's, rows-but-no-price is the price
+// pass's, priced-but-invisible is a non-BASE/catalog row.
+const reasonOf = (vendor) => planPublishingReport([vendor])[0].reason;
+
+// Discovery never linked the store to anything. This is the shape a Signature
+// Plastics specialist sat in for as long as the tracked-profile gate refused
+// SA / DSS / DSA titles — the store was crawled every rotation and matched
+// nothing, so it looked exactly like a shop that had stopped selling.
+assert.match(
+  reasonOf({ slug: "saber-keebs", websiteUrl: "https://saberkeebs.com", visibleListings: 0, listings: 0, pricedListings: 0 }),
+  /no listing linked/
+);
+// Linked but never priced — unpriced rows are hidden outright on RELEASED sets,
+// which is where most listings live, so the store has rows and shows nothing.
+assert.match(
+  reasonOf({ slug: "unpriced", websiteUrl: "https://unpriced.com", visibleListings: 0, listings: 7, pricedListings: 0 }),
+  /7 listing\(s\) linked, none priced/
+);
+// Priced, but every row is filtered off the set page.
+assert.match(
+  reasonOf({ slug: "invisible", websiteUrl: "https://invisible.com", visibleListings: 0, listings: 9, pricedListings: 4 }),
+  /4 of 9 listing\(s\) priced but none visible/
+);
+// Counts arrive from the driver as strings on some paths; a "0" must not read
+// as "has listings" and flip the diagnosis to the wrong pass.
+assert.match(
+  reasonOf({ slug: "stringy", websiteUrl: "https://stringy.com", visibleListings: "0", listings: "0", pricedListings: "0" }),
+  /no listing linked/
+);
+assert.match(
+  reasonOf({ slug: "stringy2", websiteUrl: "https://stringy2.com", visibleListings: "0", listings: "3", pricedListings: "0" }),
+  /3 listing\(s\) linked, none priced/
+);
 // Deterministic order (alphabetical by slug), so the deploy log doesn't churn.
 assert.deepEqual(
   planPublishingReport([
@@ -754,6 +796,26 @@ assert.ok(
 assert.ok(
   /reportVendorsPublishingNothing\(client\)/.test(dbSetup),
   "scripts/db-setup.mjs's main() must invoke reportVendorsPublishingNothing"
+);
+// …and it must feed the counts the reason is derived from. Omitting them is not
+// a missing detail: every field defaults to 0, so the report would tell the
+// owner "no listing linked — discovery has never matched a tracked set" about
+// every silent vendor, confidently and wrongly, and send them to the one pass
+// that has nothing to do with it.
+for (const field of ["listings", "pricedListings", "visibleListings"]) {
+  assert.ok(
+    new RegExp(`${field}:`).test(dbSetup),
+    `scripts/db-setup.mjs must pass ${field} to planPublishingReport`
+  );
+}
+assert.ok(
+  /AS listings/.test(dbSetup) && /AS priced_listings/.test(dbSetup),
+  "scripts/db-setup.mjs must count the vendor's rows and priced rows in SQL"
+);
+// The reason must reach the log, not just the plan.
+assert.ok(
+  /\.reason/.test(dbSetup),
+  "scripts/db-setup.mjs must print each silent vendor's reason"
 );
 
 console.log("vendor-url heal checks passed");

@@ -96,6 +96,25 @@ that actually crawls) and `discoverGmkProducts` in `src/lib/import/discovery.ts`
 vendors in the TS copy alone and the nightly kept spending a fifth of every
 rotation on stores it could not fetch.
 
+**The profiles discovery reads a catalog for must equal the profiles the site
+publishes.** That gate is the first thing every store product passes through,
+and it spent a year as a local `\b(?:GMK|DCS)\b` in both halves while
+`MAKER_NAME_PREFIXES` in `src/lib/set-name.ts` had grown to GMK/CYL/MTNU and
+DCS/SA/DSS/DSA — the Geekhack importer files those threads as keycap sets and
+/browse offers them under the two maker pills. So the sets existed, the site
+listed them, and every SA / DSS / DSA / MTNU / CYL product in every store
+catalog was dropped before `matchProduct` saw a title. A Signature Plastics
+specialist (Saber Keebs: 9 of its 10 keycap products are DCS/DSS/SA) therefore
+came back "0 tracked listing(s)" on every rotation, forever, with a healthy
+`websiteUrl` and no run summary ever looking wrong — the fifth "publishes
+nothing" shape below, with a code bug behind it rather than bad data.
+`TRACKED_PROFILES` is now derived from the maker registry itself and mirrored
+in `scrape.py`; `test:set-name` fails if the two lists disagree, if a maker
+prefix names a profile the gate refuses, or if `discovery.ts` declares its own
+regex again. Whole-word matching is what makes the two-letter tokens safe —
+`\bSA\b` cannot reach inside "Salamander" or "Sanctuary", which is the hazard
+`MAKER_NAME_PREFIXES` has to spell around as `"SA "`.
+
 A vendor is identified by its **site**, not its slug: the roster spells five
 stores differently from the database (`cannonkeys`/`cannon-keys`,
 `thekeyco`/`the-key-company`, …), so anything that inserts a Vendor must match
@@ -180,6 +199,18 @@ discovery isn't matching, or force a re-scrape. A "visible listing" is what
 `PURCHASABLE_VENDOR_KIT_WHERE` + `showUnpriced` (in `VendorTable`) would render,
 counted in SQL; the planner has the shape rules so a blank / shortener /
 marketplace row belongs to `planVendorUrlHeal`, not to this report.
+
+**Naming the vendor is not the diagnosis** — the three causes above go to three
+different passes, and one message listing all three sent the owner to the wrong
+one as often as the right one. They leave different residue, so the report also
+counts each vendor's VendorKit rows (`listings`) and priced rows
+(`pricedListings`) and says which applies: no rows at all is discovery's, rows
+but no price is `refresh-prices`, priced but invisible is a non-BASE kit or a
+catalog URL. Those counts are deliberately unfiltered by kit type or URL so the
+three stay disjoint — and every one of them defaults to 0, so a caller that
+forgets to pass them gets "discovery has never matched a tracked set" about
+every silent vendor, confidently and wrongly. `test:vendor-urls` asserts
+`db-setup` selects and passes all three.
 
 Roster entries carry `aliases` because the rows the roster exists to repair are
 the ones host matching cannot see: a blank vendor has no host, so a blank

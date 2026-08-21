@@ -134,6 +134,42 @@ export const MAKER_SLUG_PREFIXES: Record<KeycapMaker, string[]> = {
   SP: ["dcs-", "sa-", "dss-", "dsa-"],
 };
 
+// ── The profiles a vendor catalog is read for ───────────────────────────────
+// Discovery walks a store's own catalog and keeps the products whose TITLE
+// names a profile we track, then matches those titles to tracked sets. That
+// gate is the first thing every store listing passes through, and it was
+// written as a standalone `\b(?:GMK|DCS)\b` in both halves of discovery —
+// narrower than the registry above, which is what the site actually publishes.
+//
+// The gap is not academic. `MAKER_NAME_PREFIXES.SP` carries "SA ", "DSS " and
+// "DSA " because the Geekhack importer files those threads as keycap sets and
+// /browse offers them under the Signature Plastics pill; `MAKER_SLUG_PREFIXES`
+// carries "cyl-" and "mtnu-" for the same reason. So the sets exist, the site
+// lists them — and a store selling them published NOTHING, because every one
+// of its products was dropped before `matchProduct` ever saw it. A store whose
+// tracked catalogue is entirely Signature Plastics (Saber Keebs: 9 of its 10
+// keycap products are DCS/DSS/SA) therefore came back "0 tracked listing(s)"
+// on every rotation, forever, with no run summary ever looking wrong.
+//
+// Derived from MAKER_BY_PROFILE rather than re-listed so a new profile can
+// only ever be added in one place on this side. The Python copy in scrape.py
+// is checked against this one by `npm run test:set-name`.
+export const TRACKED_PROFILES: string[] = Object.keys(MAKER_BY_PROFILE);
+
+// Whole-word, so the two-letter tokens stay safe: "SA" cannot match inside
+// "Salamander" or "Sanctuary" (both GMK sets) the way the bare "SA" PREFIX
+// that MAKER_NAME_PREFIXES has to avoid would.
+//
+// Passing the gate is not the same as matching a set — normalizeSetName still
+// decides that, and it strips "cyl"/"mtnu" from BOTH sides, so a store's "MTNU
+// Electronic Control" matches the DB row of the same name and nothing else.
+// "sa"/"dss"/"dsa" it keeps, so those stay distinct from their GMK namesakes,
+// which is the rule keycap identity turns on.
+export const TRACKED_PROFILE_RE = new RegExp(
+  `\\b(?:${TRACKED_PROFILES.join("|")})\\b`,
+  "i"
+);
+
 export function isKeycapMaker(value: string): value is KeycapMaker {
   return value === "GMK" || value === "SP";
 }
