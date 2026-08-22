@@ -165,11 +165,31 @@ export function storefrontHostFromUrls(urls) {
  * mokbstore.com, so without this the deploy-time repair is undone by the very
  * next nightly import.
  *
+ * `ownHostKey` is the host this vendor is KNOWN to own — the strict-plurality
+ * host of its own listing URLs (storefrontHostFromUrls), which is the same
+ * evidence planStorefrontRelocation settles the question with at deploy time.
+ * A store that moved domains keeps upstream entries on the old one forever:
+ * 96 of NovelKeys' 258 links are novelkeys.xyz, its retired site, and
+ * last-write-wins is exactly how the Vendor row came to be registered there.
+ * So once the row IS on the host its listings sell from, no storeLink may move
+ * it off again — otherwise the deploy repairs it and that same night's import
+ * puts it back, which is the loop #133 and #137 each had to close for their own
+ * shape. When the row is NOT yet on that host, an incoming link is adopted only
+ * if it names it, so the import converges on the store's real site instead of
+ * wandering between its old ones. Omitted (a brand-new vendor, or one whose
+ * listings name no storefront) leaves the rule above unchanged.
+ *
  * @param {string | null | undefined} current
  * @param {string | null | undefined} incoming
  * @param {{ has(host: string): boolean }} [otherHostKeys]
+ * @param {string | null | undefined} [ownHostKey]
  */
-export function nextVendorWebsiteUrl(current, incoming, otherHostKeys = new Set()) {
+export function nextVendorWebsiteUrl(
+  current,
+  incoming,
+  otherHostKeys = new Set(),
+  ownHostKey = ""
+) {
   const currentUrl = String(current ?? "").trim();
   let origin = "";
   try {
@@ -179,7 +199,10 @@ export function nextVendorWebsiteUrl(current, incoming, otherHostKeys = new Set(
     origin = "";
   }
   if (!origin || !isStorefrontHost(hostOfUrl(origin))) return currentUrl;
-  if (otherHostKeys?.has?.(hostKey(hostOfUrl(origin)))) return currentUrl;
+  const incomingKey = hostKey(hostOfUrl(origin));
+  if (otherHostKeys?.has?.(incomingKey)) return currentUrl;
+  const ownKey = hostKey(ownHostKey ?? "");
+  if (ownKey && incomingKey !== ownKey) return currentUrl;
   return origin;
 }
 
@@ -360,6 +383,101 @@ export function planStorefrontOwnership(vendors, roster = []) {
 }
 
 /**
+ * Move a vendor off a storefront that is a real shop, is nobody else's, and is
+ * still not the site this store sells from.
+ *
+ * planStorefrontOwnership can only ask "is this THIS shop?" when two rows fight
+ * over one host — the collision is its whole evidence. A row parked ALONE on
+ * the wrong site answers "healthy" to every existing repair: `needsStorefront`
+ * says it is a shop, no other row contests it, and planVendorUrlHeal only ever
+ * looks at rows `needsStorefront` flagged. Six of the 125 shipped vendors are
+ * in that state and only one of them (Swagkeys (KR), which happens to share
+ * mokbstore.com with Mokb Store's own row) was reachable by any of them:
+ *
+ *   novelkeys   novelkeys.xyz               → novelkeys.com               162:96
+ *   omnitype    dixiemech.com               → omnitype.com                 42:6
+ *   yushakobo   yushakobo.jp                → shop.yushakobo.jp            44:8
+ *   mekanisk    mekanisktastatur.no         → tastatur.no                  14:2
+ *   mechboards  mechboards.co.uk            → groupbuys.mechboards.co.uk    6:2
+ *
+ * A retired domain, a sibling brand, a corporate apex instead of the shop
+ * subdomain (host matching folds "www." and nothing else, so shop.yushakobo.jp
+ * is a different host from yushakobo.jp — which is why SEEDED_VENDORS in
+ * scrape.py had to hard-code a repoint for that ONE store, in the Python half
+ * only). Every rotation asks the wrong site for /products.json, so the store is
+ * never crawled AS ITSELF: no new listing is ever linked, no moved listing is
+ * ever relinked, and its dead URLs never heal — which on a RELEASED set means
+ * hidden, because an unpriced row is not shown there. `find_vendor_for_url`
+ * resolves outlet collections by host too, so none of them can reach the row
+ * either. Worst of all is the shape with a live shop on the wrong side of it:
+ * discovery reads DixieMech's catalogue and files it as Omnitype's listings —
+ * planStorefrontOwnership's exact harm, with no collision to detect it.
+ *
+ * The evidence is already in the database, and it is the same evidence every
+ * other planner here uses: the row's own VendorKit URLs. So the rule is the
+ * same too — `storefrontHostFromUrls`, a STRICT plurality, ties left alone.
+ * Deliberately narrow on top of that:
+ *
+ *   - a slug the roster pins is skipped outright; planRosterSync has already
+ *     decided it and the roster is the rung that is right by construction;
+ *   - a row sharing its host with another row is skipped: that is a contested
+ *     host, which is planStorefrontOwnership's business and settled with
+ *     different evidence;
+ *   - a winning host another row already holds is REPORTED, never taken —
+ *     adopting it is how a vendor gets parked on someone else's shop in the
+ *     first place.
+ *
+ * `vendors` is [{ id, slug, websiteUrl, listingUrls }] — every vendor, since a
+ * host is only "taken" relative to the rest of the table. `roster` is the
+ * hand-written seed. Returns { heal, contested }, both pure; `heal` carries
+ * `current` so the caller can guard its UPDATE on the value planned against.
+ */
+export function planStorefrontRelocation(vendors, roster = []) {
+  const pinnedSlugs = new Set();
+  for (const entry of roster ?? []) {
+    if (!entry?.slug || !hostOfUrl(entry?.websiteUrl)) continue;
+    for (const slug of [entry.slug, ...(entry.aliases ?? [])]) pinnedSlugs.add(slug);
+  }
+
+  // Only a row that HAS a storefront can be on the wrong one; blank and
+  // shortener-parked rows are planVendorUrlHeal's shape.
+  const rows = (vendors ?? []).filter((v) => v && !needsStorefront(v.websiteUrl));
+  const holders = new Map(); // hostKey -> [slug]
+  for (const row of rows) {
+    const key = hostKey(hostOfUrl(row.websiteUrl));
+    if (key) holders.set(key, [...(holders.get(key) ?? []), row.slug]);
+  }
+
+  const heal = [];
+  const contested = [];
+  for (const row of rows) {
+    const current = String(row.websiteUrl ?? "").trim();
+    const currentKey = hostKey(hostOfUrl(current));
+    if (!currentKey || pinnedSlugs.has(row.slug)) continue;
+    if ((holders.get(currentKey) ?? []).length > 1) continue;
+
+    const own = storefrontHostFromUrls(row.listingUrls);
+    const ownKey = hostKey(own ?? "");
+    if (!ownKey || ownKey === currentKey) continue;
+
+    const holder = (holders.get(ownKey) ?? []).find((slug) => slug !== row.slug);
+    if (holder) {
+      contested.push({
+        ...row,
+        host: own,
+        owner: holder,
+        reason: `its listings sell from ${own}, which already belongs to ${holder}`,
+      });
+      continue;
+    }
+    holders.set(ownKey, [row.slug]);
+    holders.set(currentKey, []); // the row no longer holds the host it left
+    heal.push({ ...row, host: own, current, websiteUrl: `https://${own}` });
+  }
+  return { heal, contested };
+}
+
+/**
  * Reconcile the hand-written roster (src/data/seed/vendors.json) with the
  * Vendor rows that exist.
  *
@@ -390,15 +508,39 @@ export function planStorefrontOwnership(vendors, roster = []) {
  * needsStorefront). The roster is hand-written, so when it names a store the
  * database has parked on a marketplace, the roster is simply right.
  *
+ * And it is right about a WRONG storefront too, which is the case this rung
+ * spent a year declining to fix. `needsStorefront` asks whether a URL is *a*
+ * shop, never whether it is *this* shop, so a row parked on a real-looking site
+ * that is not the store's own reads as healthy and the heal skipped it —
+ * `novelkeys` shipped as https://novelkeys.xyz, NovelKeys' retired domain,
+ * while this very roster names https://novelkeys.com, and every deploy for a
+ * year read the row, agreed it was "a shop", and left it. Discovery therefore
+ * asked novelkeys.xyz for /products.json on every rotation, so one of the
+ * biggest stores on the site could never be linked to a new listing nor have a
+ * moved one relinked — and because `find_vendor_for_url` resolves an outlet
+ * collection by HOST, all four of NovelKeys' OUTLET_COLLECTIONS entries (the
+ * discounted-GMK and GMK-leftovers pages, which is where its in-stock sets
+ * actually are) logged "no tracked vendor for novelkeys.com" and did nothing,
+ * every night. `test:vendor-urls` did not catch that: it checks the outlet
+ * hosts against the ROSTER, which was right — it was the Vendor row that
+ * disagreed. Comparison is by HOST, so a www-only spelling difference
+ * (`ashkeebs` is www.ashkeebs.com in the DB and ashkeebs.com in the roster)
+ * is not churn worth writing.
+ *
  * `existing` is [{ slug, websiteUrl }]. Returns, all pure:
  *   insert    — roster rows with no row under any of their slugs and no other
  *               vendor already owning their host
- *   heal      — { slug, websiteUrl, current } for a row this roster entry
- *               names that has no usable storefront; `current` is what it is
- *               being replaced with, so the caller can guard its UPDATE
+ *   heal      — { slug, websiteUrl, current } for a row this roster entry names
+ *               whose storefront is missing, unusable, or on the wrong host;
+ *               `current` is what it is being replaced with, so the caller can
+ *               guard its UPDATE
  *   aliased   — roster rows a differently-slugged vendor already covers by host
  *   duplicate — extra rows matching the same roster entry: two Vendor rows for
  *               one shop, which is a merge nobody can do automatically
+ *   conflicted — a row the roster would move onto a host ANOTHER vendor row
+ *               already holds. Moving it would re-create exactly what
+ *               planStorefrontOwnership exists to undo, so it is reported
+ *               instead: two rows claiming one shop needs a person.
  */
 export function planRosterSync(roster, existing) {
   const urlBySlug = new Map();
@@ -419,9 +561,11 @@ export function planRosterSync(roster, existing) {
   const heal = [];
   const aliased = [];
   const duplicate = [];
+  const conflicted = [];
   for (const entry of roster ?? []) {
     const websiteUrl = String(entry?.websiteUrl ?? "").trim();
     if (!entry?.slug || !websiteUrl) continue;
+    const rosterKey = hostKey(hostOfUrl(websiteUrl));
 
     // Declared order is the priority order: the canonical slug wins when both
     // spellings exist, so the heal never lands on the row we'd rather retire.
@@ -429,21 +573,32 @@ export function planRosterSync(roster, existing) {
     if (present.length > 0) {
       const target = present[0];
       const current = urlBySlug.get(target);
-      if (needsStorefront(current)) heal.push({ slug: target, websiteUrl, current });
+      // Missing, unusable, or simply not this store's site — the roster is the
+      // hand-written rung, so it outranks all three.
+      const wrongHost = hostKey(hostOfUrl(current)) !== rosterKey;
+      if (needsStorefront(current) || wrongHost) {
+        const owner = ownerByHost.get(rosterKey);
+        if (owner && owner !== target) {
+          conflicted.push({ slug: target, owner, host: rosterKey });
+        } else {
+          heal.push({ slug: target, websiteUrl, current });
+          // One host, one row — including the one this heal is about to create.
+          if (rosterKey) ownerByHost.set(rosterKey, target);
+        }
+      }
       for (const extra of present.slice(1)) duplicate.push({ slug: extra, keeps: target });
       continue;
     }
 
-    const key = hostKey(hostOfUrl(websiteUrl));
-    const owner = ownerByHost.get(key);
+    const owner = ownerByHost.get(rosterKey);
     if (owner) {
       aliased.push({ slug: entry.slug, owner });
       continue;
     }
     insert.push(entry);
-    if (key) ownerByHost.set(key, entry.slug);
+    if (rosterKey) ownerByHost.set(rosterKey, entry.slug);
   }
-  return { insert, heal, aliased, duplicate };
+  return { insert, heal, aliased, duplicate, conflicted };
 }
 
 /**
@@ -457,8 +612,11 @@ export function planRosterSync(roster, existing) {
  * shortener-parked URL, a row on another shop's host — and names the residue
  * (`stranded`, `contested`, "not shops") so the owner can act on the rest.
  *
- * There is a fourth shape those repairs cannot see. A vendor can carry a real
- * storefront and still publish nothing on any set page — because its catalog
+ * There is a further shape those repairs cannot see — the fifth, after a blank
+ * URL, a non-shop URL, another store's storefront, and (planStorefrontRelocation
+ * above) a storefront that is nobody else's and still not this store's. A
+ * vendor can carry a real storefront, its OWN, and still publish nothing on any
+ * set page — because its catalog
  * pass never matched a tracked set, or its /products.json turned to a redirect,
  * or its every scraped price landed at null and the sets it lists are all
  * RELEASED (which hides unpriced rows). The row LOOKS healthy to every planner

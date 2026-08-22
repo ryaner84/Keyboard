@@ -185,6 +185,44 @@ another vendor's host for the same reason it refuses a marketplace link —
 without that the nightly import re-parks the row the deploy just repaired, since
 one of Swagkeys (KR)'s own upstream entries names mokbstore.com.
 
+**A fourth shape has no collision to give it away: a row parked ALONE on a
+storefront that isn't this store's site.** `needsStorefront` says "yes, a
+shop"; `planStorefrontOwnership` needs two rows fighting over one host and
+there is only one; `planVendorUrlHeal` only ever looks at rows
+`needsStorefront` flagged. So the row reads as healthy to every repair while
+discovery asks the wrong website for `/products.json` on every rotation, and
+the store is never crawled *as itself*: no new listing is linked, no moved
+listing is relinked, and its dead URLs never heal — which on a RELEASED set
+means hidden. `find_vendor_for_url` resolves outlet collections by host too, so
+none of them can reach the row either. Six of the 125 shipped vendors are in
+that state — a retired domain (`novelkeys` on novelkeys.xyz), a sibling brand
+(`omnitype` on dixiemech.com), a renamed shop (`mekanisk` on
+mekanisktastatur.no), a corporate apex instead of the shop subdomain
+(`yushakobo` on yushakobo.jp, `mechboards` on mechboards.co.uk) — and only
+Swagkeys (KR) was reachable, because it happened to share mokbstore.com with
+Mokb Store's row. Worst is a live shop on the wrong side of it: discovery reads
+DixieMech's catalogue and files it as Omnitype's listings, which is
+`planStorefrontOwnership`'s exact harm with nothing to detect it.
+
+**The roster is right about a WRONG storefront, not just a missing one.**
+`planRosterSync` healed only rows `needsStorefront` flagged, so `novelkeys`
+sat on its retired domain for a year while `src/data/seed/vendors.json` — the
+hand-written rung that exists to be right about exactly this — said
+`https://novelkeys.com` on every deploy and was ignored. All four of NovelKeys'
+`OUTLET_COLLECTIONS` entries logged "no tracked vendor for novelkeys.com" and
+did nothing, nightly; `test:vendor-urls` did not catch it because it checks
+those hosts against the ROSTER, which was right — the Vendor row disagreed. It
+now heals whenever
+the row's HOST differs from the roster's (a www-only spelling difference is not
+churn worth writing), and reports rather than takes a host another row holds.
+For the rows the roster doesn't name, `planStorefrontRelocation` settles it
+with the evidence already in the database — the row's own listing URLs, same
+strict-plurality `storefrontHostFromUrls` every other planner here uses. It
+skips roster-pinned slugs and contested hosts so the three passes never fight
+over one row. And `nextVendorWebsiteUrl` now takes the vendor's own listing
+host: 96 of NovelKeys' 258 links are novelkeys.xyz, so without that guard the
+deploy repairs the row and the same night's import puts it straight back.
+
 **A fifth shape gets past every one of those repairs**: a `websiteUrl` that IS
 a real shop belonging to this vendor and still publishes nothing. The row looks
 healthy — `needsStorefront` returns false, `planStorefrontOwnership` sees no

@@ -20,6 +20,7 @@ import {
   planPublishingReport,
   planRosterSync,
   planStorefrontOwnership,
+  planStorefrontRelocation,
   planVendorUrlHeal,
 } from "./lib/vendor-urls.mjs";
 
@@ -150,6 +151,16 @@ async function ensureVendorRoster(client) {
         `[db-setup] ${plan.duplicate.length} vendor row(s) duplicate a roster store that ` +
           `already has one — merge or remove them: ` +
           plan.duplicate.map((v) => `${v.slug} (kept ${v.keeps})`).join(", ")
+      );
+    }
+    // The roster names a storefront another Vendor row already holds. Taking it
+    // would park two rows on one shop, which is what healMisparkedVendorUrls
+    // exists to undo — so say so and change nothing.
+    if ((plan.conflicted ?? []).length > 0) {
+      console.warn(
+        `[db-setup] ${plan.conflicted.length} roster store(s) name a host another vendor ` +
+          `row already holds — merge or correct them: ` +
+          plan.conflicted.map((v) => `${v.slug} → ${v.host} (held by ${v.owner})`).join(", ")
       );
     }
   } catch (err) {
@@ -352,6 +363,122 @@ async function healMisparkedVendorUrls(client) {
   }
 }
 
+// The fourth shape, and the one every repair above reads as healthy: a row
+// parked ALONE on a storefront that isn't its own. `needsStorefront` says
+// "yes, a shop"; planStorefrontOwnership needs a collision and there isn't one;
+// planVendorUrlHeal only looks at rows needsStorefront flagged. So the row sits
+// there while discovery asks the wrong website for /products.json on every
+// rotation — novelkeys on its retired novelkeys.xyz, omnitype on DixieMech's
+// site, yushakobo on the corporate apex instead of shop.yushakobo.jp. See
+// planStorefrontRelocation for the full list and what it costs.
+//
+// Runs AFTER healMisparkedVendorUrls so contested hosts are settled first (a
+// row moved off one frees it, so the freed host is available here), and BEFORE
+// healVendorUrlsFromListings so that pass sees the final ownership when it
+// decides which hosts are taken.
+async function healOffsiteVendorUrls(client) {
+  let roster = [];
+  try {
+    const parsed = JSON.parse(readFileSync(VENDOR_ROSTER_PATH, "utf8"));
+    if (Array.isArray(parsed)) roster = parsed;
+  } catch {
+    // Only used to skip slugs the roster already decided; without it those rows
+    // are simply settled from their listings, which agrees with it in practice.
+  }
+
+  let rows;
+  try {
+    const all = await client.query(
+      `SELECT id, slug, "websiteUrl" FROM public."Vendor" ORDER BY slug`
+    );
+    rows = all.rows;
+  } catch (err) {
+    console.warn(`[db-setup] offsite vendor check skipped: ${err.message}`);
+    return;
+  }
+
+  // Which rows could even be on the wrong host is a host question, not a SQL
+  // one, so narrow in JS first and aggregate listing URLs only for those.
+  // Same rule planStorefrontRelocation applies, so the narrowing here can never
+  // starve it of the listings it needs for a row it would have considered.
+  const pinned = new Set(
+    roster.flatMap((e) =>
+      e?.slug && hostOfUrl(e?.websiteUrl) ? [e.slug, ...(e.aliases ?? [])] : []
+    )
+  );
+  const holders = new Map();
+  for (const r of rows) {
+    if (needsStorefront(r.websiteUrl)) continue;
+    const key = hostKey(hostOfUrl(r.websiteUrl));
+    if (key) holders.set(key, (holders.get(key) ?? 0) + 1);
+  }
+  const candidates = rows.filter(
+    (r) =>
+      !needsStorefront(r.websiteUrl) &&
+      !pinned.has(r.slug) &&
+      holders.get(hostKey(hostOfUrl(r.websiteUrl))) === 1
+  );
+  if (candidates.length === 0) return;
+
+  let listings;
+  try {
+    listings = await client.query(
+      `SELECT v.id,
+              coalesce(
+                array_agg(u.url) FILTER (WHERE u.url IS NOT NULL AND btrim(u.url) <> ''),
+                '{}'
+              ) AS urls
+         FROM public."Vendor" v
+         LEFT JOIN public."VendorKit" vk ON vk."vendorId" = v.id
+         LEFT JOIN LATERAL (VALUES (vk."productUrl"), (vk."gbUrl")) AS u(url) ON true
+        WHERE v.id = ANY($1)
+        GROUP BY v.id`,
+      [candidates.map((r) => r.id)]
+    );
+  } catch (err) {
+    console.warn(`[db-setup] offsite vendor check skipped: ${err.message}`);
+    return;
+  }
+  const urlsById = new Map(listings.rows.map((r) => [r.id, r.urls]));
+
+  // Every row is passed in, not just the candidates: a host is only "already
+  // taken" relative to the whole table.
+  const { heal, contested } = planStorefrontRelocation(
+    rows.map((r) => ({ ...r, listingUrls: urlsById.get(r.id) ?? [] })),
+    roster
+  );
+
+  if (heal.length > 0) {
+    try {
+      // Guarded on the host it was parked on, so a row another pass moved in
+      // the meantime keeps whatever that pass decided.
+      await client.query(
+        `UPDATE public."Vendor" AS v
+            SET "websiteUrl" = r.url
+           FROM unnest($1::text[], $2::text[], $3::text[]) AS r(id, url, current)
+          WHERE v.id = r.id
+            AND btrim(coalesce(v."websiteUrl", '')) = btrim(r.current)`,
+        [heal.map((v) => v.id), heal.map((v) => v.websiteUrl), heal.map((v) => v.current)]
+      );
+      console.log(
+        `[db-setup] Moved ${heal.length} vendor(s) onto the storefront their own listings ` +
+          `sell from: ${heal.map((v) => `${v.slug} (was ${v.current}) → ${v.host}`).join(", ")}`
+      );
+    } catch (err) {
+      console.warn(`[db-setup] offsite vendor repair skipped: ${err.message}`);
+      return;
+    }
+  }
+
+  if (contested.length > 0) {
+    console.warn(
+      `[db-setup] ${contested.length} vendor(s) sell from a host that already belongs to ` +
+        `another row — merge or correct them: ` +
+        contested.map((v) => `${v.slug} (${v.reason})`).join(", ")
+    );
+  }
+}
+
 // The roster can only repair a store it lists — 26 of them. Every other vendor
 // with no usable storefront has to be repaired from what the database already
 // knows: its own listings. A vendor's VendorKit rows carry the product URLs an
@@ -522,14 +649,15 @@ async function healVendorUrlsFromListings(client) {
 // Vendors that publish NOTHING on any set page, despite having a real
 // storefront — the residue every heal above cannot see.
 //
-// The three healers (planRosterSync, planStorefrontOwnership,
-// planVendorUrlHeal) exist because a Vendor with no usable `websiteUrl`
-// publishes nothing. They each name their own residue in the log — the
-// stranded, the contested, the not-a-shops — so the four shapes of "no
-// storefront of its own" all reach the owner one way or another.
+// The four healers (planRosterSync, planStorefrontOwnership,
+// planStorefrontRelocation, planVendorUrlHeal) exist because a Vendor with no
+// usable `websiteUrl` publishes nothing. They each name their own residue in
+// the log — the stranded, the contested, the not-a-shops — so every shape of
+// "no storefront of its own" reaches the owner one way or another.
 //
 // A fifth shape gets past every one of them. The row's `websiteUrl` is a real
-// shop, so `needsStorefront` reads it as healthy. Discovery crawls it and
+// shop AND its own, so `needsStorefront` reads it as healthy and neither
+// ownership pass has anything to move it to. Discovery crawls it and
 // run_outlets resolves collections to it. And still, the site never surfaces a
 // single listing from it — because its catalog pass never matched a tracked
 // set (a store that stopped selling GMK / DCS), or its /products.json turned
@@ -1052,6 +1180,7 @@ async function main() {
         // listing it publishes until the next nightly self-heal.
         await ensureVendorRoster(client);
         await healMisparkedVendorUrls(client);
+        await healOffsiteVendorUrls(client);
         await healVendorUrlsFromListings(client);
         // The residue every heal above misses: a healthy storefront that still
         // publishes nothing on any set page. Report-only — no automatic pass
@@ -1117,6 +1246,7 @@ async function main() {
     await resetPollutedGalleries(client);
     await ensureVendorRoster(client);
     await healMisparkedVendorUrls(client);
+    await healOffsiteVendorUrls(client);
     await healVendorUrlsFromListings(client);
     await backfillShipping(client);
     await cleanupInterestChecks(client);

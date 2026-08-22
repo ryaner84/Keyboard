@@ -11,6 +11,7 @@ import {
   planPublishingReport,
   planRosterSync,
   planStorefrontOwnership,
+  planStorefrontRelocation,
   planVendorUrlHeal,
   nextVendorWebsiteUrl,
   NON_STOREFRONT_HOSTS,
@@ -396,13 +397,14 @@ assert.deepEqual(sameHost.aliased.map((v) => [v.slug, v.owner]), [["store-b", "s
 // Entries with nothing to act on are dropped, not inserted blank.
 assert.deepEqual(
   planRosterSync([{ slug: "x", websiteUrl: "  " }, { slug: "", websiteUrl: "https://y.com" }], []),
-  { insert: [], heal: [], aliased: [], duplicate: [] }
+  { insert: [], heal: [], aliased: [], duplicate: [], conflicted: [] }
 );
 assert.deepEqual(planRosterSync(undefined, undefined), {
   insert: [],
   heal: [],
   aliased: [],
   duplicate: [],
+  conflicted: [],
 });
 
 // --- the roster file itself ------------------------------------------------
@@ -816,6 +818,308 @@ assert.ok(
 assert.ok(
   /\.reason/.test(dbSetup),
   "scripts/db-setup.mjs must print each silent vendor's reason"
+);
+
+// --- the roster outranks a WRONG storefront, not just a missing one --------
+// `novelkeys` shipped as https://novelkeys.xyz — NovelKeys' retired domain —
+// while this very roster names https://novelkeys.com. needsStorefront reads
+// novelkeys.xyz as "a shop", so the heal skipped it on every deploy for a year
+// and discovery kept asking the dead site for /products.json.
+const wrongHost = planRosterSync(
+  [
+    { slug: "novelkeys", websiteUrl: "https://novelkeys.com" },
+    // Same shape reached through an alias spelling.
+    { slug: "swagkeys-kr", websiteUrl: "https://www.swagkey.kr", aliases: ["swagkeys-korea"] },
+    // Host already agrees — a www-only spelling difference is not churn worth
+    // writing (the DB has www.ashkeebs.com, the roster ashkeebs.com).
+    { slug: "ashkeebs", websiteUrl: "https://ashkeebs.com" },
+  ],
+  [
+    { slug: "novelkeys", websiteUrl: "https://novelkeys.xyz" },
+    { slug: "swagkeys-korea", websiteUrl: "https://mokbstore.com" },
+    { slug: "ashkeebs", websiteUrl: "https://www.ashkeebs.com" },
+  ]
+);
+assert.deepEqual(
+  wrongHost.heal.map((v) => [v.slug, v.current, v.websiteUrl]),
+  [
+    ["novelkeys", "https://novelkeys.xyz", "https://novelkeys.com"],
+    ["swagkeys-korea", "https://mokbstore.com", "https://www.swagkey.kr"],
+  ]
+);
+assert.deepEqual(wrongHost.conflicted, []);
+
+// …but never onto a host another Vendor row already holds. Taking it would
+// park two rows on one shop, which is the state planStorefrontOwnership exists
+// to undo — so it is reported and nothing is written.
+const rosterClash = planRosterSync(
+  [{ slug: "swagkeys-kr", websiteUrl: "https://mokbstore.com" }],
+  [
+    { slug: "mokb-store", websiteUrl: "https://mokbstore.com" },
+    { slug: "swagkeys-kr", websiteUrl: "https://swagkeys.com" },
+  ]
+);
+assert.deepEqual(rosterClash.heal, []);
+assert.deepEqual(rosterClash.conflicted, [
+  { slug: "swagkeys-kr", owner: "mokb-store", host: "mokbstore.com" },
+]);
+// The row that already IS the owner is healed, not reported against itself.
+assert.deepEqual(
+  planRosterSync(
+    [{ slug: "mokb-store", websiteUrl: "https://www.mokbstore.com" }],
+    [{ slug: "mokb-store", websiteUrl: "https://mokbstore.com" }]
+  ).heal,
+  []
+);
+
+// --- planStorefrontRelocation ----------------------------------------------
+// The shape every repair above reads as healthy: a row parked ALONE on a real
+// storefront that is not this store's site. Fixtures are the five rows
+// supabase-setup.sql actually ships in that state, with their real listing
+// hosts and counts.
+const offsite = planStorefrontRelocation(
+  [
+    // Retired domain. Also the one the roster names — so the roster decides it
+    // and this planner must keep its hands off (see the pinned check below).
+    {
+      id: "nk",
+      slug: "novelkeys",
+      websiteUrl: "https://novelkeys.xyz",
+      listingUrls: [
+        ...Array(162).fill("https://novelkeys.com/products/gmk-x"),
+        ...Array(96).fill("https://novelkeys.xyz/products/gmk-x"),
+      ],
+    },
+    // Registered on a DIFFERENT LIVE SHOP. Discovery reads DixieMech's
+    // catalogue and files it as Omnitype's listings — planStorefrontOwnership's
+    // harm, with no collision for it to detect.
+    {
+      id: "om",
+      slug: "omnitype",
+      websiteUrl: "https://dixiemech.com",
+      listingUrls: [
+        ...Array(42).fill("https://omnitype.com/products/gmk-x"),
+        ...Array(6).fill("https://dixiemech.com/products/gmk-x"),
+      ],
+    },
+    // Corporate apex instead of the shop subdomain. hostKey folds "www." and
+    // nothing else, so yushakobo.jp and shop.yushakobo.jp are two hosts — which
+    // is why SEEDED_VENDORS in scrape.py had to hard-code a repoint for this
+    // one store, in the Python half only.
+    {
+      id: "yk",
+      slug: "yushakobo",
+      websiteUrl: "https://yushakobo.jp",
+      listingUrls: [
+        ...Array(44).fill("https://shop.yushakobo.jp/products/gmk-x"),
+        ...Array(8).fill("https://yushakobo.jp/products/gmk-x"),
+      ],
+    },
+    // Renamed shop.
+    {
+      id: "mk",
+      slug: "mekanisk",
+      websiteUrl: "https://mekanisktastatur.no",
+      listingUrls: [
+        ...Array(14).fill("https://tastatur.no/products/gmk-x"),
+        ...Array(2).fill("https://mekanisktastatur.no/products/gmk-x"),
+      ],
+    },
+    // Group buys on a sibling subdomain.
+    {
+      id: "mb",
+      slug: "mechboards",
+      websiteUrl: "http://mechboards.co.uk",
+      listingUrls: [
+        ...Array(6).fill("https://groupbuys.mechboards.co.uk/products/gmk-x"),
+        ...Array(2).fill("https://mechboards.co.uk/products/gmk-x"),
+      ],
+    },
+    // Registered host and listings agree — the overwhelming majority of rows,
+    // and none of them may be touched.
+    {
+      id: "ck",
+      slug: "cannon-keys",
+      websiteUrl: "https://cannonkeys.com",
+      listingUrls: Array(124).fill("https://cannonkeys.com/products/gmk-x"),
+    },
+    // Blank / shortener rows are planVendorUrlHeal's shape, never this one.
+    { id: "bk", slug: "basekeys", websiteUrl: "", listingUrls: ["https://basekeys.jp/p/x"] },
+    { id: "cb", slug: "cocobrais", websiteUrl: "https://goo.gl", listingUrls: ["https://goo.gl/x"] },
+  ],
+  [{ slug: "novelkeys", websiteUrl: "https://novelkeys.com" }]
+);
+assert.deepEqual(
+  offsite.heal.map((v) => [v.slug, v.current, v.websiteUrl]),
+  [
+    ["omnitype", "https://dixiemech.com", "https://omnitype.com"],
+    ["yushakobo", "https://yushakobo.jp", "https://shop.yushakobo.jp"],
+    ["mekanisk", "https://mekanisktastatur.no", "https://tastatur.no"],
+    ["mechboards", "http://mechboards.co.uk", "https://groupbuys.mechboards.co.uk"],
+  ]
+);
+assert.deepEqual(offsite.contested, []);
+// The id rides through, because db-setup's UPDATE is keyed on it.
+assert.deepEqual(offsite.heal.map((v) => v.id), ["om", "yk", "mk", "mb"]);
+
+// A host two rows SHARE is a contested host: different evidence, different
+// planner (planStorefrontOwnership, which the roster can also settle). Leaving
+// it alone here is what keeps the two from fighting over the same rows.
+assert.deepEqual(
+  planStorefrontRelocation([
+    {
+      slug: "swagkeys-kr",
+      websiteUrl: "https://mokbstore.com",
+      listingUrls: Array(11).fill("https://www.swagkey.kr/p/x"),
+    },
+    { slug: "mokb-store", websiteUrl: "https://mokbstore.com", listingUrls: [] },
+  ]).heal,
+  []
+);
+
+// The winning host already belongs to someone else: report, never take. This
+// is exactly how a vendor gets parked on another shop in the first place.
+const relClash = planStorefrontRelocation([
+  {
+    slug: "omnitype",
+    websiteUrl: "https://dixiemech.com",
+    listingUrls: Array(9).fill("https://omnitype.com/p/x"),
+  },
+  { slug: "omnitype-eu", websiteUrl: "https://omnitype.com", listingUrls: [] },
+]);
+assert.deepEqual(relClash.heal, []);
+assert.deepEqual(relClash.contested.map((v) => [v.slug, v.owner]), [["omnitype", "omnitype-eu"]]);
+
+// A tie is never broken by guessing — Maamaadei's links are one .com and one
+// .xyz, and picking either would be a coin toss stored as fact.
+assert.deepEqual(
+  planStorefrontRelocation([
+    {
+      slug: "maamaadei",
+      websiteUrl: "https://maamaadei.store",
+      listingUrls: ["https://www.maamaadei.com/x", "https://www.maamaadei.xyz/x"],
+    },
+  ]).heal,
+  []
+);
+// Marketplace/forum links never win one either: a row whose listings are all
+// Taobao keeps its storefront rather than being pointed at a marketplace.
+assert.deepEqual(
+  planStorefrontRelocation([
+    {
+      slug: "typist-club",
+      websiteUrl: "https://typist.club",
+      listingUrls: Array(4).fill("https://shop278801163.m.taobao.com/x"),
+    },
+  ]).heal,
+  []
+);
+// Called every deploy — must not throw on nothing at all.
+assert.deepEqual(planStorefrontRelocation(), { heal: [], contested: [] });
+assert.deepEqual(planStorefrontRelocation([], []), { heal: [], contested: [] });
+
+// --- nextVendorWebsiteUrl vs. the store's own listings ---------------------
+// Once a row IS on the host its own listings sell from, no upstream storeLink
+// may move it off: 96 of NovelKeys' 258 links are its retired novelkeys.xyz, so
+// without this the deploy repairs the row and that same night's import undoes
+// it — the loop #133 and #137 each had to close for their own shape.
+assert.equal(
+  nextVendorWebsiteUrl(
+    "https://novelkeys.com",
+    "https://novelkeys.xyz/products/gmk-x",
+    new Set(),
+    "novelkeys.com"
+  ),
+  "https://novelkeys.com"
+);
+// The store's own host is still adopted — this refuses the wrong link, not the
+// right one — and the comparison folds www. like every other host check here.
+assert.equal(
+  nextVendorWebsiteUrl(
+    "https://novelkeys.com",
+    "https://www.novelkeys.com/products/gmk-x",
+    new Set(),
+    "novelkeys.com"
+  ),
+  "https://www.novelkeys.com"
+);
+// When the row is NOT yet on that host, only a link naming it is adopted, so
+// the import converges on the store's real site instead of wandering between
+// its old ones.
+assert.equal(
+  nextVendorWebsiteUrl(
+    "https://novelkeys.xyz",
+    "https://novelkeys.com/products/gmk-x",
+    new Set(),
+    "novelkeys.com"
+  ),
+  "https://novelkeys.com"
+);
+assert.equal(
+  nextVendorWebsiteUrl(
+    "https://novelkeys.xyz",
+    "https://geekhack.org/index.php?topic=1",
+    new Set(),
+    "novelkeys.com"
+  ),
+  "https://novelkeys.xyz"
+);
+// Unknown (a brand-new vendor, or one whose listings name no storefront) leaves
+// the existing rule exactly as it was — including the kbd.fans → kbdfans.com
+// move a genuinely relocated store still needs.
+for (const unknown of ["", null, undefined]) {
+  assert.equal(
+    nextVendorWebsiteUrl("https://kbd.fans", "https://kbdfans.com/products/x", new Set(), unknown),
+    "https://kbdfans.com",
+    JSON.stringify(unknown)
+  );
+}
+// Another vendor's host still loses, whatever the listings say.
+assert.equal(
+  nextVendorWebsiteUrl(
+    "https://www.swagkey.kr",
+    "https://mokbstore.com/gb-mv-expo",
+    new Set(["mokbstore.com"]),
+    "mokbstore.com"
+  ),
+  "https://www.swagkey.kr"
+);
+
+// The import must actually pass the vendor's own host through, and derive it
+// from the listings rather than re-deciding what a storefront is.
+assert.ok(
+  /ownHostByVendorId\.get\(vendor\?\.id \?\? ""\)/.test(keycaplendarTs),
+  "the KeycapLendar import must pass each vendor's own listing host to nextVendorWebsiteUrl"
+);
+assert.ok(
+  /storefrontHostFromUrls\(urls\)/.test(keycaplendarTs),
+  "the KeycapLendar import must derive that host with storefrontHostFromUrls"
+);
+
+// db-setup must run the relocation pass, in both of main()'s branches — a
+// planner nothing calls is a repair that never happens.
+assert.ok(
+  /planStorefrontRelocation/.test(dbSetup),
+  "scripts/db-setup.mjs must call planStorefrontRelocation"
+);
+assert.equal(
+  (dbSetup.match(/await healOffsiteVendorUrls\(client\);/g) ?? []).length,
+  2,
+  "scripts/db-setup.mjs's main() must invoke healOffsiteVendorUrls on both paths"
+);
+// Order matters: contested hosts are settled first (a row moved off one frees
+// it), and the blank/shortener heal runs last so it sees final ownership.
+assert.ok(
+  dbSetup.indexOf("await healMisparkedVendorUrls(client);") <
+    dbSetup.indexOf("await healOffsiteVendorUrls(client);") &&
+    dbSetup.indexOf("await healOffsiteVendorUrls(client);") <
+      dbSetup.indexOf("await healVendorUrlsFromListings(client);"),
+  "healOffsiteVendorUrls must run after healMisparkedVendorUrls and before healVendorUrlsFromListings"
+);
+// The roster's new finding has to reach the build log too.
+assert.ok(
+  /plan\.conflicted/.test(dbSetup),
+  "scripts/db-setup.mjs must report roster entries whose host another row holds"
 );
 
 console.log("vendor-url heal checks passed");

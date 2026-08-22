@@ -4020,6 +4020,13 @@ SEEDED_VENDORS = [
     # is a 404 while shop.yushakobo.jp/products.json serves the catalog, and
     # host matching strips "www." but not "shop.", so a row pointed at the bare
     # domain silently fails both passes.
+    #
+    # That is one instance of a general shape — a Vendor row parked alone on a
+    # storefront that is not this store's site — which db-setup now repairs from
+    # the row's own listing URLs (planStorefrontRelocation in
+    # scripts/lib/vendor-urls.mjs; it moves this very row). This entry stays
+    # because it also CREATES the row on a database that has never seen it, and
+    # a store with no VendorKit rows yet has nothing to derive a host from.
     (
         "yushakobo", "Yushakobo", "ASIA", "JP", "JPY",
         "https://shop.yushakobo.jp",
