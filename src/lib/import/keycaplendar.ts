@@ -7,7 +7,12 @@ import { normalizeSetName } from "@/lib/set-name";
 // Storefront rules live with db-setup's blank-URL heal so the two agree on what
 // counts as a store — a second copy of the marketplace/forum list here would be
 // the "written twice" hazard the discovery pass already taught us about.
-import { nextVendorWebsiteUrl, hostKey, hostOfUrl } from "../../../scripts/lib/vendor-urls.mjs";
+import {
+  nextVendorWebsiteUrl,
+  hostKey,
+  hostOfUrl,
+  storefrontHostFromUrls,
+} from "../../../scripts/lib/vendor-urls.mjs";
 import type { GBStatus, Region } from "@/generated/prisma";
 
 const PROJECT_ID = process.env.KEYCAPLENDAR_PROJECT_ID || "keycaplendar";
@@ -203,6 +208,24 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
       return owner != null && owner !== slug;
     },
   });
+  // The host each store's OWN listings sell from. A store that changed domains
+  // keeps upstream entries on the old one forever — 96 of NovelKeys' 258 links
+  // are novelkeys.xyz — and last-write-wins is exactly how the Vendor row came
+  // to be registered there while the site's roster said novelkeys.com. Reading
+  // the plurality host off the listings is the same evidence db-setup's
+  // planStorefrontRelocation repairs the row with, so the import converges on
+  // the store's real site instead of undoing that repair the same night.
+  const listingUrlsByVendor = new Map<string, string[]>();
+  for (const vk of existingVendorKits) {
+    const urls = listingUrlsByVendor.get(vk.vendorId) ?? [];
+    for (const u of [vk.productUrl, vk.gbUrl]) if (u && u.trim()) urls.push(u);
+    listingUrlsByVendor.set(vk.vendorId, urls);
+  }
+  const ownHostByVendorId = new Map<string, string>();
+  listingUrlsByVendor.forEach((urls, vendorId) => {
+    const host = storefrontHostFromUrls(urls);
+    if (host) ownHostByVendorId.set(vendorId, host);
+  });
   const vkByKey = new Map(existingVendorKits.map((vk) => [`${vk.kitId}:${vk.vendorId}`, vk]));
 
   const result: ImportResult = { sets: 0, vendors: 0, vendorKits: 0, unchanged: 0, stoppedEarly: false };
@@ -381,7 +404,8 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
       const websiteUrl = nextVendorWebsiteUrl(
         vendor?.websiteUrl ?? "",
         v.storeLink,
-        hostsOwnedByOthers(vSlug)
+        hostsOwnedByOthers(vSlug),
+        ownHostByVendorId.get(vendor?.id ?? "")
       );
       // A host this run just handed out belongs to that store for the rest of
       // it, or the next entry for a different shop would take it right back.
