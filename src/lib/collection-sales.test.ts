@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { calculateCollectionSales } from "@/lib/collection-sales";
+import { calculateCollectionSales, unitMoneyLine } from "@/lib/collection-sales";
 import type { CollectionCatalogItem, CollectionItemDetails } from "@/types";
 
 // Rates are "units of X per 1 USD", matching convertCurrency's contract.
@@ -258,5 +258,99 @@ assert.equal(month.net, 50);
 assert.equal(month.sales, 1);
 // The 2020 purchase date must not have put anything in a 2020 bucket.
 assert.equal(charted.months.filter((entry) => entry.sales > 0).length, 1);
+
+
+
+// ── unitMoneyLine: the owner's own private figures ──────────────────────────
+// Formatter stub — the real one is formatCurrency; these tests are about which
+// numbers and currencies come out, not their typography.
+const fmt = (amount: number, currency: string) =>
+  `${currency} ${Math.round(amount * 100) / 100}`;
+
+// Paid only, never sold.
+const held = unitMoneyLine(
+  { purchasePrice: 8588, purchaseCurrency: "CNY", isSold: false, soldPrice: null, soldCurrency: null },
+  "USD",
+  RATES,
+  fmt
+);
+assert.equal(held.paid, "CNY 8588", "shown in the currency actually paid");
+assert.equal(held.sold, null);
+assert.equal(held.gain, null, "a unit you still own has no gain");
+
+// Sold at a profit, one currency throughout.
+const profit = unitMoneyLine(
+  { purchasePrice: 100, purchaseCurrency: "USD", isSold: true, soldPrice: 150, soldCurrency: "USD" },
+  "USD",
+  RATES,
+  fmt
+);
+assert.equal(profit.paid, "USD 100");
+assert.equal(profit.sold, "USD 150");
+assert.equal(profit.gain?.text, "+USD 50");
+assert.equal(profit.gain?.positive, true);
+
+// A loss must read as a loss, not an absolute value.
+const lineLoss = unitMoneyLine(
+  { purchasePrice: 300, purchaseCurrency: "USD", isSold: true, soldPrice: 200, soldCurrency: "USD" },
+  "USD",
+  RATES,
+  fmt
+);
+assert.equal(lineLoss.gain?.text, "−USD 100");
+assert.equal(lineLoss.gain?.positive, false);
+
+// Bought CNY, sold SGD, viewed in USD. Subtracting the raw numbers would be
+// meaningless — the gain has to be computed in the viewer's currency.
+const crossFx = unitMoneyLine(
+  { purchasePrice: 130, purchaseCurrency: "SGD", isSold: true, soldPrice: 150, soldCurrency: "USD" },
+  "USD",
+  RATES,
+  fmt
+);
+assert.equal(crossFx.paid, "SGD 130", "the paid figure keeps its own currency");
+assert.equal(crossFx.sold, "USD 150");
+assert.equal(crossFx.gain?.text, "+USD 50", "SGD 130 is USD 100, so the gain is USD 50");
+
+// Sold with no sale price recorded: no sold figure, and no invented gain.
+const soldUnpriced = unitMoneyLine(
+  { purchasePrice: 100, purchaseCurrency: "USD", isSold: true, soldPrice: null, soldCurrency: null },
+  "USD",
+  RATES,
+  fmt
+);
+assert.equal(soldUnpriced.paid, "USD 100");
+assert.equal(soldUnpriced.sold, null);
+assert.equal(soldUnpriced.gain, null);
+
+// No purchase price: the sale still shows, but there is nothing to compare to.
+const lineNoCost = unitMoneyLine(
+  { purchasePrice: null, purchaseCurrency: null, isSold: true, soldPrice: 200, soldCurrency: "USD" },
+  "USD",
+  RATES,
+  fmt
+);
+assert.equal(lineNoCost.paid, null);
+assert.equal(lineNoCost.sold, "USD 200");
+assert.equal(lineNoCost.gain, null, "no cost means no verdict");
+
+// An unconvertible currency omits the gain rather than guessing one.
+const lineNoRate = unitMoneyLine(
+  { purchasePrice: 100, purchaseCurrency: "ZZZ", isSold: true, soldPrice: 150, soldCurrency: "USD" },
+  "USD",
+  RATES,
+  fmt
+);
+assert.equal(lineNoRate.paid, "ZZZ 100", "still shown — it is the owner's own record");
+assert.equal(lineNoRate.gain, null, "a wrong profit figure is worse than none");
+
+// Break-even across currencies must not render as a rounding artefact.
+const breakEven = unitMoneyLine(
+  { purchasePrice: 130, purchaseCurrency: "SGD", isSold: true, soldPrice: 100, soldCurrency: "USD" },
+  "USD",
+  RATES,
+  fmt
+);
+assert.equal(breakEven.gain?.text, "+USD 0");
 
 console.log("collection sales P/L checks passed");
