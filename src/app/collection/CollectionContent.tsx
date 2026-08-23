@@ -3400,11 +3400,6 @@ function KeyboardCollectionCard({
       ⌨
     </div>
   );
-  const details = [
-    item.collection.color && { label: "Color", value: item.collection.color },
-    item.collection.switches && { label: "Switches", value: item.collection.switches },
-    item.collection.keycaps && { label: "Keycaps", value: item.collection.keycaps },
-  ].filter(Boolean) as Array<{ label: string; value: string }>;
   const summaryColor = multiBuild ? activeBuild?.color : item.collection.color;
   const summaryCondition = multiBuild
     ? activeBuild?.condition
@@ -3587,32 +3582,16 @@ function KeyboardCollectionCard({
           )}
         </div>
 
-        {owned && !multiBuild && details.length > 0 && (
-          <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-gray-100 pt-4 dark:border-white/10">
-            {details.map((detail) => (
-              <div key={detail.label} className="min-w-0">
-                <dt className="text-[9px] font-semibold uppercase tracking-wider text-gray-400">
-                  {detail.label}
-                </dt>
-                <dd className="mt-1 truncate text-xs font-medium text-gray-700 dark:text-gray-200">
-                  {detail.value}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        )}
-
-        {owned && !multiBuild && item.collection.buildDetails && (
-          <p className="mt-4 line-clamp-2 border-t border-gray-100 pt-4 text-xs leading-5 text-gray-500 dark:border-white/10 dark:text-gray-400">
-            {item.collection.buildDetails}
-          </p>
-        )}
-
-        {owned && multiBuild && (
+        {/* Unconditional. This used to require multiBuild, so a single-build
+            piece fell through to a labelled detail grid that carried no price —
+            the owner could not see what they paid for a board they own one of.
+            BuildSummary already renders everything that grid did, plus the
+            money line, so one section serves both cases. */}
+        {owned && (
           <div className="mt-4 space-y-3 border-t border-gray-100 pt-4 dark:border-white/10">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-[#9a7a42] dark:text-[#c9ab72]">
-                {builds.length} builds
+                {builds.length === 1 ? "1 build" : `${builds.length} builds`}
               </p>
               {showBuildVisibility && (
                 <span
@@ -3900,10 +3879,12 @@ function KeycapCollectionCard({
           </div>
         )}
 
-        {owned && acquisitions.length > 1 && (
+        {/* Unconditional, same reasoning as the keyboard builds section: a
+            set bought once still has a price the owner should see. */}
+        {owned && (
           <div className="mt-4 space-y-2 border-t border-gray-100 pt-4 dark:border-white/10">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-[#9a7a42] dark:text-[#c9ab72]">{acquisitions.length} purchases</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-[#9a7a42] dark:text-[#c9ab72]">{acquisitions.length === 1 ? "1 purchase" : `${acquisitions.length} purchases`}</p>
               {showPurchaseVisibility && (
                 <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                   hiddenPurchaseCount > 0
