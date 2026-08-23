@@ -298,3 +298,69 @@ export function calculateCollectionSales(
     results,
   };
 }
+
+// ── The owner's private money line for one unit ─────────────────────────────
+// What YOU paid, what you sold it for, and the difference — for the owner's own
+// collection view only. Never rendered on the public page, which has its own
+// per-purchase visibility gates.
+//
+// This exists because the two card types disagreed: a keyboard build row showed
+// "Acquired 2026 · CNY 8,588" while a keycap purchase row showed only the year,
+// so an owner could not see what they paid for their own keycaps. Same helper
+// now feeds both.
+//
+// The gain is computed in the VIEWER's currency, not by subtracting the raw
+// numbers: bought in CNY and sold in USD is ordinary, and 1,249 − 8,588 would
+// be meaningless. When either side cannot be converted the gain is omitted
+// rather than guessed — a wrong profit figure is worse than none.
+export interface UnitMoneyLine {
+  paid: string | null;
+  sold: string | null;
+  gain: { text: string; positive: boolean } | null;
+}
+
+export function unitMoneyLine(
+  unit: Pick<
+    CollectionUnit,
+    "purchasePrice" | "purchaseCurrency" | "isSold" | "soldPrice" | "soldCurrency"
+  >,
+  viewerCurrency: string,
+  rates: Record<string, number>,
+  format: (amount: number, currency: string) => string
+): UnitMoneyLine {
+  const paidCurrency = unit.purchaseCurrency || viewerCurrency;
+  const saleCurrency = unit.soldCurrency || unit.purchaseCurrency || viewerCurrency;
+
+  // Shown in the currency it was actually paid in — that is the number the
+  // owner recognises from their own receipt.
+  const paid =
+    unit.purchasePrice != null ? format(unit.purchasePrice, paidCurrency) : null;
+  const sold =
+    unit.isSold && unit.soldPrice != null
+      ? format(unit.soldPrice, saleCurrency)
+      : null;
+
+  let gain: UnitMoneyLine["gain"] = null;
+  if (unit.isSold && unit.purchasePrice != null && unit.soldPrice != null) {
+    const convertible = (from: string) =>
+      from === viewerCurrency ||
+      (Number.isFinite(rates[from]) && Number.isFinite(rates[viewerCurrency]));
+    if (convertible(paidCurrency) && convertible(saleCurrency)) {
+      const toViewer = (amount: number, from: string) =>
+        from === viewerCurrency
+          ? amount
+          : convertCurrency(amount, from, viewerCurrency, rates);
+      const delta =
+        toViewer(unit.soldPrice, saleCurrency) -
+        toViewer(unit.purchasePrice, paidCurrency);
+      // Rounded before the zero test so a sub-cent FX residue reads as break
+      // even rather than "+$0.00".
+      const rounded = Math.round(delta * 100) / 100;
+      gain = {
+        text: `${rounded >= 0 ? "+" : "−"}${format(Math.abs(rounded), viewerCurrency)}`,
+        positive: rounded >= 0,
+      };
+    }
+  }
+  return { paid, sold, gain };
+}

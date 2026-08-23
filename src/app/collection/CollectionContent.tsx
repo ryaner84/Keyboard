@@ -21,6 +21,7 @@ import { dedupeKey } from "@/lib/set-name";
 import {
   assembleBuilds,
   calculateCollectionSales,
+  unitMoneyLine,
   EMPTY_UNIT,
   type CollectionSales,
 } from "@/lib/collection-sales";
@@ -357,6 +358,8 @@ function BuildSummary({
   onSelect,
   showVisibility = false,
   hidden = false,
+  viewerCurrency,
+  rates,
 }: {
   build: CollectionUnit;
   index: number;
@@ -371,6 +374,10 @@ function BuildSummary({
   // their public page.
   showVisibility?: boolean;
   hidden?: boolean;
+  // Needed only to state the gain in the viewer's currency; absent means the
+  // gain is omitted (see the shared-watchlist note on CollectionCardProps).
+  viewerCurrency?: string;
+  rates?: Record<string, number>;
 }) {
   const specs = [
     build.acquiredAt
@@ -395,8 +402,17 @@ function BuildSummary({
       build.soldPrice != null
         ? `${build.soldCurrency || build.purchaseCurrency || "USD"} ${build.soldPrice.toLocaleString()}`
         : null;
+    // The gain belongs beside the sale, and has to be computed in the viewer's
+    // currency — bought CNY, sold USD is ordinary, and subtracting those two
+    // raw numbers would be nonsense.
+    const gain =
+      viewerCurrency && rates
+        ? unitMoneyLine(build, viewerCurrency, rates, formatCurrency).gain
+        : null;
     specs.unshift(
-      [soldYear ? `Sold ${soldYear}` : "Sold", amount].filter(Boolean).join(" · ")
+      [soldYear ? `Sold ${soldYear}` : "Sold", amount, gain?.text]
+        .filter(Boolean)
+        .join(" · ")
     );
   }
   return (
@@ -1761,6 +1777,8 @@ export default function CollectionContent() {
       item={item}
       tab={tab}
       countryCode={countryCode}
+      viewerCurrency={currency}
+      rates={rates}
       editable={authenticated}
       ownedKeyboards={owned.filter((candidate) => candidate.productType === "KEYBOARD")}
       onEdit={() => setEditingItem(item)}
@@ -3286,6 +3304,14 @@ type CollectionCardProps = {
   item: CollectionCatalogItem;
   tab: CollectionTab;
   countryCode: string;
+  // The viewer's currency and today's rates, needed to state a gain when a unit
+  // was bought and sold in different currencies.
+  //
+  // OPTIONAL on purpose: the legacy shared-watchlist view renders these same
+  // cards for someone else's collection and passes neither, so the private
+  // money line cannot render there even by mistake. Absent = don't show it.
+  viewerCurrency?: string;
+  rates?: Record<string, number>;
   editable: boolean;
   ownedKeyboards: CollectionCatalogItem[];
   onEdit: () => void;
@@ -3305,6 +3331,8 @@ function KeyboardCollectionCard({
   item,
   tab,
   countryCode,
+  viewerCurrency,
+  rates,
   editable,
   onEdit,
   onTogglePublic,
@@ -3614,6 +3642,8 @@ function KeyboardCollectionCard({
                 build={build}
                 index={index}
                 fallbackImageUrl={catalogImageUrl}
+                viewerCurrency={viewerCurrency}
+                rates={rates}
                 selected={index === visibleBuildIndex}
                 onSelect={() => setActiveBuildIndex(index)}
                 showVisibility={showBuildVisibility}
@@ -3698,6 +3728,8 @@ function KeycapCollectionCard({
   item,
   tab,
   countryCode,
+  viewerCurrency,
+  rates,
   editable,
   ownedKeyboards,
   onEdit,
@@ -3708,6 +3740,8 @@ function KeycapCollectionCard({
   item: CollectionCatalogItem;
   tab: CollectionTab;
   countryCode: string;
+  viewerCurrency?: string;
+  rates?: Record<string, number>;
   editable: boolean;
   ownedKeyboards: CollectionCatalogItem[];
   onEdit: () => void;
@@ -3889,7 +3923,8 @@ function KeycapCollectionCard({
               </p>
             )}
             {acquisitions.map((purchase, purchaseIndex) => (
-              <button key={purchase.id} type="button" onClick={() => setActiveIndex(purchaseIndex)} className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs transition ${purchaseIndex === index ? "bg-[#faf7f0] text-gray-950 dark:bg-[#211d16] dark:text-white" : "bg-gray-50 text-gray-500 hover:bg-gray-100 dark:bg-white/[0.04] dark:text-gray-300"}`}>
+              <button key={purchase.id} type="button" onClick={() => setActiveIndex(purchaseIndex)} className={`w-full rounded-xl px-3 py-2 text-left text-xs transition ${purchaseIndex === index ? "bg-[#faf7f0] text-gray-950 dark:bg-[#211d16] dark:text-white" : "bg-gray-50 text-gray-500 hover:bg-gray-100 dark:bg-white/[0.04] dark:text-gray-300"}`}>
+                <span className="flex w-full items-center justify-between">
                 <span className="flex min-w-0 items-center gap-1.5">
                   <span className="truncate font-semibold">{keycapKitLabel(purchase)}</span>
                   {showPurchaseVisibility && (purchase.isPublic ? (
@@ -3905,6 +3940,45 @@ function KeycapCollectionCard({
                   ))}
                 </span>
                 <span className="ml-3 shrink-0 text-[10px]">{purchase.acquiredAt ? new Date(purchase.acquiredAt).getFullYear() : "Date pending"}</span>
+                </span>
+                {/* PRIVATE. The owner's own figures, shown regardless of the
+                    publish switches — those govern what VISITORS see, never
+                    what you can see about your own collection. A keyboard build
+                    row has always shown its price; keycap purchases showed only
+                    a year, so an owner could not see what they paid. */}
+                {(() => {
+                  if (!owned || !viewerCurrency || !rates) return null;
+                  const money = unitMoneyLine(
+                    {
+                      purchasePrice: purchase.purchasePrice,
+                      purchaseCurrency: purchase.purchaseCurrency,
+                      isSold: purchase.isSold,
+                      soldPrice: purchase.soldPrice,
+                      soldCurrency: purchase.soldCurrency,
+                    },
+                    viewerCurrency,
+                    rates,
+                    formatCurrency
+                  );
+                  if (!money.paid && !money.sold) return null;
+                  return (
+                    <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500 dark:text-gray-400">
+                      {money.paid && <span>Paid {money.paid}</span>}
+                      {money.sold && <span>· Sold {money.sold}</span>}
+                      {money.gain && (
+                        <span
+                          className={`font-semibold ${
+                            money.gain.positive
+                              ? "text-emerald-700 dark:text-emerald-400"
+                              : "text-rose-700 dark:text-rose-400"
+                          }`}
+                        >
+                          {money.gain.text}
+                        </span>
+                      )}
+                    </span>
+                  );
+                })()}
               </button>
             ))}
           </div>
