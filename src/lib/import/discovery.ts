@@ -3,7 +3,7 @@ import { isBlockedVendorSet } from "./vendor-overrides";
 import { NOT_MANUFACTURER_VENDOR } from "./manufacturer-vendors";
 // One host list, one definition of "is this a shop" — shared with db-setup's
 // storefront repairs rather than re-listed here.
-import { needsStorefront } from "../../../scripts/lib/vendor-urls.mjs";
+import { hostKey, hostOfUrl, needsStorefront } from "../../../scripts/lib/vendor-urls.mjs";
 import { NONBASE_SUBKIT_RE, PRODUCT_ACCESSORY_RE } from "@/lib/kit-variants";
 import { TRACKED_PROFILE_RE } from "@/lib/set-name";
 
@@ -103,6 +103,12 @@ async function fetchGmkCatalogShopify(origin: string): Promise<CatalogProduct[] 
 // ── Generic HTML path (non-Shopify stores) ──────────────────────────────────
 // No catalog API, but every vendor homepage links a "Group Buys" / "Pre-order"
 // section. Crawl: homepage → section pages → anchor links titled "GMK …".
+//
+// Mirrored in scraper/scrape.py (extract_page_links / catalog_section_urls /
+// tracked_products_from_links). That half is the one that actually reaches
+// these stores — a fifth of the roster is WooCommerce or bespoke, and until it
+// grew this path their listings were never linked or relinked at all — so
+// `npm run test:set-name` fails if the section pattern here and there disagree.
 
 const SECTION_LINK_RE = /group[\s_-]?buys?|pre[\s_-]?orders?|in[\s_-]?stock/i;
 const MAX_SECTION_PAGES = 3;
@@ -112,15 +118,30 @@ interface PageLink {
   text: string;
 }
 
+// Anchor text is markup plus entities: a product tile wraps its title in
+// <span>/<h3>, and "GMK Black &amp; White" must normalise to the same key as
+// the set's stored name — normalizeSetName would otherwise keep "amp" as a word
+// and the listing would never match.
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/gi, "'")
+    .replace(/&nbsp;/g, " ");
+}
+
 function extractLinks(html: string, baseUrl: string): PageLink[] {
   const links: PageLink[] = [];
   const re = /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
-    const text = m[2].replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    const text = decodeEntities(m[2].replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
     if (!text) continue;
     try {
-      links.push({ href: new URL(m[1], baseUrl).href, text });
+      links.push({ href: new URL(decodeEntities(m[1]).trim(), baseUrl).href, text });
     } catch {
       // unparseable href — skip
     }
@@ -145,20 +166,23 @@ async function fetchGmkCatalogHtml(origin: string): Promise<CatalogProduct[]> {
   if (!home) return [];
 
   const homeLinks = extractLinks(home, origin);
-  const sameOrigin = (href: string) => {
-    try {
-      return new URL(href).origin === origin;
-    } catch {
-      return false;
-    }
-  };
+  // Deliberately looser than comparing origins: a Vendor row carries whichever
+  // spelling of the store someone typed, and it is regularly not the one the
+  // site serves — donutcables and mechboards ship as http://, ashkeebs and
+  // keebz-n-cables as www. An origin comparison would then read every anchor on
+  // the store's own homepage as somebody else's site. Folds exactly what the
+  // rest of the codebase folds (scheme and a leading "www."), so
+  // en.zfrontier.com and www.zfrontier.com stay two different sites. Mirrored
+  // by _same_site in scraper/scrape.py.
+  const originHost = hostKey(hostOfUrl(origin));
+  const sameSite = (href: string) => !!originHost && hostKey(hostOfUrl(href)) === originHost;
 
   // Candidate section pages: nav links that look like a GB/pre-order section.
   const sectionUrls = Array.from(
     new Set(
       homeLinks
         .filter(
-          (l) => sameOrigin(l.href) && (SECTION_LINK_RE.test(l.text) || SECTION_LINK_RE.test(l.href))
+          (l) => sameSite(l.href) && (SECTION_LINK_RE.test(l.text) || SECTION_LINK_RE.test(l.href))
         )
         .map((l) => l.href)
     )
@@ -175,7 +199,7 @@ async function fetchGmkCatalogHtml(origin: string): Promise<CatalogProduct[]> {
   const found: CatalogProduct[] = [];
   for (const links of pages) {
     for (const l of links) {
-      if (!sameOrigin(l.href) || !TRACKED_PROFILE_RE.test(l.text) || seen.has(l.href)) continue;
+      if (!sameSite(l.href) || !TRACKED_PROFILE_RE.test(l.text) || seen.has(l.href)) continue;
       seen.add(l.href);
       found.push({ title: l.text, url: l.href });
     }
@@ -184,10 +208,15 @@ async function fetchGmkCatalogHtml(origin: string): Promise<CatalogProduct[]> {
 }
 
 // Shopify catalog first (rich, one request); generic HTML crawl otherwise.
-async function fetchGmkCatalog(origin: string): Promise<CatalogProduct[]> {
+// `fromHtml` rides along because the two sources carry different authority: a
+// Shopify feed states what is buyable and what it costs, an anchor on a
+// homepage states neither — see the relink guard in discoverGmkProducts.
+async function fetchGmkCatalog(
+  origin: string
+): Promise<{ products: CatalogProduct[]; fromHtml: boolean }> {
   const shopify = await fetchGmkCatalogShopify(origin);
-  if (shopify !== null) return shopify;
-  return fetchGmkCatalogHtml(origin);
+  if (shopify !== null) return { products: shopify, fromHtml: false };
+  return { products: await fetchGmkCatalogHtml(origin), fromHtml: true };
 }
 
 // Name normalization now lives in src/lib/set-name.ts (shared with the set
@@ -365,7 +394,7 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
     })();
     if (!origin) continue;
 
-    const catalog = await fetchGmkCatalog(origin);
+    const { products: catalog, fromHtml } = await fetchGmkCatalog(origin);
     if (catalog.length === 0) continue;
     result.gmkListings += catalog.length;
 
@@ -373,7 +402,7 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
     // never clobber a manually-entered price's URL.
     const existing = await prisma.vendorKit.findMany({
       where: { vendorId: vendor.id },
-      select: { kitId: true, productUrl: true, priceSource: true },
+      select: { kitId: true, productUrl: true, priceSource: true, price: true },
     });
     const existingByKit = new Map(existing.map((e) => [e.kitId, e]));
 
@@ -403,9 +432,20 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
           kitId: match.baseKitId,
           productUrl: product.url,
           priceSource: null,
+          price: null,
         });
         result.linked++;
-      } else if (current.priceSource !== "MANUAL" && current.productUrl !== product.url) {
+      } else if (
+        current.priceSource !== "MANUAL" &&
+        current.productUrl !== product.url &&
+        // A candidate crawled off the storefront's own HTML may only take over
+        // a row that is NOT currently priced. Unpriced is the state the HTML
+        // path exists to end (an unpriced row is hidden outright on a released
+        // set); a link the price pass is successfully reading is not something
+        // a homepage anchor should be allowed to replace. Mirrored in
+        // run_discovery's `html_guard` in scraper/scrape.py.
+        (!fromHtml || current.price == null)
+      ) {
         // The store moved/renamed the listing — point at the live page and
         // re-queue so the next price run scrapes the fresh URL.
         await prisma.vendorKit.update({
