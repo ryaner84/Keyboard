@@ -96,6 +96,34 @@ that actually crawls) and `discoverGmkProducts` in `src/lib/import/discovery.ts`
 vendors in the TS copy alone and the nightly kept spending a fifth of every
 rotation on stores it could not fetch.
 
+**And the half that was missing a whole code path was the half that runs.**
+`/products.json` is a SHOPIFY endpoint; about a fifth of the roster is not
+Shopify — Ashkeebs, Zion Studios, Sandkeys and Keyclack are WooCommerce
+(`/product/…`), CandyKeys serves `/group-buys/…`, MyKeyboard.eu
+`/catalogue/category/…`, Latamkeys `/productos/`, STACKS `/store/`, Drop
+`/buy/…`, KLC Playground (KR) and Monstargears are cafe24 shops. `discovery.ts`
+has always fallen back to crawling the storefront's own group-buy / pre-order /
+in-stock pages; `run_discovery` read the 404 on page one, logged "catalog
+unreadable", and moved on — and it is the half with a real browser, so the
+Vercel copy's fallback never reached these stores either. So discovery had
+never linked OR relinked a single listing for any of them: their rows were
+frozen at whatever the first KeycapLendar import wrote, a moved or renamed GB
+page could never heal, the price pass kept failing on the dead URL so `price`
+stayed NULL, and an unpriced row is hidden outright on a RELEASED set. The store
+published nothing at all, and named itself in `planPublishingReport` under the
+FIRST cause — "discovery has never matched a tracked set" — which reads as "the
+store stopped selling GMK", exactly as the tracked-profile gate did before #140.
+`html_catalog` in `scrape.py` is that fallback and `test:set-name` fails if it
+disappears or if the two halves pick section pages by different rules.
+
+A crawled anchor is weaker evidence than a catalog entry — it carries no stock
+flag and no price — so it may only take over a VendorKit that is **not
+currently priced** (`html_guard` in `scrape.py`, `fromHtml` in `discovery.ts`).
+That is the state the fallback exists to end; a link the price pass is reading
+successfully is not a homepage anchor's to replace. A link that later dies is
+cleared to NULL by the price pass (404/410), which hands the row back on the
+next rotation.
+
 **The profiles discovery reads a catalog for must equal the profiles the site
 publishes.** That gate is the first thing every store product passes through,
 and it spent a year as a local `\b(?:GMK|DCS)\b` in both halves while

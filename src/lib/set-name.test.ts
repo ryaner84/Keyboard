@@ -265,4 +265,35 @@ assert.ok(
   "discovery.ts still declares its own tracked-profile regex"
 );
 
+// The tracked-profile gate is only reached for stores discovery can read a
+// catalog FOR. `/products.json` is a Shopify endpoint, and about a fifth of the
+// roster is not Shopify (Ashkeebs and Zion Studios are WooCommerce, CandyKeys
+// serves /group-buys/…, MyKeyboard.eu /catalogue/category/…) — so both halves
+// fall back to crawling the storefront's own group-buy / pre-order / in-stock
+// pages. The nightly is the half that can actually fetch them, and it spent a
+// year without the fallback: none of those stores ever had a listing linked or
+// relinked, their rows stayed frozen on whatever the first import wrote, and
+// every one of them read as "discovery has never matched a tracked set" in
+// db-setup's silent-vendor report. Assert the nightly still has the path, and
+// that both halves choose section pages by the same rule.
+assert.ok(
+  /def\s+html_catalog\s*\(/.test(scraperSource),
+  "scrape.py must keep the non-Shopify HTML catalog fallback"
+);
+assert.ok(
+  /catalog\s*=\s*html_catalog\(/.test(scraperSource),
+  "run_discovery must fall back to html_catalog when /products.json is unreadable"
+);
+const tsSection = /const\s+SECTION_LINK_RE\s*=\s*\/([^/]+)\/i;/.exec(discoverySource);
+const pySection = /_DISCOVERY_SECTION_RE\s*=\s*re\.compile\(\s*\n?\s*r"([^"]+)"/.exec(
+  scraperSource
+);
+assert.ok(tsSection, "discovery.ts must keep SECTION_LINK_RE");
+assert.ok(pySection, "scrape.py must keep _DISCOVERY_SECTION_RE");
+assert.equal(
+  pySection[1],
+  tsSection[1],
+  "scrape.py and discovery.ts must pick catalog section pages by the same rule"
+);
+
 console.log("set-name profile-identity checks passed");

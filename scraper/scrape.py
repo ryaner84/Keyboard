@@ -3319,6 +3319,203 @@ def pick_store_listing(candidates: list[dict]) -> dict | None:
 gmk_products_from_catalog = tracked_products_from_catalog
 
 
+# ── Generic HTML catalog path (non-Shopify storefronts) ─────────────────────
+#
+# `/products.json` is a SHOPIFY endpoint, and about a fifth of the roster does
+# not run Shopify: Ashkeebs, Zion Studios, Sandkeys and Keyclack are WooCommerce
+# (/product/…), CandyKeys serves /group-buys/…, MyKeyboard.eu
+# /catalogue/category/…, Latamkeys /productos/, STACKS /store/, KLC Playground
+# (KR) and Monstargears are Korean cafe24-style shops, Drop /buy/…, Olkb
+# /parts/…. For every one of them the loop in run_discovery reads a 404 on page
+# one, marks the catalog unreadable and moves on — so discovery has NEVER
+# linked or relinked a single listing for those stores. Their VendorKit rows are
+# frozen at whatever the original KeycapLendar import left: a moved or renamed
+# group-buy page can never heal, the price pass keeps failing on the dead URL so
+# `price` stays NULL, and an unpriced row is hidden outright on a RELEASED set.
+# The store publishes nothing at all — and it reads as the first cause in
+# db-setup's silent-vendor report ("discovery has never matched a tracked set"),
+# which is the same signature the tracked-profile gate produced before #140.
+#
+# The price pass has handled these stores since generic_price was written; only
+# discovery insisted on Shopify. discovery.ts (the Vercel half) has carried the
+# fallback below all along, but it fetches from a datacenter IP that these
+# stores' bot protection blocks — which is the whole reason this nightly exists.
+# So the half that could actually use it was the half that did not have it.
+#
+# The crawl is deliberately shallow: homepage → up to three GB / pre-order /
+# in-stock section pages → every anchor on the store's own site whose TEXT names
+# a tracked profile. match_product_to_set stays the real filter, so a category link
+# ("GMK Keycaps") simply never resolves to a set.
+_DISCOVERY_SECTION_RE = re.compile(
+    r"group[\s_-]?buys?|pre[\s_-]?orders?|in[\s_-]?stock", re.IGNORECASE
+)
+_DISCOVERY_MAX_SECTION_PAGES = 3
+_ANCHOR_RE = re.compile(r"<a\b[^>]*href=[\"']([^\"'#]+)[\"'][^>]*>(.*?)</a>", re.I | re.S)
+_HTML_TAG_RE = re.compile(r"<[^>]*>")
+
+
+def _same_site(url: str, origin: str) -> bool:
+    """True when `url` is on the storefront's own site.
+
+    Deliberately looser than comparing origins: a Vendor row carries whichever
+    spelling of the store someone typed, and it is regularly not the one the
+    site serves — `donutcables` and `mechboards` ship as `http://`, `ashkeebs`
+    and `keebz-n-cables` as `www.`. Comparing origins would then read every
+    anchor on the store's own homepage as somebody else's site and drop it,
+    which is the same silent nothing this fallback exists to end. Folds exactly
+    what the rest of the codebase folds — scheme and a leading "www." — so
+    en.zfrontier.com and www.zfrontier.com stay two different sites.
+    """
+    host = _dcs_host(url)
+    return bool(host) and host == _dcs_host(origin)
+
+
+def extract_page_links(html: str, base_url: str) -> list[dict]:
+    """[{"href", "text"}] for every <a> in `html`, hrefs made absolute.
+
+    Mirror of extractLinks in discovery.ts. Anchor text is stripped of nested
+    markup (a product tile wraps its title in <span>/<h3>) and entity-decoded:
+    "GMK Black &amp; White" has to normalise to the same key as the set's stored
+    name, and normalize_set_name would otherwise keep "amp" as a word.
+    """
+    links: list[dict] = []
+    for match in _ANCHOR_RE.finditer(html or ""):
+        text = re.sub(r"\s+", " ", html_unescape(_HTML_TAG_RE.sub(" ", match.group(2)))).strip()
+        if not text:
+            continue
+        try:
+            href = urllib.parse.urljoin(base_url, html_unescape(match.group(1)).strip())
+        except ValueError:
+            continue  # unparseable href — skip
+        if not _origin_of(href):
+            continue
+        links.append({"href": href, "text": text})
+    return links
+
+
+def catalog_section_urls(
+    links: list[dict], origin: str, limit: int = _DISCOVERY_MAX_SECTION_PAGES
+) -> list[str]:
+    """Nav links on the store's own site that name a GB / pre-order / in-stock section.
+
+    Bounded to `limit` pages: this runs for every non-Shopify store in the
+    rotation and a storefront's nav can name a dozen collections.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for link in links:
+        href = link.get("href") or ""
+        if not _same_site(href, origin) or href in seen:
+            continue
+        if not (
+            _DISCOVERY_SECTION_RE.search(link.get("text") or "")
+            or _DISCOVERY_SECTION_RE.search(href)
+        ):
+            continue
+        seen.add(href)
+        out.append(href)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def tracked_products_from_links(links: list[dict], origin: str) -> list[dict]:
+    """Anchors naming a tracked profile (GMK / DCS …), as catalog products.
+
+    Same shape tracked_products_from_catalog returns, so everything downstream —
+    pick_store_listing, the subkit guard, the link/relink write — is identical
+    for both paths. An HTML listing page carries no stock flag or price, so
+    `available` is None and `price` 0.0; score_store_listing then falls back to
+    the title marker, which is the only evidence these pages give.
+    """
+    seen: set[str] = set()
+    out: list[dict] = []
+    for link in links:
+        href = link.get("href") or ""
+        text = link.get("text") or ""
+        if not _same_site(href, origin) or href in seen:
+            continue
+        if not TRACKED_PROFILE_RE.search(text):
+            continue
+        seen.add(href)
+        out.append({"title": text, "url": href, "available": None, "price": 0.0})
+    return out
+
+
+def _fetch_page_html(
+    page: Page, url: str, scrapling: ScraplingClient | None = None
+) -> str | None:
+    """One storefront page as HTML — real browser first, Scrapling stealth after."""
+    try:
+        response = page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+        status = response.status if response is not None else None
+        content = page.content()
+        if (
+            content
+            and not response_is_blocked(status, content)
+            and (status is None or int(status) < 400)
+        ):
+            return content
+    except Exception as exc:  # noqa: BLE001
+        log(f"  html fetch error ({url}): {type(exc).__name__}: {exc}")
+    if scrapling is not None and scrapling.available:
+        return scrapling.get_html(url, protected=True)
+    return None
+
+
+def html_catalog(
+    page: Page,
+    origin: str,
+    scrapling: ScraplingClient | None = None,
+    throttle: "HostThrottle | None" = None,
+    deadline: float | None = None,
+) -> list[dict]:
+    """Catalog products crawled from a non-Shopify storefront's own pages."""
+    if throttle is not None:
+        throttle.wait(origin)
+    home = _fetch_page_html(page, origin, scrapling)
+    if not home:
+        return []
+
+    home_links = extract_page_links(home, origin)
+    pages = [home_links]  # the homepage itself usually lists the current GBs
+    for url in catalog_section_urls(home_links, origin):
+        if deadline is not None and now_ms() > deadline:
+            break
+        if throttle is not None:
+            throttle.wait(url)
+        section = _fetch_page_html(page, url, scrapling)
+        if section:
+            pages.append(extract_page_links(section, url))
+
+    seen: set[str] = set()
+    products: list[dict] = []
+    for links in pages:
+        for product in tracked_products_from_links(links, origin):
+            if product["url"] in seen:
+                continue
+            seen.add(product["url"])
+            products.append(product)
+    return products
+
+
+def relink_price_guard(from_html: bool) -> str:
+    """Extra ON CONFLICT condition for a candidate crawled off a storefront.
+
+    A Shopify feed states which product is buyable and what it costs; an anchor
+    on a homepage states neither, so an HTML-derived candidate may only take
+    over a VendorKit that is NOT currently priced. Unpriced is exactly the state
+    the HTML fallback exists to end — an unpriced row is hidden outright on a
+    RELEASED set — while a link the price pass is reading successfully is not a
+    homepage anchor's to replace. A link that later dies is cleared to NULL by
+    the price pass (404/410), which hands the row back to this path on the next
+    rotation. Mirrored by `fromHtml` in src/lib/import/discovery.ts.
+    """
+    if not from_html:
+        return ""
+    return '\n                          AND "VendorKit".price IS NULL'
+
+
 def _pick_from_family(candidates: list[dict]) -> dict:
     """ACTIVE round wins, else the newest — vendors sell the current round."""
     if len(candidates) == 1:
@@ -3422,7 +3619,7 @@ def run_discovery(
 ) -> dict:
     """Crawl vendor catalogs for GMK listings and link them to tracked sets."""
     stats = {"vendors": 0, "gmk_listings": 0, "linked": 0, "relinked": 0,
-             "multi_listing": 0}
+             "multi_listing": 0, "html_vendors": 0}
 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
@@ -3511,13 +3708,26 @@ def run_discovery(
             # This loop used to be silent on every failure path, so a run
             # reporting gmk_listings=0 gave no way to tell "every store blocked
             # us" apart from "fetched fine, nothing matched". Say which.
+            from_html = False
             if unreadable:
-                log(f"  {origin}: catalog unreadable (blocked, or not Shopify) — skipped.")
-                continue
-            if not catalog:
+                # No Shopify catalog. That is not "no catalog" — a fifth of the
+                # roster runs WooCommerce or a bespoke storefront, and this
+                # branch used to `continue`, which is why none of them has ever
+                # had a listing linked or relinked (see html_catalog above).
+                from_html = True
+                catalog = html_catalog(page, origin, scrapling, throttle, deadline)
+                if not catalog:
+                    log(f"  {origin}: no Shopify catalog and no tracked listing on the "
+                        f"storefront's own pages (blocked, or sells none) — skipped.")
+                    continue
+                stats["html_vendors"] += 1
+                log(f"  {origin}: no Shopify catalog — {len(catalog)} tracked "
+                    f"listing(s) crawled from the storefront's own pages.")
+            elif not catalog:
                 log(f"  {origin}: {raw_products} product(s), 0 tracked listing(s).")
                 continue
-            log(f"  {origin}: {raw_products} product(s), {len(catalog)} tracked listing(s).")
+            else:
+                log(f"  {origin}: {raw_products} product(s), {len(catalog)} tracked listing(s).")
             stats["gmk_listings"] += len(catalog)
 
             # Group first, write second. A store can list the same set several
@@ -3563,8 +3773,18 @@ def run_discovery(
                 # but never touch a MANUAL price's row. RETURNING (xmax = 0)
                 # distinguishes an insert (new link) from an update (relink); a
                 # skipped MANUAL/unchanged row returns nothing.
+                #
+                # A candidate crawled off a storefront's own HTML may only take
+                # over a row that is NOT currently priced. A Shopify feed says
+                # which product is buyable and what it costs; an anchor on a
+                # homepage says neither, so it cannot be trusted to outrank a
+                # link the price pass is successfully reading. Unpriced is
+                # exactly the state this fallback exists to end — and a link
+                # that later dies is cleared to NULL by the price pass (404/410),
+                # which hands the row back to this branch on the next rotation.
+                html_guard = relink_price_guard(from_html)
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute("""
+                    cur.execute(f"""
                         INSERT INTO "VendorKit"
                             (id, "kitId", "vendorId", "productUrl", "gbUrl",
                              "inStock", currency, "updatedAt")
@@ -3582,7 +3802,7 @@ def run_discovery(
                             "priceUpdatedAt" = NULL,
                             "updatedAt" = now()
                         WHERE "VendorKit"."priceSource" IS DISTINCT FROM 'MANUAL'
-                          AND "VendorKit"."productUrl" IS DISTINCT FROM EXCLUDED."productUrl"
+                          AND "VendorKit"."productUrl" IS DISTINCT FROM EXCLUDED."productUrl"{html_guard}
                         RETURNING (xmax = 0) AS inserted
                     """, (
                         match["base_kit_id"], vendor["id"], product["url"],
@@ -3600,7 +3820,8 @@ def run_discovery(
         page.close()
     log(f"Discovery -> vendors={stats['vendors']} "
         f"gmk_listings={stats['gmk_listings']} linked={stats['linked']} "
-        f"relinked={stats['relinked']} multi_listing={stats['multi_listing']}")
+        f"relinked={stats['relinked']} multi_listing={stats['multi_listing']} "
+        f"html_vendors={stats['html_vendors']}")
     return stats
 
 

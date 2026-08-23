@@ -1764,5 +1764,173 @@ class ScraplingStatsAttributionTests(unittest.TestCase):
         self.assertIn("(+9 more host(s))", summary)
 
 
+class FakePage:
+    """Minimal Playwright Page stand-in: serves canned HTML per URL."""
+
+    def __init__(self, pages: dict[str, str], status: int = 200):
+        self.pages = pages
+        self.status = status
+        self.visited: list[str] = []
+        self._current = ""
+
+    class _Response:
+        def __init__(self, status: int):
+            self.status = status
+
+    def goto(self, url, **kwargs):
+        self.visited.append(url)
+        self._current = self.pages.get(url, "")
+        return self._Response(self.status if self._current else 404)
+
+    def content(self):
+        return self._current
+
+    def close(self):
+        pass
+
+
+class NonShopifyCatalogTests(unittest.TestCase):
+    """The fallback that lets a non-Shopify store be crawled at all.
+
+    `/products.json` is a Shopify endpoint. Roughly a fifth of the roster runs
+    something else, and for those run_discovery read a 404 and gave up — so no
+    listing of theirs was ever linked or relinked, their rows stayed frozen on
+    whatever the first import wrote, and once those URLs died the price pass
+    could only fail. An unpriced row is hidden on a RELEASED set, so the store
+    published nothing at all.
+    """
+
+    def test_links_are_absolutised_and_text_is_flattened(self):
+        html = (
+            '<a href="/product/gmk-panda"><span>GMK</span> <b>Panda</b></a>'
+            '<a href="https://other.test/x">GMK Elsewhere</a>'
+            '<a href="/empty"><img src="x.png"></a>'
+        )
+        links = scrape.extract_page_links(html, "https://ashkeebs.test")
+        self.assertEqual(
+            links,
+            [
+                {"href": "https://ashkeebs.test/product/gmk-panda", "text": "GMK Panda"},
+                {"href": "https://other.test/x", "text": "GMK Elsewhere"},
+            ],
+        )
+
+    def test_entities_are_decoded_so_the_name_matcher_can_match(self):
+        # "&amp;" left alone normalises to the word "amp", which no set name
+        # carries — the listing would silently never match.
+        [link] = scrape.extract_page_links(
+            '<a href="/p/x">GMK Black &amp; White</a>', "https://shop.test"
+        )
+        self.assertEqual(link["text"], "GMK Black & White")
+        self.assertEqual(
+            scrape.normalize_set_name(link["text"]), scrape.normalize_set_name("GMK Black & White")
+        )
+
+    def test_section_urls_are_same_origin_deduped_and_capped(self):
+        links = [
+            {"href": "https://shop.test/collections/group-buys", "text": "Group Buys"},
+            {"href": "https://shop.test/collections/group-buys", "text": "GB"},  # dup
+            {"href": "https://shop.test/pre-order", "text": "Shop"},  # matched on href
+            {"href": "https://shop.test/in-stock", "text": "In Stock"},
+            {"href": "https://shop.test/about", "text": "About us"},
+            {"href": "https://elsewhere.test/group-buys", "text": "Group Buys"},
+            {"href": "https://shop.test/collections/preorders", "text": "Pre-Orders"},
+        ]
+        self.assertEqual(
+            scrape.catalog_section_urls(links, "https://shop.test"),
+            [
+                "https://shop.test/collections/group-buys",
+                "https://shop.test/pre-order",
+                "https://shop.test/in-stock",
+            ],
+        )
+
+    def test_products_from_links_keep_the_shopify_path_shape(self):
+        links = [
+            {"href": "https://shop.test/product/gmk-panda", "text": "GMK Panda"},
+            {"href": "https://shop.test/product/gmk-panda", "text": "GMK Panda"},  # dup
+            {"href": "https://shop.test/product/kat-milkshake", "text": "KAT Milkshake"},
+            {"href": "https://elsewhere.test/product/gmk-x", "text": "GMK X"},
+            {"href": "https://shop.test/product/sa-laser", "text": "(In Stock) SA Laser"},
+        ]
+        out = scrape.tracked_products_from_links(links, "https://shop.test")
+        self.assertEqual(
+            [p["title"] for p in out], ["GMK Panda", "(In Stock) SA Laser"]
+        )
+        # Same keys tracked_products_from_catalog produces, so pick_store_listing
+        # and the link/relink write treat both paths identically. An HTML page
+        # gives no stock flag or price, so the title marker is the only signal.
+        self.assertEqual(set(out[0]), {"title", "url", "available", "price"})
+        self.assertIsNone(out[0]["available"])
+        self.assertGreater(
+            scrape.score_store_listing(out[1]), scrape.score_store_listing(out[0])
+        )
+
+    def test_html_catalog_crawls_home_and_section_pages(self):
+        home = (
+            '<a href="/collections/group-buys">Group Buys</a>'
+            '<a href="/collections/about">About</a>'
+            '<a href="/product/gmk-panda">GMK Panda</a>'
+        )
+        section = (
+            '<a href="/product/gmk-panda">GMK Panda</a>'  # already seen on home
+            '<a href="/product/dcs-superweld">DCS Superweld</a>'
+        )
+        page = FakePage(
+            {
+                "https://ashkeebs.test": home,
+                "https://ashkeebs.test/collections/group-buys": section,
+            }
+        )
+        out = scrape.html_catalog(page, "https://ashkeebs.test")
+        self.assertEqual([p["title"] for p in out], ["GMK Panda", "DCS Superweld"])
+        self.assertEqual(
+            page.visited,
+            ["https://ashkeebs.test", "https://ashkeebs.test/collections/group-buys"],
+        )
+
+    def test_html_catalog_gives_up_quietly_when_the_home_page_is_unreadable(self):
+        page = FakePage({})
+        self.assertEqual(scrape.html_catalog(page, "https://blocked.test"), [])
+
+    def test_the_stores_own_pages_survive_a_www_or_http_spelling(self):
+        # The Vendor row carries whichever spelling someone typed: donutcables
+        # and mechboards ship as http://, ashkeebs and keebz-n-cables as www.
+        # An origin comparison drops every anchor on the store's own homepage,
+        # which is the same silent nothing this fallback exists to end.
+        links = [
+            {"href": "https://www.ashkeebs.com/product/gmk-panda", "text": "GMK Panda"},
+            {"href": "http://ashkeebs.com/product/gmk-pacific", "text": "GMK Pacific"},
+            {"href": "https://shop.ashkeebs.com/product/gmk-x", "text": "GMK X"},
+        ]
+        out = scrape.tracked_products_from_links(links, "https://ashkeebs.com")
+        # www. and the scheme fold away; a different subdomain is a different
+        # site, exactly as hostKey treats en.zfrontier.com.
+        self.assertEqual([p["title"] for p in out], ["GMK Panda", "GMK Pacific"])
+        self.assertEqual(
+            scrape.catalog_section_urls(
+                [{"href": "http://www.ashkeebs.com/group-buys", "text": "Group Buys"}],
+                "https://ashkeebs.com",
+            ),
+            ["http://www.ashkeebs.com/group-buys"],
+        )
+
+    def test_html_candidates_may_only_take_over_an_unpriced_row(self):
+        # A crawled anchor has no stock flag and no price, so it must not
+        # displace a link the price pass is reading successfully — only the
+        # unpriced rows this fallback exists to rescue.
+        self.assertIn('"VendorKit".price IS NULL', scrape.relink_price_guard(True))
+        self.assertEqual(scrape.relink_price_guard(False), "")
+
+    def test_section_rule_matches_the_typescript_half(self):
+        # discovery.ts is the Vercel copy of this crawl; set-name.test.ts asserts
+        # the two patterns are identical. Assert the behaviour here so a change
+        # to either is caught in whichever suite runs first.
+        for text in ("Group Buys", "group_buy", "Pre-Order", "preorders", "In Stock"):
+            self.assertIsNotNone(scrape._DISCOVERY_SECTION_RE.search(text), text)
+        for text in ("About", "Switches", "Contact us"):
+            self.assertIsNone(scrape._DISCOVERY_SECTION_RE.search(text), text)
+
+
 if __name__ == "__main__":
     unittest.main()
