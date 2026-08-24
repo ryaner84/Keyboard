@@ -25,5 +25,6 @@
   { "name": "Keebz N Cables", "slug": "keebz-n-cables", "region": "AU", "country": "AU", "currency": "AUD", "websiteUrl": "https://www.keebzncables.com", "logoUrl": null, "aliases": ["keebzncables"] },
   { "name": "Pantheon Keys", "slug": "pantheonkeys", "region": "SG", "country": "SG", "currency": "SGD", "websiteUrl": "https://pantheonkeys.com", "logoUrl": null, "aliases": ["pantheon-keys"] },
   { "name": "KLC Playground", "slug": "klc-playground", "region": "ASIA", "country": "KR", "currency": "USD", "websiteUrl": "https://klc-playground.com", "logoUrl": null, "aliases": ["klcplayground"] },
-  { "name": "MatrixLab", "slug": "matrixlab", "region": "ASIA", "country": "CN", "currency": "USD", "websiteUrl": "https://www.matrixlab.store", "logoUrl": null, "aliases": ["matrix-lab", "matrixlab-store"] }
+  { "name": "MatrixLab", "slug": "matrixlab", "region": "ASIA", "country": "CN", "currency": "USD", "websiteUrl": "https://www.matrixlab.store", "logoUrl": null, "aliases": ["matrix-lab", "matrixlab-store"] },
+  { "name": "Maamaadei", "slug": "maamaadei", "region": "US", "country": "US", "currency": "USD", "websiteUrl": "https://maamaadei.com", "logoUrl": null }
 ]
