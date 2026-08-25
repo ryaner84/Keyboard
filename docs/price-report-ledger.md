@@ -29,7 +29,9 @@ both the client-reported log and the resolution audit in the same run.
 
 ## 1. Open wrong-price reports (unresolved only)
 
-_None — all filed reports are resolved and the live feed is at 0 pending._
+| logged (UTC) | set | vendor | current price | reason (client) | verdict | status |
+|---|---|---|---|---|---|---|
+| 2026-08-25 | gmk-british-racing-green-r3 | Ktechs | 113 SGD (SCRAPED) | "there is no more stock" | self-healed (stock-only) | ⏳ open — clears on next availability scrape |
 
 ## 2. Open client-recommended values (awaiting verification)
 
@@ -39,6 +41,7 @@ _None — all client-recommended values have been verified (see audit below)._
 
 | logged (UTC) | set | vendor | reported price | reason (client) | verdict | status |
 |---|---|---|---|---|---|---|
+| 2026-08-25 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | "there is no more stock" | self-healed | ⏳ open |
 | 2026-07-02 | gmk-cyl-kitsune | Ktechs | 45 SGD | "this price is for the numpad not for the base set" | needs fix | ✅ resolved |
 | 2026-06-26 | gmk-awaken | NovelKeys | 70 USD | "item dun exist" | needs fix | ✅ resolved |
 | 2026-06-24 | gmk-monokai-material | NovelKeys | 40 USD | "this is not the base kit price, this is another subkit price" | needs fix | ✅ resolved |
@@ -58,7 +61,7 @@ _None — all client-recommended values have been verified (see audit below)._
 
 | logged (UTC) | set | vendor | reported price | verdict | root cause & fix | status now |
 |---|---|---|---|---|---|---|
-| 2026-07-02 | gmk-cyl-kitsune | Ktechs | 45 SGD | needs fix | Numpad subkit picked as base — `90d2984` excludes numpad from base pool → `NO_BASE_KIT` clears it | ✅ resolved (price cleared) |
+| 2026-08-25 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | self-healed | Availability-only complaint ("no more stock") — no scrape bug; price re-verifies on the next stock scrape. Secondary watch: 113 SGD (≈84 USD) reads low for a GMK base kit — re-check the scraped kit is the base, not a subkit, after the availability scrape | ⏳ open (awaiting next availability scrape) |
 | 2026-06-26 | gmk-awaken | NovelKeys | 70 USD | needs fix | Dead listing — dead-link clearing (#45) + `NO_BASE_KIT` | ✅ resolved (cleared) |
 | 2026-06-24 | gmk-monokai-material | NovelKeys | 40 USD | needs fix | Wrong variant (cheapest subkit) — #43 dearest-base-candidate pick | ✅ resolved (cleared) |
 | 2026-06-24 | gmk-rainy-day-r2 | Keygem | 60 EUR | needs fix | Listing has no base kit (subkits only), never heals — dropped via `BLOCKED_VENDOR_SET_PAIRS` (`82b991d`) | ✅ resolved (vendor-set dropped) |
@@ -81,8 +84,15 @@ _None — all client-recommended values have been verified (see audit below)._
 
 ## Summary
 
-- **14 report submissions across 12 listings.** All are resolved; the live feed
-  has been at **0 pending** since (checked through 2026-07-24).
+- **15 report submissions across 13 listings.** 14 are resolved; **1 open** as
+  of 2026-08-25 (gmk-british-racing-green-r3 × Ktechs, a stock-only complaint
+  awaiting its next availability scrape).
+- **Ledger completeness caveat.** The committed log is transcribed from the
+  `price-reports-feed` snapshot, which only exposes *pending* reports. A report
+  filed and self-healed between two review runs never appears in a snapshot and
+  can be missed here — stock-only complaints are the most exposed. The full
+  history lives in the `PriceReport` DB table (`resolvedAt` stamped on
+  resolution); reconcile against it to guarantee completeness.
 - **rainy-day-r2 × Keygem was reported 3×** (2026-06-13, -06-21, -06-24) and
   never healed because that store lists subkits only — resolved by dropping the
   vendor-set pair, not by patching the picker.
