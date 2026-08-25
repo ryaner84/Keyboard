@@ -29,11 +29,20 @@ const REPORT_WINDOW_DAYS = 7;
 //    auto-null still fires), so nothing wrong stays hidden for long.
 // Resolution is stamped in resolvedAt — the same flag the visitor-inbox
 // feed reads — rather than filtered per-read, so both feeds stay in step.
-export async function GET() {
+// `?all=1` returns the FULL report history (resolved + pending) with each
+// report's `resolvedAt`, so the committed ledger can be reconciled against
+// every report ever filed — not just the ones that happen to be pending at
+// snapshot time. A report that is filed and self-heals between two review
+// runs never appears in the pending-only feed, which is how stock-only
+// complaints slip out of the durable ledger. The default (no `all`) stays the
+// pending-only review feed the routine acts on. Either way the pending reports
+// that have healed are still auto-resolved below, so both modes stay in step.
+export async function GET(req: NextRequest) {
+  const all = new URL(req.url).searchParams.get("all") === "1";
   const reports = await prisma.priceReport.findMany({
-    where: { resolvedAt: null },
+    where: all ? {} : { resolvedAt: null },
     orderBy: { submittedAt: "desc" },
-    take: 50,
+    take: all ? 500 : 50,
   });
   const vendorKits = await prisma.vendorKit.findMany({
     where: { id: { in: Array.from(new Set(reports.map((r) => r.vendorKitId))) } },
@@ -57,11 +66,12 @@ export async function GET() {
       })
       .map((r) => r.id)
   );
+  const resolvedNow = new Date();
   if (resolvedIds.size > 0) {
     try {
       await prisma.priceReport.updateMany({
         where: { id: { in: Array.from(resolvedIds) } },
-        data: { resolvedAt: new Date() },
+        data: { resolvedAt: resolvedNow },
       });
     } catch {
       // The feed must render even if the resolution write fails; the same
@@ -71,9 +81,11 @@ export async function GET() {
 
   return NextResponse.json({
     reports: reports
-      .filter((r) => !resolvedIds.has(r.id))
+      // Pending feed drops what just auto-resolved; `all` keeps everything.
+      .filter((r) => all || !resolvedIds.has(r.id))
       .map((r) => ({
         submittedAt: r.submittedAt,
+        resolvedAt: r.resolvedAt ?? (resolvedIds.has(r.id) ? resolvedNow : null),
         setSlug: r.setSlug,
         vendorName: r.vendorName,
         reason: r.reason,

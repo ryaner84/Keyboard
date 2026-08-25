@@ -1,33 +1,52 @@
-# Prints the live site's pending wrong-price reports (GET /api/price-reports).
-# Manual-dispatch review feed: GitHub runners can reach the production site,
-# so this needs no DB secret. Used by the report-review routine
+# Prints the live site's wrong-price reports (GET /api/price-reports).
+# Runs daily and on manual dispatch: GitHub runners can reach the production
+# site, so this needs no DB secret. Used by the report-review routine
 # (see docs/price-report-review-routine.md).
+#
+# Pulls the FULL history (`?all=1`): PENDING reports are the ones the routine
+# acts on, RESOLVED reports let the committed ledger be reconciled against
+# every report ever filed — so a report that self-heals between two review
+# runs (stock-only complaints especially) is no longer silently dropped from
+# the durable log.
 name: Price reports feed
 
 on:
   workflow_dispatch:
+  schedule:
+    # Daily at 00:30 UTC — just before the visitor-inbox feed (01:00 UTC), so
+    # each day's wrong-price reports are snapshotted for review before they can
+    # self-heal on the next scrape and drop out of the pending feed.
+    - cron: "30 0 * * *"
 
 jobs:
   feed:
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch pending price reports
+      - name: Fetch price reports (full history)
         run: |
-          curl -sf "https://keyboard-six-tau.vercel.app/api/price-reports" \
+          curl -sf "https://keyboard-six-tau.vercel.app/api/price-reports?all=1" \
             | node -e "
               let s='';
               process.stdin.on('data', d => s += d).on('end', () => {
                 const j = JSON.parse(s);
                 const rs = j.reports ?? [];
-                console.log(rs.length + ' report(s):');
-                for (const r of rs) {
+                const pending = rs.filter(r => !r.resolvedAt);
+                const resolved = rs.filter(r => r.resolvedAt);
+                const line = (tag, r) => {
                   const l = r.listing ?? {};
-                  console.log('PRICE_REPORT | ' + r.submittedAt + ' | set=' + r.setSlug +
+                  return tag + ' | ' + r.submittedAt +
+                    ' | set=' + r.setSlug +
                     ' | vendor=' + r.vendorName +
                     ' | current=' + (l.price ?? 'null') + ' ' + (l.currency ?? '') +
                     ' | source=' + (l.priceSource ?? '?') +
                     ' | reason=' + JSON.stringify(r.reason ?? '') +
-                    ' | url=' + (l.productUrl ?? '?'));
-                }
+                    (r.resolvedAt ? ' | resolvedAt=' + r.resolvedAt : '') +
+                    ' | url=' + (l.productUrl ?? '?');
+                };
+                console.log(pending.length + ' pending report(s):');
+                for (const r of pending) console.log(line('PRICE_REPORT', r));
+                console.log('');
+                console.log(resolved.length + ' resolved report(s) (full-history reconciliation):');
+                for (const r of resolved) console.log(line('PRICE_REPORT_RESOLVED', r));
               });
             "

@@ -27,8 +27,15 @@ not the doc — repoint it here.
 
 1. Dispatch the **Price reports feed** workflow (`price-reports-feed.yml`) on
    `ryaner84/Keyboard`, wait for it to complete, and read its execution log.
-   Each pending report prints as a `PRICE_REPORT | …` line (date, set, vendor,
-   current price, price source, reason, product URL).
+   The feed also runs on its own **daily schedule (00:30 UTC)** so no report
+   goes uncaptured between manual runs. It pulls the FULL history (`?all=1`)
+   and prints two blocks:
+   - `PRICE_REPORT | …` lines — the **pending** reports to act on (date, set,
+     vendor, current price, price source, reason, product URL).
+   - `PRICE_REPORT_RESOLVED | …` lines — the **already-resolved** history (same
+     fields plus `resolvedAt`), for reconciling the client-reported log so a
+     report that self-healed between two runs is never silently dropped. Cross-
+     check these against the ledger's full log and append any that are missing.
 2. **Re-verify prior "self-healed" items first.** A `self-healed` verdict is
    provisional — it only holds once the fix survives a later scrape. At the
    start of every run, before assessing new reports, re-check each listing a
