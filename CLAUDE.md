@@ -275,9 +275,22 @@ For the rows the roster doesn't name, `planStorefrontRelocation` settles it
 with the evidence already in the database — the row's own listing URLs, same
 strict-plurality `storefrontHostFromUrls` every other planner here uses. It
 skips roster-pinned slugs and contested hosts so the three passes never fight
-over one row. And `nextVendorWebsiteUrl` now takes the vendor's own listing
-host: 96 of NovelKeys' 258 links are novelkeys.xyz, so without that guard the
-deploy repairs the row and the same night's import puts it straight back.
+over one row. And `nextVendorWebsiteUrl` now takes the vendor's own host: 96 of
+NovelKeys' 258 links are novelkeys.xyz, so without that guard the deploy repairs
+the row and the same night's import puts it straight back.
+
+**Which host is "its own" is `ownStorefrontHost`, and the roster outranks the
+listings there.** The listing plurality alone reads BACKWARDS for a store whose
+links are all on the domain it left: Maamaadei's one listing is on
+`www.maamaadei.xyz`, which no longer resolves, so the plurality pinned the row to
+the dead domain — adopting any upstream `.xyz` storeLink and refusing the
+`maamaadei.com` the roster names. Every deploy healed the row and the next import
+was free to undo it, which is the state #145 fixed by hand. The roster is the
+rung that is right by construction, so a slug it names is pinned to ITS host in
+both directions: nothing can move the row off, and `planRosterSync` stays free to
+move it on. The plurality still decides for every row the roster doesn't name.
+A roster entry with no `websiteUrl` pins nothing, so `test:vendor-urls` requires
+one on every entry.
 
 **A fifth shape gets past every one of those repairs**: a `websiteUrl` that IS
 a real shop belonging to this vendor and still publishes nothing. The row looks
@@ -294,17 +307,43 @@ discovery isn't matching, or force a re-scrape. A "visible listing" is what
 counted in SQL; the planner has the shape rules so a blank / shortener /
 marketplace row belongs to `planVendorUrlHeal`, not to this report.
 
-**Naming the vendor is not the diagnosis** — the three causes above go to three
-different passes, and one message listing all three sent the owner to the wrong
-one as often as the right one. They leave different residue, so the report also
-counts each vendor's VendorKit rows (`listings`) and priced rows
-(`pricedListings`) and says which applies: no rows at all is discovery's, rows
-but no price is `refresh-prices`, priced but invisible is a non-BASE kit or a
-catalog URL. Those counts are deliberately unfiltered by kit type or URL so the
-three stay disjoint — and every one of them defaults to 0, so a caller that
-forgets to pass them gets "discovery has never matched a tracked set" about
-every silent vendor, confidently and wrongly. `test:vendor-urls` asserts
-`db-setup` selects and passes all three.
+**Naming the vendor is not the diagnosis** — the causes above go to different
+passes, and one message listing them all sent the owner to the wrong one as
+often as the right one. They leave different residue, so the report also counts
+each vendor's VendorKit rows (`listings`), the ones the price pass has ever READ
+(`readListings`) and the priced ones (`pricedListings`) and says which applies:
+no rows at all is discovery's, rows that were never once read is a dead link set,
+rows read but unpriced is `refresh-prices`, priced but invisible is a non-BASE
+kit or a catalog URL. Those counts are deliberately unfiltered by kit type or URL
+so the four stay disjoint. `listings`/`pricedListings`/`visibleListings` default
+to 0, so a caller that forgets one gets "discovery has never matched a tracked
+set" about every silent vendor, confidently and wrongly; `readListings` defaults
+to `listings` instead, because there the zero-default would invent the newest
+diagnosis rather than fall back to the previous one. `test:vendor-urls` asserts
+`db-setup` selects and passes all four.
+
+**"Never read" is the commonest cause, and it read as the pricing backlog for
+months.** `priceSource` is written (`'SCRAPED'`) whenever the price pass READ the
+page — including when the answer was "no base kit on offer", price NULL. A row
+whose `priceUpdatedAt` is set while `priceSource` is still NULL was fetched and
+never once parsed. Only a 404/410 clears a price, and a store that closed
+(kono.store), moved domain (apexkeyboards.ca → .com), was acquired
+(ashkeebs.com now serves kineticlabs.com), password-locked its Shopify
+(hexkeyboards.com) or let its plan lapse (402) answers with a redirect / 401 /
+402 / 5xx / DNS failure — never a 404. So the row is re-fetched every six hours
+forever, stays unpriced, stays hidden on its RELEASED sets, and the report kept
+naming `refresh-prices`, the one pass that cannot end it. Count `priceSource`,
+never `priceUpdatedAt`: the timestamp is written on every attempt, so counting it
+would make every dead link look read.
+
+**The report only ever existed inside a Vercel build log, which nobody can
+read.** That is how 57 of 136 vendor rows came to be publishing nothing at once
+with no run summary ever looking wrong. `npm run audit:publishing`
+(`scripts/vendor-publishing-audit.mjs`, dispatchable as the **Vendor publishing
+audit** workflow) prints all four shapes against the production database on
+demand and writes nothing. Reach for it before guessing at why a store is
+silent — a silent store and a store nobody buys from look identical from
+outside.
 
 Roster entries carry `aliases` because the rows the roster exists to repair are
 the ones host matching cannot see: a blank vendor has no host, so a blank

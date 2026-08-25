@@ -11,8 +11,10 @@ import {
   nextVendorWebsiteUrl,
   hostKey,
   hostOfUrl,
-  storefrontHostFromUrls,
+  ownStorefrontHost,
+  rosterHostBySlug,
 } from "../../../scripts/lib/vendor-urls.mjs";
+import vendorRoster from "@/data/seed/vendors.json";
 import type { GBStatus, Region } from "@/generated/prisma";
 
 const PROJECT_ID = process.env.KEYCAPLENDAR_PROJECT_ID || "keycaplendar";
@@ -208,24 +210,33 @@ export async function importGmkSets(opts: ImportOptions = {}): Promise<ImportRes
       return owner != null && owner !== slug;
     },
   });
-  // The host each store's OWN listings sell from. A store that changed domains
-  // keeps upstream entries on the old one forever — 96 of NovelKeys' 258 links
-  // are novelkeys.xyz — and last-write-wins is exactly how the Vendor row came
-  // to be registered there while the site's roster said novelkeys.com. Reading
-  // the plurality host off the listings is the same evidence db-setup's
-  // planStorefrontRelocation repairs the row with, so the import converges on
-  // the store's real site instead of undoing that repair the same night.
+  // The host each store is KNOWN to own. A store that changed domains keeps
+  // upstream entries on the old one forever — 96 of NovelKeys' 258 links are
+  // novelkeys.xyz — and last-write-wins is exactly how the Vendor row came to be
+  // registered there while the site's roster said novelkeys.com. Pinning the row
+  // to its own host is what stops the import undoing that repair the same night.
+  //
+  // Which host that IS comes from ownStorefrontHost: the ROSTER's when it names
+  // one, and only otherwise the plurality of the store's own listings. The
+  // plurality alone reads backwards for a store whose links are ALL on the
+  // domain it left — Maamaadei's single listing is on the dead
+  // www.maamaadei.xyz, so it would pin the row to the dead domain, adopt any
+  // upstream .xyz link, and refuse the maamaadei.com the roster names.
   const listingUrlsByVendor = new Map<string, string[]>();
   for (const vk of existingVendorKits) {
     const urls = listingUrlsByVendor.get(vk.vendorId) ?? [];
     for (const u of [vk.productUrl, vk.gbUrl]) if (u && u.trim()) urls.push(u);
     listingUrlsByVendor.set(vk.vendorId, urls);
   }
+  const rosterUrlBySlug: Map<string, string> = rosterHostBySlug(vendorRoster);
   const ownHostByVendorId = new Map<string, string>();
-  listingUrlsByVendor.forEach((urls, vendorId) => {
-    const host = storefrontHostFromUrls(urls);
-    if (host) ownHostByVendorId.set(vendorId, host);
-  });
+  for (const v of existingVendors) {
+    const host = ownStorefrontHost(
+      rosterUrlBySlug.get(v.slug),
+      listingUrlsByVendor.get(v.id) ?? []
+    );
+    if (host) ownHostByVendorId.set(v.id, host);
+  }
   const vkByKey = new Map(existingVendorKits.map((vk) => [`${vk.kitId}:${vk.vendorId}`, vk]));
 
   const result: ImportResult = { sets: 0, vendors: 0, vendorKits: 0, unchanged: 0, stoppedEarly: false };

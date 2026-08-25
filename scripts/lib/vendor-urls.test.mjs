@@ -7,6 +7,8 @@ import {
   hostKey,
   isStorefrontHost,
   needsStorefront,
+  ownStorefrontHost,
+  rosterHostBySlug,
   storefrontHostFromUrls,
   planPublishingReport,
   planRosterSync,
@@ -733,11 +735,40 @@ assert.match(
   reasonOf({ slug: "saber-keebs", websiteUrl: "https://saberkeebs.com", visibleListings: 0, listings: 0, pricedListings: 0 }),
   /no listing linked/
 );
-// Linked but never priced — unpriced rows are hidden outright on RELEASED sets,
-// which is where most listings live, so the store has rows and shows nothing.
+// Linked, READ, and the answer was "nothing priced here" — unpriced rows are
+// hidden outright on RELEASED sets, which is where most listings live, so the
+// store has rows and shows nothing. This one really is refresh-prices'.
 assert.match(
-  reasonOf({ slug: "unpriced", websiteUrl: "https://unpriced.com", visibleListings: 0, listings: 7, pricedListings: 0 }),
+  reasonOf({ slug: "unpriced", websiteUrl: "https://unpriced.com", visibleListings: 0, listings: 7, readListings: 7, pricedListings: 0 }),
   /7 listing\(s\) linked, none priced/
+);
+// Linked, attempted, and never once READ: priceSource is still NULL on every
+// row. The store closed / moved domain / password-locked its Shopify, none of
+// which is a 404, so nothing ever cleared the link and refresh-prices has been
+// re-fetching it every six hours for months. Naming that pass here is what sent
+// the owner to the one thing that cannot help.
+assert.match(
+  reasonOf({ slug: "dead-links", websiteUrl: "https://kono.store", visibleListings: 0, listings: 44, readListings: 0, pricedListings: 0 }),
+  /44 listing\(s\) linked, the price pass has never read one/
+);
+// Partially read still means the pass CAN reach the store — that is the pricing
+// case, not the dead-link one.
+assert.match(
+  reasonOf({ slug: "part-read", websiteUrl: "https://partread.com", visibleListings: 0, listings: 9, readListings: 1, pricedListings: 0 }),
+  /9 listing\(s\) linked, none priced/
+);
+// A caller that doesn't measure readListings must degrade to the old message,
+// never to a confident "the links are dead". Absent is not zero here — every
+// other count defaults to 0 and this is the one where that default would invent
+// a diagnosis. db-setup passing it is asserted below.
+assert.match(
+  reasonOf({ slug: "unmeasured", websiteUrl: "https://unmeasured.com", visibleListings: 0, listings: 7, pricedListings: 0 }),
+  /7 listing\(s\) linked, none priced/
+);
+// Strings from the driver, on the new count too.
+assert.match(
+  reasonOf({ slug: "stringy-read", websiteUrl: "https://stringyread.com", visibleListings: "0", listings: "4", readListings: "0", pricedListings: "0" }),
+  /4 listing\(s\) linked, the price pass has never read one/
 );
 // Priced, but every row is filtered off the set page.
 assert.match(
@@ -804,15 +835,25 @@ assert.ok(
 // owner "no listing linked — discovery has never matched a tracked set" about
 // every silent vendor, confidently and wrongly, and send them to the one pass
 // that has nothing to do with it.
-for (const field of ["listings", "pricedListings", "visibleListings"]) {
+for (const field of ["listings", "readListings", "pricedListings", "visibleListings"]) {
   assert.ok(
     new RegExp(`${field}:`).test(dbSetup),
     `scripts/db-setup.mjs must pass ${field} to planPublishingReport`
   );
 }
 assert.ok(
-  /AS listings/.test(dbSetup) && /AS priced_listings/.test(dbSetup),
-  "scripts/db-setup.mjs must count the vendor's rows and priced rows in SQL"
+  /AS listings/.test(dbSetup) &&
+    /AS read_listings/.test(dbSetup) &&
+    /AS priced_listings/.test(dbSetup),
+  "scripts/db-setup.mjs must count the vendor's rows, read rows and priced rows in SQL"
+);
+// The read count is `priceSource IS NOT NULL`, not `priceUpdatedAt IS NOT NULL`.
+// The timestamp is written on every ATTEMPT, including the ones that never
+// parsed the page — counting it would make every dead link look read and put
+// the diagnosis straight back where it was.
+assert.ok(
+  /"priceSource" IS NOT NULL[\s\S]{0,80}AS read_listings/.test(dbSetup),
+  "scripts/db-setup.mjs must derive read_listings from priceSource, not priceUpdatedAt"
 );
 // The reason must reach the log, not just the plan.
 assert.ok(
@@ -1085,15 +1126,83 @@ assert.equal(
   "https://www.swagkey.kr"
 );
 
+// --- ownStorefrontHost: the roster outranks the listing plurality ----------
+// The plurality alone reads BACKWARDS for a store whose links are all on the
+// domain it left. Maamaadei's one listing is on www.maamaadei.xyz, which no
+// longer resolves: the plurality names the dead domain, so the guard above would
+// adopt any upstream .xyz link and refuse the maamaadei.com the roster names —
+// every deploy healing the row and every import putting it back, the store dark
+// again. #145 fixed that row by hand; this is what stops it being undone.
+assert.equal(
+  ownStorefrontHost("https://maamaadei.com", ["https://www.maamaadei.xyz/products/gmk-rubrehose"]),
+  "maamaadei.com"
+);
+assert.equal(
+  nextVendorWebsiteUrl(
+    "https://maamaadei.com",
+    "https://www.maamaadei.xyz/products/gmk-rubrehose",
+    new Set(),
+    ownStorefrontHost("https://maamaadei.com", ["https://www.maamaadei.xyz/products/x"])
+  ),
+  "https://maamaadei.com"
+);
+// A roster row with NO listings at all is pinned just the same. Without the
+// roster the plurality is null, which disables the guard entirely and lets any
+// storefront link on earth take the row.
+assert.equal(ownStorefrontHost("https://monacokeys.de", []), "monacokeys.de");
+assert.equal(ownStorefrontHost(null, []), null);
+// Rows the roster doesn't name keep the listing plurality, unchanged: that is
+// still the only evidence for them, and it is what converged NovelKeys.
+assert.equal(
+  ownStorefrontHost(undefined, [
+    "https://novelkeys.com/products/a",
+    "https://novelkeys.com/products/b",
+    "https://novelkeys.xyz/products/c",
+  ]),
+  "novelkeys.com"
+);
+// A roster entry that names no usable URL is not a pin — fall through.
+assert.equal(ownStorefrontHost("  ", ["https://mekibo.com/products/a"]), "mekibo.com");
+
+// --- rosterHostBySlug ------------------------------------------------------
+// Aliases are included because the roster's slugs are not always the database's;
+// a row spelled `cannon-keys` must be pinned by the `cannonkeys` entry.
+const pinned = rosterHostBySlug([
+  { slug: "cannonkeys", websiteUrl: "https://cannonkeys.com", aliases: ["cannon-keys"] },
+  { slug: "nourl", websiteUrl: "" },
+  { websiteUrl: "https://noslug.com" },
+]);
+assert.equal(pinned.get("cannonkeys"), "https://cannonkeys.com");
+assert.equal(pinned.get("cannon-keys"), "https://cannonkeys.com");
+assert.equal(pinned.has("nourl"), false);
+assert.equal(pinned.size, 2);
+assert.deepEqual([...rosterHostBySlug().keys()], []);
+// Every roster entry is well-formed enough to pin its own row — an entry that
+// pins nothing is a store the import can still wander off.
+const rosterJson = JSON.parse(
+  readFileSync(join(REPO_ROOT, "src", "data", "seed", "vendors.json"), "utf8")
+);
+const allPins = rosterHostBySlug(rosterJson);
+for (const entry of rosterJson) {
+  assert.ok(
+    allPins.get(entry.slug),
+    `src/data/seed/vendors.json: ${entry.slug} must carry a websiteUrl the import can pin to`
+  );
+}
+
 // The import must actually pass the vendor's own host through, and derive it
-// from the listings rather than re-deciding what a storefront is.
+// with ownStorefrontHost so the roster's pin wins over the listing plurality.
 assert.ok(
   /ownHostByVendorId\.get\(vendor\?\.id \?\? ""\)/.test(keycaplendarTs),
-  "the KeycapLendar import must pass each vendor's own listing host to nextVendorWebsiteUrl"
+  "the KeycapLendar import must pass each vendor's own host to nextVendorWebsiteUrl"
 );
 assert.ok(
-  /storefrontHostFromUrls\(urls\)/.test(keycaplendarTs),
-  "the KeycapLendar import must derive that host with storefrontHostFromUrls"
+  /ownStorefrontHost\(/.test(keycaplendarTs),
+  "the KeycapLendar import must derive that host with ownStorefrontHost"
+);
+assert.ok(
+  /rosterHostBySlug\(vendorRoster\)/.test(keycaplendarTs),
+  "the KeycapLendar import must feed ownStorefrontHost the hand-written roster"
 );
 
 // db-setup must run the relocation pass, in both of main()'s branches — a

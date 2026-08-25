@@ -165,9 +165,10 @@ export function storefrontHostFromUrls(urls) {
  * mokbstore.com, so without this the deploy-time repair is undone by the very
  * next nightly import.
  *
- * `ownHostKey` is the host this vendor is KNOWN to own — the strict-plurality
- * host of its own listing URLs (storefrontHostFromUrls), which is the same
- * evidence planStorefrontRelocation settles the question with at deploy time.
+ * `ownHostKey` is the host this vendor is KNOWN to own — see ownStorefrontHost
+ * below: the roster's when it names one, otherwise the strict-plurality host of
+ * the vendor's own listing URLs, which is the same evidence
+ * planStorefrontRelocation settles the question with at deploy time.
  * A store that moved domains keeps upstream entries on the old one forever:
  * 96 of NovelKeys' 258 links are novelkeys.xyz, its retired site, and
  * last-write-wins is exactly how the Vendor row came to be registered there.
@@ -204,6 +205,56 @@ export function nextVendorWebsiteUrl(
   const ownKey = hostKey(ownHostKey ?? "");
   if (ownKey && incomingKey !== ownKey) return currentUrl;
   return origin;
+}
+
+/**
+ * Every spelling of a vendor slug the roster pins, mapped to the storefront it
+ * pins it to. Aliases are included because the roster's slugs are not always
+ * the database's (`cannonkeys`/`cannon-keys`, `thekeyco`/`the-key-company`, …).
+ *
+ * @param {Array<{ slug?: string, websiteUrl?: string, aliases?: string[] }>} roster
+ * @returns {Map<string, string>} slug (and alias) -> the roster's websiteUrl
+ */
+export function rosterHostBySlug(roster) {
+  const bySlug = new Map();
+  for (const entry of roster ?? []) {
+    const url = String(entry?.websiteUrl ?? "").trim();
+    if (!entry?.slug || !hostOfUrl(url)) continue;
+    for (const slug of [entry.slug, ...(entry.aliases ?? [])]) bySlug.set(slug, url);
+  }
+  return bySlug;
+}
+
+/**
+ * The host a vendor is KNOWN to own — what `nextVendorWebsiteUrl` must be given
+ * as `ownHostKey` so an import can never move the row off it.
+ *
+ * The listing plurality alone was the whole answer until it repaired one loop by
+ * opening another. It works when the store's own links name the site it sells
+ * from (NovelKeys: 162 novelkeys.com against 96 on the retired .xyz). It fails
+ * exactly where the ROSTER exists to help — a store whose links are ALL on the
+ * domain it left. Maamaadei is that case: its one listing is on
+ * www.maamaadei.xyz, which no longer resolves, so the plurality names the dead
+ * domain. The guard then reads backwards: an upstream `.xyz` storeLink matches
+ * "its own host" and is adopted, while the `.com` one the roster names is
+ * refused for not matching. Every deploy healed the row to maamaadei.com and the
+ * next import was free to put it straight back — the store dark again, which is
+ * the state #145 fixed by hand.
+ *
+ * The roster is the hand-written rung that is right by construction, so where it
+ * names a storefront that IS the vendor's own host, and the listing plurality is
+ * only consulted for the rows it doesn't name. A roster-pinned row is therefore
+ * pinned in both directions: nothing can move it off, and planRosterSync is free
+ * to move it on.
+ *
+ * @param {string | null | undefined} rosterUrl  the roster's websiteUrl, if any
+ * @param {string[]} [listingUrls]               the vendor's own listing URLs
+ * @returns {string | null}
+ */
+export function ownStorefrontHost(rosterUrl, listingUrls) {
+  const pinned = hostOfUrl(String(rosterUrl ?? "").trim());
+  if (pinned) return pinned;
+  return storefrontHostFromUrls(listingUrls);
 }
 
 /**
@@ -646,21 +697,43 @@ export function planRosterSync(roster, existing) {
  *                                lands here, which is exactly how every
  *                                Signature Plastics specialist read as healthy
  *                                while publishing nothing.
- *   listings > 0, priced = 0     linked but never priced. Unpriced rows are
- *                                hidden outright on RELEASED sets, which is
- *                                where most listings live — so the store has
- *                                rows and still shows nothing. refresh-prices.
+ *   listings > 0, read = 0       the price pass has never once READ one of this
+ *                                store's pages — see below. Its links are dead;
+ *                                relink or retire the store.
+ *   listings > 0, priced = 0     read, and the answer was "nothing priced here".
+ *                                Unpriced rows are hidden outright on RELEASED
+ *                                sets, which is where most listings live — so
+ *                                the store has rows and still shows nothing.
+ *                                refresh-prices.
  *   priced > 0, visible = 0      priced, but every row is filtered off the set
  *                                page: a non-BASE kit, or a catalog URL that
  *                                PURCHASABLE_VENDOR_KIT_WHERE refuses.
  *
- * `listings` counts the vendor's VendorKit rows of ANY kit type and
- * `pricedListings` the ones carrying a price, so the three cases stay disjoint;
- * `visibleListings` is the narrow site-visible count described above. All are
- * counted in SQL by the caller — this planner has no DB.
+ * The read/never-read split is the one that had the owner chasing the wrong
+ * pass. "None priced — refresh-prices" was said about every silent store, and
+ * for most of them refresh-prices had already read the URL every six hours for
+ * months and can never succeed: the store closed (kono.store), moved domain
+ * (apexkeyboards.ca → .com), was acquired (ashkeebs.com now serves
+ * kineticlabs.com), turned on a Shopify password page (hexkeyboards.com) or let
+ * its plan lapse (402). None of those is a 404, and only a 404/410 clears a
+ * price — so the row is retried forever, stays unpriced, stays hidden, and the
+ * report keeps naming the one pass that cannot help.
+ *
+ * `priceSource` is the evidence, and it is already in the table: the price pass
+ * writes 'SCRAPED' whenever it READ the page, including when the answer was "no
+ * base kit on offer" (price NULL). A row whose `priceUpdatedAt` is set while
+ * `priceSource` is still NULL was attempted and never once parsed. A vendor
+ * where that is true of EVERY row has a dead link set, not a pricing backlog.
+ *
+ * `listings` counts the vendor's VendorKit rows of ANY kit type,
+ * `readListings` the ones the price pass has ever read (priceSource not null)
+ * and `pricedListings` the ones carrying a price, so the four cases stay
+ * disjoint; `visibleListings` is the narrow site-visible count described above.
+ * All are counted in SQL by the caller — this planner has no DB.
  *
  * @param {Array<{ slug: string, websiteUrl?: string | null, visibleListings?: number,
- *                 listings?: number, pricedListings?: number }>} vendors
+ *                 listings?: number, readListings?: number,
+ *                 pricedListings?: number }>} vendors
  * @param {Set<string>} [excludeSlugs]
  */
 export function planPublishingReport(vendors, excludeSlugs = new Set()) {
@@ -683,7 +756,22 @@ export function planPublishingReport(vendors, excludeSlugs = new Set()) {
 function publishingFailureReason(vendor) {
   const listings = Number(vendor.listings ?? 0);
   const priced = Number(vendor.pricedListings ?? 0);
+  // Absent means "not measured", NOT zero. Every other count here defaults to 0
+  // and a caller that forgets one gets a confident wrong diagnosis for free —
+  // the mistake this reason exists to stop. Defaulting to `listings` degrades to
+  // the pre-existing message instead; test:vendor-urls asserts db-setup passes it.
+  const read = vendor.readListings == null ? listings : Number(vendor.readListings);
   if (!(listings > 0)) return "no listing linked — discovery has never matched a tracked set";
+  // Never once parsed, however many times it was fetched: the links are dead
+  // (store closed, moved domain, password page, plan lapsed). refresh-prices
+  // cannot end this — relinking or retiring the store can. Only claimed when a
+  // price is absent too, so a store that reads fine keeps the priced reasons.
+  if (!(priced > 0) && !(read > 0)) {
+    return (
+      `${listings} listing(s) linked, the price pass has never read one — ` +
+      `the store's links are dead; relink or retire it`
+    );
+  }
   if (!(priced > 0)) {
     return `${listings} listing(s) linked, none priced — unpriced rows are hidden on released sets`;
   }
