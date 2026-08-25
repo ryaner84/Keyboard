@@ -15,10 +15,14 @@ ledger tables). Use exactly:
 
 > Run the wrong-price report review for the GMK group-buy tracker exactly as
 > specified in `docs/price-report-review-routine.md`. Read that file first and
-> follow every step, including re-verifying prior self-healed items and
-> rendering all three ledger tables from `price-report-ledger.md` on every run
-> — even when there are zero pending reports. Work on the `main` branch and do
-> not make code changes without tracing a report to its root cause per the doc.
+> follow every step, including re-verifying every prior self-healed item
+> against the Self-heal watch and rendering all ledger tables from
+> `price-report-ledger.md` on every run — even when there are zero pending
+> reports. Work on the `main` branch. When a report needs a fix — a fresh
+> "needs fix" report, or a watched item that did not actually self-heal — trace
+> it to its root cause per the doc, implement and commit the fix on `main`
+> yourself, and only pause for me when a fix is genuinely ambiguous or
+> architecturally significant. Do not wait for per-report approval.
 
 If the stored prompt ever diverges from the steps below, the prompt is wrong,
 not the doc — repoint it here.
