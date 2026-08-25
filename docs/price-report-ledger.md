@@ -18,6 +18,10 @@ renders three tables:
 3. **Client-reported items** — the full client's-eye log of every report ever
    filed (always shown, including resolved).
 
+The **Self-heal watch** (table 1b) holds every item flagged `self-healed`,
+which the *next* run must confirm actually healed or else fix. It is rendered
+and reconciled on every run alongside the three tables.
+
 The **Resolution audit** table below keeps the full root-cause/fix detail for
 every report; it is the durable audit trail and is not part of the routine's
 per-run rendered output. When a new report appears in the feed, add its row to
@@ -32,6 +36,20 @@ both the client-reported log and the resolution audit in the same run.
 | logged (UTC) | set | vendor | current price | reason (client) | verdict | status |
 |---|---|---|---|---|---|---|
 | 2026-08-25 | gmk-british-racing-green-r3 | Ktechs | 113 SGD (SCRAPED) | "there is no more stock" | self-healed (stock-only) | ⏳ open — clears on next availability scrape |
+
+## 1b. Self-heal watch (pending next-day confirmation)
+
+Every item a run marks **self-healed** lands here and stays until the *next*
+run proves it. A nightly scrape runs between review runs, so by the next run
+each row must be confirmed **healed** (report resolved, wrong value gone) or,
+if it did not heal (still pending after a scrape, wrong value returned, or the
+same listing was re-reported), reclassified **needs fix** and **fixed in that
+run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
+to the resolution audit and drops out of this table.
+
+| flagged (UTC) | set | vendor | flagged value | expected heal signal | confirm by | status |
+|---|---|---|---|---|---|---|
+| 2026-08-25 | gmk-british-racing-green-r3 | Ktechs | 113 SGD, "no more stock" | availability re-scrape marks it out of stock / re-verifies; price not a stale wrong value | next run ≥ 2026-08-26 | ⏳ awaiting confirmation |
 
 ## 2. Open client-recommended values (awaiting verification)
 

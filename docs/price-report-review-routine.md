@@ -36,17 +36,28 @@ not the doc — repoint it here.
      fields plus `resolvedAt`), for reconciling the client-reported log so a
      report that self-healed between two runs is never silently dropped. Cross-
      check these against the ledger's full log and append any that are missing.
-2. **Re-verify prior "self-healed" items first.** A `self-healed` verdict is
-   provisional — it only holds once the fix survives a later scrape. At the
-   start of every run, before assessing new reports, re-check each listing a
-   previous run marked self-healed:
-   - **Stayed rectified?** The current price is still `null` (or now shows the
-     correct base kit) and the flagged wrong value did not come back. Only then
-     is it truly resolved and can stop being tracked.
-   - **Regressed?** The wrong price returned (a re-scrape re-stored the bad
-     value, or a stock-only complaint keeps recurring). It never actually
-     healed — reclassify it as **needs fix** and treat it as a systematic bug,
-     because a value that reverts is the "never heals" case, not a heal.
+2. **Re-verify every prior "self-healed" item first — and fix the ones that did
+   not heal.** A `self-healed` verdict is provisional: it only holds once a
+   later scrape proves it. A nightly scrape runs between review runs, so by the
+   next run every self-heal flagged previously can and must be confirmed. Track
+   them in the **Self-heal watch** table (1b) of `price-report-ledger.md`: every
+   item a run marks self-healed is added there on that run and stays until this
+   step confirms or fails it. At the start of every run, before assessing new
+   reports, re-check each watched listing against the full-history feed (its
+   `PRICE_REPORT` and `PRICE_REPORT_RESOLVED` lines):
+   - **Healed → confirm.** The report is now resolved (`resolvedAt` set after a
+     scrape that ran *after* the report was filed) and the flagged wrong value
+     is gone — price is `null`, now shows the correct base kit, or the
+     stock-only listing re-scraped cleanly. Only then mark it resolved, move it
+     to the resolution audit, and drop it from the watch.
+   - **Did NOT heal → fix it now.** The item is still pending a full day after a
+     nightly scrape should have re-verified it, the wrong value came back, or
+     the same listing was re-reported. A value that survives or reverts across a
+     scrape is the "never heals" case, not a heal. Reclassify it **needs fix**
+     and **fix it in this same run** per step 4 — trace the root cause,
+     implement the scraper/import fix, add tests, run the suite, and commit on
+     `main`. Do not defer it to a human and do not leave it on the watch for
+     "another day": the scheduler owns the fix.
 3. For each `PRICE_REPORT` line, assess:
    - **Self-healed?** The current price was re-scraped recently or is now
      `null`. Stock-only complaints ("sold out", "no stock", "ready stock")
@@ -55,11 +66,20 @@ not the doc — repoint it here.
      — wrong currency, wrong product, or wrong variant/subkit. These do **not**
      self-heal: re-scraping pulls the same wrong value every run.
 4. **Investigate and fix proactively.** Do not wait for per-report approval.
-   Trace each "needs fix" report to its root cause in `scraper/scrape.py`
-   (and `src/lib/import/prices.ts` / `vendor-overrides.ts`), implement the fix,
-   add/extend unit tests in `scraper/tests/test_scraper_helpers.py`, run the
-   suite, then commit on `main`. Only pause for a human decision when a fix is
-   genuinely ambiguous or architecturally significant.
+   This covers both fresh "needs fix" reports and any item that **failed
+   self-heal verification in step 2**. Trace each to its root cause in
+   `scraper/scrape.py` (and `src/lib/import/prices.ts` / `vendor-overrides.ts`),
+   implement the fix, add/extend unit tests in
+   `scraper/tests/test_scraper_helpers.py`, run the suite, then commit on
+   `main`. Only pause for a human decision when a fix is genuinely ambiguous or
+   architecturally significant.
+
+   > **"Manual fix" here means the scheduler implements and commits the fix
+   > itself** — it never means "stop and wait for a human". An item that did not
+   > self-heal is the scheduler's to repair in the same run it detects the
+   > failure. A stored prompt that says "do not make code changes / wait for the
+   > user to decide" contradicts this routine and is wrong (repoint it here per
+   > the note above); the only pause is the genuine-ambiguity exception.
 5. Present a results table with these columns:
    `report date | set | vendor | current price | reason | verdict
    (self-healed / needs fix) | recommendation | status post-fixing`.
@@ -82,6 +102,12 @@ not the doc — repoint it here.
      ever filed (columns: logged date, set, vendor, reported price, client
      reason, verdict, status). This one **always shows every item**, resolved or
      not, and is the durable "what has the client complained about" view.
+
+   Also render **(1b) Self-heal watch** — the items awaiting next-day
+   confirmation (step 2). This is the working set the verification loop keys on:
+   a row is added when an item is flagged self-healed and cleared only when a
+   later run confirms it healed or fixes it. Rendering it every run makes the
+   pending verifications visible; when the watch is empty, show "none".
 
    The `Resolution audit` table in the ledger keeps the full root-cause/fix
    detail for the audit trail and is **not** rendered per run. When the current
