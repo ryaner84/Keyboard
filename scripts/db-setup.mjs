@@ -665,12 +665,20 @@ async function healVendorUrlsFromListings(client) {
 // to a redirect the crawler can't follow, or its every scraped price landed at
 // null and the sets it lists are all RELEASED (which hides unpriced rows).
 // None can be UNDONE from data we hold — but they can be told apart, and the
-// report names which of them applies to each vendor, because "one of three
+// report names which of them applies to each vendor, because "one of these
 // things went wrong" sent the owner to the wrong pass as often as the right
 // one. The first cause is the one that had a code bug behind it: discovery's
 // tracked-profile gate refused every SA / DSS / DSA / MTNU / CYL product, so a
 // Signature Plastics specialist could never be linked to anything and sat in
 // this report reading as "the store stopped selling tracked sets".
+//
+// The commonest cause by far is a DEAD LINK SET, and it read as the pricing
+// backlog until this pass learned to count `priceSource`. A store that closed,
+// moved domain, was acquired, password-locked its Shopify or let the plan lapse
+// answers with a redirect / 401 / 402 / 5xx / DNS failure — never a 404 — and
+// only a 404/410 clears a price, so the row is re-fetched every six hours
+// forever and stays unpriced, hidden, and mis-diagnosed as "refresh-prices".
+// See planPublishingReport for why `priceSource IS NOT NULL` is the evidence.
 //
 // A "visible listing" is a VendorKit that would actually render on a set page:
 // its kit is BASE, its productUrl isn't a manufacturer catalog page (unless
@@ -735,13 +743,20 @@ async function reportVendorsPublishingNothing(client) {
                      )
                    )
               ) AS visible_listings,
-              -- The two counts that tell the three causes apart (see
-              -- planPublishingReport): how many rows the store has at all, and
-              -- how many of those carry a price. Deliberately unfiltered by kit
-              -- type or URL, so "has rows but none visible" stays distinct from
-              -- "has no rows".
+              -- The three counts that tell the four causes apart (see
+              -- planPublishingReport): how many rows the store has at all, how
+              -- many the price pass has ever READ, and how many carry a price.
+              -- Deliberately unfiltered by kit type or URL, so "has rows but
+              -- none visible" stays distinct from "has no rows".
               (SELECT count(*)::int FROM public."VendorKit" vk
                 WHERE vk."vendorId" = v.id) AS listings,
+              -- priceSource is written ('SCRAPED') whenever the pass READ the
+              -- page — including when the answer was "no base kit", price NULL.
+              -- Still NULL after an attempt means the URL was never parsed at
+              -- all: a dead link, which refresh-prices can never resolve.
+              (SELECT count(*)::int FROM public."VendorKit" vk
+                WHERE vk."vendorId" = v.id AND vk."priceSource" IS NOT NULL)
+                AS read_listings,
               (SELECT count(*)::int FROM public."VendorKit" vk
                 WHERE vk."vendorId" = v.id AND vk.price IS NOT NULL) AS priced_listings
          FROM public."Vendor" v
@@ -758,6 +773,7 @@ async function reportVendorsPublishingNothing(client) {
       websiteUrl: r.websiteUrl,
       visibleListings: r.visible_listings,
       listings: r.listings,
+      readListings: r.read_listings,
       pricedListings: r.priced_listings,
     })),
     _NON_PUBLISHING_SLUGS
@@ -767,9 +783,12 @@ async function reportVendorsPublishingNothing(client) {
   console.warn(
     `[db-setup] ${silent.length} vendor(s) have a storefront but publish no ` +
       `listing on any set page. Each is named with the pass to look at — ` +
-      `"no listing linked" is discovery, "none priced" is refresh-prices, ` +
-      `"none visible" is a non-BASE/catalog row. Removing the Vendor row is ` +
-      `the right answer only when the store no longer sells tracked sets.`
+      `"no listing linked" is discovery, "never read one" is a dead link set ` +
+      `(relink or retire — refresh-prices cannot help), "none priced" is ` +
+      `refresh-prices, "none visible" is a non-BASE/catalog row. Removing the ` +
+      `Vendor row is the right answer only when the store no longer sells ` +
+      `tracked sets. \`npm run audit:publishing\` (or the Vendor publishing ` +
+      `audit workflow) prints this on demand, outside a build log.`
   );
   for (const v of silent) {
     console.warn(`[db-setup]   ${v.slug} (${v.websiteUrl}) — ${v.reason}`);
