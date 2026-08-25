@@ -1831,14 +1831,56 @@ def ensure_gmk_vendor(conn) -> str:
         return vendor_id
 
 
+def build_keycap_norm_index(conn) -> dict:
+    """Existing keycap sets indexed by normalized name, for divergent-slug reuse.
+
+    The slug a source chooses is its own: gmk.net files "GMK CYL Mizu R2
+    Keycaps" under gmk-cyl-mizu-r2-keycaps while KeycapLendar files the same
+    product under gmk-mizu-r2. An upsert that only looks up the slug therefore
+    writes a SECOND row for one set — the "orphan duplicate" _build_set_index
+    routes listings around. normalize_set_name already drops "CYL" and
+    "Keycaps", so it recognises the pair; this makes the upserts use it.
+    """
+    index: dict[str, list[dict]] = {}
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("""SELECT id, name, status::text AS status FROM "GroupBuy"
+                        WHERE "productType" = 'KEYCAPS' AND slug NOT LIKE 'custom-%'""")
+        for row in cur.fetchall():
+            key = normalize_set_name(row.get("name") or "")
+            if key:
+                index.setdefault(key, []).append({"id": row["id"], "status": row["status"]})
+    return index
+
+
+def _existing_set_by_name(norm_index: dict | None, name: str) -> dict | None:
+    """The one existing row this name belongs to, or None.
+
+    Ambiguity is never resolved by guessing: two rows sharing a normalized name
+    are themselves a duplicate the db-setup merge has to settle, and picking one
+    here would attach the source's URL to whichever happened to be listed first.
+    """
+    if not norm_index:
+        return None
+    key = normalize_set_name(name or "")
+    if not key:
+        return None
+    candidates = norm_index.get(key) or []
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def upsert_gmk_set(conn, data: dict, vendor_id: str, *,
                    vk_currency: str = "EUR",
-                   protect_terminal: bool = False) -> tuple:
+                   protect_terminal: bool = False,
+                   norm_index: dict | None = None) -> tuple:
     """Upsert a GroupBuy + BASE Kit + vendor link. Returns (gb_id, created).
 
     protect_terminal: don't overwrite a DELIVERED/CANCELLED status — used by
     sources (zFrontier regional GBs) that may still list a set as active
     after the worldwide run has shipped.
+
+    norm_index: when the slug is unknown, fall back to an unambiguous
+    normalized-name match so a divergently-slugged source updates the existing
+    row instead of creating a duplicate of it (see build_keycap_norm_index).
     """
     slug = data["slug"]
 
@@ -1850,6 +1892,9 @@ def upsert_gmk_set(conn, data: dict, vendor_id: str, *,
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute('SELECT id FROM "GroupBuy" WHERE slug = %s', (slug,))
         existing = cur.fetchone()
+
+    if not existing:
+        existing = _existing_set_by_name(norm_index, data.get("name") or "")
 
     if existing:
         gb_id = existing["id"]
@@ -1880,9 +1925,9 @@ def upsert_gmk_set(conn, data: dict, vendor_id: str, *,
                     designer = CASE WHEN (designer IS NULL OR designer = '') THEN %s ELSE designer END,
                     description = CASE WHEN (description IS NULL OR description = '') THEN %s ELSE description END,
                     "updatedAt" = now()
-                WHERE slug = %s
+                WHERE id = %s
             """, (*status_params, data["name"], data.get("designer") or "",
-                  data.get("description") or "", slug))
+                  data.get("description") or "", gb_id))
         created = False
     else:
         images_list = data.get("images") or []
@@ -1917,10 +1962,24 @@ def upsert_gmk_set(conn, data: dict, vendor_id: str, *,
                 ON CONFLICT DO NOTHING
             """, (gb_id,))
         created = True
+        # Register the new row so a second URL for the same set later in this
+        # run reuses it rather than adding another spelling of it.
+        if norm_index is not None:
+            key = normalize_set_name(data["name"])
+            if key:
+                norm_index.setdefault(key, []).append(
+                    {"id": gb_id, "status": data["status"]}
+                )
 
     # Store the gmk.net product page on a GMK VendorKit row. GMK is the
     # MANUFACTURER, not a vendor — this row is never priced or displayed; it
     # exists solely to carry the gmk.net URL for the image/catalog passes.
+    #
+    # An EXISTING row is not guaranteed to have a BASE kit — a Geekhack-sourced
+    # one never did — and the name fallback above now sends this pass down that
+    # branch far more often. Without a kit there is nowhere to hang the URL, so
+    # the catalog and image passes would never see the set.
+    ensure_base_kit(conn, gb_id)
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             'SELECT id FROM "Kit" WHERE "groupBuyId" = %s AND type = \'BASE\' LIMIT 1',
@@ -1962,6 +2021,10 @@ def run_catalog(
 
     gmk_vendor_id = ensure_gmk_vendor(conn)
     frozen_slugs = fetch_frozen_catalog_slugs(conn)
+    # gmk.net's own slugs ("gmk-cyl-mizu-r2-keycaps") diverge from the ones the
+    # rest of the catalog uses ("gmk-mizu-r2"), so a slug-only upsert wrote this
+    # pass's own duplicate of every set it already had.
+    norm_index = build_keycap_norm_index(conn)
     log(f"  {len(frozen_slugs)} released set(s) already final — detail pages skipped.")
     catalog_page = context.new_page()
     detail_page = context.new_page()
@@ -2000,7 +2063,9 @@ def run_catalog(
                 continue
 
             stats["sets_scraped"] += 1
-            _, created = upsert_gmk_set(conn, metadata, gmk_vendor_id)
+            _, created = upsert_gmk_set(
+                conn, metadata, gmk_vendor_id, norm_index=norm_index
+            )
             if created:
                 stats["created"] += 1
                 log(f"  + {metadata['name']} ({metadata['status']})")
@@ -2325,18 +2390,25 @@ def _attach_dcs_vendor_kit(conn, gb_id: str, vendor_id: str, url: str) -> None:
         """, (kit["id"], vendor_id, url, url))
 
 
-def upsert_dcs_set(conn, data: dict, vendor_id: str, status: str) -> tuple:
+def upsert_dcs_set(conn, data: dict, vendor_id: str, status: str,
+                   norm_index: dict | None = None) -> tuple:
     """Upsert a DCS GroupBuy + BASE Kit + wiki link. Returns (gb_id, created).
 
     Modelled on upsert_gmk_set: a terminal (DELIVERED/CANCELLED) row is never
-    reopened, and existing name/designer/description are supplemented rather
-    than clobbered so manual edits survive.
+    reopened, existing name/designer/description are supplemented rather than
+    clobbered so manual edits survive, and an unknown slug falls back to an
+    unambiguous normalized-name match so dcs.wiki's spelling of a set ("DCS
+    After School 1992 40s kit") updates the row the rest of the catalog already
+    has rather than duplicating it.
     """
     slug = data["slug"]
 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute('SELECT id FROM "GroupBuy" WHERE slug = %s', (slug,))
         existing = cur.fetchone()
+
+    if not existing:
+        existing = _existing_set_by_name(norm_index, data.get("name") or "")
 
     if existing:
         gb_id = existing["id"]
@@ -2351,11 +2423,11 @@ def upsert_dcs_set(conn, data: dict, vendor_id: str, status: str) -> tuple:
                     "imageUrl" = COALESCE(NULLIF("imageUrl", ''), %s),
                     "gbStart" = COALESCE("gbStart", %s),
                     "updatedAt" = now()
-                WHERE slug = %s
+                WHERE id = %s
             """, (
                 list(TERMINAL_STATUSES), status, data["name"],
                 data.get("designer") or "", data.get("description") or "",
-                data.get("imageUrl"), data.get("release_date"), slug,
+                data.get("imageUrl"), data.get("release_date"), gb_id,
             ))
         created = False
     else:
@@ -2383,6 +2455,10 @@ def upsert_dcs_set(conn, data: dict, vendor_id: str, status: str) -> tuple:
                 row = cur.fetchone()
             gb_id = row["id"]
         created = True
+        if norm_index is not None:
+            key = normalize_set_name(data["name"])
+            if key:
+                norm_index.setdefault(key, []).append({"id": gb_id, "status": status})
 
     # Vendor linking is only possible through a BASE kit (_build_set_index
     # INNER JOINs on it), so guarantee one before attaching anything.
@@ -2440,6 +2516,7 @@ def run_dcs_catalog(
 
     vendor_id = ensure_dcs_vendor(conn)
     frozen_slugs = fetch_frozen_dcs_slugs(conn)
+    norm_index = build_keycap_norm_index(conn)
     log(f"  {len(frozen_slugs)} released DCS set(s) already final — detail pages skipped.")
 
     page = context.new_page()
@@ -2478,7 +2555,9 @@ def run_dcs_catalog(
             # running has shipped. Interest checks never appear here.
             status = "ACTIVE_GB" if slug in active_slugs else "DELIVERED"
             stats["sets_scraped"] += 1
-            _, created = upsert_dcs_set(conn, detail, vendor_id, status)
+            _, created = upsert_dcs_set(
+                conn, detail, vendor_id, status, norm_index=norm_index
+            )
             if created:
                 stats["created"] += 1
                 log(f"  + {detail['name']} ({status})")
@@ -2639,6 +2718,7 @@ def run_zfrontier(conn, context: BrowserContext, deadline: float) -> dict:
     log("zFrontier pass: discovering active GMK group buys ...")
 
     vendor_id = ensure_zfrontier_vendor(conn)
+    norm_index = build_keycap_norm_index(conn)
     page = context.new_page()
     try:
         page.goto(ZFRONTIER_GB_URL, wait_until="domcontentloaded",
@@ -2671,6 +2751,7 @@ def run_zfrontier(conn, context: BrowserContext, deadline: float) -> dict:
                 _, created = upsert_gmk_set(
                     conn, data, vendor_id,
                     vk_currency="CNY", protect_terminal=True,
+                    norm_index=norm_index,
                 )
             except Exception as e:
                 log(f"  upsert failed ({data['slug']}): {e}")
@@ -2912,14 +2993,7 @@ def run_kbdfans_gb(conn, context: BrowserContext, deadline: float,
     vendor_id = ensure_kbdfans_vendor(conn)
 
     # One normalized-name index of existing keycap sets, for divergent-slug dedupe.
-    norm_index: dict = {}
-    with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute("""SELECT id, name, status::text AS status FROM "GroupBuy"
-                        WHERE "productType" = 'KEYCAPS' AND slug NOT LIKE 'custom-%'""")
-        for r in cur.fetchall():
-            key = normalize_set_name(r.get("name") or "")
-            if key:
-                norm_index.setdefault(key, []).append({"id": r["id"], "status": r["status"]})
+    norm_index = build_keycap_norm_index(conn)
 
     page = context.new_page()
     try:

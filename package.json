@@ -20,6 +20,7 @@
     "test:set-name": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/set-name.test.ts",
     "test:home-cache": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/home-cache.test.ts",
     "test:vendor-urls": "node scripts/lib/vendor-urls.test.mjs",
+    "test:set-merge": "node scripts/lib/set-merge.test.mjs",
     "test:manufacturer-vendors": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/import/manufacturer-vendors.test.ts"
   },
   "prisma": {

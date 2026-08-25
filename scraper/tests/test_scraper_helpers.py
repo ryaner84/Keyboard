@@ -1932,5 +1932,45 @@ class NonShopifyCatalogTests(unittest.TestCase):
             self.assertIsNone(scrape._DISCOVERY_SECTION_RE.search(text), text)
 
 
+class ExistingSetByNameTests(unittest.TestCase):
+    """The divergent-slug fallback that stops a catalog pass duplicating a set.
+
+    gmk.net files "GMK CYL Mizu R2 Keycaps" under its own slug; the row already
+    in the database is "GMK Mizu R2". Matching on the slug alone wrote both.
+    """
+
+    def _index(self, *names):
+        index = {}
+        for i, name in enumerate(names):
+            key = scrape.normalize_set_name(name)
+            index.setdefault(key, []).append({"id": f"id{i}", "status": "DELIVERED"})
+        return index
+
+    def test_extra_description_words_still_find_the_existing_row(self):
+        index = self._index("GMK Mizu R2")
+        found = scrape._existing_set_by_name(index, "GMK CYL Mizu R2 Keycaps")
+        self.assertIsNotNone(found)
+        self.assertEqual(found["id"], "id0")
+
+    def test_a_different_round_is_not_the_same_set(self):
+        index = self._index("GMK Mizu R2")
+        self.assertIsNone(scrape._existing_set_by_name(index, "GMK CYL Mizu R3 Keycaps"))
+
+    def test_a_different_profile_is_not_the_same_set(self):
+        index = self._index("GMK Dolch")
+        self.assertIsNone(scrape._existing_set_by_name(index, "DCS Dolch"))
+
+    def test_ambiguity_is_never_resolved_by_guessing(self):
+        # Two rows already share this name — that is itself the duplicate the
+        # db-setup merge settles, and attaching to either one here would pick
+        # whichever the query listed first.
+        index = self._index("GMK Mizu R2", "GMK CYL Mizu R2 Keycaps")
+        self.assertIsNone(scrape._existing_set_by_name(index, "GMK Mizu R2"))
+
+    def test_no_index_and_no_name_are_both_misses(self):
+        self.assertIsNone(scrape._existing_set_by_name(None, "GMK Mizu R2"))
+        self.assertIsNone(scrape._existing_set_by_name(self._index("GMK Mizu"), ""))
+
+
 if __name__ == "__main__":
     unittest.main()

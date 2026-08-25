@@ -79,6 +79,12 @@ jobs:
         if: always()
         run: npm run test:vendor-urls
 
+      # Also plain node — the identity rule it covers decides which GroupBuy
+      # rows db-setup DELETES, so it runs in the build alongside vendor-urls.
+      - name: set-merge
+        if: always()
+        run: npm run test:set-merge
+
       # Reads scrape.py as well as the TS sources: the manufacturer registry is
       # written in both languages and a divergence is silent at runtime.
       - name: manufacturer-vendors
