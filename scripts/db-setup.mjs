@@ -23,6 +23,7 @@ import {
   planStorefrontRelocation,
   planVendorUrlHeal,
 } from "./lib/vendor-urls.mjs";
+import { planSetMerges } from "./lib/set-merge.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SQL_PATH = join(__dirname, "..", "supabase-setup.sql");
@@ -1206,7 +1207,7 @@ async function main() {
         await prioritizePreorderVendors(client);
         await reclassifyMisflaggedKeycaps(client);
         await reclassifyGeekhackStatuses(client);
-        await dropForumDuplicatesOfOfficialSets(client);
+        await mergeDuplicateKeycapSets(client);
         await ensureBaseKitForKeycapSets(client);
       }
     }
@@ -1252,7 +1253,7 @@ async function main() {
     await cleanupInterestChecks(client);
     await reclassifyMisflaggedKeycaps(client);
     await reclassifyGeekhackStatuses(client);
-    await dropForumDuplicatesOfOfficialSets(client);
+    await mergeDuplicateKeycapSets(client);
     await ensureBaseKitForKeycapSets(client);
   } catch (err) {
     console.warn(`[db-setup] Setup failed: ${err.message}`);
@@ -2716,70 +2717,214 @@ async function reclassifyGeekhackStatuses(client) {
   }
 }
 
-// RECURRING (every deploy): Geekhack forum threads are imported as stub sets
-// with a `gh-<topicid>` slug. When the same colorway also has an official,
-// fully-named "GMK <colorway>" entry (from KeycapLendar / a vendor), the forum
-// stub is a lower-quality duplicate — e.g. forum "Distortion" vs official
-// "GMK Distortion". Drop the forum stub and keep the official one.
+// RECURRING (every deploy): one set, two rows — fold the duplicate into the
+// row the site actually publishes.
 //
-// Matching strips bracket tags ([GB]/[IC]), the "| designer" suffix, and a
-// leading keycap-profile word (GMK / GMK CYL / SA / KAT / …), then compares the
-// remaining colorway, case-insensitively, ignoring punctuation/spacing. A forum
-// stub is deleted ONLY when a NON-forum twin with the same colorway exists AND
-// that twin's name actually starts with "GMK" — so forum-only sets (no official
-// equivalent) are always kept. Child Kit/VendorKit rows cascade on delete.
+// gmk.net's catalog calls a set "GMK CYL Mizu R2 Keycaps" and KeycapLendar
+// calls the same product "GMK Mizu R2". `upsert_gmk_set` matches on SLUG, so
+// both got written; `_build_set_index` in scrape.py has called the second one
+// "the orphan duplicate" ever since, and routes new listings around it. What it
+// cannot do is remove it: the orphan keeps its own set page, shows up in search
+// and on /released, and holds on to whatever vendor links, tracker items and
+// dev updates happened to land there — off the row the price comparison lives
+// on. Two half-populated rows compare worse than one whole one.
 //
-// CRUCIALLY the forum stub must ALSO be a "GMK …" row. Because the key strips
-// the leading profile word, "[GB] DCS Dolch" and an official "GMK Dolch"
-// normalise to the same key — but they are completely different products (a DCS
-// set is Signature Plastics, not GMK). Without this guard the heal silently
-// deletes a DCS / SA / KAT / MT3 forum set on every deploy whenever a
-// same-colourway GMK set exists. Only ever collapse GMK-vs-GMK duplicates.
-async function dropForumDuplicatesOfOfficialSets(client) {
+// This replaces an earlier pass that deleted Geekhack stubs duplicating an
+// official set. That pass keyed on a SQL-side normalisation which stripped a
+// LEADING profile word but no trailing ones, so the pair above never matched
+// it — "mizur2" vs "mizur2keycaps". It also DELETED the stub outright, taking
+// any collection entry pointing at it down with it (TrackerItem cascades on
+// GroupBuy). A merge is what was wanted both times, so there is now one rule,
+// in scripts/lib/set-merge.mjs, covered by `npm run test:set-merge`.
+//
+// Nothing is deleted until its children have been moved. Each merge runs in its
+// own transaction, so a failure on one duplicate leaves that pair untouched
+// rather than half-merged, and the rest of the deploy carries on.
+async function mergeDuplicateKeycapSets(client) {
+  let rows;
   try {
-    const { rowCount } = await client.query(
-      `WITH normd AS (
-         SELECT id, slug, name,
-           regexp_replace(
-             lower(
-               regexp_replace(
-                 regexp_replace(
-                   regexp_replace(name, '\\|.*$', ''),          -- drop "| designer"
-                   '\\[[^\\]]*\\]', '', 'g'),                    -- drop [GB]/[IC] tags
-                 '^\\s*(gmk\\s+cyl|gmk|sa|dcs|mtnu|kat|mt3|cyl|xda|mda|dsa|dss|kam)\\s+', '', 'i')
-             ),
-             '[^a-z0-9]+', '', 'g'                               -- keep only [a-z0-9]
-           ) AS key,
-           -- Leading profile token ('gmk' for both "GMK Foo" and "GMK CYL Foo",
-           -- 'dcs' for "DCS Foo"), used to keep the collapse within one profile.
-           lower(coalesce((regexp_match(
-             regexp_replace(name, '\\[[^\\]]*\\]', '', 'g'),
-             '^\\s*(gmk|sa|dcs|mtnu|kat|mt3|cyl|xda|mda|dsa|dss|kam)\\y', 'i'
-           ))[1], '')) AS profile
-         FROM public."GroupBuy"
-       )
-       DELETE FROM public."GroupBuy" g
-       USING normd f, normd o
-       WHERE g.id = f.id
-         AND f.slug LIKE 'gh-%'                                  -- target: forum stub
-         AND o.slug NOT LIKE 'gh-%'                              -- twin: non-forum
-         AND o.id <> f.id
-         AND f.key <> '' AND f.key = o.key                       -- same colorway
-         -- Same profile on both sides. Originally this required both to be
-         -- "GMK …", because gmk.net was the only official catalog and the
-         -- narrow guard stopped "[GB] DCS Dolch" being deleted by an official
-         -- "GMK Dolch". Now that dcs.wiki supplies official "DCS …" rows too,
-         -- the real rule is profile equality: a DCS stub collapses into its
-         -- dcs.wiki twin, while DCS↔GMK still never collapse (different
-         -- manufacturer, different product).
-         AND f.profile <> '' AND f.profile = o.profile
-      `
-    );
-    if (rowCount > 0) {
-      console.log(`[db-setup] Dropped ${rowCount} forum stub(s) duplicating an official same-profile set.`);
-    }
+    ({ rows } = await client.query(
+      `SELECT gb.id, gb.slug, gb.name, gb."productType",
+              gb."createdAt", gb."gbStart",
+              (SELECT count(*)::int FROM public."VendorKit" vk
+                 JOIN public."Kit" k ON k.id = vk."kitId"
+                WHERE k."groupBuyId" = gb.id) AS vendor_links,
+              (SELECT count(*)::int FROM public."TrackerItem" t
+                WHERE t."groupBuyId" = gb.id) AS tracker_items
+         FROM public."GroupBuy" gb
+        WHERE gb."productType" = 'KEYCAPS'`
+    ));
   } catch (err) {
-    console.warn(`[db-setup] Forum-duplicate cleanup skipped: ${err.message}`);
+    console.warn(`[db-setup] duplicate-set merge skipped: ${err.message}`);
+    return;
+  }
+
+  const { merges, skipped } = planSetMerges(
+    rows.map((r) => ({
+      id: r.id,
+      slug: r.slug,
+      name: r.name,
+      productType: r.productType,
+      createdAt: r.createdAt,
+      gbStart: r.gbStart,
+      vendorLinks: r.vendor_links,
+      trackerItems: r.tracker_items,
+    }))
+  );
+
+  let merged = 0;
+  let strandedTrackers = 0;
+  for (const merge of merges) {
+    const keepId = merge.keep.id;
+    const dropIds = merge.drop.map((r) => r.id);
+    try {
+      await client.query("BEGIN");
+
+      // The survivor must have somewhere to put the listings. A keycap row
+      // without a BASE kit publishes nothing at all (ensureBaseKitForKeycapSets
+      // exists for exactly that), and a duplicate whose only kit is a subkit
+      // would otherwise strand its vendor links.
+      await client.query(
+        `INSERT INTO public."Kit" (id, name, type, "groupBuyId")
+         SELECT gen_random_uuid()::text, 'Base Kit', 'BASE', $1
+          WHERE NOT EXISTS (
+            SELECT 1 FROM public."Kit" WHERE "groupBuyId" = $1 AND type = 'BASE')`,
+        [keepId]
+      );
+      // …and one kit per type the duplicates carry, so an ALPHA/NOVELTY listing
+      // lands on a kit of its own type instead of being dropped or flattened
+      // onto BASE (kit type is what the set page's category filter reads).
+      await client.query(
+        `INSERT INTO public."Kit" (id, name, type, "groupBuyId")
+         SELECT gen_random_uuid()::text, s.name, s.type, $1
+           FROM (SELECT DISTINCT ON (type) name, type
+                   FROM public."Kit" WHERE "groupBuyId" = ANY($2::text[])
+                  ORDER BY type, id) s
+          WHERE NOT EXISTS (
+            SELECT 1 FROM public."Kit" kk
+             WHERE kk."groupBuyId" = $1 AND kk.type = s.type)`,
+        [keepId, dropIds]
+      );
+
+      // Move the listings. VendorKit is unique on (kitId, vendorId), so a
+      // vendor the survivor already lists is left where it is and cascades away
+      // with the duplicate — its price is the one already on the visible row.
+      // DISTINCT ON keeps two duplicates' listings from the same shop from
+      // colliding on the survivor, preferring the priced, freshest one.
+      const moved = await client.query(
+        `WITH target AS (
+           SELECT DISTINCT ON (type) id, type
+             FROM public."Kit" WHERE "groupBuyId" = $1 ORDER BY type, id
+         ), moves AS (
+           SELECT DISTINCT ON (t.id, vk."vendorId") vk.id AS vk_id, t.id AS kit_id
+             FROM public."VendorKit" vk
+             JOIN public."Kit" lk ON lk.id = vk."kitId"
+             JOIN target t ON t.type = lk.type
+            WHERE lk."groupBuyId" = ANY($2::text[])
+              AND NOT EXISTS (
+                SELECT 1 FROM public."VendorKit" ex
+                 WHERE ex."kitId" = t.id AND ex."vendorId" = vk."vendorId")
+            ORDER BY t.id, vk."vendorId", (vk.price IS NOT NULL) DESC,
+                     vk."priceUpdatedAt" DESC NULLS LAST, vk.id
+         )
+         UPDATE public."VendorKit" v
+            SET "kitId" = m.kit_id, "updatedAt" = now()
+           FROM moves m WHERE v.id = m.vk_id`,
+        [keepId, dropIds]
+      );
+
+      // Collections and price alerts. TrackerItem is unique on
+      // (userId, groupBuyId): an owner who added BOTH rows keeps the entry on
+      // the survivor, and the duplicate's entry goes — which is what the
+      // collection page already showed them, since it dedupes on display.
+      await client.query(
+        `WITH moves AS (
+           SELECT DISTINCT ON (t."userId") t.id
+             FROM public."TrackerItem" t
+            WHERE t."groupBuyId" = ANY($2::text[])
+              AND NOT EXISTS (
+                SELECT 1 FROM public."TrackerItem" e
+                 WHERE e."userId" = t."userId" AND e."groupBuyId" = $1)
+            ORDER BY t."userId", t."inCollection" DESC,
+                     t."updatedAt" DESC NULLS LAST, t.id
+         )
+         UPDATE public."TrackerItem" t SET "groupBuyId" = $1
+           FROM moves m WHERE t.id = m.id`,
+        [keepId, dropIds]
+      );
+      await client.query(
+        `UPDATE public."DevUpdate" SET "groupBuyId" = $1
+          WHERE "groupBuyId" = ANY($2::text[])`,
+        [keepId, dropIds]
+      );
+
+      // Only ever fill what the survivor is missing — never overwrite an edit.
+      // One duplicate at a time, oldest first, so the result does not depend on
+      // which row Postgres happened to join.
+      for (const dropId of [...dropIds].sort()) {
+        await client.query(
+          `UPDATE public."GroupBuy" k SET
+             "imageUrl"   = COALESCE(NULLIF(k."imageUrl", ''), NULLIF(l."imageUrl", '')),
+             images       = CASE WHEN COALESCE(cardinality(k.images), 0) = 0
+                                 THEN l.images ELSE k.images END,
+             description  = CASE WHEN COALESCE(k.description, '') = ''
+                                 THEN l.description ELSE k.description END,
+             designer     = CASE WHEN COALESCE(k.designer, '') = ''
+                                 THEN l.designer ELSE k.designer END,
+             colorway     = CASE WHEN COALESCE(k.colorway, '') = ''
+                                 THEN l.colorway ELSE k.colorway END,
+             subtitle     = CASE WHEN COALESCE(k.subtitle, '') = ''
+                                 THEN l.subtitle ELSE k.subtitle END,
+             "gbStart"    = COALESCE(k."gbStart", l."gbStart"),
+             "gbEnd"      = COALESCE(k."gbEnd", l."gbEnd"),
+             "sourceUrl"  = COALESCE(NULLIF(k."sourceUrl", ''), NULLIF(l."sourceUrl", '')),
+             "updatedAt"  = now()
+           FROM public."GroupBuy" l
+          WHERE k.id = $1 AND l.id = $2`,
+          [keepId, dropId]
+        );
+      }
+
+      const { rows: left } = await client.query(
+        `SELECT count(*)::int AS n FROM public."TrackerItem"
+          WHERE "groupBuyId" = ANY($1::text[])`,
+        [dropIds]
+      );
+      strandedTrackers += left[0].n;
+
+      await client.query(`DELETE FROM public."GroupBuy" WHERE id = ANY($1::text[])`, [
+        dropIds,
+      ]);
+      await client.query("COMMIT");
+      merged += dropIds.length;
+      console.log(
+        `[db-setup]   merged ${merge.drop.map((r) => r.slug).join(", ")} into ` +
+          `${merge.keep.slug} (${moved.rowCount} listing(s) moved)`
+      );
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.warn(
+        `[db-setup] duplicate-set merge failed for ${merge.keep.slug}: ${err.message}`
+      );
+    }
+  }
+
+  if (merged > 0) {
+    console.log(`[db-setup] Merged ${merged} duplicate keycap set row(s).`);
+  }
+  if (strandedTrackers > 0) {
+    console.log(
+      `[db-setup] ${strandedTrackers} collection entr(ies) were already on the ` +
+        `surviving row and were removed with the duplicate.`
+    );
+  }
+  // Named rather than merged: two rows that look like one set but whose group
+  // buys ran a long way apart are more likely two rounds that lost a suffix.
+  for (const group of skipped) {
+    console.warn(
+      `[db-setup] duplicate-set merge skipped ${group.profile} "${group.key}" ` +
+        `(${group.rows.map((r) => r.slug).join(", ")}) — ${group.reason}`
+    );
   }
 }
 

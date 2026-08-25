@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Ten suites, all of which should pass before pushing:
+Eleven suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -40,6 +40,7 @@ npm run test:collection-sales
 npm run test:http-json
 npm run test:home-cache
 npm run test:vendor-urls
+npm run test:set-merge
 npm run test:manufacturer-vendors
 npx tsc --noEmit
 ```
@@ -65,12 +66,39 @@ above it is the signal that matters.
 Profile is product identity for keycaps: `DCS Dolch` and `GMK Dolch` are
 different products from different manufacturers and must never be collapsed
 into one another. `normalizeSetName`, `dedupeKey({ keepProfile: true })` and
-the `db-setup` forum-stub heal all encode this — keep them in agreement.
+`setMergeIdentity` (the `db-setup` duplicate merge) all encode this — keep them
+in agreement.
 
 Maker is not profile. GMK Electronic Design makes Cherry-profile sets plus the
 CYL and MTNU profiles; Signature Plastics makes DCS, SA, DSS and DSA. `MTNU
 Electronic Control` carries no "GMK" token, so maker cannot be inferred from a
 substring search.
+
+**One set, written twice.** Every upstream source spells a set its own way and
+slugs it its own way: gmk.net files "GMK CYL Mizu R2 Keycaps" under
+`gmk-cyl-mizu-r2-keycaps`, KeycapLendar files the same product as "GMK Mizu R2"
+under `gmk-mizu-r2`, and Geekhack files it as a `gh-<topicid>` thread. The
+upserts matched on SLUG alone, so each source wrote its OWN row — the "orphan
+duplicate" `_build_set_index` has always routed listings around. Routing around
+it is not removing it: the orphan keeps a set page, appears in search and on
+/released, and holds whatever vendor links, collection entries and dev updates
+landed there, off the row the price comparison lives on. Two half-populated
+rows compare worse than one whole one. `build_keycap_norm_index` +
+`_existing_set_by_name` are the fix at the source (an unknown slug falls back to
+an unambiguous `normalize_set_name` match, which already drops "CYL" and
+"Keycaps"); `mergeDuplicateKeycapSets` in `db-setup` folds the rows already
+written, moving children before it deletes anything.
+
+That merge DELETES a row, which is a higher bar than `dedupeKey`'s display
+collapse, so `scripts/lib/set-merge.mjs` is deliberately stricter in three
+places and must stay that way: a parenthetical is unwrapped rather than dropped
+(`GMK Nautilus (2021)` is not `GMK Nautilus`), `+` becomes a token before
+punctuation is stripped (`GMK Olivia++` is not `GMK Olivia`), and a known
+profile token is REQUIRED on both sides — a bare `[GB] Dolch` names no maker and
+merges with nothing. It replaced a SQL-side pass that stripped a LEADING profile
+word but no trailing one (so `mizur2` never matched `mizur2keycaps`) and deleted
+Geekhack stubs outright, taking any collection entry with them: `TrackerItem`
+cascades on `GroupBuy`, so a merge has to repoint children first.
 
 ## Scraper
 
