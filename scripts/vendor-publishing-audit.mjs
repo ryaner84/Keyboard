@@ -98,6 +98,14 @@ try {
              AS read_listings,
            (SELECT count(*)::int FROM public."VendorKit" vk
              WHERE vk."vendorId" = v.id AND vk.price IS NOT NULL) AS priced_listings,
+           -- The store answered 404/410 for these. A 404 IS a read as far as
+           -- priceSource goes, so without this count a closed store reads as a
+           -- pricing backlog. See scripts/lib/link-health.mjs.
+           (SELECT count(*)::int FROM public."VendorKit" vk
+             WHERE vk."vendorId" = v.id AND vk."deadSince" IS NOT NULL)
+             AS dead_listings,
+           (SELECT min(vk."deadSince") FROM public."VendorKit" vk
+             WHERE vk."vendorId" = v.id) AS deadest_since,
            (
              SELECT count(*)::int
                FROM public."VendorKit" vk
@@ -111,6 +119,9 @@ try {
                   OR (vk."productUrl" NOT ILIKE '%gmk.net%'
                       AND vk."productUrl" NOT ILIKE '%dcs.wiki%')
                 )
+                -- Mirrors PURCHASABLE_VENDOR_KIT_WHERE: a link the store
+                -- answers 404/410 for is not a place to buy.
+                AND NOT (vk."deadSince" IS NOT NULL AND vk.price IS NULL)
                 AND (
                   vk.price IS NOT NULL
                   OR (
@@ -136,6 +147,8 @@ try {
     listings: r.listings,
     readListings: r.read_listings,
     pricedListings: r.priced_listings,
+    deadListings: r.dead_listings,
+    deadestSince: r.deadest_since,
     visibleListings: r.visible_listings,
   }));
   const bySlug = new Map(vendors.map((v) => [v.slug, v]));
@@ -217,7 +230,8 @@ try {
     console.log(
       `SILENT      | ${v.slug}${mergedAway.has(v.slug) ? " (merging away)" : ""}` +
         ` | ${v.websiteUrl} | listings=${row.listings}` +
-        ` read=${row.readListings} priced=${row.pricedListings} | ${v.reason}` +
+        ` read=${row.readListings} priced=${row.pricedListings}` +
+        ` dead=${row.deadListings} | ${v.reason}` +
         ` | ${sample(row.listingUrls)}`
     );
   }

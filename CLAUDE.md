@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Eleven suites, all of which should pass before pushing:
+Twelve suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -41,6 +41,7 @@ npm run test:http-json
 npm run test:home-cache
 npm run test:vendor-urls
 npm run test:set-merge
+npm run test:link-health
 npm run test:manufacturer-vendors
 npx tsc --noEmit
 ```
@@ -335,6 +336,45 @@ forever, stays unpriced, stays hidden on its RELEASED sets, and the report kept
 naming `refresh-prices`, the one pass that cannot end it. Count `priceSource`,
 never `priceUpdatedAt`: the timestamp is written on every attempt, so counting it
 would make every dead link look read.
+
+**And a 404 counted as READ, so the commonest cause was hiding inside the
+second-commonest.** Both price passes returned the `NO_BASE_KIT` sentinel for a
+404/410, and its caller stamps `priceSource = 'SCRAPED'` — the same mark a live
+page carrying only add-on kits gets. A store whose products had all been removed
+therefore came back "read, just not priced", i.e. the pricing backlog, i.e.
+`refresh-prices` again. Probing production found monokei (44 listings read, 0
+priced), vala-supply (19/0), mechs-co (33/0) and apex-keyboards (19/0) all
+reported that way with every sampled product page in fact gone. `DEAD_LINK` is
+now a third answer alongside `NO_BASE_KIT` and null, and the dead branch
+deliberately does NOT write `priceSource`.
+
+`scripts/lib/link-health.mjs` holds the rules and **two columns that mean
+different things on purpose**: `VendorKit.deadSince` is the first time the STORE
+answered 404/410 — definitive, so it is the only signal allowed to take a
+listing off the site (`PURCHASABLE_VENDOR_KIT_WHERE` refuses an unpriced dead
+row; a link to a removed page is worse than no link) — while `linkFailures`
+counts consecutive unreadable attempts of any kind and is a HEURISTIC, because a
+store blocking the scraper is indistinguishable from one that closed. It may
+slow a row down and name it in the report; it may never hide a live store. Both
+reset on any successful read, `NO_BASE_KIT` included, so a store that comes back
+heals itself.
+
+The point of the columns is the back-off. Only a 404/410 clears a price, so
+every other kind of dead link was re-fetched **every six hours forever**; the
+price run is time-boxed, so several hundred permanently-dead rows were crowding
+live listings out of it — and an unpriced live listing is hidden outright on a
+RELEASED set. A backed-off row waits `DEAD_LINK_RECHECK_HOURS` (14 days)
+instead. It is a back-off, never a retirement: the row keeps its place in the
+queue, and `FORCE_PRICE_REFRESH` ignores it entirely.
+
+**The price pass is written twice too** — `run_prices` in `scrape.py` (the
+nightly with a real browser) and `refreshPrices` in `src/lib/import/prices.ts`
+(the Vercel cron and `refresh-prices-ci`). `prices.ts` IMPORTS `link-health.mjs`
+rather than copying it; `scrape.py` cannot, so it mirrors it and
+`test:link-health` fails if the constants, the sentinel, the two 404 return
+sites per half, or the queue's back-off disagree. Both halves have a Shopify
+path and a generic WooCommerce/JSON-LD path, and a fifth of the roster is not
+Shopify — the non-Shopify half is the one that keeps getting missed.
 
 **The report only ever existed inside a Vercel build log, which nobody can
 read.** That is how 57 of 136 vendor rows came to be publishing nothing at once

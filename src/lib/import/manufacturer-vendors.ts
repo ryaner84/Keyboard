@@ -79,6 +79,17 @@ export const PURCHASABLE_VENDOR_KIT_WHERE: Prisma.VendorKitWhereInput = {
     { productUrl: null },
     { NOT: { OR: urlIsManufacturer() } },
   ],
+  // A link the store answers 404/410 for is not a place to buy. Sending a
+  // visitor to a removed product page is worse than showing them nothing, and
+  // an unpriced row is only ever rendered as a bare "go here" link anyway.
+  //
+  // Only `deadSince` gates this, never the `linkFailures` heuristic: a store
+  // that blocks the scraper looks identical to one that closed, and hiding a
+  // live listing on a hunch is the failure this codebase keeps having. A priced
+  // row is likewise never hidden — the same pass that sees a 404 clears the
+  // price, so "priced and dead" only means the flag outlived the price.
+  // See scripts/lib/link-health.mjs.
+  NOT: { AND: [{ deadSince: { not: null } }, { price: null }] },
 };
 
 // Discovery-rotation filter: asking a manufacturer/catalog source for a

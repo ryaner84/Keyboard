@@ -24,6 +24,9 @@
 // Exported because the same list decides who enters the discovery rotation,
 // in both halves of it: `_NON_STOREFRONT_HOSTS` in scraper/scrape.py is the
 // Python copy and vendor-urls.test.mjs fails if the two disagree.
+
+import { describeDeadListings } from "./link-health.mjs";
+
 export const NON_STOREFRONT_HOSTS = [
   // Link shorteners and file/doc hosts (a GB spreadsheet is not a shop)
   "goo.gl", "bit.ly", "t.co", "tinyurl.com", "linktr.ee",
@@ -778,6 +781,13 @@ export function planVendorMerges(roster, existing) {
  * which pass to look at. The three causes leave different residue in the DB and
  * the counts separate them cleanly:
  *
+ *   deadListings > 0             the STORE answered 404/410 for those pages.
+ *                                Checked first, because a 404 counts as a READ
+ *                                as far as `priceSource` goes and would
+ *                                otherwise be reported as the pricing backlog
+ *                                below — which is what happened to nearly every
+ *                                silent store until the price pass learned to
+ *                                record it (see scripts/lib/link-health.mjs).
  *   listings = 0                 discovery has never linked this store to a
  *                                tracked set. The catalog pass is the one to
  *                                look at — a store whose catalogue is entirely
@@ -844,6 +854,17 @@ export function planPublishingReport(vendors, excludeSlugs = new Set()) {
 function publishingFailureReason(vendor) {
   const listings = Number(vendor.listings ?? 0);
   const priced = Number(vendor.pricedListings ?? 0);
+  // The store itself said the pages are gone (404/410). That outranks every
+  // reason below, including "read but not priced": a 404 IS a read as far as
+  // priceSource is concerned, which is exactly how monokei, vala-supply,
+  // mechs-co and apex-keyboards were all reported as a pricing backlog while
+  // every one of their sampled product pages had in fact been removed.
+  const deadReason = describeDeadListings(
+    listings,
+    vendor.deadListings,
+    vendor.deadestSince
+  );
+  if (deadReason) return deadReason;
   // Absent means "not measured", NOT zero. Every other count here defaults to 0
   // and a caller that forgets one gets a confident wrong diagnosis for free —
   // the mistake this reason exists to stop. Defaulting to `listings` degrades to
