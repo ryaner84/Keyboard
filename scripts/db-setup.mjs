@@ -1005,6 +1005,9 @@ const BLOCKED_VENDOR_SET_PAIRS = [
   { vendor: "latamkeys", set: "gmk-mictlan-rebirth" },
   { vendor: "latamkeys", set: "gmk-nervewrecker" },
   { vendor: "zfrontier", set: "gmk-camping-r3" },
+  // SwiftCables cable listing mis-linked to the keycap set (reported 3×) —
+  // see BLOCKED_VENDOR_SET_PAIRS in src/lib/import/vendor-overrides.ts.
+  { vendor: "swiftcables", set: "gmk-evil-dolch-r2" },
 ];
 async function purgeBlockedVendorSetPairs(client) {
   try {

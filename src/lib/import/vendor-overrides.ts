@@ -93,6 +93,12 @@ export const BLOCKED_VENDOR_SET_PAIRS = new Set<string>([
   "latamkeys::gmk-mictlan-rebirth",
   "latamkeys::gmk-nervewrecker",
   "zfrontier::gmk-camping-r3",
+  // SwiftCables is a cable maker; /products/gmk-evil-dolch-extras is a cable,
+  // not the keycap base. Reported 3× as "not a keycap, this is a cable"
+  // (2026-07-26, 2026-08-16 ×2); the single "Default Title" variant is a
+  // plausibly-priced 39.5 USD, so the base-kit picker can't reject it and
+  // "extras" is deliberately allowed as a base word — drop the pair.
+  "swiftcables::gmk-evil-dolch-r2",
 ]);
 
 export function isBlockedVendorSet(vendorSlug: string, setSlug: string): boolean {
