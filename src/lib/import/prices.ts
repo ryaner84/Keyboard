@@ -10,6 +10,12 @@ import {
   NOT_MANUFACTURER_LISTING,
   isManufacturerListingUrl,
 } from "./manufacturer-vendors";
+import {
+  DEAD_LINK_FAILURE_THRESHOLD,
+  DEAD_LINK_RECHECK_HOURS,
+  isDeadLinkStatus,
+  nextLinkHealth,
+} from "../../../scripts/lib/link-health.mjs";
 
 const BROWSER_HEADERS = {
   "User-Agent":
@@ -58,7 +64,21 @@ export interface PriceResult {
 // never heals: returning null preserved the stale wrong number every run. This
 // is the root cause behind the recurring Keygem / Latamkeys / STACKS reports.
 export const NO_BASE_KIT = "NO_BASE_KIT" as const;
-export type FetchPriceOutcome = PriceResult | typeof NO_BASE_KIT | null;
+
+// A third answer, and the one that was missing. DEAD_LINK means the store
+// itself said the page does not exist (404/410) — it clears the stored price
+// exactly like NO_BASE_KIT, but it is a different FACT and has to be recorded
+// as one. Folded into NO_BASE_KIT it stamped `priceSource = 'SCRAPED'`, the
+// same mark a live page with only add-on kits gets, so a store whose products
+// were all removed read as a pricing backlog and the publishing report sent the
+// owner to refresh-prices, which can never fix a page that is gone. See
+// scripts/lib/link-health.mjs.
+export const DEAD_LINK = "DEAD_LINK" as const;
+export type FetchPriceOutcome =
+  | PriceResult
+  | typeof NO_BASE_KIT
+  | typeof DEAD_LINK
+  | null;
 
 async function fetchWithTimeout(url: string, extraHeaders?: Record<string, string>): Promise<Response> {
   const controller = new AbortController();
@@ -272,9 +292,10 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     }
     if (!res.ok) {
       // Dead-link audit: a removed product (even after canonical-handle retry)
-      // returns 404/410. Clear the stale price instead of preserving it; any
-      // other failure (403 block, 5xx, timeout) is transient → keep last good.
-      return res.status === 404 || res.status === 410 ? NO_BASE_KIT : null;
+      // returns 404/410. Clear the stale price instead of preserving it AND
+      // record that the page is gone; any other failure (403 block, 5xx,
+      // timeout) is transient → keep last good.
+      return isDeadLinkStatus(res.status) ? DEAD_LINK : null;
     }
     const data = (await res.json()) as {
       product?: {
@@ -594,9 +615,10 @@ async function fetchJsonLdPrice(
   try {
     const res = await fetchWithTimeout(productUrl);
     if (!res.ok) {
-      // Dead-link audit: a removed page returns 404/410 → clear the stale price;
-      // any other failure is transient → keep the last good price.
-      return res.status === 404 || res.status === 410 ? NO_BASE_KIT : null;
+      // Dead-link audit: a removed page returns 404/410 → clear the stale price
+      // and record the page as gone; any other failure is transient → keep the
+      // last good price.
+      return isDeadLinkStatus(res.status) ? DEAD_LINK : null;
     }
     const html = await res.text();
 
@@ -842,18 +864,54 @@ export interface RefreshResult {
   attempted: number;
   updated: number;
   failed: number;
+  // Subset of `failed`: the store answered 404/410. Reported separately so a
+  // run whose failures are all dead links doesn't read as a blocked run.
+  dead: number;
   stoppedEarly: boolean; // true if the time budget was hit before finishing
 }
 
 // Refresh one VendorKit's cached price: fetch, then write the outcome.
 async function refreshOne(
-  vk: { id: string; productUrl: string | null; vendor: { currency: string } },
+  vk: {
+    id: string;
+    productUrl: string | null;
+    vendor: { currency: string };
+    linkFailures?: number;
+    deadSince?: Date | null;
+  },
   result: RefreshResult
 ): Promise<void> {
   if (!vk.productUrl) return;
   result.attempted++;
   const priceData = await fetchVendorPrice(vk.productUrl, vk.vendor.currency);
-  if (priceData === NO_BASE_KIT) {
+  const outcome =
+    priceData === DEAD_LINK
+      ? "GONE"
+      : priceData === NO_BASE_KIT
+        ? "NO_BASE_KIT"
+        : priceData
+          ? "PRICED"
+          : "UNREADABLE";
+  const health = nextLinkHealth(vk, outcome);
+  if (priceData === DEAD_LINK) {
+    // The store answered "gone". Clear the price like NO_BASE_KIT does — a
+    // removed listing must not keep quoting its last price — but leave
+    // priceSource alone: this page was never READ, and stamping it 'SCRAPED'
+    // is what made a closed store read as a pricing backlog for months.
+    await prisma.vendorKit.update({
+      where: { id: vk.id },
+      data: {
+        price: null,
+        compareAtPrice: null,
+        inStock: false,
+        priceUpdatedAt: new Date(),
+        variants: [],
+        ...health,
+      },
+    });
+    result.dead++;
+    result.failed++;
+  } else if (priceData === NO_BASE_KIT) {
     // Listing has no base kit (only subkits / ambiguous aggregate) — clear the
     // stale wrong price so it stops showing, instead of preserving it forever.
     await prisma.vendorKit.update({
@@ -865,6 +923,7 @@ async function refreshOne(
         priceUpdatedAt: new Date(),
         priceSource: "SCRAPED",
         variants: [],
+        ...health,
       },
     });
     result.updated++;
@@ -885,14 +944,17 @@ async function refreshOne(
         // Keep the last valid price for comparison, while stock follows the
         // selected/base variant's current vendor availability.
         inStock: priceData.inStock,
+        ...health,
       },
     });
     result.updated++;
   } else {
-    // Record the attempt so we don't hammer the same blocked URL every run.
+    // Record the attempt so we don't hammer the same blocked URL every run,
+    // and count it: enough consecutive unreadable answers is the only evidence
+    // a store that redirects, 401s, 402s or stopped resolving ever gives.
     await prisma.vendorKit.update({
       where: { id: vk.id },
-      data: { priceUpdatedAt: new Date() },
+      data: { priceUpdatedAt: new Date(), ...health },
     });
     result.failed++;
   }
@@ -918,6 +980,13 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
     ids,
   } = opts;
   const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+  // `maxAgeHours: 0` is FORCE_PRICE_REFRESH — a person saying "check
+  // everything now". The back-off is an optimisation, not a quarantine, so it
+  // must not survive that: dead rows fall back to the normal cutoff.
+  const deadCutoff =
+    maxAgeHours <= 0
+      ? cutoff
+      : new Date(Date.now() - DEAD_LINK_RECHECK_HOURS * 60 * 60 * 1000);
 
   const candidates = await prisma.vendorKit.findMany({
     where: {
@@ -942,16 +1011,56 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
       // An explicit id list means "price these NOW" — skip the staleness gate.
       ...(!ids?.length && {
         AND: {
-          OR: [{ priceUpdatedAt: null }, { priceUpdatedAt: { lt: cutoff } }],
+          // Two cadences, not one. A row whose page the store says is GONE, or
+          // that has been unreadable for DEAD_LINK_FAILURE_THRESHOLD runs in a
+          // row, waits DEAD_LINK_RECHECK_HOURS instead of `maxAgeHours` — it
+          // cannot be priced, and this run is time-boxed, so re-fetching it
+          // every six hours costs live listings their turn (and an unpriced
+          // live listing is hidden outright on a RELEASED set). It is a
+          // back-off, never a retirement: the row keeps its place and the
+          // first read that gets through resets both columns.
+          OR: [
+            { priceUpdatedAt: null },
+            {
+              AND: [
+                { deadSince: null },
+                { linkFailures: { lt: DEAD_LINK_FAILURE_THRESHOLD } },
+                { priceUpdatedAt: { lt: cutoff } },
+              ],
+            },
+            {
+              AND: [
+                {
+                  OR: [
+                    { deadSince: { not: null } },
+                    { linkFailures: { gte: DEAD_LINK_FAILURE_THRESHOLD } },
+                  ],
+                },
+                { priceUpdatedAt: { lt: deadCutoff } },
+              ],
+            },
+          ],
         },
       }),
     },
     orderBy: [{ priceUpdatedAt: { sort: "asc", nulls: "first" } }],
     take: limit,
-    select: { id: true, productUrl: true, vendor: { select: { currency: true } } },
+    select: {
+      id: true,
+      productUrl: true,
+      linkFailures: true,
+      deadSince: true,
+      vendor: { select: { currency: true } },
+    },
   });
 
-  const result: RefreshResult = { attempted: 0, updated: 0, failed: 0, stoppedEarly: false };
+  const result: RefreshResult = {
+    attempted: 0,
+    updated: 0,
+    failed: 0,
+    dead: 0,
+    stoppedEarly: false,
+  };
   const start = Date.now();
   let next = 0;
 

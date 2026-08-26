@@ -606,6 +606,69 @@ _SUPPORTED_CURRENCIES = {
 # the root cause behind the recurring Keygem rainy-day-r2 reports.
 NO_BASE_KIT = "NO_BASE_KIT"
 
+# A third answer, and the one that was missing. DEAD_LINK means the STORE said
+# the page does not exist (404/410). It clears the stored price exactly like
+# NO_BASE_KIT, but it is a different fact: folded into NO_BASE_KIT it stamped
+# priceSource='SCRAPED', the same mark a live page with only add-on kits gets,
+# so a store whose products were all removed read as a pricing backlog and the
+# publishing report sent the owner to refresh-prices — the one pass that can
+# never fix a page that is gone.
+#
+# Mirror of scripts/lib/link-health.mjs, which the TypeScript price pass
+# imports directly. `npm run test:link-health` parses this file and fails if
+# the two copies disagree — the price pass is written twice (run_prices here,
+# refreshPrices in prices.ts) and a fix to one is only half a fix.
+DEAD_LINK = "DEAD_LINK"
+
+# HTTP statuses that mean the listing is gone rather than blocked.
+DEAD_LINK_STATUSES = (404, 410)
+
+# Consecutive unreadable attempts before a link is backed off. One attempt per
+# row per nightly run, so six is about a week of "this never once answered" —
+# out of reach of a Cloudflare block or a bad night, short enough that a closed
+# store stops costing the run within days.
+DEAD_LINK_FAILURE_THRESHOLD = 6
+
+# How long a backed-off row waits between attempts. A back-off, never a
+# retirement: the row keeps its place in the queue and the first read that gets
+# through resets both columns, so a store that comes back needs no help.
+DEAD_LINK_RECHECK_HOURS = 24 * 14
+
+
+def next_link_health(link_failures, dead_since, outcome, now=None):
+    """Link-health columns after one price attempt. Pure — the caller writes.
+
+    `outcome` is "PRICED", "NO_BASE_KIT", "GONE" or "UNREADABLE". PRICED and
+    NO_BASE_KIT are both successful READS: treating NO_BASE_KIT as a failure
+    would flag every store that legitimately sells only add-on kits.
+    Mirror of nextLinkHealth in scripts/lib/link-health.mjs.
+    """
+    failures = int(link_failures or 0)
+    if outcome in ("PRICED", "NO_BASE_KIT"):
+        return 0, None
+    if outcome == "GONE":
+        # Keep the FIRST moment it was seen gone: how long the store has been
+        # broken is what decides relink-or-retire.
+        return failures + 1, dead_since or (now or datetime.now())
+    return failures + 1, dead_since
+
+
+def ensure_link_health_columns(conn) -> None:
+    """Create the link-health columns if the build-time migration didn't — the
+    nightly run happens whether or not a deploy has reached the DB since."""
+    stmts = [
+        'ALTER TABLE "VendorKit" ADD COLUMN IF NOT EXISTS '
+        '"linkFailures" integer NOT NULL DEFAULT 0',
+        'ALTER TABLE "VendorKit" ADD COLUMN IF NOT EXISTS "deadSince" timestamp(3)',
+    ]
+    with conn.cursor() as cur:
+        for s in stmts:
+            try:
+                cur.execute(s)
+            except Exception as e:
+                log(f"  link-health column ensure skipped: {e}")
+    conn.commit()
+
 
 # Kits a bundle can be bundled WITH. Reuses the non-base subkit vocabulary and
 # adds the three standard kit names classify_variant tests for directly.
@@ -1089,11 +1152,11 @@ def shopify_price(
             data = browser_json(clean + ".json")
         if not data or "product" not in data:
             # Dead-link audit: a removed product page returns 404/410. That's a
-            # definitively gone listing, so CLEAR the stale price (NO_BASE_KIT)
+            # definitively gone listing, so CLEAR the stale price (DEAD_LINK)
             # instead of preserving it the way we do for a transient block.
-            if nav_status in (404, 410):
+            if nav_status in DEAD_LINK_STATUSES:
                 log(f"  dead link ({nav_status}) — clearing price ({product_url})")
-                return NO_BASE_KIT
+                return DEAD_LINK
             return None
 
         origin = urllib.parse.urlsplit(clean)
@@ -1511,9 +1574,22 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
     # when a store blocks /meta.json.
     # Manufacturer/catalog rows (GMK -> gmk.net, DCS -> dcs.wiki) only carry a
     # catalog URL for the catalog/image passes and must never be priced.
+    # Two cadences, not one. A row whose page the store says is GONE
+    # (deadSince), or that has been unreadable DEAD_LINK_FAILURE_THRESHOLD runs
+    # in a row, waits DEAD_LINK_RECHECK_HOURS instead of PRICE_MAX_AGE_HOURS. It
+    # cannot be priced, and this pass is time-boxed, so re-fetching it every six
+    # hours costs live listings their turn — and an unpriced live listing is
+    # hidden outright on a RELEASED set, which is where most listings are. Left
+    # on the fast cadence, several hundred permanently-dead rows were crowding
+    # out the stores that can still sell something.
+    #
+    # A back-off, never a retirement: the row keeps its place in the queue, and
+    # next_link_health resets both columns on the first read that gets through,
+    # so a store that comes back needs no intervention. Mirror of the same split
+    # in refreshPrices (prices.ts).
     sql = """
-        SELECT vk.id, vk."productUrl", v.currency AS vendor_currency,
-               gb.name AS set_name
+        SELECT vk.id, vk."productUrl", vk."linkFailures", vk."deadSince",
+               v.currency AS vendor_currency, gb.name AS set_name
           FROM "VendorKit" vk
           JOIN "Kit" k ON k.id = vk."kitId"
           JOIN "GroupBuy" gb ON gb.id = k."groupBuyId"
@@ -1525,7 +1601,10 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
            AND NOT (vk."productUrl" ILIKE ANY(%s))
            AND (vk."priceSource" IS NULL OR vk."priceSource" <> 'MANUAL')
            AND (vk."priceUpdatedAt" IS NULL
-                OR vk."priceUpdatedAt" < now() - make_interval(hours => %s))
+                OR vk."priceUpdatedAt" < now() - make_interval(hours =>
+                     CASE WHEN vk."deadSince" IS NOT NULL
+                                OR coalesce(vk."linkFailures", 0) >= %s
+                          THEN %s ELSE %s END))
          ORDER BY vk."priceUpdatedAt" ASC NULLS FIRST
          LIMIT %s
     """
@@ -1533,6 +1612,8 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
         cur.execute(sql, (
             list(MANUFACTURER_VENDOR_SLUGS),
             list(MANUFACTURER_URL_PATTERNS),
+            DEAD_LINK_FAILURE_THRESHOLD,
+            DEAD_LINK_RECHECK_HOURS,
             PRICE_MAX_AGE_HOURS,
             limit,
         ))
@@ -3908,8 +3989,9 @@ def generic_price(
 ) -> dict | None:
     """Price path for non-Shopify storefronts (WooCommerce: Latamkeys, STACKS).
 
-    Mirrors shopify_price's contract — returns a price dict, NO_BASE_KIT (clear
-    the stale price), or None (transient, keep the last good price). Prefers the
+    Mirrors shopify_price's contract — returns a price dict, DEAD_LINK (the
+    store says the page is gone), NO_BASE_KIT (read fine, nothing to price, so
+    clear it), or None (transient, keep the last good price). Prefers the
     WooCommerce variation blob so the base kit is picked over a cheaper subkit;
     falls back to a single JSON-LD offer for simple products."""
     status: int | None = None
@@ -3931,9 +4013,9 @@ def generic_price(
     if not html:
         # A genuinely removed listing (404/410) clears the stale price; a
         # transient block keeps the last good price (same split as Shopify).
-        if status in (404, 410):
+        if status in DEAD_LINK_STATUSES:
             log(f"  dead link ({status}) — clearing price ({product_url})")
-            return NO_BASE_KIT
+            return DEAD_LINK
         return None
 
     if vendor_currency and vendor_currency not in _SUPPORTED_CURRENCIES:
@@ -4512,7 +4594,9 @@ def run_prices(
     deadline: float,
     scrapling: ScraplingClient | None = None,
 ) -> dict:
-    stats = {"attempted": 0, "updated": 0, "failed": 0, "throttled_s": 0.0}
+    stats = {"attempted": 0, "updated": 0, "failed": 0, "dead": 0,
+             "throttled_s": 0.0}
+    ensure_link_health_columns(conn)
     candidates = HostThrottle.interleave(fetch_price_candidates(conn))
     log(f"Price pass: {len(candidates)} vendor listing(s) to check.")
     throttle = HostThrottle()
@@ -4560,7 +4644,33 @@ def run_prices(
                 scrapling,
                 allow_subkits,
             )
-            if result == NO_BASE_KIT:
+            outcome = (
+                "GONE" if result == DEAD_LINK
+                else "NO_BASE_KIT" if result == NO_BASE_KIT
+                else "PRICED" if result
+                else "UNREADABLE"
+            )
+            failures, dead_since = next_link_health(
+                vk.get("linkFailures"), vk.get("deadSince"), outcome
+            )
+            if result == DEAD_LINK:
+                # The store answered "gone". Clear the price like NO_BASE_KIT
+                # does — a removed listing must not keep quoting its last price
+                # — but leave priceSource alone: this page was never READ, and
+                # stamping it 'SCRAPED' is what made a closed store read as a
+                # pricing backlog for months.
+                with conn.cursor() as cur:
+                    cur.execute(
+                        'UPDATE "VendorKit" SET price = NULL, "compareAtPrice" = NULL, '
+                        '"inStock" = false, variants = \'[]\'::jsonb, '
+                        '"priceUpdatedAt" = now(), "linkFailures" = %s, '
+                        '"deadSince" = %s WHERE id = %s',
+                        (failures, dead_since, vk["id"]),
+                    )
+                conn.commit()
+                stats["dead"] += 1
+                stats["failed"] += 1
+            elif result == NO_BASE_KIT:
                 # Listing has no base kit (only subkits) — clear any stale price
                 # so the wrong subkit number stops showing, instead of letting
                 # it persist run after run. Counts as a successful update.
@@ -4569,8 +4679,9 @@ def run_prices(
                         'UPDATE "VendorKit" SET price = NULL, "compareAtPrice" = NULL, '
                         '"inStock" = false, '
                         'variants = \'[]\'::jsonb, "priceUpdatedAt" = now(), '
-                        '"priceSource" = \'SCRAPED\' WHERE id = %s',
-                        (vk["id"],),
+                        '"priceSource" = \'SCRAPED\', "linkFailures" = %s, '
+                        '"deadSince" = %s WHERE id = %s',
+                        (failures, dead_since, vk["id"]),
                     )
                 conn.commit()
                 stats["updated"] += 1
@@ -4580,24 +4691,31 @@ def run_prices(
                         'UPDATE "VendorKit" SET price = %s, currency = %s, '
                         '"compareAtPrice" = %s, '
                         'variants = %s::jsonb, "inStock" = %s, '
-                        '"priceUpdatedAt" = now(), "priceSource" = \'SCRAPED\' WHERE id = %s',
+                        '"priceUpdatedAt" = now(), "priceSource" = \'SCRAPED\', '
+                        '"linkFailures" = %s, "deadSince" = %s WHERE id = %s',
                         (
                             result["price"],
                             result["currency"],
                             result.get("compareAt"),
                             json.dumps(result["variants"]),
                             result["inStock"],
+                            failures,
+                            dead_since,
                             vk["id"],
                         ),
                     )
                 conn.commit()
                 stats["updated"] += 1
             else:
-                # Record the attempt so the oldest-first queue rotates onward.
+                # Record the attempt so the oldest-first queue rotates onward,
+                # and count it: enough consecutive unreadable answers is the
+                # only evidence a store that redirects, 401s, 402s or stopped
+                # resolving ever gives.
                 with conn.cursor() as cur:
                     cur.execute(
-                        'UPDATE "VendorKit" SET "priceUpdatedAt" = now() WHERE id = %s',
-                        (vk["id"],),
+                        'UPDATE "VendorKit" SET "priceUpdatedAt" = now(), '
+                        '"linkFailures" = %s, "deadSince" = %s WHERE id = %s',
+                        (failures, dead_since, vk["id"]),
                     )
                 conn.commit()
                 stats["failed"] += 1
@@ -6528,8 +6646,11 @@ def main() -> int:
     log(f"GMK Direct -> pages={gd_stats['pages']} priced={gd_stats['priced']} "
         f"out_of_stock={gd_stats['out_of_stock']} unmatched={gd_stats['unmatched']}")
     log(f"Prices  -> throttle_wait={price_stats['throttled_s']:.0f}s")
+    # `dead` is a subset of `failed`: the store answered 404/410. Split out so a
+    # run whose failures are all dead links doesn't read as a blocked run.
     log(f"Prices  -> attempted={price_stats['attempted']} "
-        f"updated={price_stats['updated']} failed={price_stats['failed']}")
+        f"updated={price_stats['updated']} failed={price_stats['failed']} "
+        f"dead={price_stats['dead']}")
     log("Done.")
     return 0
 

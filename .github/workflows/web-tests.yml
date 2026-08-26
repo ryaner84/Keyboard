@@ -85,6 +85,12 @@ jobs:
         if: always()
         run: npm run test:set-merge
 
+      # Reads scrape.py too: the price pass is written twice and only the TS
+      # half can import the shared module, so the Python mirror is checked here.
+      - name: link-health
+        if: always()
+        run: npm run test:link-health
+
       # Reads scrape.py as well as the TS sources: the manufacturer registry is
       # written in both languages and a divergence is silent at runtime.
       - name: manufacturer-vendors

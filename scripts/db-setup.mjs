@@ -903,6 +903,9 @@ async function reportVendorsPublishingNothing(client) {
                      OR (vk."productUrl" NOT ILIKE '%gmk.net%'
                          AND vk."productUrl" NOT ILIKE '%dcs.wiki%')
                    )
+                   -- Mirrors PURCHASABLE_VENDOR_KIT_WHERE: a link the store
+                   -- answers 404/410 for is not a place to buy.
+                   AND NOT (vk."deadSince" IS NOT NULL AND vk.price IS NULL)
                    AND (
                      vk.price IS NOT NULL
                      OR (
@@ -931,7 +934,15 @@ async function reportVendorsPublishingNothing(client) {
                 WHERE vk."vendorId" = v.id AND vk."priceSource" IS NOT NULL)
                 AS read_listings,
               (SELECT count(*)::int FROM public."VendorKit" vk
-                WHERE vk."vendorId" = v.id AND vk.price IS NOT NULL) AS priced_listings
+                WHERE vk."vendorId" = v.id AND vk.price IS NOT NULL) AS priced_listings,
+              -- The store answered 404/410 for these. Counted separately from
+              -- read_listings because a 404 IS a read to priceSource, which is
+              -- how a closed store read as a pricing backlog for months.
+              (SELECT count(*)::int FROM public."VendorKit" vk
+                WHERE vk."vendorId" = v.id AND vk."deadSince" IS NOT NULL)
+                AS dead_listings,
+              (SELECT min(vk."deadSince") FROM public."VendorKit" vk
+                WHERE vk."vendorId" = v.id) AS deadest_since
          FROM public."Vendor" v
         ORDER BY v.slug`
     ));
@@ -948,6 +959,8 @@ async function reportVendorsPublishingNothing(client) {
       listings: r.listings,
       readListings: r.read_listings,
       pricedListings: r.priced_listings,
+      deadListings: r.dead_listings,
+      deadestSince: r.deadest_since,
     })),
     _NON_PUBLISHING_SLUGS
   );
@@ -1365,6 +1378,9 @@ async function main() {
         await healWarehouseGalleries(client);
         await expireEndedGroupBuys(client);
         await ensureDiscoveryColumn(client);
+        // Ahead of reportVendorsPublishingNothing, which counts dead listings,
+        // and of the nightly price pass, which writes them.
+        await ensureLinkHealthColumns(client);
         await ensureDataTrustLayer(client);
         await ensureCurrencies(client);
         await resetPollutedGalleries(client);
@@ -1437,6 +1453,7 @@ async function main() {
     await purgeCancelledSets(client);
     await purgeBlockedVendorSetPairs(client);
     await ensureDiscoveryColumn(client);
+    await ensureLinkHealthColumns(client);
     await ensureDataTrustLayer(client);
     await ensureCurrencies(client);
     await resetPollutedGalleries(client);
@@ -1612,6 +1629,32 @@ async function ensureVariantsColumn(client) {
     );
   } catch (err) {
     console.warn(`[db-setup] variants column setup skipped: ${err.message}`);
+  }
+}
+
+// Link health for a vendor listing. Both price passes (run_prices in scrape.py,
+// refreshPrices in prices.ts) write these; scrape.py creates them too, because
+// the nightly run happens whether or not a deploy has reached the database
+// since. See scripts/lib/link-health.mjs for what each one means and why it is
+// two columns rather than one.
+async function ensureLinkHealthColumns(client) {
+  try {
+    await client.query(
+      `ALTER TABLE public."VendorKit"
+       ADD COLUMN IF NOT EXISTS "linkFailures" integer NOT NULL DEFAULT 0`
+    );
+    await client.query(
+      `ALTER TABLE public."VendorKit"
+       ADD COLUMN IF NOT EXISTS "deadSince" timestamp(3) without time zone`
+    );
+    // The price queue's back-off filters on these, and the publishing report
+    // counts them per vendor across ~5k rows on every deploy.
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS "VendorKit_deadSince_idx"
+         ON public."VendorKit" ("deadSince")`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] link-health column setup skipped: ${err.message}`);
   }
 }
 

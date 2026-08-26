@@ -130,6 +130,15 @@ model VendorKit {
   productUrl     String?
   priceUpdatedAt DateTime?
   priceSource    String? // "LIVE" | "SCRAPED" | "MANUAL"
+  // Link health. `deadSince` is the first time the STORE answered 404/410 for
+  // this page — definitive, so it is the only signal allowed to take a listing
+  // off the site. `linkFailures` counts consecutive unreadable attempts of any
+  // kind (redirect to the homepage, 401, 402, 5xx, DNS failure); it is a
+  // heuristic, so it only slows the price queue down and names the row in the
+  // publishing report. Both reset on any successful read. See
+  // scripts/lib/link-health.mjs.
+  linkFailures   Int       @default(0)
+  deadSince      DateTime?
   // All Shopify variants scraped from the product page: [{ title, price }].
   // Powers the kit-category filter (Base / Alpha / Novelties / Spacebars / Others).
   variants       Json?

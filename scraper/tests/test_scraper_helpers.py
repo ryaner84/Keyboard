@@ -1972,5 +1972,67 @@ class ExistingSetByNameTests(unittest.TestCase):
         self.assertIsNone(scrape._existing_set_by_name(self._index("GMK Mizu"), ""))
 
 
+class LinkHealthTests(unittest.TestCase):
+    """The Python mirror of scripts/lib/link-health.mjs.
+
+    `npm run test:link-health` checks that the CONSTANTS agree across the two
+    halves; these check that this half actually behaves the way the shared
+    module says it does.
+    """
+
+    T0 = datetime(2026, 8, 1)
+    T1 = datetime(2026, 8, 20)
+
+    def test_a_read_clears_everything(self):
+        # NO_BASE_KIT means the page loaded and carries only add-on kits — a
+        # legitimate listing, not a failure. Counting it as one would flag
+        # every store whose GMK products are all extras.
+        for outcome in ("PRICED", "NO_BASE_KIT"):
+            with self.subTest(outcome=outcome):
+                self.assertEqual(
+                    scrape.next_link_health(5, self.T0, outcome, self.T1),
+                    (0, None),
+                )
+
+    def test_gone_keeps_the_first_sighting(self):
+        # How long the store has been broken is what decides relink-or-retire,
+        # so a later 404 must not reset the clock to today.
+        self.assertEqual(
+            scrape.next_link_health(0, None, "GONE", self.T0), (1, self.T0)
+        )
+        self.assertEqual(
+            scrape.next_link_health(3, self.T0, "GONE", self.T1), (4, self.T0)
+        )
+
+    def test_unreadable_counts_but_never_declares(self):
+        # A redirect to the homepage, a 401, a 402, a DNS failure: none of them
+        # is the store saying the page is gone.
+        self.assertEqual(
+            scrape.next_link_health(0, None, "UNREADABLE", self.T1), (1, None)
+        )
+        self.assertEqual(
+            scrape.next_link_health(1, self.T0, "UNREADABLE", self.T1), (2, self.T0)
+        )
+
+    def test_missing_columns_read_as_zero(self):
+        # A row written before the migration has NULLs; the price pass writes
+        # these on every attempt and a None + 1 would crash the whole run.
+        self.assertEqual(
+            scrape.next_link_health(None, None, "UNREADABLE", self.T1), (1, None)
+        )
+
+    def test_only_404_and_410_are_dead(self):
+        self.assertEqual(scrape.DEAD_LINK_STATUSES, (404, 410))
+        # 403 is a Cloudflare block on a datacenter IP — half the roster does
+        # that on a good day, and it is exactly what must NOT count as dead.
+        for status in (200, 301, 302, 401, 402, 403, 429, 500, 503):
+            self.assertNotIn(status, scrape.DEAD_LINK_STATUSES)
+
+    def test_dead_link_is_distinct_from_no_base_kit(self):
+        # The whole fix: folded together, a removed page stamped
+        # priceSource='SCRAPED' and read as a pricing backlog.
+        self.assertNotEqual(scrape.DEAD_LINK, scrape.NO_BASE_KIT)
+
+
 if __name__ == "__main__":
     unittest.main()
