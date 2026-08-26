@@ -34,6 +34,7 @@ import {
   planPublishingReport,
   planStorefrontOwnership,
   planStorefrontRelocation,
+  planVendorMerges,
   planVendorUrlHeal,
   rosterHostBySlug,
 } from "./lib/vendor-urls.mjs";
@@ -167,18 +168,44 @@ try {
   }
 
   // 2. A storefront that is a shop, but not this shop's.
+  //
+  // The roster-declared duplicates are pulled out first. They read as contested
+  // — two rows, one host, neither obviously wrong — but the roster has already
+  // said they are one shop, so db-setup's mergeDuplicateVendorRows folds them on
+  // the next deploy. Counting them as unrepairable was how "merge or remove
+  // them" stayed on the list for months after the merge existed.
+  const vendorMerge = planVendorMerges(roster, vendors);
+  // Both halves stop contesting the host once they are one row; only the DROPS
+  // stop existing. A survivor that is silent for some other reason stays on the
+  // list — merging two rows changes which slug is silent, not the silence.
+  const merging = new Set(vendorMerge.merges.flatMap((m) => [m.keep, ...m.drop]));
+  const mergedAway = new Set(vendorMerge.merges.flatMap((m) => m.drop));
   const ownership = planStorefrontOwnership(vendors, roster);
   const relocation = planStorefrontRelocation(vendors, roster);
+  const contested = [...ownership.contested, ...relocation.contested].filter(
+    (v) => !merging.has(v.slug)
+  );
   const shapeTwo =
     ownership.heal.length +
-    ownership.contested.length +
     relocation.heal.length +
-    relocation.contested.length;
+    contested.length +
+    vendorMerge.merges.length +
+    vendorMerge.skipped.length;
   console.log(`\n== 2. Parked on someone else's / the wrong storefront (${shapeTwo}) ==`);
   for (const v of [...ownership.heal, ...relocation.heal]) {
     console.log(`RELOCATABLE | ${v.slug} | ${v.current} → ${v.host}`);
   }
-  for (const v of [...ownership.contested, ...relocation.contested]) {
+  for (const m of vendorMerge.merges) {
+    const drop = m.drop.map((slug) => bySlug.get(slug)?.listings ?? 0);
+    console.log(
+      `MERGING     | ${m.drop.join(", ")} → ${m.keep} | ${m.host} | one shop, two rows` +
+        ` — the roster says so; next deploy folds ${drop.join("+")} listing(s) across`
+    );
+  }
+  for (const g of vendorMerge.skipped) {
+    console.log(`ALIAS-STALE | ${g.slugs.join(", ")} | ${g.hosts.join(", ")} | ${g.reason}`);
+  }
+  for (const v of contested) {
     console.log(`CONTESTED   | ${v.slug} | ${v.host} | ${v.reason}`);
   }
 
@@ -188,7 +215,8 @@ try {
   for (const v of silent) {
     const row = bySlug.get(v.slug);
     console.log(
-      `SILENT      | ${v.slug} | ${v.websiteUrl} | listings=${row.listings}` +
+      `SILENT      | ${v.slug}${mergedAway.has(v.slug) ? " (merging away)" : ""}` +
+        ` | ${v.websiteUrl} | listings=${row.listings}` +
         ` read=${row.readListings} priced=${row.pricedListings} | ${v.reason}` +
         ` | ${sample(row.listingUrls)}`
     );
@@ -213,12 +241,13 @@ try {
     console.log(`UNPINNED    | ${v.slug} | roster=${v.rosterKey} | import would pin=${v.own}`);
   }
 
+  // Rows the merge is about to fold are NOT counted: a deploy repairs them.
   const total =
     urlHeal.duplicate.length +
     urlHeal.stranded.length +
-    ownership.contested.length +
-    relocation.contested.length +
-    silent.length;
+    contested.length +
+    vendorMerge.skipped.length +
+    silent.filter((v) => !mergedAway.has(v.slug)).length;
   console.log(
     `\nTOTAL_UNPUBLISHED ${total} vendor(s) the site shows nothing for and no deploy pass can repair.`
   );

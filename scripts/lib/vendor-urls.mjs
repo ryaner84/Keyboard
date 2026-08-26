@@ -587,7 +587,8 @@ export function planStorefrontRelocation(vendors, roster = []) {
  *               guard its UPDATE
  *   aliased   — roster rows a differently-slugged vendor already covers by host
  *   duplicate — extra rows matching the same roster entry: two Vendor rows for
- *               one shop, which is a merge nobody can do automatically
+ *               one shop. `planVendorMerges` below turns this list into the
+ *               merge that folds them back into one row.
  *   conflicted — a row the roster would move onto a host ANOTHER vendor row
  *               already holds. Moving it would re-create exactly what
  *               planStorefrontOwnership exists to undo, so it is reported
@@ -650,6 +651,93 @@ export function planRosterSync(roster, existing) {
     if (rosterKey) ownerByHost.set(rosterKey, entry.slug);
   }
   return { insert, heal, aliased, duplicate, conflicted };
+}
+
+/**
+ * The duplicate Vendor rows `planRosterSync` reports, planned as merges.
+ *
+ * Aliases were added to stop the roster INSERTING a second row for a store the
+ * database already knew under another spelling — and they do. They never
+ * removed the rows the roster had already inserted, so five shops still carry
+ * two Vendor rows each (cannonkeys/cannon-keys, thekeyco/the-key-company,
+ * mykeyboard-eu/mykeyboard, mech-land/mechland, toro-studio/toro-studios) and
+ * every deploy since has printed "merge or remove them" at a pass that cannot.
+ *
+ * Two rows for one shop is not a cosmetic duplicate. Discovery rotates
+ * _DISCOVERY_VENDOR_LIMIT (8) stores a night across ~130 rows, so each ghost
+ * spends a slot re-fetching a catalogue that was already crawled under the
+ * other id — a real store loses its turn for a fortnight — and whichever id the
+ * crawl happens to be running under is where the listings land.
+ * `find_vendor_for_url` resolves by host and returns whichever of the two
+ * Postgres hands back first, so an outlet collection can attach to either. The
+ * split is visible in the audit: `the-key-company` holds 12 listings while
+ * `thekeyco` holds 0, `mykeyboard` holds 206 while `mykeyboard-eu` holds 0.
+ * The empty half publishes nothing, permanently, and is named for it.
+ *
+ * The survivor is the roster's own slug when a row carries it, because that is
+ * the slug `planRosterSync` heals on every deploy — keeping the other one would
+ * leave the roster repairing a row that no longer exists. Everything the drops
+ * carry moves onto it first; the caller does the moving.
+ *
+ * This DELETES a Vendor row, so — exactly like `setMergeIdentity` — the bar is
+ * higher than a display collapse and two guards keep it there:
+ *
+ *   * Only the ROSTER may declare two slugs to be one shop. It is the
+ *     hand-written rung, right by construction. Rows that merely share a host
+ *     (protozoa-studio / protozoa-studio-us, pancco / panc-interactive) are
+ *     `planStorefrontOwnership`'s to report and nobody's to merge: regional
+ *     storefronts sell different group buys from one site.
+ *   * Every row that HAS a storefront must agree on the host. A blank or
+ *     shortener-parked row (`needsStorefront`) contradicts nothing and merges —
+ *     that is the stranded `cannon-keys` shape the aliases exist for — but two
+ *     rows on two real, different shops are a stale alias, not a duplicate, and
+ *     are reported rather than merged.
+ *
+ * `existing` is [{ slug, websiteUrl }]. Returns { merges, skipped }, both pure:
+ *   merges  — { keep, drop: [...], host } of slugs, ready to fold together
+ *   skipped — { slugs, hosts, reason } for an alias group that disagrees
+ */
+export function planVendorMerges(roster, existing) {
+  const bySlug = new Map();
+  for (const row of existing ?? []) {
+    if (row?.slug) bySlug.set(row.slug, String(row.websiteUrl ?? "").trim());
+  }
+
+  const merges = [];
+  const skipped = [];
+  const claimed = new Set();
+  for (const entry of roster ?? []) {
+    if (!entry?.slug) continue;
+    // Declared order is the priority order, same as planRosterSync: the
+    // canonical slug survives whenever a row carries it.
+    const present = [entry.slug, ...(entry.aliases ?? [])].filter((s) => bySlug.has(s));
+    if (present.length < 2) continue;
+    // One row can only be merged once. Two roster entries naming the same
+    // alias is a roster bug; acting on both would delete a row twice.
+    if (present.some((slug) => claimed.has(slug))) continue;
+
+    const hosts = present
+      .map((slug) => ({ slug, url: bySlug.get(slug) }))
+      .filter((row) => !needsStorefront(row.url))
+      .map((row) => ({ slug: row.slug, key: hostKey(hostOfUrl(row.url)) }));
+    const distinct = new Set(hosts.map((h) => h.key));
+    if (distinct.size > 1) {
+      skipped.push({
+        slugs: present,
+        hosts: [...distinct].sort(),
+        reason: "the rows sit on different storefronts — a stale alias, not a duplicate",
+      });
+      continue;
+    }
+
+    for (const slug of present) claimed.add(slug);
+    merges.push({
+      keep: present[0],
+      drop: present.slice(1),
+      host: hosts[0]?.key ?? hostKey(hostOfUrl(entry.websiteUrl)) ?? "",
+    });
+  }
+  return { merges, skipped };
 }
 
 /**
