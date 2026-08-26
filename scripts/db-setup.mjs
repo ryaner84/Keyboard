@@ -21,6 +21,7 @@ import {
   planRosterSync,
   planStorefrontOwnership,
   planStorefrontRelocation,
+  planVendorMerges,
   planVendorUrlHeal,
 } from "./lib/vendor-urls.mjs";
 import { planSetMerges } from "./lib/set-merge.mjs";
@@ -256,6 +257,178 @@ async function ensureVendorRoster(client) {
     }
   } catch {
     /* diagnostic only */
+  }
+}
+
+// The duplicate rows ensureVendorRoster has been reporting since aliases were
+// added — folded back into one row per shop.
+//
+// Aliases stopped the roster from INSERTING a second Vendor row for a store the
+// database already knew under another spelling. They never removed the rows it
+// had already inserted, so five shops still carry two rows each and every
+// deploy prints "merge or remove them" at a pass that cannot do either.
+//
+// The empty half of each pair is a vendor the site publishes NOTHING for, by
+// construction: `thekeyco` holds 0 listings while `the-key-company` holds 12,
+// `mykeyboard-eu` holds 0 while `mykeyboard` holds 206. It is not inert, either
+// — discovery rotates 8 stores a night across ~130 rows, so each ghost spends a
+// slot re-crawling a catalogue already read under the other id and a real store
+// waits another fortnight; whichever id the crawl happens to run under is where
+// that night's listings land; and `find_vendor_for_url` resolves an outlet
+// collection by HOST, returning whichever of the two Postgres hands back first.
+//
+// Runs after ensureVendorRoster so the surviving slug exists and has been
+// healed, and before healMisparkedVendorUrls so ownership sees one row per host
+// instead of reporting the pair as contested for the rest of time.
+//
+// Deleting a Vendor row is a higher bar than reporting one, so the guards live
+// in planVendorMerges: only the ROSTER may declare two slugs to be one shop
+// (rows that merely share a host stay contested and reported), and every row
+// that has a storefront must agree on the host.
+async function mergeDuplicateVendorRows(client) {
+  let roster;
+  try {
+    const parsed = JSON.parse(readFileSync(VENDOR_ROSTER_PATH, "utf8"));
+    roster = Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.warn(`[db-setup] duplicate-vendor merge skipped (roster unreadable): ${err.message}`);
+    return;
+  }
+
+  let rows;
+  try {
+    ({ rows } = await client.query(
+      `SELECT id, slug, "websiteUrl" FROM public."Vendor"`
+    ));
+  } catch (err) {
+    console.warn(`[db-setup] duplicate-vendor merge skipped: ${err.message}`);
+    return;
+  }
+
+  const { merges, skipped } = planVendorMerges(roster, rows);
+  const bySlug = new Map(rows.map((r) => [r.slug, r]));
+
+  let merged = 0;
+  for (const merge of merges) {
+    const keep = bySlug.get(merge.keep);
+    const drops = merge.drop.map((slug) => bySlug.get(slug)).filter(Boolean);
+    if (!keep || drops.length === 0) continue;
+    const dropIds = drops.map((r) => r.id);
+    try {
+      await client.query("BEGIN");
+
+      // Settle every kit both sides list BEFORE moving anything: VendorKit is
+      // unique on (kitId, vendorId), so the move would fail on the first shared
+      // set otherwise. The row that survives is the one worth publishing — a
+      // price beats no price, a page the price pass has READ beats one it never
+      // parsed, and the freshest attempt breaks the rest. `is_keep` is only the
+      // final tiebreak: the survivor here is often the EMPTY roster row, and
+      // preferring it by default would throw away the only priced listing the
+      // shop has. Losers are deleted, so exactly one pool row per kit remains.
+      await client.query(
+        `WITH pool AS (
+           SELECT vk.id, vk."kitId",
+                  (vk."vendorId" = $1) AS is_keep,
+                  (vk.price IS NOT NULL) AS priced,
+                  (vk."priceSource" IS NOT NULL) AS was_read,
+                  vk."priceUpdatedAt" AS seen
+             FROM public."VendorKit" vk
+            WHERE vk."vendorId" = $1 OR vk."vendorId" = ANY($2::text[])
+         ), winner AS (
+           SELECT DISTINCT ON ("kitId") id
+             FROM pool
+            ORDER BY "kitId", priced DESC, was_read DESC,
+                     seen DESC NULLS LAST, is_keep DESC, id
+         )
+         DELETE FROM public."VendorKit" v
+          USING pool p
+          WHERE v.id = p.id
+            AND EXISTS (SELECT 1 FROM pool o
+                         WHERE o."kitId" = p."kitId" AND o.id <> p.id)
+            AND p.id NOT IN (SELECT id FROM winner)`,
+        [keep.id, dropIds]
+      );
+
+      const moved = await client.query(
+        `UPDATE public."VendorKit" SET "vendorId" = $1, "updatedAt" = now()
+          WHERE "vendorId" = ANY($2::text[])`,
+        [keep.id, dropIds]
+      );
+
+      // Shipping zones are unique on (vendorId, destinationRegion) and the
+      // price table hides a listing the survivor cannot ship (see
+      // backfillShipping). Move only the regions it is missing, one per region;
+      // the rest cascade away with the row.
+      await client.query(
+        `WITH survivors AS (
+           SELECT DISTINCT ON (z."destinationRegion") z.id
+             FROM public."ShippingZone" z
+            WHERE z."vendorId" = ANY($2::text[])
+              AND NOT EXISTS (
+                SELECT 1 FROM public."ShippingZone" k
+                 WHERE k."vendorId" = $1
+                   AND k."destinationRegion" = z."destinationRegion")
+            ORDER BY z."destinationRegion", z.id
+         )
+         UPDATE public."ShippingZone" SET "vendorId" = $1
+          WHERE id IN (SELECT id FROM survivors)`,
+        [keep.id, dropIds]
+      );
+
+      // Only ever fill what the survivor is missing. `lastDiscoveredAt` takes
+      // the EARLIER of the two (never-crawled wins): the merged row's listing
+      // set just changed, and neither half's crawl history describes it any
+      // more, so it goes back to the front of the rotation once.
+      for (const dropId of [...dropIds].sort()) {
+        await client.query(
+          `UPDATE public."Vendor" k SET
+             "logoUrl" = COALESCE(NULLIF(k."logoUrl", ''), NULLIF(l."logoUrl", '')),
+             "lastDiscoveredAt" = CASE
+               WHEN k."lastDiscoveredAt" IS NULL OR l."lastDiscoveredAt" IS NULL THEN NULL
+               ELSE LEAST(k."lastDiscoveredAt", l."lastDiscoveredAt") END
+           FROM public."Vendor" l
+          WHERE k.id = $1 AND l.id = $2`,
+          [keep.id, dropId]
+        );
+      }
+
+      // A blank / shortener-parked survivor is the shape aliases exist for: the
+      // roster heals it on this same deploy, but if it hasn't yet, take the
+      // storefront the row being deleted was carrying rather than lose it.
+      if (needsStorefront(keep.websiteUrl)) {
+        const rescue = drops.find((r) => !needsStorefront(r.websiteUrl));
+        if (rescue) {
+          await client.query(
+            `UPDATE public."Vendor" SET "websiteUrl" = $2 WHERE id = $1`,
+            [keep.id, rescue.websiteUrl]
+          );
+        }
+      }
+
+      await client.query(`DELETE FROM public."Vendor" WHERE id = ANY($1::text[])`, [dropIds]);
+      await client.query("COMMIT");
+      merged += dropIds.length;
+      console.log(
+        `[db-setup]   merged ${merge.drop.join(", ")} into ${merge.keep} ` +
+          `on ${merge.host} (${moved.rowCount} listing(s) moved)`
+      );
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.warn(
+        `[db-setup] duplicate-vendor merge failed for ${merge.keep}: ${err.message}`
+      );
+    }
+  }
+
+  if (merged > 0) {
+    console.log(`[db-setup] Merged ${merged} duplicate vendor row(s) into their shop.`);
+  }
+  // Named rather than merged: the roster says one shop and the rows say two.
+  for (const group of skipped) {
+    console.warn(
+      `[db-setup] duplicate-vendor merge skipped ${group.slugs.join(", ")} ` +
+        `(${group.hosts.join(", ")}) — ${group.reason}`
+    );
   }
 }
 
@@ -1199,6 +1372,9 @@ async function main() {
         // it shipping zones in the SAME deploy, or the price table hides every
         // listing it publishes until the next nightly self-heal.
         await ensureVendorRoster(client);
+        // Before healMisparkedVendorUrls: a shop with two rows collides with
+        // itself, and ownership would report the pair as contested forever.
+        await mergeDuplicateVendorRows(client);
         await healMisparkedVendorUrls(client);
         await healOffsiteVendorUrls(client);
         await healVendorUrlsFromListings(client);
@@ -1265,6 +1441,7 @@ async function main() {
     await ensureCurrencies(client);
     await resetPollutedGalleries(client);
     await ensureVendorRoster(client);
+    await mergeDuplicateVendorRows(client);
     await healMisparkedVendorUrls(client);
     await healOffsiteVendorUrls(client);
     await healVendorUrlsFromListings(client);

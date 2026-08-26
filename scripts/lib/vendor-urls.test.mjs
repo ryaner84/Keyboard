@@ -14,6 +14,7 @@ import {
   planRosterSync,
   planStorefrontOwnership,
   planStorefrontRelocation,
+  planVendorMerges,
   planVendorUrlHeal,
   nextVendorWebsiteUrl,
   NON_STOREFRONT_HOSTS,
@@ -408,6 +409,102 @@ assert.deepEqual(planRosterSync(undefined, undefined), {
   duplicate: [],
   conflicted: [],
 });
+
+// --- planVendorMerges ------------------------------------------------------
+// The five pairs that are actually in the database. Aliases stopped the roster
+// from inserting a SIXTH; they never removed these, so the empty half of each
+// pair has been publishing nothing for as long as it has existed.
+{
+  const { merges, skipped } = planVendorMerges(
+    [
+      { slug: "thekeyco", websiteUrl: "https://thekey.company", aliases: ["the-key-company"] },
+      { slug: "mykeyboard-eu", websiteUrl: "https://mykeyboard.eu", aliases: ["mykeyboard"] },
+    ],
+    [
+      { slug: "thekeyco", websiteUrl: "https://thekey.company" },
+      { slug: "the-key-company", websiteUrl: "https://thekey.company" },
+      { slug: "mykeyboard-eu", websiteUrl: "https://mykeyboard.eu" },
+      { slug: "mykeyboard", websiteUrl: "https://mykeyboard.eu" },
+    ]
+  );
+  assert.deepEqual(skipped, []);
+  // The roster's own slug survives — it is the one planRosterSync heals every
+  // deploy, so keeping the alias instead would leave the roster repairing a row
+  // that no longer exists.
+  assert.deepEqual(merges, [
+    { keep: "thekeyco", drop: ["the-key-company"], host: "thekey.company" },
+    { keep: "mykeyboard-eu", drop: ["mykeyboard"], host: "mykeyboard.eu" },
+  ]);
+}
+// One row of the pair is stranded (blank / shortener). It contradicts no host,
+// and it is exactly the shape aliases were added for: host matching cannot see
+// a blank row, so `cannon-keys` reads as a store nobody owns.
+{
+  const { merges, skipped } = planVendorMerges(
+    [{ slug: "cannonkeys", websiteUrl: "https://cannonkeys.com", aliases: ["cannon-keys"] }],
+    [
+      { slug: "cannonkeys", websiteUrl: "https://cannonkeys.com" },
+      { slug: "cannon-keys", websiteUrl: "" },
+    ]
+  );
+  assert.deepEqual(skipped, []);
+  assert.deepEqual(merges, [
+    { keep: "cannonkeys", drop: ["cannon-keys"], host: "cannonkeys.com" },
+  ]);
+}
+// www-only spellings are one host, not two (`ashkeebs` is www.ashkeebs.com in
+// the DB and ashkeebs.com in the roster).
+{
+  const { merges } = planVendorMerges(
+    [{ slug: "toro-studio", websiteUrl: "https://torokeeb.store", aliases: ["toro-studios"] }],
+    [
+      { slug: "toro-studio", websiteUrl: "https://torokeeb.store" },
+      { slug: "toro-studios", websiteUrl: "https://www.torokeeb.store" },
+    ]
+  );
+  assert.equal(merges.length, 1);
+  assert.deepEqual(merges[0].drop, ["toro-studios"]);
+}
+// Two rows on two real, different shops are a stale alias, not a duplicate.
+// This pass DELETES a Vendor row, so it reports and changes nothing.
+{
+  const { merges, skipped } = planVendorMerges(
+    [{ slug: "omnitype", websiteUrl: "https://omnitype.com", aliases: ["dixiemech"] }],
+    [
+      { slug: "omnitype", websiteUrl: "https://omnitype.com" },
+      { slug: "dixiemech", websiteUrl: "https://dixiemech.com" },
+    ]
+  );
+  assert.deepEqual(merges, []);
+  assert.equal(skipped.length, 1);
+  assert.deepEqual(skipped[0].slugs, ["omnitype", "dixiemech"]);
+  assert.deepEqual(skipped[0].hosts, ["dixiemech.com", "omnitype.com"]);
+}
+// Rows that merely SHARE a host are planStorefrontOwnership's to report and
+// nobody's to merge: Protozoa Studio / Protozoa Studio (US) are two regional
+// group buys on one site, and panc-interactive is not in the roster at all.
+{
+  const { merges, skipped } = planVendorMerges(
+    [{ slug: "cannonkeys", websiteUrl: "https://cannonkeys.com", aliases: ["cannon-keys"] }],
+    [
+      { slug: "protozoa-studio", websiteUrl: "https://protozoa.studio" },
+      { slug: "protozoa-studio-us", websiteUrl: "https://protozoa.studio" },
+      { slug: "pancco", websiteUrl: "https://panc.co" },
+      { slug: "panc-interactive", websiteUrl: "https://panc.co" },
+    ]
+  );
+  assert.deepEqual(merges, []);
+  assert.deepEqual(skipped, []);
+}
+// Only one side present is the healthy state aliases already produce — nothing
+// to merge, and no phantom drop of a row that isn't there.
+{
+  const { merges } = planVendorMerges(
+    [{ slug: "mech-land", websiteUrl: "https://mech.land", aliases: ["mechland"] }],
+    [{ slug: "mechland", websiteUrl: "https://mech.land" }]
+  );
+  assert.deepEqual(merges, []);
+}
 
 // --- the roster file itself ------------------------------------------------
 const roster = JSON.parse(
@@ -1229,6 +1326,39 @@ assert.ok(
 assert.ok(
   /plan\.conflicted/.test(dbSetup),
   "scripts/db-setup.mjs must report roster entries whose host another row holds"
+);
+
+// The duplicate rows ensureVendorRoster reports must actually be merged. A
+// planner nothing calls is a repair that never happens — which is precisely how
+// "merge or remove them" came to be printed on every deploy for months while
+// five shops kept two rows each.
+assert.ok(
+  /planVendorMerges/.test(dbSetup),
+  "scripts/db-setup.mjs must call planVendorMerges"
+);
+assert.equal(
+  (dbSetup.match(/await mergeDuplicateVendorRows\(client\);/g) ?? []).length,
+  2,
+  "scripts/db-setup.mjs's main() must invoke mergeDuplicateVendorRows on both paths"
+);
+// Order matters at both ends: the surviving slug has to exist and be healed
+// before anything is folded into it, and the pair has to be gone before
+// ownership decides who holds the host — otherwise a shop collides with itself
+// and is reported as contested for the rest of time.
+assert.ok(
+  dbSetup.indexOf("await ensureVendorRoster(client);") <
+    dbSetup.indexOf("await mergeDuplicateVendorRows(client);") &&
+    dbSetup.indexOf("await mergeDuplicateVendorRows(client);") <
+      dbSetup.indexOf("await healMisparkedVendorUrls(client);"),
+  "mergeDuplicateVendorRows must run after ensureVendorRoster and before healMisparkedVendorUrls"
+);
+// The unique key is (kitId, vendorId): moving a listing onto a survivor that
+// already lists the same set fails the whole merge, so the shared kits must be
+// settled BEFORE the move, not after.
+assert.ok(
+  dbSetup.indexOf(`WITH pool AS (`) <
+    dbSetup.indexOf(`UPDATE public."VendorKit" SET "vendorId" = $1`),
+  "the duplicate-vendor merge must settle shared kits before moving listings"
 );
 
 console.log("vendor-url heal checks passed");

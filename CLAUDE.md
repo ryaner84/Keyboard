@@ -351,6 +351,34 @@ the ones host matching cannot see: a blank vendor has no host, so a blank
 entry used to insert a *second* row beside it. Add the DB's spelling to
 `aliases` rather than adding a second entry.
 
+**Aliases stop the next duplicate; they never removed the last one.** Five shops
+still carried two Vendor rows each (`cannonkeys`/`cannon-keys`,
+`thekeyco`/`the-key-company`, `mykeyboard-eu`/`mykeyboard`,
+`mech-land`/`mechland`, `toro-studio`/`toro-studios`) long after the aliases
+were added, and every deploy printed "merge or remove them" at a pass that could
+do neither. The empty half is a vendor the site publishes NOTHING for by
+construction — `thekeyco` held 0 listings while `the-key-company` held 12,
+`mykeyboard-eu` 0 while `mykeyboard` held 206 — and it is not inert: discovery
+rotates 8 stores a night across ~130 rows, so each ghost spends a slot
+re-crawling a catalogue already read under the other id (a real store waits
+another fortnight), whichever id the crawl runs under is where that night's
+listings land, and `find_vendor_for_url` resolves by host and returns whichever
+row Postgres hands back first. `planVendorMerges` + `mergeDuplicateVendorRows`
+fold them into one row, and — like `mergeDuplicateKeycapSets` — the merge moves
+children before it deletes anything: shared kits are settled FIRST (VendorKit is
+unique on `(kitId, vendorId)`, so the move fails on the first shared set
+otherwise), preferring a priced row over an unpriced one and only then the
+survivor, because the survivor is usually the EMPTY roster row and defaulting to
+it would throw away the shop's only price.
+
+Because that merge DELETES a Vendor row, the bar is higher than
+`planStorefrontOwnership`'s report and two guards keep it there: only the
+ROSTER may declare two slugs to be one shop — rows that merely share a host
+(`protozoa-studio`/`protozoa-studio-us` are two regional group buys on one site,
+`pancco`/`panc-interactive` are in no roster entry) stay contested and reported
+— and every row that HAS a storefront must agree on the host, so a stale alias
+pointing at two real, different shops is reported, never merged.
+
 **`OUTLET_COLLECTIONS` and the vendor registry are two halves of one thing.**
 `run_outlets` resolves each collection's vendor by HOST, so a host no Vendor row
 carries logs "no tracked vendor" and does nothing, forever — `test:vendor-urls`
