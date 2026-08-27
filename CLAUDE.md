@@ -337,6 +337,25 @@ naming `refresh-prices`, the one pass that cannot end it. Count `priceSource`,
 never `priceUpdatedAt`: the timestamp is written on every attempt, so counting it
 would make every dead link look read.
 
+**And the commonest of those answers is not a status at all — it is a silent
+redirect.** A store that has removed a product usually sends it to the store's
+own FRONT DOOR rather than 404ing it, and an acquired shop redirects its whole
+domain to the buyer's home page. `fetch()` and `page.goto()` follow the hop
+without a word, so all either price pass ever saw was a 200 on a page that is
+not the listing: the row read as "blocked, try again later", for ever. Probing
+production found kono (44 listings) 302ing every product to `kono.store/` and
+ashkeebs (38) 301ing to `kineticlabs.com/`. `isGoneRedirect` (mirrored as
+`is_gone_redirect`) reads it off the FINAL url and answers `DEAD_LINK`, which is
+also what stops a front page carrying Product markup of its own from being
+scraped and published as that set's price at that vendor. It is deliberately
+narrow — only the site ROOT counts, so a renamed handle, a collection page and a
+`/password` lock are all still merely unreadable — and the verdict is taken on
+the HUMAN product page, never on `/products/*.json`, which a live store that
+simply doesn't serve it answers from its front door too. `npm run
+audit:publishing` re-diagnoses those vendors as gone; `scripts/vendor-link-probe.mjs`
+(the **Vendor probe** workflow) is how a silent store's answer is read in the
+first place, from a runner IP rather than guessed at.
+
 **And a 404 counted as READ, so the commonest cause was hiding inside the
 second-commonest.** Both price passes returned the `NO_BASE_KIT` sentinel for a
 404/410, and its caller stamps `priceSource = 'SCRAPED'` — the same mark a live

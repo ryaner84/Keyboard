@@ -23,11 +23,17 @@
 // — and an unpriced live listing is hidden outright on a RELEASED set. Dead
 // links were costing the site real published listings.
 //
+// And the commonest of those answers is not a status at all. A store that has
+// removed a product usually REDIRECTS to its own front door, and an acquired
+// one redirects its whole domain to the buyer's — fetch() follows both without
+// a word, so all the price pass ever saw was a 200 on a page that is not the
+// listing. isGoneRedirect below is that answer, read off the final URL.
+//
 // Two columns carry the evidence, and they mean different things on purpose:
 //
-//   deadSince     the store itself said the page does not exist (404/410).
-//                 Definitive, so it is the only signal allowed to take a link
-//                 off the site.
+//   deadSince     the store itself said the page is not there — a 404/410, or
+//                 a redirect to its front door. Definitive, so it is the only
+//                 signal allowed to take a link off the site.
 //   linkFailures  consecutive attempts that produced no readable page, for any
 //                 reason. A heuristic — a store that blocks the runner for a
 //                 week looks identical to one that shut down — so it may slow a
@@ -65,15 +71,58 @@ export function isDeadLinkStatus(status) {
   return DEAD_LINK_STATUSES.includes(Number(status));
 }
 
+/** A URL whose path is the site root — the storefront's front door. */
+function isFrontDoor(url) {
+  return url.pathname.replace(/\/+$/, "") === "";
+}
+
+function parseUrl(value) {
+  try {
+    return new URL(String(value ?? ""));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when a request for `requestUrl` was answered by a FRONT DOOR — the site
+ * root, on this host or another one.
+ *
+ * This is the other way a store says "gone", and measured against production it
+ * is the commonest one. Shopify sends a deleted product to `/` rather than
+ * 404ing it (kono.store does that for all 44 of its tracked listings); an
+ * acquired shop 301s its entire domain to the buyer's home page (ashkeebs.com →
+ * kineticlabs.com, 38 listings). Both are silent: fetch() follows the hop and
+ * hands back a 200, so the price pass filed the row as "blocked, try later" and
+ * re-fetched it every six hours for ever, because only a 404/410 clears a
+ * price. The store did answer, and its answer was that this URL is not a page
+ * here — as definitive as a 404, and the same repair (relink or retire).
+ *
+ * Deliberately narrow. Only the ROOT counts: a redirect onto another product (a
+ * renamed handle) or onto a collection says nothing about this listing, and a
+ * request that STARTED at the root — several vendors carry a bare homepage as a
+ * listing URL — was not redirected off anything. It also stays self-healing,
+ * because nextLinkHealth clears deadSince on the first read that gets through:
+ * a store redirecting to its front door for a maintenance window costs a
+ * fortnight of slow cadence, never a retirement.
+ */
+export function isGoneRedirect(requestUrl, finalUrl) {
+  const from = parseUrl(requestUrl);
+  const to = parseUrl(finalUrl);
+  if (!from || !to) return false;
+  if (isFrontDoor(from)) return false;
+  return isFrontDoor(to);
+}
+
 /**
  * The link-health columns after one price attempt. Pure — the caller writes.
  *
  * `outcome` is one of:
  *   "PRICED"       a price was parsed
  *   "NO_BASE_KIT"  the page was READ and carries no base kit
- *   "GONE"         the store answered 404/410
- *   "UNREADABLE"   anything else: a redirect to the homepage, 401, 402, 5xx,
- *                  a DNS failure, a timeout, a block
+ *   "GONE"         the store answered 404/410, or redirected to its front door
+ *   "UNREADABLE"   anything else: 401, 402, 5xx, a DNS failure, a timeout, a
+ *                  block, a storefront password page
  *
  * PRICED and NO_BASE_KIT are both successful reads. Treating NO_BASE_KIT as a
  * failure would flag every store that legitimately sells only add-on kits.
@@ -124,14 +173,17 @@ export function describeDeadListings(listings, deadListings, deadestSince) {
   const dead = Number(deadListings ?? 0);
   if (!(dead > 0) || !(total > 0)) return null;
   const since = deadestSince ? ` since ${new Date(deadestSince).toISOString().slice(0, 10)}` : "";
+  // "gone" covers both answers a store gives: 404/410, and a redirect to its
+  // front door. Naming only the status sent the owner looking for a 404 that
+  // the commonest case never produces.
   if (dead >= total) {
     return (
-      `all ${total} listing(s) return 404/410${since} — the store's pages are ` +
-      `gone; relink or retire it (refresh-prices cannot help)`
+      `all ${total} listing(s) are gone${since} (404/410 or redirected to the ` +
+      `storefront's front door) — relink or retire it (refresh-prices cannot help)`
     );
   }
   return (
-    `${dead} of ${total} listing(s) return 404/410${since} — those pages are ` +
-    `gone; the rest are still being read`
+    `${dead} of ${total} listing(s) are gone${since} (404/410 or redirected to ` +
+    `the storefront's front door); the rest are still being read`
   );
 }

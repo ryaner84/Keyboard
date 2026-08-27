@@ -1,15 +1,23 @@
-# Prints a vendor product's live variant list (title / price / availability)
-# from a GitHub runner. Vendor Shopify stores block many datacenter IPs but
-# serve runner IPs fine — this is the read-only debugging companion to
-# refresh-prices.yml, used by the price-report review routine to inspect a
-# reported listing's real variants before fixing the kit picker.
+# Prints what a vendor listing URL actually answers, from a GitHub runner.
+# Vendor stores block many datacenter IPs but serve runner IPs fine — this is
+# the read-only debugging companion to refresh-prices.yml, used by the
+# price-report review routine to inspect a reported listing's real variants
+# before fixing the kit picker, and by the vendor publishing audit to tell a
+# store that is GONE from one the parser simply cannot read.
+#
+# Two steps, because they answer different questions:
+#   * "Link health" runs scripts/vendor-link-probe.mjs over every URL — status,
+#     redirect chain, and which parser path (Shopify JSON / WooCommerce blob /
+#     JSON-LD / OpenGraph) the page offers. Works on any platform.
+#   * "Product variants" dumps the Shopify variant list, which is what the kit
+#     picker actually chooses between. Shopify-only, by nature.
 name: Vendor probe
 
 on:
   workflow_dispatch:
     inputs:
       urls:
-        description: Space-separated Shopify product URLs (/products/<handle>)
+        description: Space-separated vendor listing URLs (any platform)
         required: true
         type: string
 
@@ -17,18 +25,38 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch product variants
+      - uses: actions/checkout@v5
+
+      # No npm install: the probe is dependency-free on purpose, so a store that
+      # is only reachable from a runner can be diagnosed in seconds.
+      - name: Link health
+        env:
+          PROBE_URLS: ${{ inputs.urls }}
+        run: node scripts/vendor-link-probe.mjs
+
+      - name: Product variants (Shopify)
         env:
           URLS: ${{ inputs.urls }}
         run: |
           for u in $URLS; do
             base="${u%%\?*}"
             echo "=== PROBE $base"
+            # Non-Shopify URLs have no .js endpoint at all. Say so once instead
+            # of printing a JSON.parse stack trace over the link-health report.
+            case "$base" in
+              *"/products/"*) ;;
+              *) echo "SKIPPED | not a Shopify /products/ URL — see the link-health step"; continue ;;
+            esac
             curl -sf -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36" \
               "${base}.js" | node -e "
                 let s='';
                 process.stdin.on('data', d => s += d).on('end', () => {
-                  const p = JSON.parse(s);
+                  let p;
+                  try { p = JSON.parse(s); } catch { p = null; }
+                  if (!p || !p.title) {
+                    console.log('NO VARIANTS | .js returned no product JSON (removed, password page, or blocked)');
+                    return;
+                  }
                   console.log('PRODUCT | ' + p.title + ' | handle=' + p.handle + ' | type=' + (p.type ?? '') + ' | tags=' + JSON.stringify(p.tags ?? []));
                   for (const v of p.variants ?? []) {
                     console.log('VARIANT | id=' + v.id + ' | title=' + JSON.stringify(v.title) +

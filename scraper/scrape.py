@@ -635,6 +635,38 @@ DEAD_LINK_FAILURE_THRESHOLD = 6
 DEAD_LINK_RECHECK_HOURS = 24 * 14
 
 
+def is_gone_redirect(request_url, final_url) -> bool:
+    """True when a request was answered by a storefront's FRONT DOOR.
+
+    The other way a store says "gone", and the commonest one: Shopify sends a
+    deleted product to `/` rather than 404ing it (kono.store does that for all
+    44 of its tracked listings), and an acquired shop 301s its whole domain to
+    the buyer's home page (ashkeebs.com → kineticlabs.com, 38 listings). The
+    browser follows the hop, so the pass only ever saw a 200 on a page that is
+    not the listing and kept re-fetching it — only a 404/410 clears a price.
+
+    Only the ROOT counts: a redirect onto another product (a renamed handle) or
+    onto a collection says nothing about this listing, and a request that
+    STARTED at the root was not redirected off anything. Mirror of
+    isGoneRedirect in scripts/lib/link-health.mjs.
+    """
+
+    def front_door(url):
+        try:
+            parts = urllib.parse.urlsplit(str(url or ""))
+        except ValueError:
+            return None
+        if not parts.scheme or not parts.netloc:
+            return None
+        return parts.path.rstrip("/") == ""
+
+    origin = front_door(request_url)
+    target = front_door(final_url)
+    if origin is None or target is None:
+        return False
+    return target and not origin
+
+
 def next_link_health(link_failures, dead_since, outcome, now=None):
     """Link-health columns after one price attempt. Pure — the caller writes.
 
@@ -1099,15 +1131,21 @@ def shopify_price(
     # genuinely removed listing (404/410 → clear the stale price) apart from a
     # transient block (keep the last good price).
     nav_status: int | None = None
+    # Where that navigation actually ENDED. A removed Shopify product is usually
+    # answered with a redirect to the store's front door rather than a 404, and
+    # the redirect is silent — without this the row reads as a transient block
+    # for ever. See is_gone_redirect.
+    nav_final_url: str | None = None
 
     def ensure_browser() -> None:
-        nonlocal browser_loaded, clean, nav_status
+        nonlocal browser_loaded, clean, nav_status, nav_final_url
         if browser_loaded:
             return
         response = page.goto(
             product_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS
         )
         nav_status = response.status if response is not None else None
+        nav_final_url = page.url
         final_url = page.url.split("?")[0].split("#")[0].rstrip("/")
         if "/products/" in final_url:
             clean = final_url
@@ -1156,6 +1194,15 @@ def shopify_price(
             # instead of preserving it the way we do for a transient block.
             if nav_status in DEAD_LINK_STATUSES:
                 log(f"  dead link ({nav_status}) — clearing price ({product_url})")
+                return DEAD_LINK
+            # …and the answer a removed product gives more often than a 404: the
+            # store redirected us to its own front door. Just as definitive, and
+            # it never produced a status we could read.
+            if is_gone_redirect(product_url, nav_final_url):
+                log(
+                    f"  dead link (redirected to {nav_final_url}) — clearing "
+                    f"price ({product_url})"
+                )
                 return DEAD_LINK
             return None
 
@@ -3996,11 +4043,15 @@ def generic_price(
     falls back to a single JSON-LD offer for simple products."""
     status: int | None = None
     html: str | None = None
+    # Where the navigation ended — None when the browser never got there, so a
+    # page Scrapling fetched instead is never judged on a stale page.url.
+    final_url: str | None = None
     try:
         response = page.goto(
             product_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS
         )
         status = response.status if response is not None else None
+        final_url = page.url
         content = page.content()
         if content and not response_is_blocked(status, content):
             html = content
@@ -4017,6 +4068,15 @@ def generic_price(
             log(f"  dead link ({status}) — clearing price ({product_url})")
             return DEAD_LINK
         return None
+
+    # The store answered, but with its front door rather than this page — how a
+    # removed WooCommerce product and an acquired domain both answer, and never
+    # a status the pass could read. Checked BEFORE the markup is parsed: a home
+    # page carrying Product markup of its own would otherwise be scraped and
+    # published as this set's price at this vendor.
+    if is_gone_redirect(product_url, final_url):
+        log(f"  dead link (redirected to {final_url}) — clearing price ({product_url})")
+        return DEAD_LINK
 
     if vendor_currency and vendor_currency not in _SUPPORTED_CURRENCIES:
         log(f"  unsupported currency {vendor_currency} — skipped ({product_url})")
