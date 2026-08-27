@@ -293,6 +293,16 @@ assert.equal(
   "all four refreshOne outcomes must write the link-health columns"
 );
 
+// refreshPrices counts the dead answers separately from the failed ones, and
+// the CI runner is where anyone ever sees that number: a run whose dead count
+// jumps has just taken links off the site, while a failure count says almost
+// nothing (most of them are blocks).
+assert.match(
+  readFileSync(join(REPO_ROOT, "scripts", "refresh-prices-ci.mjs"), "utf8"),
+  /dead=\$\{result\.dead\}/,
+  "refresh-prices-ci must report the dead count, not just failures"
+);
+
 // --- the site + the report -------------------------------------------------
 const manufacturerTs = readFileSync(
   join(REPO_ROOT, "src", "lib", "import", "manufacturer-vendors.ts"),
