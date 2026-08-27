@@ -46,6 +46,17 @@ both the client-reported log and the resolution audit in the same run.
 > (a cable listing, reported 3×) — is fixed this run via a blocked vendor-set
 > pair.
 
+> **2026-08-27 run.** The `?all=1` feed now returns **41 submissions across 34
+> listings**, all resolved, 0 pending. The one report added since the
+> 2026-08-26 sweep is **gmk-vamp × Switchmod** (logged 2026-08-26T17:39,
+> "all has no stock"). It is a **stock-only self-heal, confirmed in-run**: a
+> live Vendor probe (run 33086317179) shows the Shopify listing's **Base**
+> variant priced at **84.99 USD, available=true** — the picker chose the base
+> correctly, the price is right (GMK *CYL* Vamp is the cheaper doubleshot line),
+> and every variant is now in stock, so the availability complaint no longer
+> holds. No code change. (The full-history feed re-stamps `resolvedAt` at each
+> sweep; the 2026-08-27 run reports all 41 resolved at 2026-08-27T10:05:41Z.)
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _None — 0 pending reports in the feed; every logged report is resolved._
@@ -60,10 +71,14 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-_None — the only watched item (gmk-british-racing-green-r3 × Ktechs, flagged
-2026-08-25) was confirmed healed this run: the feed resolved it
-(`resolvedAt=2026-08-25T22:55:31Z`, after the 18:14:49 submission) and the
-complaint was stock-only. Moved to the resolution audit._
+_None. The incoming watch was empty — the prior run's only entry
+(gmk-british-racing-green-r3 × Ktechs, flagged 2026-08-25) was confirmed healed
+and moved to the resolution audit. This run's one new self-heal,
+**gmk-vamp × Switchmod**, arrived already resolved (`resolvedAt=2026-08-27T10:05:41Z`,
+after the 2026-08-26T17:39 submission) and was confirmed **in-run** by a live
+Vendor probe (run 33086317179: Base variant 84.99 USD, `available=true`, picker
+correct), so it is recorded resolved directly rather than parked for next-run
+confirmation. All 41 full-history reports remain resolved._
 
 ## 2. Open client-recommended values (awaiting verification)
 
@@ -73,6 +88,7 @@ _None — all client-recommended values have been verified (see audit below)._
 
 | logged (UTC) | set | vendor | reported price | reason (client) | verdict | status |
 |---|---|---|---|---|---|---|
+| 2026-08-26 | gmk-vamp | Switchmod | 84.99 USD | "all has no stock" | self-healed | ✅ resolved |
 | 2026-08-25 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | "there is no more stock" | self-healed | ✅ resolved |
 | 2026-08-24 | gmk-tribal | zFrontier | 175 USD | "it show product not found" | needs fix | ✅ resolved |
 | 2026-08-20 | gmk-nord | CandyKeys | 62 EUR | "this url point to a different website" | needs fix | ✅ resolved |
@@ -118,6 +134,7 @@ _None — all client-recommended values have been verified (see audit below)._
 
 | logged (UTC) | set | vendor | reported price | verdict | root cause & fix | status now |
 |---|---|---|---|---|---|---|
+| 2026-08-26 | gmk-vamp | Switchmod | 84.99 USD | self-healed | Stock-only ("all has no stock") — no scrape bug. Despite the `gmk-vamp-extras` slug (the SwiftCables/evil-dolch-extras trap shape), a live Vendor probe (run 33086317179) shows the Shopify listing = "GMK CYL Vamp" with a **Base** variant at 84.99 USD `available=true` (plus Novelties 20.99, Extension 27.99, Deskmat 9.99, HIBI 40.99, all in stock). `choose_kit_variant` correctly picks Base, the price is right (CYL is the cheaper doubleshot line), and every variant is now in stock — the availability complaint no longer holds. Re-scrape after submit resolved it. No code change | ✅ resolved (self-healed, probe-confirmed) |
 | 2026-08-25 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | self-healed | Stock-only ("no more stock") — no scrape bug; re-scrape after submit resolved it. Secondary check: 113 SGD (≈84 USD) is low for a GMK base; no reporter has ever complained about the *price* (3 reports, all stock-only), so treated as the base kit until a price report says otherwise | ✅ resolved (self-healed) |
 | 2026-08-24 | gmk-tribal | zFrontier | 175 USD | needs fix | "Product not found" — the linked variant/page was gone; a dead/moved link. `NO_BASE_KIT` + dead-link (404/410) clearing hands the row back on the next rotation | ✅ resolved |
 | 2026-08-20 | gmk-nord | CandyKeys | 62 EUR | needs fix | "URL points to a different website" — stale/misrouted product link; re-scrape relinked the correct CandyKeys page (62 EUR is a plausible nord base) | ✅ resolved |
@@ -172,8 +189,9 @@ _None — all client-recommended values have been verified (see audit below)._
 
 ## Summary
 
-- **40 report submissions across 33 listings** (full `?all=1` history, first
-  reconciled 2026-08-26). **All 40 are resolved; 0 pending.**
+- **41 report submissions across 34 listings** (full `?all=1` history, first
+  reconciled 2026-08-26; gmk-vamp × Switchmod added 2026-08-27). **All 41 are
+  resolved; 0 pending.**
 - **Ledger completeness caveat (now closed for history-to-date).** The committed
   log was previously transcribed from pending-only snapshots, which drop a
   report the moment it resolves — so 25 reports that filed-and-healed between
@@ -193,7 +211,7 @@ _None — all client-recommended values have been verified (see audit below)._
   (dearest-base-candidate + the `NO_BASE_KIT` sentinel that clears a bad price)
   and, for a handful of listings with no resolvable base, by blocked vendor-set
   pairs.
-- **Stock/availability-only reports self-heal with no code change** — 10 of the
-  40 (BRG ×3, thunder-god, evil-dolch/Aiglatson, noel ×2, rainy-day/Cannon,
-  masterpiece ×2 pre-order-link). They recur when a store re-lists, so a fresh
-  stock complaint is expected and harmless.
+- **Stock/availability-only reports self-heal with no code change** — 11 of the
+  41 (BRG ×3, thunder-god, evil-dolch/Aiglatson, noel ×2, rainy-day/Cannon,
+  masterpiece ×2 pre-order-link, gmk-vamp/Switchmod). They recur when a store
+  re-lists, so a fresh stock complaint is expected and harmless.
