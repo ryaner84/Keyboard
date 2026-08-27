@@ -9,6 +9,7 @@ import {
   describeDeadListings,
   isBackedOff,
   isDeadLinkStatus,
+  isGoneRedirect,
   isUnbuyableDeadLink,
   nextLinkHealth,
 } from "./link-health.mjs";
@@ -25,6 +26,51 @@ assert.equal(isDeadLinkStatus("404"), true);
 for (const status of [200, 301, 302, 401, 402, 403, 429, 500, 503, undefined, null]) {
   assert.equal(isDeadLinkStatus(status), false, `status ${status}`);
 }
+
+// --- isGoneRedirect --------------------------------------------------------
+// The other answer a store gives, and the commonest one measured against
+// production. It never produces a status the pass can read: fetch() follows the
+// hop and hands back a 200 on a page that is not the listing.
+assert.equal(
+  isGoneRedirect(
+    "https://kono.store/collections/all-products-list/products/gmk-boho",
+    "https://kono.store/"
+  ),
+  true,
+  "a deleted Shopify product redirected to its own front door"
+);
+assert.equal(
+  isGoneRedirect(
+    "https://www.ashkeebs.com/product/gmk-alpine-keycaps/",
+    "https://kineticlabs.com/"
+  ),
+  true,
+  "an acquired shop redirecting its whole domain to the buyer's home page"
+);
+// A bare origin, with or without the trailing slash, is the same front door.
+assert.equal(isGoneRedirect("https://kono.store/products/x", "https://kono.store"), true);
+assert.equal(
+  isGoneRedirect("https://kono.store/products/x", "https://kono.store/?shop=1"),
+  true
+);
+// Landing on another PAGE says nothing about this listing: a renamed handle
+// still prices, a collection page is merely unreadable, and a storefront
+// password page is a temporary lock on a live shop — hiding those would be the
+// exact failure deadSince exists to avoid.
+for (const final of [
+  "https://shop.example/products/gmk-boho-r2",
+  "https://shop.example/collections/keycaps",
+  "https://shop.example/password",
+]) {
+  assert.equal(isGoneRedirect("https://shop.example/products/gmk-boho", final), false, final);
+}
+// Several vendors carry a bare homepage as a listing URL (mykeyboard.eu does).
+// It is a bad link, but it was not redirected off anything.
+assert.equal(isGoneRedirect("https://mykeyboard.eu/", "https://mykeyboard.eu/"), false);
+// Nothing parseable to judge → never a verdict.
+assert.equal(isGoneRedirect("https://shop.example/products/x", undefined), false);
+assert.equal(isGoneRedirect("not a url", "https://shop.example/"), false);
+assert.equal(isGoneRedirect(null, null), false);
 
 // --- nextLinkHealth --------------------------------------------------------
 const T0 = new Date("2026-08-01T00:00:00Z");
@@ -54,8 +100,8 @@ assert.deepEqual(nextLinkHealth({ linkFailures: 3, deadSince: T0 }, "GONE", T1),
   deadSince: T0,
 });
 
-// UNREADABLE counts but never declares: a redirect to the homepage, a 401, a
-// 402 or a DNS failure all land here, and none of them is the store saying the
+// UNREADABLE counts but never declares: a 401, a 402, a storefront password
+// page or a DNS failure all land here, and none of them is the store saying the
 // page is gone.
 assert.deepEqual(nextLinkHealth({ linkFailures: 0, deadSince: null }, "UNREADABLE", T1), {
   linkFailures: 1,
@@ -100,14 +146,17 @@ assert.equal(describeDeadListings(12, 0), null);
 assert.equal(describeDeadListings(0, 3), null);
 {
   const all = describeDeadListings(44, 44, T0);
-  assert.match(all, /all 44 listing\(s\) return 404\/410 since 2026-08-01/);
+  assert.match(all, /all 44 listing\(s\) are gone since 2026-08-01/);
+  // Both answers are named. Saying only "404/410" sent the owner looking for a
+  // status the commonest case never produces.
+  assert.match(all, /redirected to the storefront's front door/);
   assert.match(all, /relink or retire/);
   // The whole point: never send the owner to the pass that cannot help.
   assert.match(all, /refresh-prices cannot help/);
 }
 {
   const some = describeDeadListings(44, 12, T0);
-  assert.match(some, /12 of 44 listing\(s\) return 404\/410/);
+  assert.match(some, /12 of 44 listing\(s\) are gone/);
   assert.match(some, /the rest are still being read/);
 }
 
@@ -148,15 +197,30 @@ assert.ok(
   /def next_link_health\(/.test(scrapePy),
   "scrape.py must mirror nextLinkHealth as next_link_health"
 );
+assert.ok(
+  /def is_gone_redirect\(/.test(scrapePy),
+  "scrape.py must mirror isGoneRedirect as is_gone_redirect"
+);
 
 // A 404 must return DEAD_LINK, not NO_BASE_KIT, in BOTH of scrape.py's price
 // paths — Shopify (/products/*.json) and the generic WooCommerce/JSON-LD
 // reader. About a fifth of the roster is not Shopify, and it was the non-
-// Shopify half that went unnoticed the last three times.
+// Shopify half that went unnoticed the last three times. Each path answers the
+// same way for a redirect to the front door, which is why there are four.
 assert.equal(
   (scrapePy.match(/return DEAD_LINK\b/g) ?? []).length,
+  4,
+  "both of scrape.py's price paths must return DEAD_LINK on 404/410 AND on a " +
+    "redirect to the storefront's front door"
+);
+// scrape.py picks ONE path per URL (shopify_price if /products/ is in it, else
+// generic_price) with no fallback between them, so each has to read the final
+// URL for itself. Both read it off the browser navigation, which is the HUMAN
+// product page — the only URL whose front door means anything.
+assert.equal(
+  (scrapePy.match(/is_gone_redirect\(product_url,/g) ?? []).length,
   2,
-  "both of scrape.py's price paths must return DEAD_LINK on 404/410"
+  "both of scrape.py's price paths must judge the redirect on the product URL"
 );
 // The dead branch must NOT stamp priceSource: that stamp is what made a store
 // whose pages were all removed read as "read, just not priced".
@@ -195,6 +259,19 @@ assert.equal(
 assert.ok(
   !/res\.status === 404 \|\| res\.status === 410/.test(pricesTs),
   "prices.ts must test dead statuses with isDeadLinkStatus, not a literal pair"
+);
+// The redirect verdict is taken on the HUMAN product page, never on the
+// .json endpoint: a store that simply doesn't serve /products/*.json answers
+// that request from its front door too, and it is very much alive. Unlike
+// scrape.py, this half falls through from fetchShopifyPrice to fetchJsonLdPrice,
+// so one check on the product URL covers Shopify and non-Shopify alike.
+assert.ok(
+  /if \(isGoneRedirect\(productUrl, res\.url\)\) return DEAD_LINK;/.test(pricesTs),
+  "fetchJsonLdPrice must return DEAD_LINK when the product page redirects to a front door"
+);
+assert.ok(
+  /if \(isGoneRedirect\(`\$\{clean\}\.json`, res\.url\)\) return null;/.test(pricesTs),
+  "fetchShopifyPrice must fall through, not declare death, on a .json front door"
 );
 {
   const branch = pricesTs.slice(

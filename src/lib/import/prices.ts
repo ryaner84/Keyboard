@@ -14,6 +14,7 @@ import {
   DEAD_LINK_FAILURE_THRESHOLD,
   DEAD_LINK_RECHECK_HOURS,
   isDeadLinkStatus,
+  isGoneRedirect,
   nextLinkHealth,
 } from "../../../scripts/lib/link-health.mjs";
 
@@ -297,6 +298,13 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
       // timeout) is transient → keep last good.
       return isDeadLinkStatus(res.status) ? DEAD_LINK : null;
     }
+    // The .json request was answered by the storefront's front door. That is
+    // what a removed product looks like on Shopify — but it is also what a
+    // store that never served /products/*.json at all looks like, and only the
+    // HUMAN product page can tell those apart. So this half never declares a
+    // listing gone: fall through to the JSON-LD reader, which fetches that page
+    // and does (isGoneRedirect there).
+    if (isGoneRedirect(`${clean}.json`, res.url)) return null;
     const data = (await res.json()) as {
       product?: {
         title?: string;
@@ -620,6 +628,14 @@ async function fetchJsonLdPrice(
       // last good price.
       return isDeadLinkStatus(res.status) ? DEAD_LINK : null;
     }
+    // The store answered, but not with this page — the request ended at a front
+    // door. Shopify sends a deleted product to `/` instead of 404ing it, and an
+    // acquired shop sends its whole domain to the buyer's home page; fetch()
+    // follows both silently, so a row in that state looked merely blocked and
+    // was re-fetched every six hours for ever. Tested BEFORE the body is
+    // parsed, because a home page that carries Product markup of its own would
+    // otherwise be read and published as this set's price at this vendor.
+    if (isGoneRedirect(productUrl, res.url)) return DEAD_LINK;
     const html = await res.text();
 
     // WooCommerce variable product: pick the base kit from the variation blob,

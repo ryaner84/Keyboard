@@ -2005,7 +2005,7 @@ class LinkHealthTests(unittest.TestCase):
         )
 
     def test_unreadable_counts_but_never_declares(self):
-        # A redirect to the homepage, a 401, a 402, a DNS failure: none of them
+        # A 401, a 402, a storefront password page, a DNS failure: none of them
         # is the store saying the page is gone.
         self.assertEqual(
             scrape.next_link_health(0, None, "UNREADABLE", self.T1), (1, None)
@@ -2032,6 +2032,55 @@ class LinkHealthTests(unittest.TestCase):
         # The whole fix: folded together, a removed page stamped
         # priceSource='SCRAPED' and read as a pricing backlog.
         self.assertNotEqual(scrape.DEAD_LINK, scrape.NO_BASE_KIT)
+
+    def test_a_redirect_to_the_front_door_is_gone(self):
+        # The commonest answer of all, and the one no status reveals: Shopify
+        # sends a deleted product to `/` (kono.store, 44 listings) and an
+        # acquired shop sends its whole domain to the buyer's home page
+        # (ashkeebs.com → kineticlabs.com, 38 listings).
+        self.assertTrue(
+            scrape.is_gone_redirect(
+                "https://kono.store/collections/all/products/gmk-boho",
+                "https://kono.store/",
+            )
+        )
+        self.assertTrue(
+            scrape.is_gone_redirect(
+                "https://www.ashkeebs.com/product/gmk-alpine-keycaps/",
+                "https://kineticlabs.com/",
+            )
+        )
+        # A bare origin with no path is the same front door.
+        self.assertTrue(
+            scrape.is_gone_redirect(
+                "https://kono.store/products/gmk-boho", "https://kono.store"
+            )
+        )
+
+    def test_only_the_front_door_counts_as_gone(self):
+        # Landing on another page says nothing about this listing: a renamed
+        # handle still prices, and a collection page is simply unreadable.
+        for final in (
+            "https://shop.example/products/gmk-boho-r2",
+            "https://shop.example/collections/keycaps",
+            "https://shop.example/password",
+        ):
+            with self.subTest(final=final):
+                self.assertFalse(
+                    scrape.is_gone_redirect(
+                        "https://shop.example/products/gmk-boho", final
+                    )
+                )
+        # Several vendors carry a bare homepage as a listing URL. It is a bad
+        # link, but it was not redirected off anything.
+        self.assertFalse(
+            scrape.is_gone_redirect("https://mykeyboard.eu/", "https://mykeyboard.eu/")
+        )
+        # Nothing to judge: no navigation happened (Scrapling served the page).
+        self.assertFalse(
+            scrape.is_gone_redirect("https://shop.example/products/x", None)
+        )
+        self.assertFalse(scrape.is_gone_redirect("not a url", "https://shop.example/"))
 
 
 if __name__ == "__main__":

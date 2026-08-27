@@ -41,11 +41,22 @@ jobs:
           for u in $URLS; do
             base="${u%%\?*}"
             echo "=== PROBE $base"
+            # Non-Shopify URLs have no .js endpoint at all. Say so once instead
+            # of printing a JSON.parse stack trace over the link-health report.
+            case "$base" in
+              *"/products/"*) ;;
+              *) echo "SKIPPED | not a Shopify /products/ URL — see the link-health step"; continue ;;
+            esac
             curl -sf -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36" \
               "${base}.js" | node -e "
                 let s='';
                 process.stdin.on('data', d => s += d).on('end', () => {
-                  const p = JSON.parse(s);
+                  let p;
+                  try { p = JSON.parse(s); } catch { p = null; }
+                  if (!p || !p.title) {
+                    console.log('NO VARIANTS | .js returned no product JSON (removed, password page, or blocked)');
+                    return;
+                  }
                   console.log('PRODUCT | ' + p.title + ' | handle=' + p.handle + ' | type=' + (p.type ?? '') + ' | tags=' + JSON.stringify(p.tags ?? []));
                   for (const v of p.variants ?? []) {
                     console.log('VARIANT | id=' + v.id + ' | title=' + JSON.stringify(v.title) +
