@@ -35,8 +35,15 @@ const result = await refreshPrices({
 // opposite things: failures are mostly blocks and say nothing, while a run whose
 // dead count jumps has just taken links off the site. Without it the only way to
 // see what a run did to link health was to re-run audit:publishing afterwards.
+// `refused` and `unparsed` are neither failures nor updates: the store answered
+// and the row still has no price because THIS side refused the number (outside
+// KIT_BOUNDS / an unconvertible currency) or could not read the page's platform
+// at all. Both used to be counted as failures, which is how a live shop read as
+// a blocked one — and neither is fixed by running this workflow again, so a run
+// that reports them is pointing at code, not at the vendor.
 console.log(
   `Price refresh: attempted=${result.attempted} updated=${result.updated} ` +
-    `failed=${result.failed} dead=${result.dead} stoppedEarly=${result.stoppedEarly}`
+    `failed=${result.failed} dead=${result.dead} refused=${result.refused} ` +
+    `unparsed=${result.unparsed} stoppedEarly=${result.stoppedEarly}`
 );
 process.exit(0);

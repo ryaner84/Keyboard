@@ -66,6 +66,29 @@ export const DEAD_LINK_FAILURE_THRESHOLD = 6;
  */
 export const DEAD_LINK_RECHECK_HOURS = 24 * 14;
 
+/**
+ * What `VendorKit.priceSource` records once the pass has READ a page.
+ *
+ * 'SCRAPED' used to be the only mark, so every read collapsed into one fact and
+ * the publishing report had one sentence for four different repairs. These two
+ * split off the reads that produce no price for a reason that is OURS, not the
+ * store's:
+ *
+ *   REFUSED   the product data parsed and the number was rejected by this
+ *             site's own rules (KIT_BOUNDS, the Currency table). The store is
+ *             live, readable and selling the set — widening the window or
+ *             adding the currency is the repair, and re-running the price pass
+ *             a thousand times is not.
+ *   UNPARSED  the page answered 200 and carries no product markup any parser
+ *             path knows. Teaching the parser that platform is the repair.
+ *
+ * Everything that checks priceSource elsewhere compares against 'MANUAL', so
+ * these behave exactly like 'SCRAPED' to the rest of the codebase: never
+ * overwritten by hand, always re-priceable.
+ */
+export const PRICE_SOURCE_REFUSED = "REFUSED";
+export const PRICE_SOURCE_UNPARSED = "UNPARSED";
+
 /** True for a status that means the page is gone rather than unavailable. */
 export function isDeadLinkStatus(status) {
   return DEAD_LINK_STATUSES.includes(Number(status));
@@ -118,19 +141,41 @@ export function isGoneRedirect(requestUrl, finalUrl) {
  * The link-health columns after one price attempt. Pure — the caller writes.
  *
  * `outcome` is one of:
- *   "PRICED"       a price was parsed
- *   "NO_BASE_KIT"  the page was READ and carries no base kit
- *   "GONE"         the store answered 404/410, or redirected to its front door
- *   "UNREADABLE"   anything else: 401, 402, 5xx, a DNS failure, a timeout, a
- *                  block, a storefront password page
+ *   "PRICED"          a price was parsed
+ *   "NO_BASE_KIT"     the page was READ and carries no base kit
+ *   "PRICE_REFUSED"   the page was READ, its product data parsed, and the
+ *                     number it quotes was refused by THIS SITE's rules —
+ *                     outside the plausible base-kit window, or in a currency
+ *                     the Currency table cannot convert
+ *   "NO_PRODUCT_DATA" the page answered 200 and carries no product markup any
+ *                     parser path knows (a storefront on a platform the pass
+ *                     cannot read, a placeholder page, a bot-check served as
+ *                     200)
+ *   "GONE"            the store answered 404/410, or redirected to its front
+ *                     door
+ *   "UNREADABLE"      anything else: 401, 402, 5xx, a DNS failure, a timeout,
+ *                     a block, a storefront password page
  *
- * PRICED and NO_BASE_KIT are both successful reads. Treating NO_BASE_KIT as a
- * failure would flag every store that legitimately sells only add-on kits.
+ * PRICED, NO_BASE_KIT and PRICE_REFUSED are all successful reads. Treating
+ * NO_BASE_KIT as a failure would flag every store that legitimately sells only
+ * add-on kits, and treating PRICE_REFUSED as one flags a store that is live,
+ * readable and quoting a real number the site simply won't store — which is a
+ * fault on THIS side of the connection, never evidence about the link.
+ *
+ * NO_PRODUCT_DATA is deliberately NOT a read here. The page came back, so the
+ * caller records what it learned (`priceSource`), but an unparseable 200 and a
+ * bot-check page served with a 200 are indistinguishable from here — the same
+ * reason linkFailures exists at all — so the row stays on the failure count and
+ * earns the slow cadence like any other page that never yields a price.
  */
 export function nextLinkHealth(current, outcome, now = new Date()) {
   const failures = Number(current?.linkFailures ?? 0) || 0;
   const deadSince = current?.deadSince ?? null;
-  if (outcome === "PRICED" || outcome === "NO_BASE_KIT") {
+  if (
+    outcome === "PRICED" ||
+    outcome === "NO_BASE_KIT" ||
+    outcome === "PRICE_REFUSED"
+  ) {
     return { linkFailures: 0, deadSince: null };
   }
   if (outcome === "GONE") {

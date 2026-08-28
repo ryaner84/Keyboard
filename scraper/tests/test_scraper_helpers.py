@@ -1987,12 +1987,44 @@ class LinkHealthTests(unittest.TestCase):
         # NO_BASE_KIT means the page loaded and carries only add-on kits — a
         # legitimate listing, not a failure. Counting it as one would flag
         # every store whose GMK products are all extras.
-        for outcome in ("PRICED", "NO_BASE_KIT"):
+        # PRICE_REFUSED is a read too, and the one that used to be charged to
+        # the link: the store served its product data and THIS SIDE turned the
+        # number away (outside _KIT_BOUNDS, or a currency the site cannot
+        # convert). norbauer.co quotes USD 230 against a USD ceiling of 225 —
+        # counting that as a failure demoted a live shop to the 14-day cadence.
+        for outcome in ("PRICED", "NO_BASE_KIT", "PRICE_REFUSED"):
             with self.subTest(outcome=outcome):
                 self.assertEqual(
                     scrape.next_link_health(5, self.T0, outcome, self.T1),
                     (0, None),
                 )
+
+    def test_no_product_data_still_counts_as_a_failure(self):
+        # The page came back 200 and the caller records what it learned, but a
+        # platform no parser knows and a bot check served as a 200 are
+        # indistinguishable from here — which is the whole reason linkFailures
+        # is a heuristic — so the row keeps counting.
+        self.assertEqual(
+            scrape.next_link_health(2, None, "NO_PRODUCT_DATA", self.T1), (3, None)
+        )
+        self.assertEqual(
+            scrape.next_link_health(1, self.T0, "NO_PRODUCT_DATA", self.T1),
+            (2, self.T0),
+        )
+
+    def test_the_read_answers_are_all_distinct(self):
+        # Five sentinels, five different repairs. Any two of them equal and a
+        # store lands in the wrong branch of the publishing report.
+        answers = [
+            scrape.NO_BASE_KIT,
+            scrape.DEAD_LINK,
+            scrape.PRICE_REFUSED,
+            scrape.NO_PRODUCT_DATA,
+        ]
+        self.assertEqual(len(set(answers)), len(answers))
+        # The priceSource marks the report counts on.
+        self.assertEqual(scrape.PRICE_SOURCE_REFUSED, "REFUSED")
+        self.assertEqual(scrape.PRICE_SOURCE_UNPARSED, "UNPARSED")
 
     def test_gone_keeps_the_first_sighting(self):
         # How long the store has been broken is what decides relink-or-retire,

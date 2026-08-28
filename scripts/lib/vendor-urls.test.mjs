@@ -867,6 +867,101 @@ assert.match(
   reasonOf({ slug: "stringy-read", websiteUrl: "https://stringyread.com", visibleListings: "0", listings: "4", readListings: "0", pricedListings: "0" }),
   /4 listing\(s\) linked, the price pass has never read one/
 );
+// Read, and the price REFUSED by this site: the store is live, its product
+// data parsed, and KIT_BOUNDS or the Currency table turned the number away.
+// norbauer.co quotes USD 230 for a DSA base kit against a USD ceiling of 225,
+// and rationalkeys.com.tr prices its JSON-LD Product in TRY. Both used to
+// answer the same null a Cloudflare block gives, so both were reported as
+// "the price pass has never read one — relink or retire it" about a shop that
+// answers perfectly. The repair is here, so the message must say so.
+{
+  const refused = reasonOf({
+    slug: "norbauer",
+    websiteUrl: "https://www.norbauer.co",
+    visibleListings: 0,
+    listings: 1,
+    readListings: 1,
+    refusedListings: 1,
+    pricedListings: 0,
+  });
+  assert.match(refused, /1 of 1 listing\(s\) read and the price REFUSED/);
+  assert.match(refused, /KIT_BOUNDS/);
+  assert.match(refused, /Currency table/);
+  assert.match(refused, /refresh-prices cannot help/);
+}
+// Read, and no product markup any parser knows — Drop's /buy/ SPA, a custom
+// storefront, a placeholder page. Teaching the parser is the repair; another
+// scrape is not.
+{
+  const unparsed = reasonOf({
+    slug: "drop",
+    websiteUrl: "https://drop.com",
+    visibleListings: 0,
+    listings: 35,
+    readListings: 35,
+    unparsedListings: 35,
+    pricedListings: 0,
+  });
+  assert.match(unparsed, /35 of 35 listing\(s\) answer 200 with no product markup/);
+  assert.match(unparsed, /teach the parser or retire it/);
+}
+// The refusal outranks the unreadable page when a vendor has both: it names a
+// number the site could publish today, which the other never does.
+assert.match(
+  reasonOf({
+    slug: "both",
+    websiteUrl: "https://both.com",
+    visibleListings: 0,
+    listings: 4,
+    readListings: 4,
+    refusedListings: 1,
+    unparsedListings: 3,
+    pricedListings: 0,
+  }),
+  /read and the price REFUSED/
+);
+// Neither may outrank the store's own answer. A vendor whose pages are gone is
+// still a dead link set — 404s are the store speaking, and no window or parser
+// change brings those back.
+assert.match(
+  reasonOf({
+    slug: "gone-and-refused",
+    websiteUrl: "https://gone.com",
+    visibleListings: 0,
+    listings: 6,
+    readListings: 6,
+    refusedListings: 2,
+    deadListings: 6,
+    pricedListings: 0,
+  }),
+  /are gone/
+);
+// …nor may they hide a vendor that IS priced: a priced row that nothing renders
+// is the non-BASE/catalog case, whatever else was refused along the way.
+assert.match(
+  reasonOf({
+    slug: "priced-invisible",
+    websiteUrl: "https://pricedinvisible.com",
+    visibleListings: 0,
+    listings: 9,
+    readListings: 9,
+    refusedListings: 3,
+    pricedListings: 4,
+  }),
+  /4 of 9 listing\(s\) priced but none visible/
+);
+// Absent counts default to 0, so a caller that doesn't measure them degrades to
+// the previous message rather than inventing this one.
+assert.match(
+  reasonOf({ slug: "unmeasured2", websiteUrl: "https://unmeasured2.com", visibleListings: 0, listings: 7, readListings: 7, pricedListings: 0 }),
+  /7 listing\(s\) linked, none priced/
+);
+// Strings from the driver here too.
+assert.match(
+  reasonOf({ slug: "stringy-refused", websiteUrl: "https://stringyrefused.com", visibleListings: "0", listings: "2", readListings: "2", refusedListings: "2", pricedListings: "0" }),
+  /2 of 2 listing\(s\) read and the price REFUSED/
+);
+
 // Priced, but every row is filtered off the set page.
 assert.match(
   reasonOf({ slug: "invisible", websiteUrl: "https://invisible.com", visibleListings: 0, listings: 9, pricedListings: 4 }),
@@ -932,7 +1027,14 @@ assert.ok(
 // owner "no listing linked — discovery has never matched a tracked set" about
 // every silent vendor, confidently and wrongly, and send them to the one pass
 // that has nothing to do with it.
-for (const field of ["listings", "readListings", "pricedListings", "visibleListings"]) {
+for (const field of [
+  "listings",
+  "readListings",
+  "refusedListings",
+  "unparsedListings",
+  "pricedListings",
+  "visibleListings",
+]) {
   assert.ok(
     new RegExp(`${field}:`).test(dbSetup),
     `scripts/db-setup.mjs must pass ${field} to planPublishingReport`
@@ -944,6 +1046,29 @@ assert.ok(
     /AS priced_listings/.test(dbSetup),
   "scripts/db-setup.mjs must count the vendor's rows, read rows and priced rows in SQL"
 );
+// The two sub-cases of "read" whose repair is code here, not another scrape.
+// They are counted off priceSource's own marks, so a row can only land in one.
+const auditMjs = readFileSync(
+  join(REPO_ROOT, "scripts", "vendor-publishing-audit.mjs"),
+  "utf8"
+);
+for (const [file, source] of [
+  ["scripts/db-setup.mjs", dbSetup],
+  ["scripts/vendor-publishing-audit.mjs", auditMjs],
+]) {
+  assert.ok(
+    /"priceSource" = 'REFUSED'[\s\S]{0,80}AS refused_listings/.test(source),
+    `${file} must count the refused rows off priceSource`
+  );
+  assert.ok(
+    /"priceSource" = 'UNPARSED'[\s\S]{0,80}AS unparsed_listings/.test(source),
+    `${file} must count the unparsed rows off priceSource`
+  );
+  assert.ok(
+    /refusedListings:/.test(source) && /unparsedListings:/.test(source),
+    `${file} must pass both counts to planPublishingReport`
+  );
+}
 // The read count is `priceSource IS NOT NULL`, not `priceUpdatedAt IS NOT NULL`.
 // The timestamp is written on every ATTEMPT, including the ones that never
 // parsed the page — counting it would make every dead link look read and put

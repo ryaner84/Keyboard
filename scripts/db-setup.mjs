@@ -935,6 +935,16 @@ async function reportVendorsPublishingNothing(client) {
                 AS read_listings,
               (SELECT count(*)::int FROM public."VendorKit" vk
                 WHERE vk."vendorId" = v.id AND vk.price IS NOT NULL) AS priced_listings,
+              -- Two sub-cases of read_listings whose repair is a code change
+              -- here rather than another scrape: REFUSED is a price this site
+              -- turned away (KIT_BOUNDS / the Currency table), UNPARSED a 200
+              -- carrying no product markup any parser path knows.
+              (SELECT count(*)::int FROM public."VendorKit" vk
+                WHERE vk."vendorId" = v.id AND vk."priceSource" = 'REFUSED')
+                AS refused_listings,
+              (SELECT count(*)::int FROM public."VendorKit" vk
+                WHERE vk."vendorId" = v.id AND vk."priceSource" = 'UNPARSED')
+                AS unparsed_listings,
               -- The store answered 404/410 for these. Counted separately from
               -- read_listings because a 404 IS a read to priceSource, which is
               -- how a closed store read as a pricing backlog for months.
@@ -958,6 +968,8 @@ async function reportVendorsPublishingNothing(client) {
       visibleListings: r.visible_listings,
       listings: r.listings,
       readListings: r.read_listings,
+      refusedListings: r.refused_listings,
+      unparsedListings: r.unparsed_listings,
       pricedListings: r.priced_listings,
       deadListings: r.dead_listings,
       deadestSince: r.deadest_since,
@@ -970,7 +982,9 @@ async function reportVendorsPublishingNothing(client) {
     `[db-setup] ${silent.length} vendor(s) have a storefront but publish no ` +
       `listing on any set page. Each is named with the pass to look at — ` +
       `"no listing linked" is discovery, "never read one" is a dead link set ` +
-      `(relink or retire — refresh-prices cannot help), "none priced" is ` +
+      `(relink or retire — refresh-prices cannot help), "price REFUSED" and ` +
+      `"no product markup" are code here (KIT_BOUNDS / the Currency table / ` +
+      `the parser), "none priced" is ` +
       `refresh-prices, "none visible" is a non-BASE/catalog row. Removing the ` +
       `Vendor row is the right answer only when the store no longer sells ` +
       `tracked sets. \`npm run audit:publishing\` (or the Vendor publishing ` +

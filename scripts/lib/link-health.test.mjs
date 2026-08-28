@@ -6,6 +6,8 @@ import {
   DEAD_LINK_FAILURE_THRESHOLD,
   DEAD_LINK_RECHECK_HOURS,
   DEAD_LINK_STATUSES,
+  PRICE_SOURCE_REFUSED,
+  PRICE_SOURCE_UNPARSED,
   describeDeadListings,
   isBackedOff,
   isDeadLinkStatus,
@@ -80,13 +82,33 @@ const T1 = new Date("2026-08-20T00:00:00Z");
 // kits — a legitimate listing, not a failure — so it clears the counters just
 // like a price does. Counting it as a failure would flag every store whose GMK
 // products are all extras.
-for (const good of ["PRICED", "NO_BASE_KIT"]) {
+// PRICE_REFUSED is a read too, and the one that used to be counted as a
+// failure: the store served its product data and this site turned the number
+// away (outside KIT_BOUNDS, or a currency the Currency table cannot convert).
+// Charging that to the link demoted live, readable shops — norbauer.co quotes
+// USD 230 against a USD ceiling of 225 — to the 14-day dead-link cadence.
+for (const good of ["PRICED", "NO_BASE_KIT", "PRICE_REFUSED"]) {
   assert.deepEqual(
     nextLinkHealth({ linkFailures: 5, deadSince: T0 }, good, T1),
     { linkFailures: 0, deadSince: null },
     good
   );
 }
+
+// NO_PRODUCT_DATA is NOT a read for link health. The page came back 200 and the
+// caller records what it learned, but a platform no parser knows and a bot
+// check served as a 200 are indistinguishable from here — the exact reason
+// linkFailures is a heuristic — so the row keeps counting failures.
+assert.deepEqual(
+  nextLinkHealth({ linkFailures: 2, deadSince: null }, "NO_PRODUCT_DATA", T1),
+  { linkFailures: 3, deadSince: null }
+);
+// …and it never clears a deadSince already established, for the same reason
+// UNREADABLE doesn't: only a successful READ heals that.
+assert.deepEqual(
+  nextLinkHealth({ linkFailures: 1, deadSince: T0 }, "NO_PRODUCT_DATA", T1),
+  { linkFailures: 2, deadSince: T0 }
+);
 
 // GONE stamps the FIRST sighting and keeps it: how long the store has been
 // broken is what decides relink-or-retire, so a later 404 must not reset the
@@ -227,7 +249,7 @@ assert.equal(
 {
   const branch = scrapePy.slice(
     scrapePy.indexOf('if result == DEAD_LINK:'),
-    scrapePy.indexOf('elif result == NO_BASE_KIT:')
+    scrapePy.indexOf('elif result in (PRICE_REFUSED, NO_PRODUCT_DATA):')
   );
   assert.ok(branch.length > 0, "run_prices must have a DEAD_LINK branch");
   // The comment in that branch explains the stamp, so match the SQL itself.
@@ -276,7 +298,7 @@ assert.ok(
 {
   const branch = pricesTs.slice(
     pricesTs.indexOf("if (priceData === DEAD_LINK) {"),
-    pricesTs.indexOf("} else if (priceData === NO_BASE_KIT) {")
+    pricesTs.indexOf("} else if (priceData === PRICE_REFUSED")
   );
   assert.ok(branch.length > 0, "refreshOne must have a DEAD_LINK branch");
   assert.ok(
@@ -289,19 +311,95 @@ assert.ok(
 // the consecutive-failure count is the only evidence it leaves.
 assert.equal(
   (pricesTs.match(/\.\.\.health\b/g) ?? []).length,
-  4,
-  "all four refreshOne outcomes must write the link-health columns"
+  5,
+  "all five refreshOne outcomes must write the link-health columns"
+);
+
+// --- read, and still no price: the two answers that were hiding in null -----
+// A page can be fetched, parsed and understood and still leave the row
+// unpriced because THIS side refused the number or could not read the page's
+// platform. Both used to answer null — the same answer a Cloudflare block
+// gives — so priceSource stayed NULL, the row never counted as read, and the
+// publishing report told the owner to relink or retire a live, readable shop.
+assert.ok(
+  /export const PRICE_REFUSED = "PRICE_REFUSED"/.test(pricesTs) &&
+    /export const NO_PRODUCT_DATA = "NO_PRODUCT_DATA"/.test(pricesTs),
+  "prices.ts must answer a refusal and an unreadable page apart from null"
+);
+// The refusals: an unconvertible currency and a price outside KIT_BOUNDS, in
+// the Shopify path, the WooCommerce path and the JSON-LD/OpenGraph path.
+assert.ok(
+  (pricesTs.match(/return PRICE_REFUSED;/g) ?? []).length >= 5,
+  "every currency/plausibility refusal must answer PRICE_REFUSED, not null"
+);
+assert.ok(
+  !/if \(!isPlausibleBaseKitPrice\([^)]*\)\) \{?\s*return null/.test(pricesTs),
+  "a price this site refuses is a READ — it must never answer null"
+);
+// Neither answer may clear a stored price: the refusal is about the number just
+// read, and a page with no markup says nothing about the last good one.
+{
+  const branch = pricesTs.slice(
+    pricesTs.indexOf("} else if (priceData === PRICE_REFUSED"),
+    pricesTs.indexOf("} else if (priceData === NO_BASE_KIT) {")
+  );
+  assert.ok(branch.length > 0, "refreshOne must have a refused/unparsed branch");
+  assert.ok(
+    !/price: null/.test(branch),
+    "the refused/unparsed branch must not clear the stored price"
+  );
+  assert.match(branch, /priceSource:/);
+  assert.match(branch, /\.\.\.health/);
+}
+// scrape.py mirrors both sentinels and both priceSource marks.
+for (const name of ["PRICE_REFUSED", "NO_PRODUCT_DATA"]) {
+  assert.ok(
+    new RegExp(`^${name} = "${name}"$`, "m").test(scrapePy),
+    `scrape.py must mirror the ${name} sentinel`
+  );
+}
+assert.equal(
+  pyConst("PRICE_SOURCE_REFUSED"),
+  `"${PRICE_SOURCE_REFUSED}"`,
+  "scrape.py's REFUSED priceSource mark must match link-health.mjs"
+);
+assert.equal(
+  pyConst("PRICE_SOURCE_UNPARSED"),
+  `"${PRICE_SOURCE_UNPARSED}"`,
+  "scrape.py's UNPARSED priceSource mark must match link-health.mjs"
+);
+// Both of scrape.py's price paths refuse rather than go quiet: the Shopify
+// path (unsupported currency + implausible price) and the generic path
+// (unsupported currency + implausible Woo variant + implausible JSON-LD
+// offer). The non-Shopify half is the one that keeps getting missed.
+assert.ok(
+  (scrapePy.match(/return PRICE_REFUSED\b/g) ?? []).length >= 5,
+  "both of scrape.py's price paths must answer PRICE_REFUSED on a refusal"
+);
+assert.ok(
+  /return NO_PRODUCT_DATA\b/.test(scrapePy),
+  "scrape.py's generic path must answer NO_PRODUCT_DATA for a 200 with no markup"
 );
 
 // refreshPrices counts the dead answers separately from the failed ones, and
 // the CI runner is where anyone ever sees that number: a run whose dead count
 // jumps has just taken links off the site, while a failure count says almost
-// nothing (most of them are blocks).
-assert.match(
-  readFileSync(join(REPO_ROOT, "scripts", "refresh-prices-ci.mjs"), "utf8"),
-  /dead=\$\{result\.dead\}/,
-  "refresh-prices-ci must report the dead count, not just failures"
-);
+// nothing (most of them are blocks). The refused/unparsed counts are there for
+// the opposite reason — they are the listings no further scrape can rescue.
+{
+  const ci = readFileSync(join(REPO_ROOT, "scripts", "refresh-prices-ci.mjs"), "utf8");
+  assert.match(ci, /dead=\$\{result\.dead\}/, "refresh-prices-ci must report the dead count");
+  assert.match(
+    ci,
+    /refused=\$\{result\.refused\}/,
+    "refresh-prices-ci must report the refused count"
+  );
+  assert.match(
+    ci,
+    /unparsed=\$\{result\.unparsed\}/,
+    "refresh-prices-ci must report the unparsed count"
+  );
+}
 
 // --- the site + the report -------------------------------------------------
 const manufacturerTs = readFileSync(
