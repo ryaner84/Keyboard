@@ -13,6 +13,8 @@ import {
 import {
   DEAD_LINK_FAILURE_THRESHOLD,
   DEAD_LINK_RECHECK_HOURS,
+  PRICE_SOURCE_REFUSED,
+  PRICE_SOURCE_UNPARSED,
   isDeadLinkStatus,
   isGoneRedirect,
   nextLinkHealth,
@@ -75,10 +77,37 @@ export const NO_BASE_KIT = "NO_BASE_KIT" as const;
 // owner to refresh-prices, which can never fix a page that is gone. See
 // scripts/lib/link-health.mjs.
 export const DEAD_LINK = "DEAD_LINK" as const;
+
+// The fourth and fifth answers, and the two that were still hiding inside
+// `null`. Both mean the page was FETCHED and the fault is on THIS side of the
+// connection, so filing them as "couldn't read the listing" was a lie with
+// three consequences: the row never counted as read, so the publishing report
+// told the owner to relink or retire a store that is live and selling the set;
+// `linkFailures` climbed on a page that answered perfectly, so after six runs
+// the row was demoted to the 14-day dead-link cadence; and nothing anywhere
+// named the repair, which is a code or config change here, never a re-scrape.
+//
+//   PRICE_REFUSED    the product data parsed and the number was rejected by
+//                    this site's rules — outside KIT_BOUNDS, or a currency the
+//                    Currency table cannot convert. Probed from a runner,
+//                    norbauer.co serves its DSA base kit at USD 230 against a
+//                    USD ceiling of 225, and rationalkeys.com.tr publishes
+//                    JSON-LD Product markup priced in TRY.
+//   NO_PRODUCT_DATA  a 200 carrying no markup any parser path knows: Drop's
+//                    /buy/ SPA, funkeys' custom storefront, the 114-byte
+//                    placeholder captus.io and kingly-keys.xyz now serve.
+//
+// Neither clears a stored price. The refusal is about the number just read, not
+// about the last good one, and hiding a listing on this evidence would be the
+// exact failure `deadSince` is kept narrow to avoid.
+export const PRICE_REFUSED = "PRICE_REFUSED" as const;
+export const NO_PRODUCT_DATA = "NO_PRODUCT_DATA" as const;
 export type FetchPriceOutcome =
   | PriceResult
   | typeof NO_BASE_KIT
   | typeof DEAD_LINK
+  | typeof PRICE_REFUSED
+  | typeof NO_PRODUCT_DATA
   | null;
 
 async function fetchWithTimeout(url: string, extraHeaders?: Record<string, string>): Promise<Response> {
@@ -477,13 +506,15 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
       knownAvailability.length === 0 || knownAvailability.some(Boolean);
 
     // Refuse implausible kit prices rather than store garbage, and refuse
-    // currencies the site can't convert.
+    // currencies the site can't convert. Both are refusals by THIS SITE of a
+    // page it read and understood, so they answer PRICE_REFUSED — never null,
+    // which would file a live, readable store as an unreachable one.
     const effectiveCurrency = currency ?? vendorCurrency ?? null;
     if (effectiveCurrency && !SUPPORTED_CURRENCIES.has(effectiveCurrency)) {
-      return null;
+      return PRICE_REFUSED;
     }
     if (!isPlausibleBaseKitPrice(chosen.price, currency)) {
-      return null;
+      return PRICE_REFUSED;
     }
 
     return {
@@ -644,15 +675,16 @@ async function fetchJsonLdPrice(
     const wooVariants = parseWooCommerceVariations(html);
     if (wooVariants.length > 0) {
       const currency = vendorCurrency ?? null;
-      // Refuse currencies the site can't convert (renders as garbage).
-      if (currency && !SUPPORTED_CURRENCIES.has(currency)) return null;
+      // Refuse currencies the site can't convert (renders as garbage) — a
+      // refusal of a page that was read, so PRICE_REFUSED, not null.
+      if (currency && !SUPPORTED_CURRENCIES.has(currency)) return PRICE_REFUSED;
       // Same canonical pick as the Shopify path and the audit; an
       // accessory-only variation list yields null → NO_BASE_KIT below.
       const chosen = pickBaseVariant(wooVariants);
       // Only subkits on offer (no base candidate) — clear the stale wrong price
       // rather than preserve it forever.
       if (!chosen) return NO_BASE_KIT;
-      if (!isPlausibleBaseKitPrice(chosen.price, currency)) return null;
+      if (!isPlausibleBaseKitPrice(chosen.price, currency)) return PRICE_REFUSED;
       return {
         price: chosen.price,
         currency,
@@ -670,6 +702,18 @@ async function fetchJsonLdPrice(
     // prices, but having SEEN one means the stale stored price is a wrong
     // subkit — so we clear it (NO_BASE_KIT) instead of preserving it (null).
     let sawAmbiguousAggregate = false;
+
+    // Set when a Product node WAS parsed and its number turned away by one of
+    // this site's own rules (an unconvertible currency, a price outside
+    // KIT_BOUNDS). The page is readable and the store is selling — the repair
+    // is here, not at the vendor — so the row must not be filed as unreachable.
+    let sawRefusedPrice = false;
+    // Set when the page carries product markup of ANY kind we understand, so
+    // "no price came out of this" can be told from "there was nothing here to
+    // read". Without it a storefront on an unreadable platform is
+    // indistinguishable from a blocked one, which is how Drop's 35 listings sat
+    // under "the store's links are dead" while every one of them answered 200.
+    let sawProductMarkup = false;
 
     const blocks = Array.from(
       html.matchAll(
@@ -711,6 +755,7 @@ async function fetchJsonLdPrice(
         const type = node["@type"];
         const isProduct = type === "Product" || (Array.isArray(type) && type.includes("Product"));
         if (!isProduct || !node.offers) continue;
+        sawProductMarkup = true;
 
         // Flatten offers into a list. Shopware (GMK.net) emits an AggregateOffer
         // with nested individual offers (one per variant: "Base", "International",
@@ -801,9 +846,18 @@ async function fetchJsonLdPrice(
           null;
         // Refuse currencies the site can't convert (e.g. geo-localized INR
         // from an Indian WooCommerce store before INR was supported).
-        if (currency && !SUPPORTED_CURRENCIES.has(currency)) continue;
+        if (currency && !SUPPORTED_CURRENCIES.has(currency)) {
+          sawRefusedPrice = true;
+          continue;
+        }
 
         const price = Number(chosen?.price ?? chosen?.lowPrice);
+        // A real number this site won't publish (outside KIT_BOUNDS) is a
+        // refusal; a missing or unparseable one is not — that is just a page
+        // whose markup carries no price.
+        if (!isNaN(price) && price > 0 && !isPlausibleBaseKitPrice(price, currency)) {
+          sawRefusedPrice = true;
+        }
         if (!isNaN(price) && price > 0 && isPlausibleBaseKitPrice(price, currency)) {
           const availability =
             chosen?.availability ??
@@ -829,20 +883,33 @@ async function fetchJsonLdPrice(
       html.match(/property=["']product:availability["'][^>]*content=["']([^"']+)["']/i) ??
       html.match(/content=["']([^"']+)["'][^>]*property=["']product:availability["']/i);
     if (amount) {
+      sawProductMarkup = true;
       const price = Number(amount[1].replace(/,/g, ""));
       const currency = cur ? cur[1] : null;
-      if (currency && !SUPPORTED_CURRENCIES.has(currency)) return null;
+      if (currency && !SUPPORTED_CURRENCIES.has(currency)) return PRICE_REFUSED;
       if (!isNaN(price) && price > 0 && isPlausibleBaseKitPrice(price, currency)) {
         const inStock =
           !availability ||
           !/(outofstock|soldout|discontinued)/i.test(availability[1]);
         return { price, currency, inStock, variants: [] };
       }
+      if (!isNaN(price) && price > 0) sawRefusedPrice = true;
     }
-    // Read the page but found no usable base price. If that was because the
-    // product is an ambiguous multi-kit aggregate, clear the stale wrong price;
-    // otherwise it's a non-product / unreadable page → keep the last good one.
-    return sawAmbiguousAggregate ? NO_BASE_KIT : null;
+    // Read the page and found no usable base price. Which of the four reasons
+    // it was decides the repair, so answer them apart rather than collapsing
+    // them into the "couldn't reach it" null they used to share:
+    //   • a real number this site refused → PRICE_REFUSED (fix the window or
+    //     the Currency table)
+    //   • an ambiguous multi-kit aggregate → NO_BASE_KIT (clear the stale
+    //     wrong price, as before)
+    //   • no product markup at all → NO_PRODUCT_DATA (teach the parser this
+    //     platform, or retire the row)
+    //   • markup that carries no number → null, unchanged: the page was a
+    //     product page and simply had no price on it this time.
+    if (sawRefusedPrice) return PRICE_REFUSED;
+    if (sawAmbiguousAggregate) return NO_BASE_KIT;
+    if (!sawProductMarkup) return NO_PRODUCT_DATA;
+    return null;
   } catch {
     return null;
   }
@@ -864,8 +931,21 @@ export async function fetchVendorPrice(productUrl: string, vendorCurrency?: stri
   // answer from the Shopify path — only a null (transient) falls through to the
   // JSON-LD reader.
   const shopify = await fetchShopifyPrice(productUrl, vendorCurrency);
-  if (shopify) return shopify;
-  return fetchJsonLdPrice(productUrl, vendorCurrency);
+  // A refusal falls through too, exactly as the null it replaced did: the
+  // product page's own markup is allowed to answer better than the variant this
+  // pass picked, and a bookkeeping split must not quietly change which number
+  // gets stored. It is only the ANSWER that changes — if the page has nothing
+  // better to say, the refusal is still what happened, and saying "couldn't
+  // read it" instead is what filed live shops as dead links.
+  if (shopify && shopify !== PRICE_REFUSED) return shopify;
+  const generic = await fetchJsonLdPrice(productUrl, vendorCurrency);
+  if (
+    shopify === PRICE_REFUSED &&
+    (generic === null || generic === NO_PRODUCT_DATA)
+  ) {
+    return PRICE_REFUSED;
+  }
+  return generic;
 }
 
 export interface RefreshOptions {
@@ -883,6 +963,12 @@ export interface RefreshResult {
   // Subset of `failed`: the store answered 404/410. Reported separately so a
   // run whose failures are all dead links doesn't read as a blocked run.
   dead: number;
+  // Reads that produced no price for a reason on OUR side. Neither is a
+  // failure — the store answered — and neither is an update, because nothing
+  // was stored; counted so a run can show that N listings stay unpublished for
+  // want of a wider price window or a parser, not for want of another scrape.
+  refused: number;
+  unparsed: number;
   stoppedEarly: boolean; // true if the time budget was hit before finishing
 }
 
@@ -905,9 +991,13 @@ async function refreshOne(
       ? "GONE"
       : priceData === NO_BASE_KIT
         ? "NO_BASE_KIT"
-        : priceData
-          ? "PRICED"
-          : "UNREADABLE";
+        : priceData === PRICE_REFUSED
+          ? "PRICE_REFUSED"
+          : priceData === NO_PRODUCT_DATA
+            ? "NO_PRODUCT_DATA"
+            : priceData
+              ? "PRICED"
+              : "UNREADABLE";
   const health = nextLinkHealth(vk, outcome);
   if (priceData === DEAD_LINK) {
     // The store answered "gone". Clear the price like NO_BASE_KIT does — a
@@ -927,6 +1017,27 @@ async function refreshOne(
     });
     result.dead++;
     result.failed++;
+  } else if (priceData === PRICE_REFUSED || priceData === NO_PRODUCT_DATA) {
+    // The page was fetched. Record WHAT was learned — priceSource is the only
+    // column that carries it, and leaving it NULL is what made a live store
+    // read as a dead link set — but do NOT touch the price: the refusal is
+    // about the number just read, and a page with no markup says nothing at
+    // all about the last good one. Link health follows nextLinkHealth: a
+    // refusal is a read (counters reset), an unparseable 200 is not, because a
+    // bot check served as 200 is indistinguishable from one.
+    await prisma.vendorKit.update({
+      where: { id: vk.id },
+      data: {
+        priceUpdatedAt: new Date(),
+        priceSource:
+          priceData === PRICE_REFUSED
+            ? PRICE_SOURCE_REFUSED
+            : PRICE_SOURCE_UNPARSED,
+        ...health,
+      },
+    });
+    if (priceData === PRICE_REFUSED) result.refused++;
+    else result.unparsed++;
   } else if (priceData === NO_BASE_KIT) {
     // Listing has no base kit (only subkits / ambiguous aggregate) — clear the
     // stale wrong price so it stops showing, instead of preserving it forever.
@@ -1075,6 +1186,8 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
     updated: 0,
     failed: 0,
     dead: 0,
+    refused: 0,
+    unparsed: 0,
     stoppedEarly: false,
   };
   const start = Date.now();

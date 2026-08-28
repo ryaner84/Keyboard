@@ -98,6 +98,17 @@ try {
              AS read_listings,
            (SELECT count(*)::int FROM public."VendorKit" vk
              WHERE vk."vendorId" = v.id AND vk.price IS NOT NULL) AS priced_listings,
+           -- Two sub-cases of read_listings, split out because the repair for
+           -- each is a code change HERE, not another scrape: REFUSED means the
+           -- product data parsed and this site turned the number away
+           -- (KIT_BOUNDS / the Currency table), UNPARSED that the page answered
+           -- 200 carrying no product markup any parser path knows.
+           (SELECT count(*)::int FROM public."VendorKit" vk
+             WHERE vk."vendorId" = v.id AND vk."priceSource" = 'REFUSED')
+             AS refused_listings,
+           (SELECT count(*)::int FROM public."VendorKit" vk
+             WHERE vk."vendorId" = v.id AND vk."priceSource" = 'UNPARSED')
+             AS unparsed_listings,
            -- The store answered 404/410 for these. A 404 IS a read as far as
            -- priceSource goes, so without this count a closed store reads as a
            -- pricing backlog. See scripts/lib/link-health.mjs.
@@ -146,6 +157,8 @@ try {
     listingUrls: r.urls,
     listings: r.listings,
     readListings: r.read_listings,
+    refusedListings: r.refused_listings,
+    unparsedListings: r.unparsed_listings,
     pricedListings: r.priced_listings,
     deadListings: r.dead_listings,
     deadestSince: r.deadest_since,
@@ -231,7 +244,8 @@ try {
       `SILENT      | ${v.slug}${mergedAway.has(v.slug) ? " (merging away)" : ""}` +
         ` | ${v.websiteUrl} | listings=${row.listings}` +
         ` read=${row.readListings} priced=${row.pricedListings}` +
-        ` dead=${row.deadListings} | ${v.reason}` +
+        ` dead=${row.deadListings} refused=${row.refusedListings}` +
+        ` unparsed=${row.unparsedListings} | ${v.reason}` +
         ` | ${sample(row.listingUrls)}`
     );
   }

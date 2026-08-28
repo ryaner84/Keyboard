@@ -620,6 +620,34 @@ NO_BASE_KIT = "NO_BASE_KIT"
 # refreshPrices in prices.ts) and a fix to one is only half a fix.
 DEAD_LINK = "DEAD_LINK"
 
+# The fourth and fifth answers, and the two that were still hiding inside None.
+# Both mean the page was FETCHED and the fault is on THIS side of the
+# connection, so filing them as "couldn't read the listing" was a lie: the row
+# never counted as read (priceSource stayed NULL), so the publishing report told
+# the owner to relink or retire a store that is live and selling the set;
+# linkFailures climbed on a page that answered perfectly, so the row was demoted
+# to the 14-day dead-link cadence; and nothing named the repair, which is code
+# or config here rather than another scrape.
+#
+#   PRICE_REFUSED    the product data parsed and the number was rejected by
+#                    this site's rules — outside _KIT_BOUNDS, or a currency the
+#                    Currency table cannot convert. norbauer.co quotes USD 230
+#                    for a DSA base kit against a USD ceiling of 225;
+#                    rationalkeys.com.tr prices its JSON-LD Product in TRY.
+#   NO_PRODUCT_DATA  a 200 carrying no markup any parser path knows: Drop's
+#                    /buy/ SPA, funkeys' custom storefront, the 114-byte
+#                    placeholder captus.io and kingly-keys.xyz now serve.
+#
+# Neither clears a stored price: the refusal is about the number just read, and
+# a page with no markup says nothing about the last good one.
+PRICE_REFUSED = "PRICE_REFUSED"
+NO_PRODUCT_DATA = "NO_PRODUCT_DATA"
+
+# What priceSource records once a page has been READ. Mirror of
+# PRICE_SOURCE_REFUSED / PRICE_SOURCE_UNPARSED in scripts/lib/link-health.mjs.
+PRICE_SOURCE_REFUSED = "REFUSED"
+PRICE_SOURCE_UNPARSED = "UNPARSED"
+
 # HTTP statuses that mean the listing is gone rather than blocked.
 DEAD_LINK_STATUSES = (404, 410)
 
@@ -670,13 +698,19 @@ def is_gone_redirect(request_url, final_url) -> bool:
 def next_link_health(link_failures, dead_since, outcome, now=None):
     """Link-health columns after one price attempt. Pure — the caller writes.
 
-    `outcome` is "PRICED", "NO_BASE_KIT", "GONE" or "UNREADABLE". PRICED and
-    NO_BASE_KIT are both successful READS: treating NO_BASE_KIT as a failure
-    would flag every store that legitimately sells only add-on kits.
+    `outcome` is "PRICED", "NO_BASE_KIT", "PRICE_REFUSED", "NO_PRODUCT_DATA",
+    "GONE" or "UNREADABLE". PRICED, NO_BASE_KIT and PRICE_REFUSED are all
+    successful READS: treating NO_BASE_KIT as a failure would flag every store
+    that legitimately sells only add-on kits, and treating PRICE_REFUSED as one
+    flags a store that is live, readable and quoting a real number this site
+    simply won't store — a fault on THIS side, never evidence about the link.
+    NO_PRODUCT_DATA is deliberately NOT a read here: an unparseable 200 and a
+    bot check served as a 200 are indistinguishable from here, which is the
+    same reason linkFailures exists at all.
     Mirror of nextLinkHealth in scripts/lib/link-health.mjs.
     """
     failures = int(link_failures or 0)
-    if outcome in ("PRICED", "NO_BASE_KIT"):
+    if outcome in ("PRICED", "NO_BASE_KIT", "PRICE_REFUSED"):
         return 0, None
     if outcome == "GONE":
         # Keep the FIRST moment it was seen gone: how long the store has been
@@ -1412,13 +1446,16 @@ def shopify_price(
         currency = currency or vendor_currency
 
         # Refuse currencies the site can't convert — they render as garbage.
+        # PRICE_REFUSED, never None: the page was read and understood, and
+        # answering "couldn't reach it" files a live store as an unreachable
+        # one for as long as the refusal stands.
         if currency and currency not in _SUPPORTED_CURRENCIES:
-            log(f"  unsupported currency {currency} — skipped ({product_url})")
-            return None
+            log(f"  unsupported currency {currency} — refused ({product_url})")
+            return PRICE_REFUSED
 
         if not is_plausible_base_price(chosen["price"], currency):
-            log(f"  implausible kit price {chosen['price']} {currency} — skipped ({product_url})")
-            return None
+            log(f"  implausible kit price {chosen['price']} {currency} — refused ({product_url})")
+            return PRICE_REFUSED
 
         in_stock = _base_variants_in_stock(
             variants, chosen, pinned_id, availability_by_id
@@ -4038,7 +4075,9 @@ def generic_price(
 
     Mirrors shopify_price's contract — returns a price dict, DEAD_LINK (the
     store says the page is gone), NO_BASE_KIT (read fine, nothing to price, so
-    clear it), or None (transient, keep the last good price). Prefers the
+    clear it), PRICE_REFUSED (read fine, and this site refused the number),
+    NO_PRODUCT_DATA (200 with no product markup any parser knows) or None
+    (transient, keep the last good price). Prefers the
     WooCommerce variation blob so the base kit is picked over a cheaper subkit;
     falls back to a single JSON-LD offer for simple products."""
     status: int | None = None
@@ -4079,8 +4118,11 @@ def generic_price(
         return DEAD_LINK
 
     if vendor_currency and vendor_currency not in _SUPPORTED_CURRENCIES:
-        log(f"  unsupported currency {vendor_currency} — skipped ({product_url})")
-        return None
+        # Read fine; this site cannot convert the money. A refusal by us, not a
+        # link the pass could not reach — rationalkeys.com.tr sells in TRY and
+        # spent a year reported as "the price pass has never read one".
+        log(f"  unsupported currency {vendor_currency} — refused ({product_url})")
+        return PRICE_REFUSED
 
     # WooCommerce variable product: pick the base kit, not the cheapest subkit.
     variants = parse_woocommerce_variations(html)
@@ -4092,9 +4134,9 @@ def generic_price(
         if not is_plausible_base_price(chosen["price"], vendor_currency):
             log(
                 f"  implausible kit price {chosen['price']} {vendor_currency}"
-                f" — skipped ({product_url})"
+                f" — refused ({product_url})"
             )
-            return None
+            return PRICE_REFUSED
         return {
             "price": chosen["price"],
             "currency": vendor_currency,
@@ -4112,7 +4154,11 @@ def generic_price(
     # Simple product: single JSON-LD offer.
     offer = parse_jsonld_offer(html)
     if offer is None:
-        return None
+        # The page answered and carries no product markup any parser path here
+        # knows — an unreadable platform, a placeholder page, or a bot check
+        # served as a 200. Distinct from None so the row records what was
+        # learned instead of reading as a link nobody could reach.
+        return NO_PRODUCT_DATA
     if offer is NO_BASE_KIT:
         # Ambiguous multi-kit aggregate or a lone subkit/accessory offer —
         # clear the stale price rather than store/keep a non-base number.
@@ -4120,9 +4166,9 @@ def generic_price(
     if not is_plausible_base_price(offer["price"], vendor_currency):
         log(
             f"  implausible kit price {offer['price']} {vendor_currency}"
-            f" — skipped ({product_url})"
+            f" — refused ({product_url})"
         )
-        return None
+        return PRICE_REFUSED
     return {
         "price": offer["price"],
         "currency": vendor_currency,
@@ -4655,7 +4701,7 @@ def run_prices(
     scrapling: ScraplingClient | None = None,
 ) -> dict:
     stats = {"attempted": 0, "updated": 0, "failed": 0, "dead": 0,
-             "throttled_s": 0.0}
+             "refused": 0, "unparsed": 0, "throttled_s": 0.0}
     ensure_link_health_columns(conn)
     candidates = HostThrottle.interleave(fetch_price_candidates(conn))
     log(f"Price pass: {len(candidates)} vendor listing(s) to check.")
@@ -4707,6 +4753,8 @@ def run_prices(
             outcome = (
                 "GONE" if result == DEAD_LINK
                 else "NO_BASE_KIT" if result == NO_BASE_KIT
+                else "PRICE_REFUSED" if result == PRICE_REFUSED
+                else "NO_PRODUCT_DATA" if result == NO_PRODUCT_DATA
                 else "PRICED" if result
                 else "UNREADABLE"
             )
@@ -4730,6 +4778,31 @@ def run_prices(
                 conn.commit()
                 stats["dead"] += 1
                 stats["failed"] += 1
+            elif result in (PRICE_REFUSED, NO_PRODUCT_DATA):
+                # The page was fetched. Record WHAT was learned — priceSource is
+                # the only column that carries it, and leaving it NULL is what
+                # made a live store read as a dead link set — but do NOT touch
+                # the price: the refusal is about the number just read, and a
+                # page with no markup says nothing about the last good one.
+                with conn.cursor() as cur:
+                    cur.execute(
+                        'UPDATE "VendorKit" SET "priceUpdatedAt" = now(), '
+                        '"priceSource" = %s, "linkFailures" = %s, '
+                        '"deadSince" = %s WHERE id = %s',
+                        (
+                            PRICE_SOURCE_REFUSED
+                            if result == PRICE_REFUSED
+                            else PRICE_SOURCE_UNPARSED,
+                            failures,
+                            dead_since,
+                            vk["id"],
+                        ),
+                    )
+                conn.commit()
+                if result == PRICE_REFUSED:
+                    stats["refused"] += 1
+                else:
+                    stats["unparsed"] += 1
             elif result == NO_BASE_KIT:
                 # Listing has no base kit (only subkits) — clear any stale price
                 # so the wrong subkit number stops showing, instead of letting
@@ -6708,9 +6781,13 @@ def main() -> int:
     log(f"Prices  -> throttle_wait={price_stats['throttled_s']:.0f}s")
     # `dead` is a subset of `failed`: the store answered 404/410. Split out so a
     # run whose failures are all dead links doesn't read as a blocked run.
+    # `refused` and `unparsed` are neither failures nor updates — the store
+    # answered and the row stays unpriced because this side refused the number
+    # or could not read the page's platform, neither of which another run fixes.
     log(f"Prices  -> attempted={price_stats['attempted']} "
         f"updated={price_stats['updated']} failed={price_stats['failed']} "
-        f"dead={price_stats['dead']}")
+        f"dead={price_stats['dead']} refused={price_stats['refused']} "
+        f"unparsed={price_stats['unparsed']}")
     log("Done.")
     return 0
 

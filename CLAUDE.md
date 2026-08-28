@@ -367,6 +367,31 @@ reported that way with every sampled product page in fact gone. `DEAD_LINK` is
 now a third answer alongside `NO_BASE_KIT` and null, and the dead branch
 deliberately does NOT write `priceSource`.
 
+**And `null` still meant four different things, two of which are OUR fault, not
+the store's.** A page can be fetched, parsed and completely understood and still
+leave the row unpriced because this site refused the number — `KIT_BOUNDS` caps
+a USD base kit at 225 and norbauer.co sells its DSA kit at 230; the `Currency`
+table cannot convert TRY and rationalkeys.com.tr prices in it — or because no
+parser path recognised the page at all (Drop's `/buy/` SPA, funkeys' custom
+storefront, the 114-byte placeholder captus.io and kingly-keys.xyz now serve).
+Both answered the same `null` a Cloudflare block gives, with three
+consequences: `priceSource` stayed NULL so the row never counted as READ and the
+publishing report told the owner to "relink or retire" a shop that answers
+perfectly; `linkFailures` climbed on a page that was read fine, so after six
+runs — a day and a half at four runs a night — the row was demoted to the
+14-day dead-link cadence; and nothing named the repair, which is a code or
+config change here that no number of re-scrapes can substitute for.
+`PRICE_REFUSED` and `NO_PRODUCT_DATA` are those two answers, stamped
+`priceSource = 'REFUSED'` / `'UNPARSED'`, counted by the report, and printed in
+both price passes' summaries. Neither clears a stored price: the refusal is
+about the number just read, and a page with no markup says nothing about the
+last good one. `PRICE_REFUSED` resets link health (the store answered) while
+`NO_PRODUCT_DATA` does not — a bot check served as a 200 is indistinguishable
+from a platform the parser cannot read, which is the whole reason `linkFailures`
+is a heuristic. A refusal on the Shopify path still falls through to the
+JSON-LD reader exactly as its `null` did, so which number gets stored is
+unchanged.
+
 `scripts/lib/link-health.mjs` holds the rules and **two columns that mean
 different things on purpose**: `VendorKit.deadSince` is the first time the STORE
 answered 404/410 — definitive, so it is the only signal allowed to take a

@@ -823,14 +823,27 @@ export function planVendorMerges(roster, existing) {
  * `priceSource` is still NULL was attempted and never once parsed. A vendor
  * where that is true of EVERY row has a dead link set, not a pricing backlog.
  *
+ * And "read" hid two more repairs inside it, both of them OURS rather than the
+ * store's. A page can be fetched, parsed and understood and still leave the row
+ * unpriced because this site refused the number (`REFUSED`: outside KIT_BOUNDS,
+ * or a currency the Currency table cannot convert) or because no parser path
+ * recognised the page at all (`UNPARSED`: a platform the price pass cannot
+ * read). Both used to be answered with the same `null` a Cloudflare block
+ * produces, so the row never counted as read and the report told the owner to
+ * relink or retire a shop that was live, readable and selling the set —
+ * norbauer.co quotes $230 for a DSA base kit that KIT_BOUNDS caps at $225, and
+ * rationalkeys.com.tr publishes JSON-LD Product markup priced in TRY.
+ *
  * `listings` counts the vendor's VendorKit rows of ANY kit type,
- * `readListings` the ones the price pass has ever read (priceSource not null)
- * and `pricedListings` the ones carrying a price, so the four cases stay
- * disjoint; `visibleListings` is the narrow site-visible count described above.
+ * `readListings` the ones the price pass has ever read (priceSource not null),
+ * `refusedListings` / `unparsedListings` the two sub-cases above and
+ * `pricedListings` the ones carrying a price, so the cases stay disjoint;
+ * `visibleListings` is the narrow site-visible count described above.
  * All are counted in SQL by the caller — this planner has no DB.
  *
  * @param {Array<{ slug: string, websiteUrl?: string | null, visibleListings?: number,
  *                 listings?: number, readListings?: number,
+ *                 refusedListings?: number, unparsedListings?: number,
  *                 pricedListings?: number }>} vendors
  * @param {Set<string>} [excludeSlugs]
  */
@@ -871,6 +884,30 @@ function publishingFailureReason(vendor) {
   // the pre-existing message instead; test:vendor-urls asserts db-setup passes it.
   const read = vendor.readListings == null ? listings : Number(vendor.readListings);
   if (!(listings > 0)) return "no listing linked — discovery has never matched a tracked set";
+  // Two reads that produce no price for a reason on THIS side of the
+  // connection, checked before the dead-link and backlog messages because both
+  // of those send the owner somewhere that cannot help: the store is live and
+  // readable, and only this site's own rules are keeping it off the page.
+  // They default to 0, like every count except `read`: a caller that forgets
+  // one degrades to the previous message rather than inventing this one.
+  const refused = Number(vendor.refusedListings ?? 0);
+  const unparsed = Number(vendor.unparsedListings ?? 0);
+  if (!(priced > 0) && refused > 0) {
+    return (
+      `${refused} of ${listings} listing(s) read and the price REFUSED by this ` +
+      `site — outside the plausible base-kit window (KIT_BOUNDS) or priced in a ` +
+      `currency the Currency table cannot convert; widen the window or add the ` +
+      `currency (refresh-prices cannot help)`
+    );
+  }
+  if (!(priced > 0) && unparsed > 0) {
+    return (
+      `${unparsed} of ${listings} listing(s) answer 200 with no product markup ` +
+      `any parser path knows — an unreadable platform, a placeholder page, or ` +
+      `a bot check served as 200; teach the parser or retire it ` +
+      `(refresh-prices cannot help)`
+    );
+  }
   // Never once parsed, however many times it was fetched: the links are dead
   // (store closed, moved domain, password page, plan lapsed). refresh-prices
   // cannot end this — relinking or retiring the store can. Only claimed when a
