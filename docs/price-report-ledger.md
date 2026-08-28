@@ -57,6 +57,18 @@ both the client-reported log and the resolution audit in the same run.
 > holds. No code change. (The full-history feed re-stamps `resolvedAt` at each
 > sweep; the 2026-08-27 run reports all 41 resolved at 2026-08-27T10:05:41Z.)
 
+> **2026-08-28 run.** Feed run 33183506189 (`?all=1`) returns **41 submissions,
+> all resolved, 0 pending** — a 1:1 match with the ledger's client-reported log,
+> so **no new report** has filed since the 2026-08-27 run and nothing is
+> appended. The incoming **Self-heal watch was empty**; the prior run's one
+> self-heal (**gmk-vamp × Switchmod**) is **re-confirmed healed** here — the
+> feed shows it resolved (`resolvedAt=2026-08-28T11:36:50.543Z`, after the
+> 2026-08-26T17:39 submit) with `current=84.99 USD source=SCRAPED`, the correct
+> CYL base, so the stock-only complaint no longer holds. No item failed
+> verification, so no fix was required. (The full-history feed re-stamps
+> `resolvedAt` at each sweep; this run reports all 41 resolved at
+> 2026-08-28T11:36:50.543Z.)
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _None — 0 pending reports in the feed; every logged report is resolved._
@@ -71,14 +83,14 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-_None. The incoming watch was empty — the prior run's only entry
-(gmk-british-racing-green-r3 × Ktechs, flagged 2026-08-25) was confirmed healed
-and moved to the resolution audit. This run's one new self-heal,
-**gmk-vamp × Switchmod**, arrived already resolved (`resolvedAt=2026-08-27T10:05:41Z`,
-after the 2026-08-26T17:39 submission) and was confirmed **in-run** by a live
-Vendor probe (run 33086317179: Base variant 84.99 USD, `available=true`, picker
-correct), so it is recorded resolved directly rather than parked for next-run
-confirmation. All 41 full-history reports remain resolved._
+_None. The 2026-08-28 run's incoming watch was empty. The prior run's one
+self-heal, **gmk-vamp × Switchmod** (flagged 2026-08-27, probe-confirmed in-run
+via run 33086317179: Base 84.99 USD `available=true`, picker correct), is
+**re-confirmed healed** against this run's full-history feed — still resolved,
+`current=84.99 USD source=SCRAPED`, `resolvedAt=2026-08-28T11:36:50.543Z` (after
+the 2026-08-26T17:39 submit) — and stays in the resolution audit. No watched
+item failed verification, so no in-run fix was required. All 41 full-history
+reports remain resolved; 0 pending._
 
 ## 2. Open client-recommended values (awaiting verification)
 
