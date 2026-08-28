@@ -3446,6 +3446,65 @@ TRACKED_PROFILE_RE = re.compile(
 )
 
 
+def catalog_availability(product: dict) -> bool | None:
+    """One catalog entry's availability, or None when the entry does not say.
+
+    Mirror of catalogAvailability in scripts/lib/catalog-stock.mjs — keep in
+    sync; `npm run test:catalog-stock` fails if they drift.
+
+    THREE answers, not two. "every variant is unavailable" and "this feed does
+    not report availability" must never collapse into one False, or a store
+    whose feed omits the field gets its whole catalogue marked sold out. This
+    used to be `any(v.get("available") for v in variants)`, which returned False
+    for both — harmless while the result only broke ties in pick_store_listing,
+    and not harmless now that it can clear a listing off the site.
+
+    Ktechs is the worked example: its /products.json reports `available` on
+    every variant, while its /products/<handle>.json carries no `available` key
+    at all. Same store, same product, and only one of the two endpoints knows.
+    """
+    variants = product.get("variants") if isinstance(product, dict) else None
+    if not isinstance(variants, list):
+        return None
+    known = False
+    any_available = False
+    for variant in variants:
+        available = variant.get("available") if isinstance(variant, dict) else None
+        # Strictly bool: a missing key, None, or the string "false" is NOT a
+        # report. `isinstance(True, int)` is True in Python, so this also has to
+        # exclude ints explicitly — bool is the only accepted type.
+        if not isinstance(available, bool):
+            continue
+        known = True
+        if available:
+            any_available = True
+    if not known:
+        return None
+    return any_available
+
+
+def catalog_stock_update(availability: bool | None) -> bool | None:
+    """False when discovery may mark this row sold out, else None (leave alone).
+
+    Mirror of catalogStockUpdate in scripts/lib/catalog-stock.mjs. Takes the
+    tri-state from catalog_availability rather than the raw product: the catalog
+    parser resolves availability up front (pick_store_listing scores on it), so
+    by the time the write happens the raw variants are long gone.
+
+    One-directional on purpose, like the html_guard rule next door:
+
+      * It MAY mark a row sold out. A feed reporting every variant unavailable
+        is the store saying nobody can buy this, which is exactly what a stale
+        inStock gets wrong.
+      * It may NEVER mark a row in stock. "Something on this product is
+        purchasable" is not "the BASE variant this row is priced from is
+        purchasable" — a listing sold out on the base kit and available on a
+        novelty is a common shape. The price pass reads the actual variant and
+        is the only authority for True.
+    """
+    return False if availability is False else None
+
+
 def tracked_products_from_catalog(data: dict, origin: str) -> list[dict]:
     """Extract [{title, url, available, price}] for every tracked-profile product
     (GMK / DCS …) in a Shopify products.json page. Other profiles and
@@ -3462,7 +3521,7 @@ def tracked_products_from_catalog(data: dict, origin: str) -> list[dict]:
         if not handle or not TRACKED_PROFILE_RE.search(title):
             continue
         variants = p.get("variants") or []
-        available = any(v.get("available") for v in variants) if variants else None
+        available = catalog_availability(p)
         price = 0.0
         for v in variants:
             try:
@@ -3858,7 +3917,7 @@ def run_discovery(
 ) -> dict:
     """Crawl vendor catalogs for GMK listings and link them to tracked sets."""
     stats = {"vendors": 0, "gmk_listings": 0, "linked": 0, "relinked": 0,
-             "multi_listing": 0, "html_vendors": 0}
+             "multi_listing": 0, "html_vendors": 0, "sold_out": 0}
 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
@@ -4049,6 +4108,32 @@ def run_discovery(
                     ))
                     row = cur.fetchone()
                 conn.commit()
+                # Stock, separately from the link. The upsert above only
+                # fires when the productUrl CHANGED, so a listing the store has
+                # ended keeps whatever inStock it had — and inStock is DEFAULT
+                # true, so "ended a year ago" reads as buyable until the
+                # time-boxed price pass happens to reach the row. The feed we
+                # just read says so outright: ktechs.store reports GMK CYL
+                # Thunder God as available=false on every variant.
+                #
+                # One direction only (catalog_stock_update): a feed may mark a
+                # row SOLD OUT, never in stock. "Something on this product is
+                # purchasable" is not "the BASE variant this row is priced from
+                # is purchasable", and the price pass owns that answer. An
+                # unreported availability is None and writes nothing at all.
+                sold_out = catalog_stock_update(product.get("available"))
+                if sold_out is False:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            UPDATE "VendorKit" SET "inStock" = false, "updatedAt" = now()
+                             WHERE "kitId" = %s AND "vendorId" = %s
+                               AND "inStock" IS DISTINCT FROM false
+                               AND "priceSource" IS DISTINCT FROM 'MANUAL'
+                        """, (match["base_kit_id"], vendor["id"]))
+                        if cur.rowcount:
+                            stats["sold_out"] += cur.rowcount
+                    conn.commit()
+
                 if row is None:
                     continue  # MANUAL or unchanged — nothing to do
                 if row["inserted"]:
@@ -4060,7 +4145,7 @@ def run_discovery(
     log(f"Discovery -> vendors={stats['vendors']} "
         f"gmk_listings={stats['gmk_listings']} linked={stats['linked']} "
         f"relinked={stats['relinked']} multi_listing={stats['multi_listing']} "
-        f"html_vendors={stats['html_vendors']}")
+        f"sold_out={stats['sold_out']} html_vendors={stats['html_vendors']}")
     return stats
 
 

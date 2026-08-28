@@ -219,12 +219,20 @@ async function linkVendorKit(
   });
 
   if (existing) {
+    // Deliberately NOT `inStock: true`. This pass knows WHERE a set is sold; it
+    // has never fetched the page, so it knows nothing about whether the store
+    // still has stock. Writing the flag here re-asserted "in stock" on an
+    // existing row on every run — and it runs daily from /api/cron/refresh at
+    // step 3, BEFORE the price pass at step 5 that does know. So a row the
+    // scraper had correctly marked Sold out was flipped back every night and
+    // only re-corrected if the time-boxed price pass happened to reach it.
+    // Ktechs' GMK CYL Thunder God and British Racing Green — both `available:
+    // false`, both tagged "Ended" by the store — sat green that way.
     await prisma.vendorKit.update({
       where: { id: existing.id },
       data: {
         productUrl,
         gbUrl: existing.gbUrl ?? productUrl,
-        inStock: true,
         ...(existing.priceSource !== "MANUAL" && existing.productUrl !== productUrl
           ? { priceUpdatedAt: null }
           : {}),

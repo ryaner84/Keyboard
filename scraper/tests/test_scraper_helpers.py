@@ -2115,5 +2115,81 @@ class LinkHealthTests(unittest.TestCase):
         self.assertFalse(scrape.is_gone_redirect("not a url", "https://shop.example/"))
 
 
+class CatalogAvailabilityTests(unittest.TestCase):
+    """Sold out, in stock, or "this feed does not say" — three answers, not two.
+
+    Mirrors scripts/lib/catalog-stock.test.mjs; `npm run test:catalog-stock`
+    fails if the two copies drift.
+    """
+
+    # Verbatim from https://ktechs.store/products.json — the reported product.
+    KTECHS_THUNDER_GOD = {
+        "handle": "gmk-cyl-thunder-god",
+        "title": "GMK CYL Thunder God",
+        "tags": ["Ended"],
+        "variants": [
+            {"id": 47674956775654, "title": "Base", "price": "169.00", "available": False},
+            {"id": 47674956808422, "title": "Novelty", "price": "42.00", "available": False},
+        ],
+    }
+
+    # Same store, same product, from /products/<handle>.json — which carries no
+    # `available` key at all. Reading this as "unavailable" would mark a whole
+    # catalogue sold out.
+    KTECHS_PRODUCT_JSON = {
+        "handle": "gmk-cyl-thunder-god",
+        "variants": [
+            {"id": 47674956775654, "title": "Base", "price": "169.00",
+             "inventory_management": "shopify"},
+            {"id": 47674956808422, "title": "Novelty", "price": "42.00",
+             "inventory_management": "shopify"},
+        ],
+    }
+
+    def test_every_variant_unavailable_is_sold_out(self):
+        self.assertIs(scrape.catalog_availability(self.KTECHS_THUNDER_GOD), False)
+        self.assertIs(scrape.catalog_stock_update(False), False)
+
+    def test_a_feed_that_does_not_report_is_unknown(self):
+        self.assertIsNone(scrape.catalog_availability(self.KTECHS_PRODUCT_JSON))
+        self.assertIsNone(scrape.catalog_stock_update(None))
+
+    def test_one_available_variant_is_available(self):
+        product = {"variants": [{"available": False}, {"available": True}]}
+        self.assertIs(scrape.catalog_availability(product), True)
+        # …and still never writes True: the price pass owns that direction.
+        self.assertIsNone(scrape.catalog_stock_update(True))
+
+    def test_only_the_variants_that_report_are_counted(self):
+        product = {"variants": [{"available": False}, {"title": "no flag"}]}
+        self.assertIs(scrape.catalog_availability(product), False)
+
+    def test_degenerate_inputs_are_unknown_never_sold_out(self):
+        for product in ({}, {"variants": []}, {"variants": None},
+                        {"variants": "nope"}, None):
+            self.assertIsNone(scrape.catalog_availability(product), product)
+
+    def test_a_non_bool_is_not_a_report(self):
+        # isinstance(True, int) is True in Python, so 1 must not read as a flag.
+        for value in ("false", "true", 1, 0, None):
+            self.assertIsNone(
+                scrape.catalog_availability({"variants": [{"available": value}]}), value
+            )
+
+    def test_the_catalog_parser_carries_the_tri_state(self):
+        feed = {"products": [
+            self.KTECHS_THUNDER_GOD,
+            {"handle": "gmk-foo", "title": "GMK Foo",
+             "variants": [{"price": "100.00"}]},
+        ]}
+        out = scrape.tracked_products_from_catalog(feed, "https://ktechs.store")
+        by_url = {p["url"].rsplit("/", 1)[-1]: p for p in out}
+        self.assertIs(by_url["gmk-cyl-thunder-god"]["available"], False)
+        self.assertIsNone(
+            by_url["gmk-foo"]["available"],
+            "a feed with no availability must stay unknown, not become sold out",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

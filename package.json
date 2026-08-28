@@ -22,6 +22,7 @@
     "test:vendor-urls": "node scripts/lib/vendor-urls.test.mjs",
     "test:set-merge": "node scripts/lib/set-merge.test.mjs",
     "test:link-health": "node scripts/lib/link-health.test.mjs",
+    "test:catalog-stock": "node scripts/lib/catalog-stock.test.mjs",
     "test:manufacturer-vendors": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/import/manufacturer-vendors.test.ts",
     "audit:publishing": "node scripts/vendor-publishing-audit.mjs"
   },
