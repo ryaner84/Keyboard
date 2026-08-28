@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Twelve suites, all of which should pass before pushing:
+Thirteen suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -42,6 +42,7 @@ npm run test:home-cache
 npm run test:vendor-urls
 npm run test:set-merge
 npm run test:link-health
+npm run test:catalog-stock
 npm run test:manufacturer-vendors
 npx tsc --noEmit
 ```
@@ -468,6 +469,33 @@ pointing at two real, different shops is reported, never merged.
 carries logs "no tracked vendor" and does nothing, forever — `test:vendor-urls`
 fails if any outlet host is registered by neither the roster nor
 `SEEDED_VENDORS`.
+
+**A listing goes stale IN STOCK, and only one pass ever noticed.**
+`VendorKit.inStock` is `DEFAULT true`, both discovery halves create rows as
+true, and for a long time the only writer of `false` was the price pass — which
+is time-boxed and runs oldest-first over the whole roster, so a set a store
+ended could keep its Buy button indefinitely. Worse, `linkVendorKit` in
+`vendor-overrides.ts` re-asserted `inStock: true` on EXISTING rows every run,
+from the daily cron, at step 3 — before the price pass at step 5. A curated link
+knows WHERE a set is sold and has never fetched the page; it must never write
+that flag. Ktechs' GMK CYL Thunder God sat green that way while the shop
+reported `available: false` on every endpoint it serves.
+
+Discovery now reads stock from the catalog feed it already fetches, and the rule
+is ONE-DIRECTIONAL like `html_guard` next door: a feed may mark a row **sold
+out**, never in stock. "Something on this product is purchasable" is not "the
+BASE variant this row is priced from is purchasable", and the price pass reads
+the actual variant, so it stays the only authority for `true`.
+
+`catalogAvailability` has **three** answers and the third is the point: `false`,
+`true`, and `null` for "this feed does not report availability". Collapsing null
+into false marks a whole catalogue sold out — and an unpriced or sold-out row is
+hidden or dead on a released set. Ktechs is its own example: `/products.json`
+carries `available`, `/products/<handle>.json` has no such key at all. A strict
+boolean test is what separates them (in Python that means excluding `int`, since
+`isinstance(True, int)` is true). Written twice — `scripts/lib/catalog-stock.mjs`
+and `catalog_availability` in `scrape.py` — and `test:catalog-stock` fails if
+they disagree.
 
 Stores rate-limit per IP and HTTP 429 counts as "blocked". Any pass that fetches
 many URLs must go through `HostThrottle`, and `HostThrottle.interleave()` should

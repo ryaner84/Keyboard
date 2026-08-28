@@ -4,6 +4,12 @@ import { NOT_MANUFACTURER_VENDOR } from "./manufacturer-vendors";
 // One host list, one definition of "is this a shop" — shared with db-setup's
 // storefront repairs rather than re-listed here.
 import { hostKey, hostOfUrl, needsStorefront } from "../../../scripts/lib/vendor-urls.mjs";
+// Same arrangement for "does this catalog entry say it is sold out" — one
+// definition, mirrored in scrape.py and pinned by `npm run test:catalog-stock`.
+import {
+  catalogAvailability,
+  catalogStockUpdate,
+} from "../../../scripts/lib/catalog-stock.mjs";
 import { NONBASE_SUBKIT_RE, PRODUCT_ACCESSORY_RE } from "@/lib/kit-variants";
 import { TRACKED_PROFILE_RE } from "@/lib/set-name";
 
@@ -59,6 +65,11 @@ async function fetchWithTimeout(url: string): Promise<Response> {
 interface CatalogProduct {
   title: string;
   url: string;
+  // What the feed said about stock: true, false, or null for "it did not say".
+  // Null is not a synonym for false — a store whose feed omits `available`
+  // would otherwise have its whole catalogue marked sold out. The HTML fallback
+  // carries no stock information at all, so it is always null there.
+  available: boolean | null;
 }
 
 // Keycap profiles we track. A vendor listing must name one of these to be
@@ -80,11 +91,16 @@ interface CatalogProduct {
 async function fetchGmkCatalogShopify(origin: string): Promise<CatalogProduct[] | null> {
   const found: CatalogProduct[] = [];
   for (let page = 1; page <= MAX_CATALOG_PAGES; page++) {
-    let products: Array<{ title?: string; handle?: string }>;
+    type ShopifyCatalogProduct = {
+      title?: string;
+      handle?: string;
+      variants?: Array<{ available?: unknown }>;
+    };
+    let products: ShopifyCatalogProduct[];
     try {
       const res = await fetchWithTimeout(`${origin}/products.json?limit=250&page=${page}`);
       if (!res.ok) return page === 1 ? null : found;
-      const data = (await res.json()) as { products?: Array<{ title?: string; handle?: string }> };
+      const data = (await res.json()) as { products?: ShopifyCatalogProduct[] };
       products = data.products ?? [];
     } catch {
       return page === 1 ? null : found;
@@ -93,7 +109,11 @@ async function fetchGmkCatalogShopify(origin: string): Promise<CatalogProduct[] 
     for (const p of products) {
       const title = String(p.title ?? "");
       if (!p.handle || !TRACKED_PROFILE_RE.test(title)) continue;
-      found.push({ title, url: `${origin}/products/${p.handle}` });
+      found.push({
+        title,
+        url: `${origin}/products/${p.handle}`,
+        available: catalogAvailability(p),
+      });
     }
     if (products.length < 250) break; // last page
   }
@@ -201,7 +221,8 @@ async function fetchGmkCatalogHtml(origin: string): Promise<CatalogProduct[]> {
     for (const l of links) {
       if (!sameSite(l.href) || !TRACKED_PROFILE_RE.test(l.text) || seen.has(l.href)) continue;
       seen.add(l.href);
-      found.push({ title: l.text, url: l.href });
+      // An anchor on a storefront page says nothing about stock.
+      found.push({ title: l.text, url: l.href, available: null });
     }
   }
   return found;
@@ -320,6 +341,7 @@ export interface DiscoveryResult {
   gmkListings: number;
   linked: number; // new VendorKits created
   relinked: number; // existing VendorKits whose productUrl was refreshed
+  soldOut: number; // rows the store's own feed reported as unavailable
   stoppedEarly: boolean;
 }
 
@@ -331,6 +353,7 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
     gmkListings: 0,
     linked: 0,
     relinked: 0,
+    soldOut: 0,
     stoppedEarly: false,
   };
 
@@ -402,7 +425,13 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
     // never clobber a manually-entered price's URL.
     const existing = await prisma.vendorKit.findMany({
       where: { vendorId: vendor.id },
-      select: { kitId: true, productUrl: true, priceSource: true, price: true },
+      select: {
+        kitId: true,
+        productUrl: true,
+        priceSource: true,
+        price: true,
+        inStock: true,
+      },
     });
     const existingByKit = new Map(existing.map((e) => [e.kitId, e]));
 
@@ -424,6 +453,9 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
             productUrl: product.url,
             gbUrl: product.url,
             inStock: true,
+            // …unless the feed we just read says otherwise. Spread last so a
+            // sold-out entry wins over the optimistic default above.
+            ...catalogStockUpdate(product.available),
           },
         });
         // Keep the in-memory view consistent in case the catalog lists the
@@ -433,6 +465,7 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
           productUrl: product.url,
           priceSource: null,
           price: null,
+          inStock: catalogStockUpdate(product.available).inStock ?? true,
         });
         result.linked++;
       } else if (
@@ -454,6 +487,30 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
         });
         existingByKit.set(match.baseKitId, { ...current, productUrl: product.url });
         result.relinked++;
+      }
+
+      // Stock, separately from the link. The relink branch above only fires
+      // when the URL CHANGED, so a listing the store has ended keeps whatever
+      // inStock it had — and inStock is DEFAULT true, so "ended a year ago"
+      // reads as buyable until the time-boxed price pass happens to reach the
+      // row. The feed just read says so outright.
+      //
+      // One direction only (catalogStockUpdate): a feed may mark a row SOLD
+      // OUT, never in stock. An unreported availability writes nothing.
+      const stock = catalogStockUpdate(product.available);
+      const known = existingByKit.get(match.baseKitId);
+      if (
+        stock.inStock === false &&
+        known &&
+        known.inStock !== false &&
+        known.priceSource !== "MANUAL"
+      ) {
+        await prisma.vendorKit.update({
+          where: { kitId_vendorId: { kitId: match.baseKitId, vendorId: vendor.id } },
+          data: { inStock: false },
+        });
+        existingByKit.set(match.baseKitId, { ...known, inStock: false });
+        result.soldOut++;
       }
     }
   }

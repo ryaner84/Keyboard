@@ -91,6 +91,12 @@ jobs:
         if: always()
         run: npm run test:link-health
 
+      # Also reads scrape.py: "sold out" vs "this feed does not report stock"
+      # is written twice, and collapsing them would hide live listings.
+      - name: catalog-stock
+        if: always()
+        run: npm run test:catalog-stock
+
       # Reads scrape.py as well as the TS sources: the manufacturer registry is
       # written in both languages and a divergence is silent at runtime.
       - name: manufacturer-vendors
