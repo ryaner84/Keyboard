@@ -1665,11 +1665,28 @@ class BaseKitPriceBoundsTests(unittest.TestCase):
         self.assertTrue(scrape.is_plausible_base_price(135.0, "USD"))
         self.assertTrue(scrape.is_plausible_base_price(60.0, "EUR"))
 
+    def test_premium_profile_set_prices_are_accepted(self):
+        # norbauer.co's "After-school 1992", read from a runner: two variants
+        # (DSA and DSS), both USD 230, and it is the vendor's only listing. The
+        # old ceiling of 225 answered PRICE_REFUSED on a page that parsed
+        # perfectly, so the row stayed unpriced — and an unpriced row is hidden
+        # outright on a RELEASED set, which is why that store published nothing
+        # at all. The roster carries the Signature Plastics profiles now and
+        # they price above GMK; the ceiling has to sit above them.
+        self.assertTrue(scrape.is_plausible_base_price(230.0, "USD"))
+
     def test_ceiling_still_rejects_bundles_and_parse_errors(self):
         # The upper bound is NOT removed: a price far above a base kit is a
-        # bundle or a parse failure, not a real listing.
+        # bundle or a parse failure, not a real listing. Stated relative to the
+        # bound rather than as a fixed number — a hard-coded 40000 JPY read as
+        # a bundle test while actually pinning the ceiling at 34000.
         self.assertFalse(scrape.is_plausible_base_price(2999.0, "USD"))
-        self.assertFalse(scrape.is_plausible_base_price(40000.0, "JPY"))
+        for currency, (_low, high) in scrape._KIT_BOUNDS.items():
+            self.assertTrue(scrape.is_plausible_base_price(high, currency))
+            self.assertFalse(
+                scrape.is_plausible_base_price(high * 3, currency),
+                f"{currency}: three times the ceiling is a bundle, not a kit",
+            )
 
     def test_zero_and_negative_are_still_refused(self):
         # Not a "cheap product" — always a parse failure, and it would render

@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Thirteen suites, all of which should pass before pushing:
+Fourteen suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -43,6 +43,7 @@ npm run test:vendor-urls
 npm run test:set-merge
 npm run test:link-health
 npm run test:catalog-stock
+npm run test:kit-bounds
 npm run test:manufacturer-vendors
 npx tsc --noEmit
 ```
@@ -370,8 +371,8 @@ deliberately does NOT write `priceSource`.
 
 **And `null` still meant four different things, two of which are OUR fault, not
 the store's.** A page can be fetched, parsed and completely understood and still
-leave the row unpriced because this site refused the number — `KIT_BOUNDS` caps
-a USD base kit at 225 and norbauer.co sells its DSA kit at 230; the `Currency`
+leave the row unpriced because this site refused the number — `KIT_BOUNDS` capped
+a USD base kit at 225 while norbauer.co sells its DSA kit at 230; the `Currency`
 table cannot convert TRY and rationalkeys.com.tr prices in it — or because no
 parser path recognised the page at all (Drop's `/buy/` SPA, funkeys' custom
 storefront, the 114-byte placeholder captus.io and kingly-keys.xyz now serve).
@@ -392,6 +393,26 @@ from a platform the parser cannot read, which is the whole reason `linkFailures`
 is a heuristic. A refusal on the Shopify path still falls through to the
 JSON-LD reader exactly as its `null` did, so which number gets stored is
 unchanged.
+
+**And the refusal window was written FOUR times, so it could only ever be
+wrong.** `KIT_BOUNDS` is a backstop for parse errors — `pickBaseVariant` is what
+actually keeps a deskmat off a set page — but a backstop set too low does not
+fail loudly: it answers `PRICE_REFUSED` on a page it read and understood
+perfectly, and an unpriced row is hidden outright on a RELEASED set, so the
+store publishes nothing and looks from outside like a store nobody buys from.
+The ceiling was calibrated when a GMK base kit topped out near USD 180; the
+roster now carries the Signature Plastics profiles and the boutique makers who
+use them price above GMK, so norbauer.co's USD 230 keyset — its only listing —
+was refused on every run for ever by our rule rather than by anything the store
+did. `scripts/lib/kit-bounds.mjs` is now the one place the window is decided
+(USD 300, every other currency the same USD-equivalent so a set does not publish
+on one storefront and vanish on another): `prices.ts` and `db-setup` IMPORT it,
+the deploy purge SQL is GENERATED from it rather than hand-written, the restore
+window IS it, and only `scrape.py` still mirrors it because Python cannot
+import a JS module. `test:kit-bounds` fails if the mirror drifts or if either
+half hand-writes a bound again. The purge is the half that must never drift
+low — it nulls stored prices on every deploy, and a purge tighter than the
+producers is what blanked released-set pricing once before.
 
 `scripts/lib/link-health.mjs` holds the rules and **two columns that mean
 different things on purpose**: `VendorKit.deadSince` is the first time the STORE
