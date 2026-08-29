@@ -56,8 +56,11 @@ not the doc — repoint it here.
      to the resolution audit, and drop it from the watch.
    - **Did NOT heal → fix it now.** The item is still pending a full day after a
      nightly scrape should have re-verified it, the wrong value came back, or
-     the same listing was re-reported. A value that survives or reverts across a
-     scrape is the "never heals" case, not a heal. Reclassify it **needs fix**
+     the same listing was re-reported — including a re-report of an item this
+     ledger already closed, since an item is dropped from the watch when it is
+     resolved and a later recurrence would otherwise arrive with a clean sheet.
+     A value that survives or reverts across a scrape is the "never heals"
+     case, not a heal; so is one that another pass writes back between scrapes. Reclassify it **needs fix**
      and **fix it in this same run** per step 4 — trace the root cause,
      implement the scraper/import fix, add tests, run the suite, and commit on
      `main`. Do not defer it to a human and do not leave it on the watch for
@@ -65,7 +68,20 @@ not the doc — repoint it here.
 3. For each `PRICE_REPORT` line, assess:
    - **Self-healed?** The current price was re-scraped recently or is now
      `null`. Stock-only complaints ("sold out", "no stock", "ready stock")
-     self-heal on the next availability scrape and never need code.
+     USUALLY self-heal on the next availability scrape and need no code — but
+     "stock-only" is a description of the complaint, not a diagnosis of the
+     cause, and it is not a licence to skip finding one. A stock complaint can
+     have a code cause: until #153, `applyVendorLinkOverrides` re-asserted
+     `inStock: true` nightly on the hand-curated `LINK_OVERRIDES` rows, so two
+     Ktechs listings oscillated between sold-out and in-stock and four reports
+     against them were closed self-healed while nothing had healed.
+   - **Reported before?** Check the client-reported log for the same
+     (set, vendor) — including rows already marked resolved, which is where the
+     recurrence hides. A second report for the same reason is a `needs fix`
+     whatever the listing reads right now: a point-in-time check cannot tell a
+     healed row from one that is oscillating, so RECURRENCE is the only signal
+     that distinguishes them. When it recurs, correct the earlier rows' verdict
+     too rather than adding a third self-healed one beside them.
    - **Needs a scraper code fix?** The reason points at a systematic scrape bug
      — wrong currency, wrong product, or wrong variant/subkit. These do **not**
      self-heal: re-scraping pulls the same wrong value every run.
