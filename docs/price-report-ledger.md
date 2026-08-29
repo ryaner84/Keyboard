@@ -79,6 +79,37 @@ both the client-reported log and the resolution audit in the same run.
 > correct CYL base). (The full-history feed re-stamps `resolvedAt` at each sweep;
 > this run reports all 41 resolved at 2026-08-29T07:15:18.736Z, the nightly
 > schedule sweep that preceded this dispatch.)
+>
+> **This run's "watch empty / nothing failed verification" is correct as
+> written and still missed four live misclassifications** — see the note
+> below, filed the same day. The watch only holds items a run FLAGGED
+> self-healed and has not yet confirmed; an item closed in an earlier run
+> is off it, so a recurrence months later arrives with a clean sheet.
+
+> **2026-08-29 — four "self-healed" verdicts corrected, and why the watch
+> missed them.** Ktechs' GMK British Racing Green R3 was reported three times
+> (2026-07-16, 2026-08-17, 2026-08-25) and its Thunder God once (2026-07-25),
+> every one closed `self-healed / no code change`. None of them had healed. The
+> nightly `applyVendorLinkOverrides` re-asserted `inStock: true` on existing
+> rows at step 3 of `/api/cron/refresh`, before the price pass at step 5 — and
+> all four reports are against the two Ktechs listings that appear in the five
+> hand-curated `LINK_OVERRIDES`. That is not a coincidence; it is the whole
+> cause.
+>
+> The listing therefore OSCILLATED: the GitHub `refresh-prices` run (every 6h)
+> wrote `false`, the 16:00 UTC Vercel cron wrote `true` back, and a review
+> landing in the grey half of the cycle saw a healed row. The **self-heal
+> watch** is designed to catch exactly this and reported "clear" every time,
+> because a point-in-time check cannot see an oscillation. **A recurrence is
+> the signal the watch cannot produce: the same (set, vendor) reported twice
+> for the same reason is a `needs fix`, whatever the row reads when checked.**
+> BRG was reported three times in six weeks and stayed classified stock-only.
+>
+> Fixed in #153: the override no longer writes the flag, and discovery marks a
+> row sold out from the store's own `/products.json`. Verified on production
+> the same day — `ktechs / gmk-british-racing-green-r3` reads `inStock=false,
+> price=113 SGD, priceSource=SCRAPED, priceUpdatedAt=2026-08-29T16:13:43Z`, and
+> `ktechs / gmk-thunder-god` `inStock=false` at 07:19:17Z.
 
 ## 1. Open wrong-price reports (unresolved only)
 
@@ -112,10 +143,10 @@ _None — all client-recommended values have been verified (see audit below)._
 | logged (UTC) | set | vendor | reported price | reason (client) | verdict | status |
 |---|---|---|---|---|---|---|
 | 2026-08-26 | gmk-vamp | Switchmod | 84.99 USD | "all has no stock" | self-healed | ✅ resolved |
-| 2026-08-25 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | "there is no more stock" | self-healed | ✅ resolved |
+| 2026-08-25 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | "there is no more stock" | needs fix | ✅ resolved (#153) |
 | 2026-08-24 | gmk-tribal | zFrontier | 175 USD | "it show product not found" | needs fix | ✅ resolved |
 | 2026-08-20 | gmk-nord | CandyKeys | 62 EUR | "this url point to a different website" | needs fix | ✅ resolved |
-| 2026-08-17 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | "there is no more stock" | self-healed | ✅ resolved |
+| 2026-08-17 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | "there is no more stock" | needs fix | ✅ resolved (#153) |
 | 2026-08-16 | gmk-evil-dolch-r2 | SwiftCables | 39.5 USD | "for this vendor this is not a keycap this is a cable" | needs fix | ✅ resolved |
 | 2026-08-16 | gmk-evil-dolch-r2 | SwiftCables | 39.5 USD | "this is not a keycap this is a cable" | needs fix | ✅ resolved |
 | 2026-08-12 | gmk-metropolis-r2 | NovelKeys | 70 USD | "price is correct but when i click on buy is directed to an error page" | self-healed (link, price OK) | ✅ resolved |
@@ -126,7 +157,7 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-07-26 | gmk-evil-dolch-r2 | Aiglatson Studio | 3790 THB | "no stock" | self-healed | ✅ resolved |
 | 2026-07-26 | gmk-evil-dolch-r2 | SwiftCables | 39.5 USD | "this is not even a keycap" | needs fix | ✅ resolved |
 | 2026-07-25 | gmk-pharaoh | iLumKB | 209 SGD | "this is novelty kit" | needs fix | ✅ resolved |
-| 2026-07-25 | gmk-thunder-god | Ktechs | 169 SGD | "no stock" | self-healed | ✅ resolved |
+| 2026-07-25 | gmk-thunder-god | Ktechs | 169 SGD | "no stock" | needs fix | ✅ resolved (#153) |
 | 2026-07-22 | gmk-nord | zFrontier | 110 USD | "this is price of novelty kit" | needs fix | ✅ resolved |
 | 2026-07-22 | gmk-maroon | zFrontier | 170 USD | "wrong item price is this price of kits spacebar" | needs fix | ✅ resolved |
 | 2026-07-21 | gmk-burgundy-r3 | Omnitype | 100 USD | "when clicked buy is directing to a weird website" | needs fix | ✅ resolved |
@@ -136,7 +167,7 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-07-18 | gmk-masterpiece-r2 | iLumKB | 159 SGD | "This link is pointing to pre order not actual units" | self-healed (link) | ✅ resolved |
 | 2026-07-18 | gmk-cyl-tiramisu-keycaps | Oblotzky Industries | null | "I am seeing base kit as 116 europe" | needs fix (+ recommended value) | ✅ resolved |
 | 2026-07-18 | gmk-cyl-tiramisu-keycaps | iLumKB | null | "You picked the novelty kit price as based kit price" | needs fix | ✅ resolved |
-| 2026-07-16 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | "sold out" | self-healed | ✅ resolved |
+| 2026-07-16 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | "sold out" | needs fix | ✅ resolved (#153) |
 | 2026-07-02 | gmk-camping-r3 | zFrontier | null | "this is not base set price" | needs fix | ✅ resolved |
 | 2026-07-02 | gmk-cyl-kitsune-keycaps | Ktechs | 45 SGD | "this price is for the numpad not for the base set" | needs fix | ✅ resolved |
 | 2026-06-26 | gmk-awaken | NovelKeys | 70 USD | "item dun exist" | needs fix | ✅ resolved |
@@ -158,10 +189,10 @@ _None — all client-recommended values have been verified (see audit below)._
 | logged (UTC) | set | vendor | reported price | verdict | root cause & fix | status now |
 |---|---|---|---|---|---|---|
 | 2026-08-26 | gmk-vamp | Switchmod | 84.99 USD | self-healed | Stock-only ("all has no stock") — no scrape bug. Despite the `gmk-vamp-extras` slug (the SwiftCables/evil-dolch-extras trap shape), a live Vendor probe (run 33086317179) shows the Shopify listing = "GMK CYL Vamp" with a **Base** variant at 84.99 USD `available=true` (plus Novelties 20.99, Extension 27.99, Deskmat 9.99, HIBI 40.99, all in stock). `choose_kit_variant` correctly picks Base, the price is right (CYL is the cheaper doubleshot line), and every variant is now in stock — the availability complaint no longer holds. Re-scrape after submit resolved it. No code change | ✅ resolved (self-healed, probe-confirmed) |
-| 2026-08-25 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | self-healed | Stock-only ("no more stock") — no scrape bug; re-scrape after submit resolved it. Secondary check: 113 SGD (≈84 USD) is low for a GMK base; no reporter has ever complained about the *price* (3 reports, all stock-only), so treated as the base kit until a price report says otherwise | ✅ resolved (self-healed) |
+| 2026-08-25 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | needs fix | **Not self-healed** — the nightly override re-asserted stock. `linkVendorKit` wrote `inStock: true` on existing rows from `/api/cron/refresh` step 3, before the price pass at step 5, and this listing is one of the five hand-curated `LINK_OVERRIDES`. The GitHub price run (every 6h) wrote `false`; the 16:00 UTC cron wrote `true` back; whoever checked next saw whichever half of the cycle they landed in — which is why the self-heal watch kept passing it. Fixed in #153 (the override no longer writes the flag; discovery now marks a row sold out from the store's own feed). 3rd of 3 BRG stock reports. The price itself was never disputed: 113 SGD (≈84 USD) is low for a GMK base but no reporter has complained about it, so it stays treated as the base kit | ✅ resolved (#153) |
 | 2026-08-24 | gmk-tribal | zFrontier | 175 USD | needs fix | "Product not found" — the linked variant/page was gone; a dead/moved link. `NO_BASE_KIT` + dead-link (404/410) clearing hands the row back on the next rotation | ✅ resolved |
 | 2026-08-20 | gmk-nord | CandyKeys | 62 EUR | needs fix | "URL points to a different website" — stale/misrouted product link; re-scrape relinked the correct CandyKeys page (62 EUR is a plausible nord base) | ✅ resolved |
-| 2026-08-17 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | self-healed | Stock-only — availability re-scrape (2nd of 3 BRG stock reports) | ✅ resolved (self-healed) |
+| 2026-08-17 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | needs fix | 2nd of 3 BRG stock reports — same cause as the 2026-08-25 row: the override re-asserted stock nightly, so the re-scrape "fix" lasted until 16:00 UTC | ✅ resolved (#153) |
 | 2026-08-16 | gmk-evil-dolch-r2 | SwiftCables | 39.5 USD | needs fix | **Wrong product** — SwiftCables is a cable maker; `/products/gmk-evil-dolch-extras` is a cable, not the keycap base. 39.5 USD is a cable price, far below any GMK base (~135 USD). Reported 3× (2026-07-26, 2026-08-16 ×2) and the value returned across scrapes → never-heals. `choose_kit_variant` can't help (single "Default Title" cable variant is plausibly priced), and "extras" is deliberately allowed as a base word, so dropped via `BLOCKED_VENDOR_SET_PAIRS` (`swiftcables::gmk-evil-dolch-r2`) | ✅ resolved (vendor-set dropped) |
 | 2026-08-16 | gmk-evil-dolch-r2 | SwiftCables | 39.5 USD | needs fix | 2nd of the two same-minute SwiftCables reports that nulled the price — same fix (vendor-set dropped) | ✅ resolved (vendor-set dropped) |
 | 2026-08-12 | gmk-metropolis-r2 | NovelKeys | 70 USD | self-healed | Reporter states the **price is correct**; complaint is a broken checkout link ("directed to an error page"). Not a price bug; the link re-verified on re-scrape | ✅ resolved (link) |
@@ -172,7 +203,7 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-07-26 | gmk-evil-dolch-r2 | Aiglatson Studio | 3790 THB | self-healed | Stock-only ("no stock") — availability re-scrape (THB base 3790 ≈ 105 USD, plausible) | ✅ resolved (self-healed) |
 | 2026-07-26 | gmk-evil-dolch-r2 | SwiftCables | 39.5 USD | needs fix | 1st of 3 SwiftCables cable reports — see 2026-08-16 row; dropped via `BLOCKED_VENDOR_SET_PAIRS` | ✅ resolved (vendor-set dropped) |
 | 2026-07-25 | gmk-pharaoh | iLumKB | 209 SGD | needs fix | Novelty kit priced as base — NOVELTIES excluded, base-pick restored | ✅ resolved |
-| 2026-07-25 | gmk-thunder-god | Ktechs | 169 SGD | self-healed | Stock-only ("no stock") — availability re-scrape (Ktechs thunder-god is a hand-curated LINK_OVERRIDE, 169 SGD base plausible) | ✅ resolved (self-healed) |
+| 2026-07-25 | gmk-thunder-god | Ktechs | 169 SGD | needs fix | **Not self-healed** — the nightly override re-asserted stock. `linkVendorKit` wrote `inStock: true` on existing rows from `/api/cron/refresh` step 3, before the price pass at step 5, and this listing is one of the five hand-curated `LINK_OVERRIDES`. The GitHub price run (every 6h) wrote `false`; the 16:00 UTC cron wrote `true` back; whoever checked next saw whichever half of the cycle they landed in — which is why the self-heal watch kept passing it. Fixed in #153 (the override no longer writes the flag; discovery now marks a row sold out from the store's own feed). The note on this row already said "Ktechs thunder-god is a hand-curated LINK_OVERRIDE" — that was the cause, recorded as a parenthetical | ✅ resolved (#153) |
 | 2026-07-22 | gmk-nord | zFrontier | 110 USD | needs fix | Novelty kit priced as base — NOVELTIES excluded | ✅ resolved |
 | 2026-07-22 | gmk-maroon | zFrontier | 170 USD | needs fix | Spacebar kit priced as base — SPACEBARS excluded | ✅ resolved |
 | 2026-07-21 | gmk-burgundy-r3 | Omnitype | 100 USD | needs fix | Buy link redirects to dixiemech.store — Omnitype's row was parked on a sibling brand's storefront (CLAUDE.md "wrong storefront" shape); `planStorefrontOwnership`/roster heal repoints it | ✅ resolved |
@@ -182,7 +213,7 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-07-18 | gmk-masterpiece-r2 | iLumKB | 159 SGD | self-healed | Pre-order link complaint — availability/link; re-scrape re-verified | ✅ resolved (link) |
 | 2026-07-18 | gmk-cyl-tiramisu-keycaps | Oblotzky Industries | null | needs fix | Client reads base as "116 europe" — that is Oblotzky's **ex-VAT** display; the tracked DE-market base is inc-VAT (see recommended-values note). Value cleared to null on re-scrape (no clean base surfaced) | ✅ resolved (cleared) |
 | 2026-07-18 | gmk-cyl-tiramisu-keycaps | iLumKB | null | needs fix | Novelty kit priced as base — NOVELTIES excluded; value now null | ✅ resolved (cleared) |
-| 2026-07-16 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | self-healed | Stock-only ("sold out") — 1st of 3 BRG stock reports; availability re-scrape | ✅ resolved (self-healed) |
+| 2026-07-16 | gmk-british-racing-green-r3 | Ktechs | 113 SGD | needs fix | 1st of 3 BRG stock reports — same cause; closing it as self-healed is what let it recur twice over the next six weeks | ✅ resolved (#153) |
 | 2026-07-02 | gmk-camping-r3 | zFrontier | null | needs fix | Non-base price — the zFrontier camping-r3 listing carries no resolvable base; dropped via `BLOCKED_VENDOR_SET_PAIRS` (`zfrontier::gmk-camping-r3`) | ✅ resolved (vendor-set dropped) |
 | 2026-07-02 | gmk-cyl-kitsune | Ktechs | 45 SGD | needs fix | Numpad priced as base — `_NONBASE_SUBKIT_RE` numpad drop → `NO_BASE_KIT` clears | ✅ resolved (cleared) |
 | 2026-06-26 | gmk-awaken | NovelKeys | 70 USD | needs fix | Dead listing — dead-link clearing (#45) + `NO_BASE_KIT` | ✅ resolved (cleared) |
