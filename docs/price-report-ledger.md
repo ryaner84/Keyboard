@@ -69,6 +69,17 @@ both the client-reported log and the resolution audit in the same run.
 > `resolvedAt` at each sweep; this run reports all 41 resolved at
 > 2026-08-28T11:36:50.543Z.)
 
+> **2026-08-29 run.** Feed run 33259240054 (`?all=1`) returns **41 submissions,
+> all resolved, 0 pending** — again a 1:1 match with the ledger's client-reported
+> log, so **no new report** has filed since the 2026-08-27 run and nothing is
+> appended. The incoming **Self-heal watch was empty** (the 2026-08-28 run
+> confirmed and cleared gmk-vamp × Switchmod), so there was nothing to re-verify
+> and no item failed verification — no in-run fix was required. gmk-vamp ×
+> Switchmod remains resolved in the feed (`current=84.99 USD source=SCRAPED`,
+> correct CYL base). (The full-history feed re-stamps `resolvedAt` at each sweep;
+> this run reports all 41 resolved at 2026-08-29T07:15:18.736Z, the nightly
+> schedule sweep that preceded this dispatch.)
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _None — 0 pending reports in the feed; every logged report is resolved._
@@ -83,13 +94,13 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-_None. The 2026-08-28 run's incoming watch was empty. The prior run's one
-self-heal, **gmk-vamp × Switchmod** (flagged 2026-08-27, probe-confirmed in-run
-via run 33086317179: Base 84.99 USD `available=true`, picker correct), is
-**re-confirmed healed** against this run's full-history feed — still resolved,
-`current=84.99 USD source=SCRAPED`, `resolvedAt=2026-08-28T11:36:50.543Z` (after
-the 2026-08-26T17:39 submit) — and stays in the resolution audit. No watched
-item failed verification, so no in-run fix was required. All 41 full-history
+_None. The 2026-08-29 run's incoming watch was empty (the 2026-08-28 run
+confirmed and cleared **gmk-vamp × Switchmod**), so there was nothing to
+re-verify this run and no watched item failed verification — no in-run fix was
+required. gmk-vamp × Switchmod (flagged 2026-08-27, probe-confirmed in-run via
+run 33086317179: Base 84.99 USD `available=true`, picker correct; re-confirmed
+healed 2026-08-28) remains resolved in the full-history feed — `current=84.99
+USD source=SCRAPED` — and stays in the resolution audit. All 41 full-history
 reports remain resolved; 0 pending._
 
 ## 2. Open client-recommended values (awaiting verification)
@@ -202,8 +213,8 @@ _None — all client-recommended values have been verified (see audit below)._
 ## Summary
 
 - **41 report submissions across 34 listings** (full `?all=1` history, first
-  reconciled 2026-08-26; gmk-vamp × Switchmod added 2026-08-27). **All 41 are
-  resolved; 0 pending.**
+  reconciled 2026-08-26; gmk-vamp × Switchmod added 2026-08-27; unchanged through
+  the 2026-08-29 run). **All 41 are resolved; 0 pending.**
 - **Ledger completeness caveat (now closed for history-to-date).** The committed
   log was previously transcribed from pending-only snapshots, which drop a
   report the moment it resolves — so 25 reports that filed-and-healed between
