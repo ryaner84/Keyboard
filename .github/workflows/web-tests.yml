@@ -97,6 +97,14 @@ jobs:
         if: always()
         run: npm run test:catalog-stock
 
+      # Reads scrape.py, prices.ts and db-setup.mjs: the base-kit price window
+      # decides what the site is willing to publish, and drift between the
+      # producers and the deploy purge is silent both ways — too low a ceiling
+      # hides a live listing, too low a purge wipes a stored price nightly.
+      - name: kit-bounds
+        if: always()
+        run: npm run test:kit-bounds
+
       # Reads scrape.py as well as the TS sources: the manufacturer registry is
       # written in both languages and a divergence is silent at runtime.
       - name: manufacturer-vendors

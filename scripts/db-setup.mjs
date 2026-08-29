@@ -25,6 +25,7 @@ import {
   planVendorUrlHeal,
 } from "./lib/vendor-urls.mjs";
 import { planSetMerges } from "./lib/set-merge.mjs";
+import { KIT_BOUNDS, kitBoundsPurgeSql } from "./lib/kit-bounds.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SQL_PATH = join(__dirname, "..", "supabase-setup.sql");
@@ -1876,8 +1877,15 @@ async function requeueCurrencyMismatches(client) {
 // first-class sets (DCS Bae Addon, 6u bars, 9009 Fix Kit …) that genuinely
 // cost a few dollars, and the floor purged those on every deploy. Only a
 // 0/negative price — always a parse failure — is refused now.
+//
 // The window must never be tighter than what scrape.py / prices.ts will store:
-// an earlier mismatch here is exactly what blanked released-set pricing.
+// an earlier mismatch here is exactly what blanked released-set pricing. It
+// used to be spelled out here as sixteen hand-written comparisons under a
+// comment asking the reader to keep it in step with two other files; it is now
+// GENERATED from scripts/lib/kit-bounds.mjs, the same table the price passes
+// bound against, so "tighter than the producers" is no longer a thing anyone
+// can write by accident. It also covers every currency in that table now — the
+// hand-written list stopped at TWD and silently let CLP/INR/ARS/MYR through.
 // Idempotent — MANUAL prices are never touched.
 async function purgeImplausibleScrapedPrices(client) {
   try {
@@ -1887,18 +1895,7 @@ async function purgeImplausibleScrapedPrices(client) {
        WHERE "priceSource" = 'SCRAPED'
          AND price IS NOT NULL
          AND (
-              (currency = 'USD' AND (price <= 0 OR price > 225))
-           OR (currency = 'EUR' AND (price <= 0 OR price > 210))
-           OR (currency = 'GBP' AND (price <= 0 OR price > 180))
-           OR (currency = 'AUD' AND (price <= 0 OR price > 345))
-           OR (currency = 'CAD' AND (price <= 0 OR price > 310))
-           OR (currency = 'SGD' AND (price <= 0 OR price > 310))
-           OR (currency = 'JPY' AND (price <= 0 OR price > 34000))
-           OR (currency = 'KRW' AND (price <= 0 OR price > 320000))
-           OR (currency = 'CNY' AND (price <= 0 OR price > 1650))
-           OR (currency = 'HKD' AND (price <= 0 OR price > 1800))
-           OR (currency = 'THB' AND (price <= 0 OR price > 8100))
-           OR (currency = 'TWD' AND (price <= 0 OR price > 7300))
+              ${kitBoundsPurgeSql()}
          )`
     );
     if (rowCount > 0) {
@@ -1922,12 +1919,10 @@ async function purgeImplausibleScrapedPrices(client) {
 // accessory sets legitimately cost a few dollars and must be restorable too.
 const ADDON_VARIANT_RE =
   /(desk\s?mat|mouse\s?pad|wrist\s?rest|cable|artisan|sticker|sample|keychain|coin|tray|deposit|shipping|insurance|add[\s-]?on|extra)/i;
-const RESTORE_BOUNDS = {
-  USD: [0, 225], EUR: [0, 210], GBP: [0, 180], AUD: [0, 345],
-  CAD: [0, 310], SGD: [0, 310], JPY: [0, 34000], KRW: [0, 320000],
-  CNY: [0, 1650], HKD: [0, 1800], THB: [0, 8100], TWD: [0, 7300],
-  MYR: [0, 1100],
-};
+// The restore window IS the purge window — same table, so "restore ⊆ purge" is
+// true by construction rather than by two lists happening to agree. A second
+// hand-written copy is how the pair drifts.
+const RESTORE_BOUNDS = KIT_BOUNDS;
 
 async function restorePurgedPricesFromVariants(client) {
   try {
@@ -1959,7 +1954,7 @@ async function restorePurgedPricesFromVariants(client) {
       if (!chosen) continue;
       const cur = row.currency ?? row.vendor_currency ?? "USD";
       const bounds = RESTORE_BOUNDS[cur];
-      if (bounds && (chosen.price < bounds[0] || chosen.price > bounds[1])) continue;
+      if (bounds && (chosen.price < bounds.min || chosen.price > bounds.max)) continue;
       await client.query(
         `UPDATE public."VendorKit" SET price = $1 WHERE id = $2 AND price IS NULL`,
         [chosen.price, row.id]

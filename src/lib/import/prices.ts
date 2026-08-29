@@ -19,6 +19,7 @@ import {
   isGoneRedirect,
   nextLinkHealth,
 } from "../../../scripts/lib/link-health.mjs";
+import { isPlausibleBaseKitPrice as isPlausibleBaseKitPriceImpl } from "../../../scripts/lib/kit-bounds.mjs";
 
 const BROWSER_HEADERS = {
   "User-Agent":
@@ -91,8 +92,10 @@ export const DEAD_LINK = "DEAD_LINK" as const;
 //                    this site's rules — outside KIT_BOUNDS, or a currency the
 //                    Currency table cannot convert. Probed from a runner,
 //                    norbauer.co serves its DSA base kit at USD 230 against a
-//                    USD ceiling of 225, and rationalkeys.com.tr publishes
-//                    JSON-LD Product markup priced in TRY.
+//                    USD ceiling that stood at 225 (raised to 300 once that was
+//                    measured — see scripts/lib/kit-bounds.mjs), and
+//                    rationalkeys.com.tr publishes JSON-LD Product markup
+//                    priced in TRY.
 //   NO_PRODUCT_DATA  a 200 carrying no markup any parser path knows: Drop's
 //                    /buy/ SPA, funkeys' custom storefront, the 114-byte
 //                    placeholder captus.io and kingly-keys.xyz now serve.
@@ -136,33 +139,13 @@ const CURRENCY_HOME_COUNTRY: Record<string, string> = {
 // classifyVariant and pickBaseVariant) so the price pickers and the nightly
 // audit apply the exact same exclusions.
 
-// Per-currency plausibility bounds for a GMK BASE kit. New base kits run
-// roughly USD 90–180, but RELEASED sets are routinely cleared out at USD
-// 40–70 (NovelKeys/CannonKeys clearance sales), so the lower bound must
-// admit clearance prices — the BASE-variant classifier is the primary guard
-// against add-ons; this window is only a backstop for parse errors.
-// IMPORTANT: this window must stay in sync with the purge in
-// scripts/db-setup.mjs and the bounds in scraper/scrape.py — a purge window
-// tighter than the producers' window silently wipes legitimate prices on
-// every deploy (this is exactly what blanked released-set pricing).
-const KIT_BOUNDS: Record<string, { min: number; max: number }> = {
-  USD: { min: 0, max: 225 },
-  EUR: { min: 0, max: 210 },
-  GBP: { min: 0, max: 180 },
-  AUD: { min: 0, max: 345 },
-  CAD: { min: 0, max: 310 },
-  SGD: { min: 0, max: 310 },
-  JPY: { min: 0, max: 34000 },
-  KRW: { min: 0, max: 320000 },
-  CNY: { min: 0, max: 1650 },
-  HKD: { min: 0, max: 1800 },
-  THB: { min: 0, max: 8100 },
-  TWD: { min: 0, max: 7300 },
-  CLP: { min: 0, max: 210000 },
-  INR: { min: 0, max: 19000 },
-  ARS: { min: 0, max: 400000 },
-  MYR: { min: 0, max: 1100 },
-};
+// The per-currency plausibility window for a BASE kit used to be restated here,
+// in scrape.py and twice in db-setup.mjs, under a comment asking each reader to
+// keep four copies in step. It now lives in scripts/lib/kit-bounds.mjs and this
+// half imports it (see the import block at the top), exactly as it imports
+// link-health.mjs rather than copying it. Only scrape.py still mirrors it,
+// because Python cannot import a JS module, and test:kit-bounds fails if the
+// mirror drifts.
 
 // Currencies the site can actually convert (the Currency table). A price in
 // any other currency renders as garbage (missing rate falls back to 1, so
@@ -173,18 +156,10 @@ const SUPPORTED_CURRENCIES = new Set([
   "INR", "ARS", "CLP",
 ]);
 
-// Plausibility check for a BASE kit price. Currencies without bounds
-// have very different magnitudes, so we don't bound them.
-// `currency === null` means the store's currency is unknown — bound it as
-// USD, since the fallback is always one of the western vendor currencies.
-export function isPlausibleBaseKitPrice(price: number, currency: string | null): boolean {
-  const b = KIT_BOUNDS[currency ?? "USD"];
-  if (!b) return price > 0;
-  // min is 0 by design: accessory products (addons, spacebar packs, fix kits)
-  // are tracked as sets and legitimately cost a few dollars. Only a 0/negative
-  // parse result is refused.
-  return price > b.min && price <= b.max;
-}
+// Re-exported so price-audit.ts and the rest of this module keep one import
+// site for the rule. The implementation is kit-bounds.mjs's.
+export const isPlausibleBaseKitPrice: (price: number, currency: string | null) => boolean =
+  isPlausibleBaseKitPriceImpl;
 
 // Some stores link products through a collection path
 // (e.g. ktechs.store/collections/group-buy/products/X); the .json endpoint

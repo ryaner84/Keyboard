@@ -561,30 +561,38 @@ _SUBKIT_PRODUCT_RE = re.compile(
 # is a few dollars, and a floor threw those away as "implausible". The minimum
 # is kept at 0 only to reject a 0/negative parse result, which is never a real
 # price. The upper bound stays: it rejects bundles and parse errors.
-# MUST stay in sync with KIT_BOUNDS in
-# src/lib/import/prices.ts and the purge window in scripts/db-setup.mjs — if
-# this stores a price the deploy purge rejects, it gets wiped on every deploy.
+#
+# THE MIRROR OF scripts/lib/kit-bounds.mjs, which is where the window is decided
+# and where the reasoning for these numbers lives. prices.ts and db-setup.mjs
+# both IMPORT that module; Python cannot, so this half copies it and
+# `npm run test:kit-bounds` fails if the two tables ever disagree. That test
+# exists because a ceiling too LOW does not fail loudly — it answers
+# PRICE_REFUSED on a page it read and understood perfectly, and an unpriced row
+# is hidden outright on a RELEASED set (norbauer.co's USD 230 keyset against the
+# old ceiling of 225). Too low in the deploy PURGE is worse still: it wipes
+# legitimate prices on every deploy, which is what blanked released-set pricing
+# once before.
 _KIT_BOUNDS = {
-    "USD": (0, 225),
-    "EUR": (0, 210),
-    "GBP": (0, 180),
-    "AUD": (0, 345),
-    "CAD": (0, 310),
-    "SGD": (0, 310),
-    "JPY": (0, 34000),
-    "KRW": (0, 320000),
-    "CNY": (0, 1650),
-    "HKD": (0, 1800),
-    "THB": (0, 8100),
-    "TWD": (0, 7300),
+    "USD": (0, 300),
+    "EUR": (0, 280),
+    "GBP": (0, 240),
+    "AUD": (0, 460),
+    "CAD": (0, 415),
+    "SGD": (0, 415),
+    "JPY": (0, 45000),
+    "KRW": (0, 425000),
+    "CNY": (0, 2200),
+    "HKD": (0, 2400),
+    "THB": (0, 10800),
+    "TWD": (0, 9700),
     # Chilean Peso — used by Fancy Customs (CL). 1 USD ≈ 960 CLP as of 2025.
-    "CLP": (0, 210_000),
-    # Indian Rupee — 1 USD ≈ 84 INR as of 2025. ~$30–$225 USD range.
-    "INR": (0, 19_000),
+    "CLP": (0, 280_000),
+    # Indian Rupee — 1 USD ≈ 84 INR as of 2025.
+    "INR": (0, 25_000),
     # Argentine Peso — used by Latamkeys. Volatile; bounds intentionally wide.
-    "ARS": (0, 400_000),
+    "ARS": (0, 535_000),
     # Malaysian Ringgit — 1 USD ≈ 4.71 MYR as of 2025.
-    "MYR": (0, 1100),
+    "MYR": (0, 1470),
 }
 
 # Currencies the site's Currency table can convert (db-setup ensureCurrencies).
@@ -632,7 +640,8 @@ DEAD_LINK = "DEAD_LINK"
 #   PRICE_REFUSED    the product data parsed and the number was rejected by
 #                    this site's rules — outside _KIT_BOUNDS, or a currency the
 #                    Currency table cannot convert. norbauer.co quotes USD 230
-#                    for a DSA base kit against a USD ceiling of 225;
+#                    for a DSA base kit against a USD ceiling that stood at 225
+#                    (raised to 300 once that was measured);
 #                    rationalkeys.com.tr prices its JSON-LD Product in TRY.
 #   NO_PRODUCT_DATA  a 200 carrying no markup any parser path knows: Drop's
 #                    /buy/ SPA, funkeys' custom storefront, the 114-byte
