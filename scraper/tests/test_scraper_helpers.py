@@ -2131,6 +2131,39 @@ class LinkHealthTests(unittest.TestCase):
         )
         self.assertFalse(scrape.is_gone_redirect("not a url", "https://shop.example/"))
 
+    def test_a_host_that_does_not_resolve_is_gone(self):
+        # The third answer, and the only one with no HTTP status at all: the
+        # domain itself has lapsed. Chromium's spelling is what page.goto
+        # raises; the libc strings are what a Python socket failure carries.
+        for message in (
+            "page.goto: net::ERR_NAME_NOT_RESOLVED at https://mykeyboard.eu/x",
+            "[Errno -2] Name or service not known",
+            "nodename nor servname provided, or not known",
+            "getaddrinfo ENOTFOUND letsgetit.io",
+        ):
+            with self.subTest(message=message):
+                self.assertTrue(scrape.is_gone_host_error(Exception(message)))
+        # The reason is often one level down, on __cause__.
+        wrapped = RuntimeError("navigation failed")
+        wrapped.__cause__ = Exception("net::ERR_NAME_NOT_RESOLVED")
+        self.assertTrue(scrape.is_gone_host_error(wrapped))
+
+    def test_a_blocked_host_is_never_gone(self):
+        # deadSince is the one signal allowed to take a listing off the site, so
+        # everything that means "this host exists and would not talk to us"
+        # must stay a block — EAI_AGAIN above all, which is a TEMPORARY resolver
+        # failure and would otherwise retire the roster on our own bad night.
+        for message in (
+            "[Errno -3] Temporary failure in name resolution EAI_AGAIN",
+            "net::ERR_CONNECTION_REFUSED",
+            "net::ERR_CERT_DATE_INVALID",
+            "Timeout 20000ms exceeded",
+            "net::ERR_CONNECTION_RESET",
+        ):
+            with self.subTest(message=message):
+                self.assertFalse(scrape.is_gone_host_error(Exception(message)))
+        self.assertFalse(scrape.is_gone_host_error(None))
+
 
 class CatalogAvailabilityTests(unittest.TestCase):
     """Sold out, in stock, or "this feed does not say" — three answers, not two.

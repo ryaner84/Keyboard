@@ -16,6 +16,7 @@ import {
   PRICE_SOURCE_REFUSED,
   PRICE_SOURCE_UNPARSED,
   isDeadLinkStatus,
+  isGoneHostError,
   isGoneRedirect,
   nextLinkHealth,
 } from "../../../scripts/lib/link-health.mjs";
@@ -510,6 +511,10 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
       })),
     };
   } catch {
+    // Includes the host not resolving at all. This half never declares a
+    // listing gone — exactly as it defers the front-door verdict to the human
+    // product page (isGoneRedirect above) — so fall through to the JSON-LD
+    // reader, which fetches that page and answers DEAD_LINK there.
     return null;
   }
 }
@@ -885,7 +890,13 @@ async function fetchJsonLdPrice(
     if (sawAmbiguousAggregate) return NO_BASE_KIT;
     if (!sawProductMarkup) return NO_PRODUCT_DATA;
     return null;
-  } catch {
+  } catch (err) {
+    // The third way a store says "gone", and the only one with no HTTP answer:
+    // its domain stopped resolving. fetch() reports that as a bare
+    // "TypeError: fetch failed", indistinguishable from a timeout or a refused
+    // connection until the cause chain is read — so a shop whose domain lapsed
+    // was filed as blocked and re-fetched every six hours for ever.
+    if (isGoneHostError(err)) return DEAD_LINK;
     return null;
   }
 }
