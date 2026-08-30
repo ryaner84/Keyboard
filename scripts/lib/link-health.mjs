@@ -138,6 +138,66 @@ export function isGoneRedirect(requestUrl, finalUrl) {
 }
 
 /**
+ * The network-level answers that mean the HOST itself is gone — NXDOMAIN, in
+ * each of the three spellings this codebase can be handed one:
+ *
+ *   ENOTFOUND               Node/undici, from getaddrinfo (both price passes'
+ *                           fetch(), and the probe)
+ *   EAI_NONAME              the same failure surfaced by name rather than errno
+ *   ERR_NAME_NOT_RESOLVED   Chromium, i.e. Playwright's page.goto in scrape.py
+ *
+ * plus the two libc strings a Python socket.gaierror carries.
+ *
+ * Nothing else belongs here, and the exclusions are the whole point:
+ * EAI_AGAIN is a TEMPORARY resolver failure (SERVFAIL, our resolver, not their
+ * domain), ECONNREFUSED / ETIMEDOUT / ECONNRESET are a host that exists and
+ * would not talk to us, and a certificate error is a live site with a lapsed
+ * cert. Every one of those is a block, and blocks may never hide a listing.
+ */
+export const GONE_HOST_ERROR_MARKERS = [
+  "ENOTFOUND",
+  "EAI_NONAME",
+  "ERR_NAME_NOT_RESOLVED",
+  "Name or service not known",
+  "nodename nor servname",
+];
+
+/**
+ * True when a fetch failed because the host does not exist.
+ *
+ * A domain that stopped resolving is the third way a store says "gone", after
+ * the 404 and the front-door redirect — and the only one with no HTTP answer at
+ * all, which is exactly why it was invisible. `fetch()` reports it as a bare
+ * "TypeError: fetch failed" whose reason is buried in `cause`, so both price
+ * passes filed a shop whose domain had lapsed under the same null a Cloudflare
+ * block gives: never dead, never retired, re-fetched every six hours for ever,
+ * and named in the publishing report as "the price pass has never read one",
+ * which is a guess rather than a diagnosis. Measured against production, seven
+ * vendors and ~253 listings were in that state — mykeyboard.eu alone holds 206.
+ *
+ * NXDOMAIN is as definitive as a 404: there is no server to ask. It is also
+ * self-healing the same way — nextLinkHealth clears deadSince on the first read
+ * that gets through — so a domain that comes back needs no intervention.
+ */
+export function isGoneHostError(err) {
+  const seen = new Set();
+  const stack = [err];
+  const text = [];
+  while (stack.length > 0 && seen.size < 20) {
+    const node = stack.pop();
+    if (!node || typeof node !== "object" || seen.has(node)) continue;
+    seen.add(node);
+    if (typeof node.code === "string") text.push(node.code);
+    if (typeof node.message === "string") text.push(node.message);
+    if (node.cause) stack.push(node.cause);
+    // AggregateError (undici tries every address a host resolves to).
+    if (Array.isArray(node.errors)) stack.push(...node.errors);
+  }
+  const joined = text.join("\n");
+  return GONE_HOST_ERROR_MARKERS.some((marker) => joined.includes(marker));
+}
+
+/**
  * The link-health columns after one price attempt. Pure — the caller writes.
  *
  * `outcome` is one of:
@@ -218,17 +278,15 @@ export function describeDeadListings(listings, deadListings, deadestSince) {
   const dead = Number(deadListings ?? 0);
   if (!(dead > 0) || !(total > 0)) return null;
   const since = deadestSince ? ` since ${new Date(deadestSince).toISOString().slice(0, 10)}` : "";
-  // "gone" covers both answers a store gives: 404/410, and a redirect to its
-  // front door. Naming only the status sent the owner looking for a 404 that
-  // the commonest case never produces.
+  // "gone" covers all three answers a store gives: 404/410, a redirect to its
+  // front door, and a host that no longer resolves. Naming only the status sent
+  // the owner looking for a 404 that the commonest cases never produce.
+  const how = "404/410, redirected to the storefront's front door, or the host no longer resolves";
   if (dead >= total) {
     return (
-      `all ${total} listing(s) are gone${since} (404/410 or redirected to the ` +
-      `storefront's front door) — relink or retire it (refresh-prices cannot help)`
+      `all ${total} listing(s) are gone${since} (${how}) — relink or retire it ` +
+      `(refresh-prices cannot help)`
     );
   }
-  return (
-    `${dead} of ${total} listing(s) are gone${since} (404/410 or redirected to ` +
-    `the storefront's front door); the rest are still being read`
-  );
+  return `${dead} of ${total} listing(s) are gone${since} (${how}); the rest are still being read`;
 }

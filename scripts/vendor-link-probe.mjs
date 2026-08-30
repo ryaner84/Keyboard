@@ -9,6 +9,12 @@
 // a platform), and until this script the only way to tell them apart was to
 // guess.
 //
+// A transport failure gets the same split the price pass now makes: a host that
+// does not resolve is GONE (and the www twin is checked, in case the shop only
+// lost one spelling of its domain), while every other network error is a live
+// host refusing us. "fetch failed" says neither out loud — the reason is buried
+// in the error's `cause` — and the two need opposite repairs.
+//
 // It mirrors the DETECTION in src/lib/import/prices.ts — Shopify product JSON
 // first, then the WooCommerce variations blob, then JSON-LD, then OpenGraph
 // meta — and reports which of them a page offers. It deliberately does NOT
@@ -22,6 +28,10 @@
 //
 //   PROBE_URLS="https://shop.example/products/x https://other.example/p/y" \
 //     node scripts/vendor-link-probe.mjs
+
+import { lookup as dnsLookup } from "node:dns/promises";
+
+import { isGoneHostError } from "./lib/link-health.mjs";
 
 const urls = (process.env.PROBE_URLS ?? process.argv.slice(2).join(" "))
   .split(/[\s,]+/)
@@ -53,7 +63,10 @@ async function fetchOnce(url, redirect = "manual") {
     const res = await fetch(url, { headers: BROWSER_HEADERS, redirect, signal: controller.signal });
     return { res };
   } catch (err) {
-    return { error: err.name === "AbortError" ? `timeout after ${TIMEOUT_MS}ms` : err.message };
+    return {
+      error: err.name === "AbortError" ? `timeout after ${TIMEOUT_MS}ms` : err.message,
+      err,
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -66,8 +79,8 @@ async function fetchChain(url) {
   const chain = [];
   let current = url;
   for (let hop = 0; hop < 10; hop++) {
-    const { res, error } = await fetchOnce(current);
-    if (error) return { chain, error, finalUrl: current };
+    const { res, error, err } = await fetchOnce(current);
+    if (error) return { chain, error, err, finalUrl: current };
     const location = res.headers.get("location");
     chain.push(`${res.status}${location ? ` → ${new URL(location, current).href}` : ""}`);
     if (res.status >= 300 && res.status < 400 && location) {
@@ -86,6 +99,42 @@ function shopifyProductUrl(url) {
   return match ? `${match[1]}/products/${match[2]}` : null;
 }
 
+/** The reason under a bare "fetch failed" — the codes fetch() hides in `cause`. */
+function causeChain(err) {
+  const seen = new Set();
+  const stack = [err];
+  const parts = [];
+  while (stack.length > 0 && seen.size < 20) {
+    const node = stack.pop();
+    if (!node || typeof node !== "object" || seen.has(node)) continue;
+    seen.add(node);
+    if (typeof node.code === "string") parts.push(node.code);
+    else if (typeof node.message === "string" && node !== err) parts.push(node.message);
+    if (node.cause) stack.push(node.cause);
+    if (Array.isArray(node.errors)) stack.push(...node.errors);
+  }
+  const unique = [...new Set(parts)];
+  return unique.length > 0 ? ` (${unique.join(", ")})` : "";
+}
+
+function hostOf(url) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return String(url ?? "");
+  }
+}
+
+/** Does this hostname resolve at all? Answers the "did the shop move?" question. */
+async function resolves(host) {
+  try {
+    const { address } = await dnsLookup(host);
+    return address;
+  } catch {
+    return null;
+  }
+}
+
 function ldTypes(html) {
   const types = new Set();
   for (const m of html.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
@@ -96,14 +145,37 @@ function ldTypes(html) {
 
 for (const url of urls) {
   console.log(`\n=== PROBE ${url}`);
-  const { chain, res, error, finalUrl } = await fetchChain(url);
+  const { chain, res, error, err, finalUrl } = await fetchChain(url);
   if (chain.length > 0) console.log(`  CHAIN     | ${chain.join("  ")}`);
   if (error || !res) {
-    // A transport failure (DNS gone, TLS expired, connection refused, hang) is
-    // the answer a store that simply stopped existing gives — and the one that
-    // never produces a 404, so nothing ever clears its rows.
-    console.log(`  RESULT    | UNREACHABLE — ${error}`);
-    console.log(`  VERDICT   | no HTTP answer at all — the row can only be relinked or retired`);
+    // A transport failure produces no status at all, so the price pass cannot
+    // tell these apart on its own — but they need opposite repairs, and
+    // "fetch failed" is all fetch() says out loud. Print the cause chain and
+    // split it the way the price pass now does: a host that does not resolve
+    // is GONE (NXDOMAIN — there is no server to ask), and every other
+    // transport failure is a live host refusing us.
+    console.log(`  RESULT    | UNREACHABLE — ${error}${causeChain(err)}`);
+    if (isGoneHostError(err)) {
+      const host = hostOf(finalUrl);
+      console.log(
+        `  VERDICT   | DEAD_LINK — ${host} does not resolve; the domain itself is gone` +
+          ` (retire the row, or relink it if the shop moved)`
+      );
+      // The one relink worth checking automatically: a shop that kept its
+      // Shopify but lost one of the two spellings of its domain. It is a
+      // question, not an answer — spaceholdings.net lost the apex and its www
+      // twin 301s straight back to it, so the shop is gone either way.
+      const twin = host.startsWith("www.") ? host.slice(4) : `www.${host}`;
+      const twinAddr = await resolves(twin);
+      console.log(
+        `  TWIN      | ${twin} ${twinAddr ? `resolves (${twinAddr}) — probe it before retiring` : "does not resolve either"}`
+      );
+    } else {
+      console.log(
+        `  VERDICT   | UNREADABLE — the host exists and would not answer; a block,` +
+          ` never a 404, so nothing clears the row on its own`
+      );
+    }
     continue;
   }
 

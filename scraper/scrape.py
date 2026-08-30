@@ -704,6 +704,43 @@ def is_gone_redirect(request_url, final_url) -> bool:
     return target and not origin
 
 
+# The network-level answers that mean the HOST itself is gone — NXDOMAIN, in
+# each spelling this pass can be handed one: Chromium (Playwright's page.goto)
+# says ERR_NAME_NOT_RESOLVED, a Python socket.gaierror carries the libc string,
+# and the Node halves see ENOTFOUND. Everything NOT here is the point: EAI_AGAIN
+# is a temporary resolver failure, a refused or timed-out connection is a host
+# that exists, and a certificate error is a live site with a lapsed cert — all
+# blocks, and a block may never hide a listing. Mirror of
+# GONE_HOST_ERROR_MARKERS in scripts/lib/link-health.mjs.
+GONE_HOST_ERROR_MARKERS = (
+    "ENOTFOUND",
+    "EAI_NONAME",
+    "ERR_NAME_NOT_RESOLVED",
+    "Name or service not known",
+    "nodename nor servname",
+)
+
+
+def is_gone_host_error(exc) -> bool:
+    """True when a navigation failed because the host does not exist.
+
+    The third way a store says "gone", after the 404 and the front-door
+    redirect, and the only one with no HTTP answer at all — which is why it was
+    invisible: the browser raises, the pass logs "fetch error", and the row is
+    filed under the same None a Cloudflare block gives. NXDOMAIN is as
+    definitive as a 404 (there is no server to ask) and just as self-healing,
+    since next_link_health clears deadSince on the first read that gets
+    through. Mirror of isGoneHostError in scripts/lib/link-health.mjs.
+    """
+    if exc is None:
+        return False
+    text = f"{type(exc).__name__}: {exc}"
+    cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
+    if cause is not None:
+        text += f"\n{type(cause).__name__}: {cause}"
+    return any(marker in text for marker in GONE_HOST_ERROR_MARKERS)
+
+
 def next_link_health(link_failures, dead_since, outcome, now=None):
     """Link-health columns after one price attempt. Pure — the caller writes.
 
@@ -1495,6 +1532,13 @@ def shopify_price(
             "compareAt": chosen.get("compareAt"),
         }
     except Exception as e:  # noqa: BLE001
+        # A host that no longer resolves is the store saying "gone" with no HTTP
+        # answer at all. This half has no generic fallback to defer to — the
+        # caller picks ONE path per URL — so it reads the verdict off the
+        # navigation it just attempted, which is the human product page.
+        if is_gone_host_error(e):
+            log(f"  dead link (host does not resolve) — clearing price ({product_url})")
+            return DEAD_LINK
         log(f"  price fetch failed for {product_url}: {e}")
         return None
 
@@ -4179,6 +4223,9 @@ def generic_price(
     # Where the navigation ended — None when the browser never got there, so a
     # page Scrapling fetched instead is never judged on a stale page.url.
     final_url: str | None = None
+    # Why the navigation failed, when it did: a DNS failure is the store saying
+    # "gone" and every other error is a block. See is_gone_host_error.
+    nav_error: Exception | None = None
     try:
         response = page.goto(
             product_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS
@@ -4189,6 +4236,7 @@ def generic_price(
         if content and not response_is_blocked(status, content):
             html = content
     except Exception as exc:  # noqa: BLE001
+        nav_error = exc
         log(f"  generic fetch error ({product_url}): {type(exc).__name__}: {exc}")
 
     if html is None and scrapling is not None and scrapling.available:
@@ -4199,6 +4247,13 @@ def generic_price(
         # transient block keeps the last good price (same split as Shopify).
         if status in DEAD_LINK_STATUSES:
             log(f"  dead link ({status}) — clearing price ({product_url})")
+            return DEAD_LINK
+        # …and the answer that never produced a status at all: the host has
+        # stopped resolving. Claimed only when no transport got a page — if
+        # Scrapling reached the site, the domain is alive and the browser was
+        # merely blocked.
+        if is_gone_host_error(nav_error):
+            log(f"  dead link (host does not resolve) — clearing price ({product_url})")
             return DEAD_LINK
         return None
 

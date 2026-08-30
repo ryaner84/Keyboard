@@ -358,6 +358,39 @@ audit:publishing` re-diagnoses those vendors as gone; `scripts/vendor-link-probe
 (the **Vendor probe** workflow) is how a silent store's answer is read in the
 first place, from a runner IP rather than guessed at.
 
+**And a third answer gives no status, no redirect and no page at all: the
+DOMAIN is gone.** Every guard in the vendor chain judges a storefront by the
+SHAPE of its URL — `needsStorefront`, `planStorefrontOwnership`,
+`planVendorUrlHeal`, `planRosterSync`, and `test:vendor-urls` behind them — and
+a host that no longer exists is shaped exactly like a healthy one. So a shop
+whose domain lapsed reads as healthy to every repair, is asked for
+`/products.json` on every discovery rotation, and answers with a DNS failure
+that `fetch()` reports as a bare `TypeError: fetch failed` (the reason buried in
+`cause`) and Playwright as `net::ERR_NAME_NOT_RESOLVED`. Both price passes filed
+that under the same `null` a Cloudflare block gives: never dead, never retired,
+re-fetched every six hours for ever, and named in the publishing report as "the
+price pass has never read one — relink or retire it", which is a guess, not a
+diagnosis — the identical sentence thicthock.com (Cloudflare 521) and
+zionstudios.ph (526) get while both domains are very much alive. Resolving the
+storefront host of every silent vendor found seven whose host answers NXDOMAIN:
+`mykeyboard.eu` (206 listings), `store.projectkeyboard.com` (15),
+`spaceholdings.net` (18), `keyclack.com` (4), `letsgetit.io` (4),
+`mkultra.click` (3) and `donutcables.com` (3). `isGoneHostError` (mirrored as
+`is_gone_host_error`) answers `DEAD_LINK` for those: NXDOMAIN is as definitive
+as a 404, because there is no server left to ask, and just as self-healing —
+`nextLinkHealth` clears `deadSince` on the first read that gets through.
+`GONE_HOST_ERROR_MARKERS` is deliberately three spellings of that one answer,
+and the exclusions carry the safety: `EAI_AGAIN` is a TEMPORARY resolver
+failure, a refused or timed-out connection is a host that exists, and a bad
+certificate is a live site — all blocks, and a block may never hide a listing.
+Written twice, and `test:link-health` fails if the marker lists disagree or if
+either half stops judging a failed navigation. Check the www twin before
+retiring a row: a shop can lose one spelling of its domain and keep the other —
+though not here, since `www.spaceholdings.net` 301s straight back to the apex
+that no longer resolves. The probe reports that twin, and the cause code under
+"fetch failed", so the next dead domain is visible from the tool rather than
+from a hand-run `getent`.
+
 **And a 404 counted as READ, so the commonest cause was hiding inside the
 second-commonest.** Both price passes returned the `NO_BASE_KIT` sentinel for a
 404/410, and its caller stamps `priceSource = 'SCRAPED'` — the same mark a live

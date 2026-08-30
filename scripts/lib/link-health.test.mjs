@@ -11,6 +11,8 @@ import {
   describeDeadListings,
   isBackedOff,
   isDeadLinkStatus,
+  GONE_HOST_ERROR_MARKERS,
+  isGoneHostError,
   isGoneRedirect,
   isUnbuyableDeadLink,
   nextLinkHealth,
@@ -172,6 +174,8 @@ assert.equal(describeDeadListings(0, 3), null);
   // Both answers are named. Saying only "404/410" sent the owner looking for a
   // status the commonest case never produces.
   assert.match(all, /redirected to the storefront's front door/);
+  // …and the third, which produces no HTTP answer at all.
+  assert.match(all, /host no longer resolves/);
   assert.match(all, /relink or retire/);
   // The whole point: never send the owner to the pass that cannot help.
   assert.match(all, /refresh-prices cannot help/);
@@ -180,6 +184,58 @@ assert.equal(describeDeadListings(0, 3), null);
   const some = describeDeadListings(44, 12, T0);
   assert.match(some, /12 of 44 listing\(s\) are gone/);
   assert.match(some, /the rest are still being read/);
+}
+
+// --- isGoneHostError -------------------------------------------------------
+// The third answer, and the only one with no HTTP status: the host stopped
+// resolving. fetch() hides the reason in `cause`, so a shop whose domain had
+// lapsed left the identical residue a Cloudflare block leaves — and seven
+// vendors, ~253 listings (mykeyboard.eu alone holds 206), sat in that state.
+{
+  // What undici actually throws: a bare TypeError with the reason in `cause`.
+  const undiciDns = new TypeError("fetch failed");
+  undiciDns.cause = Object.assign(new Error("getaddrinfo ENOTFOUND mykeyboard.eu"), {
+    code: "ENOTFOUND",
+  });
+  assert.equal(isGoneHostError(undiciDns), true, "undici NXDOMAIN");
+
+  // Node tries every address a host resolves to and aggregates the failures.
+  const aggregated = new TypeError("fetch failed");
+  aggregated.cause = Object.assign(new AggregateError([], ""), {
+    errors: [Object.assign(new Error("getaddrinfo ENOTFOUND letsgetit.io"), { code: "ENOTFOUND" })],
+  });
+  assert.equal(isGoneHostError(aggregated), true, "aggregated NXDOMAIN");
+
+  // Chromium's spelling, i.e. what Playwright hands scrape.py.
+  assert.equal(
+    isGoneHostError(new Error("page.goto: net::ERR_NAME_NOT_RESOLVED at https://kono.store/x")),
+    true,
+    "Chromium NXDOMAIN"
+  );
+  // …and libc's, via a Python socket.gaierror relayed as text.
+  assert.equal(
+    isGoneHostError(new Error("[Errno -2] Name or service not known")),
+    true,
+    "gaierror NXDOMAIN"
+  );
+}
+// Everything else is a host that EXISTS and would not talk to us. deadSince is
+// the one signal allowed to take a listing off the site, so each of these must
+// stay a block: EAI_AGAIN in particular is a temporary resolver failure — the
+// sandbox this was written in answers every lookup with it — and counting it
+// would retire the whole roster the first time our own DNS hiccupped.
+for (const [label, err] of [
+  ["EAI_AGAIN", Object.assign(new TypeError("fetch failed"), { cause: { code: "EAI_AGAIN" } })],
+  ["refused", Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } })],
+  ["timeout", Object.assign(new TypeError("fetch failed"), { cause: { code: "ETIMEDOUT" } })],
+  ["reset", Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } })],
+  ["expired cert", Object.assign(new TypeError("fetch failed"), { cause: { code: "CERT_HAS_EXPIRED" } })],
+  ["abort", Object.assign(new Error("This operation was aborted"), { name: "AbortError" })],
+  ["blocked", new Error("net::ERR_CONNECTION_REFUSED")],
+  ["nothing", null],
+  ["empty", {}],
+]) {
+  assert.equal(isGoneHostError(err), false, `${label} is a block, not a dead host`);
 }
 
 // --- the Python mirror -----------------------------------------------------
@@ -223,6 +279,31 @@ assert.ok(
   /def is_gone_redirect\(/.test(scrapePy),
   "scrape.py must mirror isGoneRedirect as is_gone_redirect"
 );
+assert.ok(
+  /def is_gone_host_error\(/.test(scrapePy),
+  "scrape.py must mirror isGoneHostError as is_gone_host_error"
+);
+// The marker list decides which network failures may hide a listing, so the two
+// copies drifting is the whole hazard: one half retiring a store the other half
+// keeps re-fetching, and neither summary looking wrong.
+{
+  const m = scrapePy.match(/^GONE_HOST_ERROR_MARKERS = \(([\s\S]*?)\)$/m);
+  assert.ok(m, "scrape.py must define GONE_HOST_ERROR_MARKERS");
+  const pyMarkers = [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+  assert.deepEqual(
+    pyMarkers,
+    GONE_HOST_ERROR_MARKERS,
+    "scrape.py's GONE_HOST_ERROR_MARKERS must match link-health.mjs"
+  );
+  // The exclusions carry the safety, so name them: a temporary resolver
+  // failure must never read as a domain that no longer exists.
+  for (const notGone of ["EAI_AGAIN", "ECONNREFUSED", "ETIMEDOUT", "CERT_"]) {
+    assert.ok(
+      !GONE_HOST_ERROR_MARKERS.some((marker) => marker.includes(notGone)),
+      `${notGone} is a block, and a block may never hide a listing`
+    );
+  }
+}
 
 // A 404 must return DEAD_LINK, not NO_BASE_KIT, in BOTH of scrape.py's price
 // paths — Shopify (/products/*.json) and the generic WooCommerce/JSON-LD
@@ -231,9 +312,17 @@ assert.ok(
 // same way for a redirect to the front door, which is why there are four.
 assert.equal(
   (scrapePy.match(/return DEAD_LINK\b/g) ?? []).length,
-  4,
-  "both of scrape.py's price paths must return DEAD_LINK on 404/410 AND on a " +
-    "redirect to the storefront's front door"
+  6,
+  "both of scrape.py's price paths must return DEAD_LINK on 404/410, on a " +
+    "redirect to the storefront's front door, AND on a host that no longer resolves"
+);
+// The third answer, in both paths. scrape.py picks ONE path per URL, so a half
+// that cannot recognise NXDOMAIN keeps re-fetching a domain that is gone.
+assert.equal(
+  // Call sites, not the definition.
+  (scrapePy.match(/(?<!def )is_gone_host_error\(/g) ?? []).length,
+  2,
+  "both of scrape.py's price paths must judge a failed navigation for NXDOMAIN"
 );
 // scrape.py picks ONE path per URL (shopify_price if /products/ is in it, else
 // generic_price) with no fallback between them, so each has to read the final
@@ -294,6 +383,19 @@ assert.ok(
 assert.ok(
   /if \(isGoneRedirect\(`\$\{clean\}\.json`, res\.url\)\) return null;/.test(pricesTs),
   "fetchShopifyPrice must fall through, not declare death, on a .json front door"
+);
+// A host that no longer resolves throws before any of that, in whichever path
+// fetches first. The verdict is taken in the same place as the front-door one
+// — the JSON-LD reader, which fetches the human product page — so the Shopify
+// half stays a pure fall-through here too.
+assert.ok(
+  /if \(isGoneHostError\(err\)\) return DEAD_LINK;/.test(pricesTs),
+  "fetchJsonLdPrice must answer DEAD_LINK when the host does not resolve"
+);
+assert.equal(
+  (pricesTs.match(/isGoneHostError\(/g) ?? []).length,
+  1,
+  "only the human-product-page path may declare a host gone"
 );
 {
   const branch = pricesTs.slice(
