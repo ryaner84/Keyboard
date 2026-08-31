@@ -8,7 +8,7 @@ import {
 } from "@/lib/kit-variants";
 import {
   NOT_MANUFACTURER_LISTING,
-  isManufacturerListingUrl,
+  isUnpriceableManufacturerListing,
 } from "./manufacturer-vendors";
 import {
   DEAD_LINK_FAILURE_THRESHOLD,
@@ -905,14 +905,24 @@ async function fetchJsonLdPrice(
 // JSON first (rich variant data), generic JSON-LD/OpenGraph markup otherwise.
 // Pass vendorCurrency so Shopify geo-localization is pinned to the vendor's
 // base currency rather than whatever the runner's IP geo-detects.
-export async function fetchVendorPrice(productUrl: string, vendorCurrency?: string): Promise<FetchPriceOutcome> {
+export async function fetchVendorPrice(
+  productUrl: string,
+  vendorCurrency?: string,
+  vendorSlug?: string
+): Promise<FetchPriceOutcome> {
   if (!productUrl) return null;
   // GMK and dcs.wiki are catalog sources, not vendors — their links are
   // catalog/image references and must never produce a price. A JSON-LD reader
   // pointed at an archive page will happily return a number otherwise, and a
   // number is all it takes for the wiki to be published as a set's cheapest
   // vendor.
-  if (isManufacturerListingUrl(productUrl)) return null;
+  //
+  // The vendor decides that, not the host on its own: gmk-direct is GMK's own
+  // Warehouse Finds shop, its listings genuinely live on gmk.net, and refusing
+  // them here is what left the manufacturer's storefront unpriced — and so,
+  // since its sets are all released, entirely unpublished. Omitting the slug
+  // still refuses, so a caller with no vendor in hand keeps the old behaviour.
+  if (isUnpriceableManufacturerListing(productUrl, vendorSlug)) return null;
   // A priced result OR the NO_BASE_KIT sentinel (both truthy) is a definitive
   // answer from the Shopify path — only a null (transient) falls through to the
   // JSON-LD reader.
@@ -963,7 +973,10 @@ async function refreshOne(
   vk: {
     id: string;
     productUrl: string | null;
-    vendor: { currency: string };
+    // The slug rides along with the currency because `fetchVendorPrice` refuses
+    // a manufacturer host unless the row belongs to the manufacturer's own shop
+    // — without it every gmk-direct listing is refused before it is fetched.
+    vendor: { currency: string; slug: string };
     linkFailures?: number;
     deadSince?: Date | null;
   },
@@ -971,7 +984,7 @@ async function refreshOne(
 ): Promise<void> {
   if (!vk.productUrl) return;
   result.attempted++;
-  const priceData = await fetchVendorPrice(vk.productUrl, vk.vendor.currency);
+  const priceData = await fetchVendorPrice(vk.productUrl, vk.vendor.currency, vk.vendor.slug);
   const outcome =
     priceData === DEAD_LINK
       ? "GONE"
@@ -1163,7 +1176,7 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
       productUrl: true,
       linkFailures: true,
       deadSince: true,
-      vendor: { select: { currency: true } },
+      vendor: { select: { currency: true, slug: true } },
     },
   });
 

@@ -143,6 +143,28 @@ function ldTypes(html) {
   return [...types];
 }
 
+/**
+ * The OpenGraph price the last parser path would read, or null.
+ *
+ * "OG PRICE | present" answers whether a path EXISTS, which is a different
+ * question from what it produces — and the difference is the whole diagnosis
+ * when a row is unpriced: a number here means the page is fine and the refusal
+ * is ours (KIT_BOUNDS, the Currency table, or a queue filter that never let the
+ * row be fetched), while "present but unreadable" means the picker is at fault.
+ * Same two regexes as fetchJsonLdPrice's fallback, in the same attribute-order-
+ * agnostic pairs, so the value printed is the value that pass would see.
+ */
+function ogPriceOf(html) {
+  const amount =
+    html.match(/property=["']product:price:amount["'][^>]*content=["']([\d.,]+)["']/i) ??
+    html.match(/content=["']([\d.,]+)["'][^>]*property=["']product:price:amount["']/i);
+  if (!amount) return null;
+  const currency =
+    html.match(/property=["']product:price:currency["'][^>]*content=["']([A-Z]{3})["']/i) ??
+    html.match(/content=["']([A-Z]{3})["'][^>]*property=["']product:price:currency["']/i);
+  return `${amount[1]}${currency ? ` ${currency[1]}` : ""}`;
+}
+
 for (const url of urls) {
   console.log(`\n=== PROBE ${url}`);
   const { chain, res, error, err, finalUrl } = await fetchChain(url);
@@ -230,13 +252,18 @@ for (const url of urls) {
 
   const woo = /data-product_variations\s*=/.test(body);
   const types = ldTypes(body);
-  const ogPrice = /property=["']product:price:amount["']/.test(body);
+  const ogTag = /property=["']product:price:amount["']/.test(body);
+  const ogValue = ogPriceOf(body);
   console.log(`  WOO       | ${woo ? "data-product_variations present" : "absent"}`);
   console.log(`  JSON-LD   | ${types.length > 0 ? types.join(", ") : "none"}`);
-  console.log(`  OG PRICE  | ${ogPrice ? "present" : "absent"}`);
+  console.log(
+    `  OG PRICE  | ${
+      ogValue ? ogValue : ogTag ? "tag present, no readable amount" : "absent"
+    }`
+  );
 
   const readable =
-    shopify.includes("variant(s)") || woo || types.includes("Product") || ogPrice;
+    shopify.includes("variant(s)") || woo || types.includes("Product") || ogTag;
   console.log(
     `  VERDICT   | ${
       readable
