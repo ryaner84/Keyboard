@@ -1639,6 +1639,17 @@ TERMINAL_STATUSES = ("DELIVERED", "CANCELLED")
 MANUFACTURER_VENDOR_SLUGS = ("gmk", "dcs-wiki")
 MANUFACTURER_URL_PATTERNS = ("%gmk.net%", "%dcs.wiki%")
 
+# The manufacturer's OWN shop, which sells from a catalog host. GMK's Warehouse
+# Finds sale is a real storefront and `gmk-direct` is a separate Vendor row from
+# the `gmk` marker; the URL patterns above cannot tell the two apart, so this
+# list excuses it from them. Without it the price pass skipped every gmk-direct
+# listing, and an unpriced row is hidden outright on a RELEASED set — which is
+# what all of Warehouse Finds' sets are — so the manufacturer's shop published
+# nothing at all. Mirror of MANUFACTURER_STOREFRONT_SLUGS in
+# src/lib/import/manufacturer-vendors.ts; test:manufacturer-vendors fails if the
+# two lists disagree or if either price queue drops the exception.
+MANUFACTURER_STOREFRONT_SLUGS = ("gmk-direct",)
+
 
 def fetch_frozen_catalog_slugs(conn) -> set[str]:
     """Slugs the catalog pass can skip: terminal status + gmk.net link present.
@@ -1710,7 +1721,10 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
     # are shown on the site. The vendor's currency rides along as the fallback
     # when a store blocks /meta.json.
     # Manufacturer/catalog rows (GMK -> gmk.net, DCS -> dcs.wiki) only carry a
-    # catalog URL for the catalog/image passes and must never be priced.
+    # catalog URL for the catalog/image passes and must never be priced. The
+    # host patterns cannot tell those marker rows from gmk-direct, GMK's own
+    # Warehouse Finds shop, whose listings legitimately live on gmk.net — so the
+    # slug check comes first and the storefront is excused from the URL check.
     # Two cadences, not one. A row whose page the store says is GONE
     # (deadSince), or that has been unreadable DEAD_LINK_FAILURE_THRESHOLD runs
     # in a row, waits DEAD_LINK_RECHECK_HOURS instead of PRICE_MAX_AGE_HOURS. It
@@ -1735,7 +1749,7 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
            AND btrim(vk."productUrl") <> ''
            AND k.type = 'BASE'
            AND NOT (v.slug = ANY(%s))
-           AND NOT (vk."productUrl" ILIKE ANY(%s))
+           AND (v.slug = ANY(%s) OR NOT (vk."productUrl" ILIKE ANY(%s)))
            AND (vk."priceSource" IS NULL OR vk."priceSource" <> 'MANUAL')
            AND (vk."priceUpdatedAt" IS NULL
                 OR vk."priceUpdatedAt" < now() - make_interval(hours =>
@@ -1748,6 +1762,7 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(sql, (
             list(MANUFACTURER_VENDOR_SLUGS),
+            list(MANUFACTURER_STOREFRONT_SLUGS),
             list(MANUFACTURER_URL_PATTERNS),
             DEAD_LINK_FAILURE_THRESHOLD,
             DEAD_LINK_RECHECK_HOURS,

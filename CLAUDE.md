@@ -118,6 +118,29 @@ site hand-writes `slug: { not: "gmk" }` again. A bare "gmk" filter reads as
 correct and silently lets the other source through — into the price queue, into
 the discovery rotation, and onto the set page as a place to buy.
 
+**And the manufacturer's own shop is on the wrong side of that registry.** GMK
+sells its old sets directly, from `gmk.net/shop/en/gmk-warehouse-finds/…`, under
+its own Vendor row (`gmk-direct`) — a real storefront, kept deliberately visible
+by `MANUFACTURER_STOREFRONT_SLUGS` in `PURCHASABLE_VENDOR_KIT_WHERE`. Visible is
+not published: the exception was carried by the site filter alone, while both
+price queues and `fetchVendorPrice` refused the row by URL HOST, which cannot
+tell whose row it is. So no pass was ever allowed to price the manufacturer's
+shop, and an unpriced row is hidden outright on a RELEASED set — which every set
+in a warehouse sale is. All 9 listings, invisible, by our rule rather than
+anything gmk.net did, and named in the publishing report under "none priced" as
+though another scrape would fix it. The code's own justification ("it publishes
+as an unpriced store link") is true only of a set still on group buy, and its
+other half ("gmk.net blocks serverless IPs") was answered by the probe: gmk.net
+serves a runner 200 with OpenGraph product markup, and both the six-hourly price
+pass and the nightly run on runners. `isUnpriceableManufacturerListing` is the
+one question every price path now asks — the host refusal, excused for the
+storefront slugs — and `test:manufacturer-vendors` fails if either half drops
+the exception or if `refreshOne` stops selecting the vendor slug the guard
+decides on. Note the queue filter's shape: `NOT_MANUFACTURER_LISTING` is SPREAD
+into a `where` that sets its own `OR` and `AND`, so a clause added under either
+name is silently overwritten — it still typecheck, still reads correctly, and
+excludes nothing.
+
 The `Vendor` table has no `createdAt`/`updatedAt` columns. Naming them in an
 insert has broken a nightly run before.
 

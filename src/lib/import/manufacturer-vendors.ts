@@ -43,8 +43,29 @@ export const MANUFACTURER_URL_HOSTS = ["gmk.net", "dcs.wiki"] as const;
 // The one exception: GMK's own Warehouse Finds sale is a real, purchasable
 // storefront whose listings legitimately live on gmk.net. It is a separate
 // Vendor row (`gmk-direct`) from the manufacturer marker, and it stays visible
-// on the site. It is still never priced — gmk.net blocks serverless IPs — so
-// it publishes as an unpriced store link.
+// on the site.
+//
+// Visible is not the same as PUBLISHED, and for a year the exception stopped
+// one step short. It was carried by the site filter alone; both price queues
+// and `fetchVendorPrice` refused the row by URL HOST, which does not know whose
+// row it is — so no pass was ever allowed to price the manufacturer's own shop.
+// The note that stood here said that was fine because it "publishes as an
+// unpriced store link", and that is true only of a set still on group buy: an
+// unpriced row is hidden outright on a RELEASED set (VendorTable's
+// `showUnpriced`), and Warehouse Finds sells old sets, all of which are
+// released. All 9 of its listings were therefore invisible, and the publishing
+// audit reported gmk-direct as a store the site shows nothing for — under our
+// own rule, not anything gmk.net did.
+//
+// The other half of that note was stale too: gmk.net answers a GitHub runner
+// 200 with OpenGraph product markup, and the six-hourly price pass
+// (refresh-prices-ci) and the nightly scraper both run on runners. Only the
+// Vercel cron is serverless, and a block there is an ordinary unreadable row.
+//
+// So the exception now runs the whole way through: this list is what excuses a
+// row from the manufacturer-host refusal, in the price queue (both halves), in
+// `fetchVendorPrice`, and on the site. The marker slugs above are still refused
+// unconditionally — they are not shops.
 export const MANUFACTURER_STOREFRONT_SLUGS = ["gmk-direct"] as const;
 
 /** True for a catalog/archive URL that must never be scraped for a price. */
@@ -52,6 +73,32 @@ export function isManufacturerListingUrl(url: string | null | undefined): boolea
   if (!url) return false;
   const lower = url.toLowerCase();
   return MANUFACTURER_URL_HOSTS.some((host) => lower.includes(host));
+}
+
+/** True for the manufacturer's OWN shop — a store that sells from a catalog host. */
+export function isManufacturerStorefrontSlug(slug: string | null | undefined): boolean {
+  if (!slug) return false;
+  return (MANUFACTURER_STOREFRONT_SLUGS as readonly string[]).includes(slug);
+}
+
+/**
+ * The question every price path must ask before fetching: is this row a catalog
+ * reference rather than something a visitor can buy?
+ *
+ * A URL test alone answers it wrongly for gmk-direct, and a slug test alone
+ * answers it wrongly for a store row an import parked on gmk.net. Both are
+ * needed, in that order — which is why they live here rather than at the four
+ * call sites that used to spell one or the other by hand.
+ *
+ * An unknown vendor (no slug passed) is treated as NOT the storefront, so the
+ * refusal stays the safe default for any caller that has no vendor in hand.
+ */
+export function isUnpriceableManufacturerListing(
+  url: string | null | undefined,
+  vendorSlug?: string | null
+): boolean {
+  if (isManufacturerStorefrontSlug(vendorSlug)) return false;
+  return isManufacturerListingUrl(url);
 }
 
 /** `productUrl` matches one of the manufacturer hosts. */
@@ -62,9 +109,26 @@ function urlIsManufacturer(): Prisma.VendorKitWhereInput[] {
 // Price-queue filter. Rows reaching the queue always carry a non-blank
 // productUrl, so the bare NOT is safe here — no NULL can be swallowed by SQL's
 // three-valued logic.
+//
+// Two keys and no more, deliberately: this object is SPREAD into the queue's
+// `where`, which sets its own `OR` (the priceSource guard) and its own `AND`
+// (the staleness cadence). A clause written here under either name would be
+// silently overwritten by them — the filter would still typecheck, still read
+// correctly, and simply stop excluding anything. `manufacturer-vendors.test.ts`
+// pins the key set for that reason.
+//
+// The NOT reads "a manufacturer-host URL on a row that is not the
+// manufacturer's own shop": gmk-direct sells from gmk.net and must be priced
+// like any other store, while a `gmk` / `dcs-wiki` marker row is refused by the
+// slug clause above whatever its URL says.
 export const NOT_MANUFACTURER_LISTING: Prisma.VendorKitWhereInput = {
   vendor: { slug: { notIn: [...MANUFACTURER_VENDOR_SLUGS] } },
-  NOT: { OR: urlIsManufacturer() },
+  NOT: {
+    AND: [
+      { vendor: { slug: { notIn: [...MANUFACTURER_STOREFRONT_SLUGS] } } },
+      { OR: urlIsManufacturer() },
+    ],
+  },
 };
 
 // Site filter: what a visitor may be shown as a place to buy.
