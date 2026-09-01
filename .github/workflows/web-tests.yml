@@ -105,6 +105,14 @@ jobs:
         if: always()
         run: npm run test:kit-bounds
 
+      # Reads scrape.py and prices.ts: the per-host request spacing is written
+      # twice, and for a long time only the nightly had it. An unthrottled,
+      # host-clustered queue invites the 429 that reads as UNREADABLE — which
+      # backs a row off for a fortnight and hides it on every released set.
+      - name: host-throttle
+        if: always()
+        run: npm run test:host-throttle
+
       # Reads scrape.py as well as the TS sources: the manufacturer registry is
       # written in both languages and a divergence is silent at runtime.
       - name: manufacturer-vendors
