@@ -21,6 +21,10 @@ import {
   nextLinkHealth,
 } from "../../../scripts/lib/link-health.mjs";
 import { isPlausibleBaseKitPrice as isPlausibleBaseKitPriceImpl } from "../../../scripts/lib/kit-bounds.mjs";
+import {
+  HostThrottle,
+  interleaveByHost,
+} from "../../../scripts/lib/host-throttle.mjs";
 
 const BROWSER_HEADERS = {
   "User-Agent":
@@ -34,8 +38,16 @@ const BROWSER_HEADERS = {
 // the whole run.
 const FETCH_TIMEOUT_MS = 6000;
 
-// How many product URLs to fetch in parallel. Vendors are distinct hosts, so
-// this is safe; it keeps the run well inside the serverless time limit.
+// How many product URLs to fetch in parallel. It keeps the run well inside the
+// serverless time limit.
+//
+// This used to record "vendors are distinct hosts, so this is safe", which is
+// false for the order the queue is built in: candidates come back
+// `ORDER BY priceUpdatedAt ASC`, and a store's rows are all stamped by the run
+// that last visited them, so the queue reproduces the previous run's per-vendor
+// grouping and all eight lanes sit on ONE store for as many rows as it has.
+// What makes the parallelism safe is interleaveByHost + HostThrottle below, not
+// the queue happening to be mixed. See scripts/lib/host-throttle.mjs.
 const DEFAULT_CONCURRENCY = 8;
 
 // Hard wall-clock budget for a single refresh run. Vercel Hobby functions are
@@ -965,6 +977,11 @@ export interface RefreshResult {
   // want of a wider price window or a parser, not for want of another scrape.
   refused: number;
   unparsed: number;
+  // Milliseconds spent waiting on the per-host throttle. Mirrors the nightly's
+  // `throttled_s`. A large number here is not waste — it is the run declining
+  // to burst a store into rate-limiting us, which would cost the row its price
+  // and, on a released set, its place on the page.
+  throttledMs: number;
   stoppedEarly: boolean; // true if the time budget was hit before finishing
 }
 
@@ -1180,6 +1197,14 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
     },
   });
 
+  // Spread the queue across hosts BEFORE handing it to the workers. The rows
+  // and their per-store order are unchanged; only the interleaving is, and it
+  // is what makes `concurrency` lanes address `concurrency` different stores
+  // instead of bursting one. Without it the throttle below would do nothing but
+  // sleep. See scripts/lib/host-throttle.mjs.
+  const queue = interleaveByHost(candidates);
+  const throttle = new HostThrottle();
+
   const result: RefreshResult = {
     attempted: 0,
     updated: 0,
@@ -1187,6 +1212,7 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
     dead: 0,
     refused: 0,
     unparsed: 0,
+    throttledMs: 0,
     stoppedEarly: false,
   };
   const start = Date.now();
@@ -1202,12 +1228,23 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
         return;
       }
       const i = next++;
-      if (i >= candidates.length) return;
-      await refreshOne(candidates[i], result);
+      if (i >= queue.length) return;
+      // Space this request from the last one to the same host. Interleaving
+      // means it almost never sleeps until the tail, where only the stores with
+      // hundreds of listings are left — which are exactly the ones a burst gets
+      // us blocked by.
+      result.throttledMs += await throttle.wait(queue[i].productUrl);
+      // The budget can have expired while we waited; a sleep must not buy the
+      // run extra wall clock past its deadline.
+      if (Date.now() - start > maxRuntimeMs) {
+        result.stoppedEarly = true;
+        return;
+      }
+      await refreshOne(queue[i], result);
     }
   }
 
-  const lanes = Math.max(1, Math.min(concurrency, candidates.length));
+  const lanes = Math.max(1, Math.min(concurrency, queue.length));
   await Promise.all(Array.from({ length: lanes }, () => worker()));
 
   return result;

@@ -41,9 +41,16 @@ const result = await refreshPrices({
 // at all. Both used to be counted as failures, which is how a live shop read as
 // a blocked one — and neither is fixed by running this workflow again, so a run
 // that reports them is pointing at code, not at the vendor.
+// `throttledS` is what the per-host spacing cost this run. It is reported for
+// the same reason the nightly reports `throttled_s`: the only alternative to
+// paying it is bursting a store into rate-limiting us, and a 429 is UNREADABLE,
+// which backs the row off and hides it on every released set. A number that
+// climbs run over run means the queue has grown tail-heavy on a few big stores,
+// not that the throttle is misbehaving.
 console.log(
   `Price refresh: attempted=${result.attempted} updated=${result.updated} ` +
     `failed=${result.failed} dead=${result.dead} refused=${result.refused} ` +
-    `unparsed=${result.unparsed} stoppedEarly=${result.stoppedEarly}`
+    `unparsed=${result.unparsed} throttledS=${(result.throttledMs / 1000).toFixed(1)} ` +
+    `stoppedEarly=${result.stoppedEarly}`
 );
 process.exit(0);

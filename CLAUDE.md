@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Fourteen suites, all of which should pass before pushing:
+Fifteen suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -44,6 +44,7 @@ npm run test:set-merge
 npm run test:link-health
 npm run test:catalog-stock
 npm run test:kit-bounds
+npm run test:host-throttle
 npm run test:manufacturer-vendors
 npx tsc --noEmit
 ```
@@ -578,3 +579,34 @@ Stores rate-limit per IP and HTTP 429 counts as "blocked". Any pass that fetches
 many URLs must go through `HostThrottle`, and `HostThrottle.interleave()` should
 spread a queue across hosts first — a host-clustered queue costs roughly 14x more
 wall clock in throttle waits than an interleaved one.
+
+**And that rule was written for a pass in one language while the other half had
+neither piece.** `run_prices` has spaced its fetches and interleaved its queue
+since it was written; `refreshPrices` — the half that actually runs, four times
+a day in CI and again on the Vercel cron — had no throttle at all, and recorded
+the premise that made it look unnecessary: *"vendors are distinct hosts, so this
+is safe"*. That is false for the order the queue is built in. Candidates come
+back `ORDER BY priceUpdatedAt ASC`, and a store's rows are all stamped within
+milliseconds of each other by the run that last visited them, so the queue does
+not merely happen to cluster — it reproduces the previous run's per-vendor
+grouping exactly. Eight lanes pulling consecutive indices out of that are eight
+simultaneous, unspaced requests to ONE store, and they stay there for as many
+rows as it has: 219 in a row for zfrontier-cn, 206 for mykeyboard-eu, 46 for
+monokei. The stores with the most listings take the heaviest burst.
+
+The cost is not wall clock, it is published listings. A 429 — like a 403, like a
+connection that never answers — is `UNREADABLE`, so it increments
+`linkFailures`; `DEAD_LINK_FAILURE_THRESHOLD` of those back the row off to the
+14-day cadence, and an unpriced row is hidden outright on a RELEASED set. That
+is `link-health.mjs`'s one prohibition ("a block may never hide a listing")
+reached from the other end, by producing the block ourselves.
+`scripts/lib/host-throttle.mjs` is now the single definition — `prices.ts`
+IMPORTS it, `scrape.py` still mirrors it because Python cannot import a JS
+module — and `test:host-throttle` fails if the two intervals drift, if either
+half stops interleaving or throttling, or if the runner summary drops the
+`throttledS` it costs. Interleaving is what makes the throttle nearly free:
+requests to different hosts never wait on each other, so it only sleeps in the
+tail, where the small stores are exhausted and only the giants remain — which
+are exactly the rows a burst gets us blocked by. The slot is claimed
+SYNCHRONOUSLY, before the sleep, so two lanes landing on one host queue up
+instead of both reading the same stale timestamp and firing together.

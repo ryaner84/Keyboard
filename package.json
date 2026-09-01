@@ -24,6 +24,7 @@
     "test:link-health": "node scripts/lib/link-health.test.mjs",
     "test:catalog-stock": "node scripts/lib/catalog-stock.test.mjs",
     "test:kit-bounds": "node scripts/lib/kit-bounds.test.mjs",
+    "test:host-throttle": "node scripts/lib/host-throttle.test.mjs",
     "test:manufacturer-vendors": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/import/manufacturer-vendors.test.ts",
     "audit:publishing": "node scripts/vendor-publishing-audit.mjs"
   },
