@@ -26,6 +26,7 @@
     "test:kit-bounds": "node scripts/lib/kit-bounds.test.mjs",
     "test:host-throttle": "node scripts/lib/host-throttle.test.mjs",
     "test:manufacturer-vendors": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/import/manufacturer-vendors.test.ts",
+    "test:subkit-sets": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/import/subkit-sets.test.ts",
     "audit:publishing": "node scripts/vendor-publishing-audit.mjs"
   },
   "prisma": {

@@ -5,6 +5,7 @@ import {
   ADDON_VARIANT_RE,
   NONBASE_SUBKIT_RE,
   PRODUCT_ACCESSORY_RE,
+  isSubkitSetName,
 } from "@/lib/kit-variants";
 import {
   NOT_MANUFACTURER_LISTING,
@@ -247,7 +248,11 @@ function structuredVariantAvailability(html: string): Map<string, boolean> {
 
 // Shopify exposes a product's data at {productUrl}.json — used by most
 // keyboard vendors (CannonKeys, NovelKeys, KBDfans, Deskhero, Daily Clack...).
-async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): Promise<FetchPriceOutcome> {
+async function fetchShopifyPrice(
+  productUrl: string,
+  vendorCurrency?: string,
+  allowSubkits = false
+): Promise<FetchPriceOutcome> {
   if (!productUrl.includes("/products/")) return null;
 
   // Strip query/hash, then request the .json variant.
@@ -358,8 +363,16 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     // guard such a product's lone variant classifies OTHERS and gets stored
     // as the set's base price. A vendor-pinned ?variant= link stays ground
     // truth and bypasses the guard. Mirrors the scraper's title guard.
+    // …unless the SET being priced is itself one of those products. The guard
+    // asks "is this product a subkit?", which is the right question only while
+    // the set it is linked to is a whole set. When the tracked set IS the
+    // subkit ("DCS After School 1992 40s kit"), its own store page necessarily
+    // trips the guard, so the row could never be priced by any pass — and an
+    // unpriced row is hidden outright on a RELEASED set. That is not a
+    // reporting nicety: Saber Keebs' single listing is one of these, so the
+    // store published nothing at all and the audit called it a pricing backlog.
     const productTitle = String(data.product?.title ?? "");
-    if (!pinnedId && productTitle) {
+    if (!pinnedId && !allowSubkits && productTitle) {
       const titleCategory = classifyVariant(productTitle);
       const isSubkitProduct =
         titleCategory === "NOVELTIES" ||
@@ -416,7 +429,7 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     // audit): accessories dropped (an accessory-only list yields null instead
     // of falling back to a deskmat price), labeled subkits dropped, first
     // BASE-titled variant wins, else the dearest remaining candidate.
-    const chosen = pinned ?? pickBaseVariant(variants);
+    const chosen = pinned ?? pickBaseVariant(variants, allowSubkits);
     if (!chosen) {
       // Read the product fine, but it has no base candidate (only subkits or
       // accessories) and the vendor didn't pin a variant. Clear any stale
@@ -641,7 +654,8 @@ export function parseWooCommerceVariations(html: string): WooVariant[] {
 // no currency of its own.
 async function fetchJsonLdPrice(
   productUrl: string,
-  vendorCurrency?: string
+  vendorCurrency?: string,
+  allowSubkits = false
 ): Promise<FetchPriceOutcome> {
   try {
     const res = await fetchWithTimeout(productUrl);
@@ -672,7 +686,7 @@ async function fetchJsonLdPrice(
       if (currency && !SUPPORTED_CURRENCIES.has(currency)) return PRICE_REFUSED;
       // Same canonical pick as the Shopify path and the audit; an
       // accessory-only variation list yields null → NO_BASE_KIT below.
-      const chosen = pickBaseVariant(wooVariants);
+      const chosen = pickBaseVariant(wooVariants, allowSubkits);
       // Only subkits on offer (no base candidate) — clear the stale wrong price
       // rather than preserve it forever.
       if (!chosen) return NO_BASE_KIT;
@@ -784,10 +798,13 @@ async function fetchJsonLdPrice(
           // A single NAMED offer that is a subkit/accessory (the base sold out
           // and was delisted, leaving e.g. "Novelties — €39") must not be
           // stored as the base price.
+          // Same exception as the product-title guard above: when the tracked
+          // set IS a subkit, an offer named for that subkit is its base offer.
           const name = String(offerList[0]?.name ?? "");
           const category = classifyVariant(name);
           if (
             name &&
+            !allowSubkits &&
             (category === "NOVELTIES" ||
               category === "SPACEBARS" ||
               category === "ALPHA" ||
@@ -920,7 +937,12 @@ async function fetchJsonLdPrice(
 export async function fetchVendorPrice(
   productUrl: string,
   vendorCurrency?: string,
-  vendorSlug?: string
+  vendorSlug?: string,
+  // True when the SET this row belongs to is itself a subkit product (see
+  // isSubkitSetName). Defaulting to false keeps every existing caller's
+  // behaviour, and is why the flag is derived from the set name at the queue
+  // rather than guessed from the URL: only the tracked set knows.
+  allowSubkits = false
 ): Promise<FetchPriceOutcome> {
   if (!productUrl) return null;
   // GMK and dcs.wiki are catalog sources, not vendors — their links are
@@ -938,7 +960,7 @@ export async function fetchVendorPrice(
   // A priced result OR the NO_BASE_KIT sentinel (both truthy) is a definitive
   // answer from the Shopify path — only a null (transient) falls through to the
   // JSON-LD reader.
-  const shopify = await fetchShopifyPrice(productUrl, vendorCurrency);
+  const shopify = await fetchShopifyPrice(productUrl, vendorCurrency, allowSubkits);
   // A refusal falls through too, exactly as the null it replaced did: the
   // product page's own markup is allowed to answer better than the variant this
   // pass picked, and a bookkeeping split must not quietly change which number
@@ -946,7 +968,7 @@ export async function fetchVendorPrice(
   // better to say, the refusal is still what happened, and saying "couldn't
   // read it" instead is what filed live shops as dead links.
   if (shopify && shopify !== PRICE_REFUSED) return shopify;
-  const generic = await fetchJsonLdPrice(productUrl, vendorCurrency);
+  const generic = await fetchJsonLdPrice(productUrl, vendorCurrency, allowSubkits);
   if (
     shopify === PRICE_REFUSED &&
     (generic === null || generic === NO_PRODUCT_DATA)
@@ -994,6 +1016,9 @@ async function refreshOne(
     // a manufacturer host unless the row belongs to the manufacturer's own shop
     // — without it every gmk-direct listing is refused before it is fetched.
     vendor: { currency: string; slug: string };
+    // …and the set name rides along for the same kind of reason: without it
+    // every subkit set is cleared before its variants are looked at.
+    kit?: { groupBuy?: { name?: string | null } | null } | null;
     linkFailures?: number;
     deadSince?: Date | null;
   },
@@ -1001,7 +1026,12 @@ async function refreshOne(
 ): Promise<void> {
   if (!vk.productUrl) return;
   result.attempted++;
-  const priceData = await fetchVendorPrice(vk.productUrl, vk.vendor.currency, vk.vendor.slug);
+  const priceData = await fetchVendorPrice(
+    vk.productUrl,
+    vk.vendor.currency,
+    vk.vendor.slug,
+    isSubkitSetName(vk.kit?.groupBuy?.name)
+  );
   const outcome =
     priceData === DEAD_LINK
       ? "GONE"
@@ -1194,6 +1224,11 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
       linkFailures: true,
       deadSince: true,
       vendor: { select: { currency: true, slug: true } },
+      // The set's own name decides whether a subkit-named product/variant is
+      // this row's BASE kit (isSubkitSetName). Omitting it does not fail
+      // loudly: every subkit set silently answers NO_BASE_KIT instead, which
+      // is unpriced, which is hidden on a released set.
+      kit: { select: { groupBuy: { select: { name: true } } } },
     },
   });
 

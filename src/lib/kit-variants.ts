@@ -89,6 +89,42 @@ export const PRODUCT_ACCESSORY_RE =
 export const NONBASE_SUBKIT_RE =
   /num(?:ber)?\s*pad|\b40s\b|forties|accents?\b|extension|hiragana|katakana|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b/i;
 
+// A product whose RAW title names a subkit or accessory rather than a whole
+// set. Two consumers, and they ask opposite questions of it:
+//
+//   discovery  — of a STORE PRODUCT: never link "GMK Foo (Novelties)" as GMK
+//                Foo's base listing (normalizeSetName strips the bracket, so
+//                it would collide with the set name and overwrite the real
+//                product's URL).
+//   the price  — of the TRACKED SET's own name: when the set we are pricing IS
+//   passes      one of these, its own kind of kit is the base kit and must not
+//               be excluded. See `allowSubkits` below.
+//
+// Mirror of _SUBKIT_PRODUCT_RE in scraper/scrape.py — keep in sync.
+// "alphas" is plural-only so a set legitimately named "… Alpha" still links.
+export const SUBKIT_PRODUCT_RE = new RegExp(
+  `novelt|space\\s*bars?|\\balphas\\b|${NONBASE_SUBKIT_RE.source}|${PRODUCT_ACCESSORY_RE.source}`,
+  "i"
+);
+
+/**
+ * Is the tracked SET itself a subkit product?
+ *
+ * The dcs.wiki archive catalogs subkits as first-class sets — "DCS After School
+ * 1992 40s kit", "DCS 10U Spacebars", "DCS Bae Addon", "DCS LAE Addon" — and a
+ * store sells each as one product whose base offering is, necessarily, a
+ * subkit-named variant. Every subkit rule in the price path exists to stop "GMK
+ * Foo Novelties" being priced as GMK Foo's base kit, and each of them fires on
+ * these sets too, where it is exactly wrong.
+ *
+ * Asked of the SET name, never the product title: the product title cannot tell
+ * the two cases apart (both say "40s"), and only the set being priced knows
+ * which of them it is. Mirror of run_prices' allow_subkits in scrape.py.
+ */
+export function isSubkitSetName(setName: string | null | undefined): boolean {
+  return SUBKIT_PRODUCT_RE.test(String(setName ?? ""));
+}
+
 // THE canonical base-kit pick, used by every consumer that must agree on
 // which variant is the base: the Shopify/Woo price pickers and the nightly
 // price audit. Order: drop accessories; drop labeled subkits (alphas/
@@ -97,8 +133,18 @@ export const NONBASE_SUBKIT_RE =
 // cheaper lines). Returns null when the listing has no base candidate —
 // including when it carries ONLY accessories — so callers clear rather than
 // store a wrong price.
+//
+// `allowSubkits` is for a set that IS a subkit. The dcs.wiki archive catalogs
+// several as products in their own right — "DCS After School 1992 40s kit",
+// "DCS 10U Spacebars", "DCS Bae Addon" — and on those listings the 40s /
+// spacebar variant IS the base kit, not something to exclude. Saber Keebs' After
+// School page is the case that found it: its variants are "40s Monokit" $140,
+// "BAE" $10 and "LAE" $10, so dropping the 40s variant leaves the $10 add-ons as
+// the only candidates and the set prices at $10. Mirror of choose_kit_variant's
+// allow_subkits in scraper/scrape.py.
 export function pickBaseVariant<T extends { title: string; price: number }>(
-  variants: T[]
+  variants: T[],
+  allowSubkits = false
 ): T | null {
   if (variants.length === 0) return null;
   const nonAddon = variants.filter((v) => !ADDON_VARIANT_RE.test(v.title));
@@ -109,7 +155,7 @@ export function pickBaseVariant<T extends { title: string; price: number }>(
   const basePool = nonAddon.filter((v) => {
     const category = classifyVariant(v.title);
     if (category === "BASE") return true;
-    return category === "OTHERS" && !NONBASE_SUBKIT_RE.test(v.title);
+    return category === "OTHERS" && (allowSubkits || !NONBASE_SUBKIT_RE.test(v.title));
   });
   const titledBase = basePool.find((v) => classifyVariant(v.title) === "BASE");
   if (titledBase) return titledBase;
