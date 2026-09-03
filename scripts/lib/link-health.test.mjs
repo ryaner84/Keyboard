@@ -6,6 +6,7 @@ import {
   DEAD_LINK_FAILURE_THRESHOLD,
   DEAD_LINK_RECHECK_HOURS,
   DEAD_LINK_STATUSES,
+  UNDIAGNOSED_RECHECK_HOURS,
   PRICE_SOURCE_REFUSED,
   PRICE_SOURCE_UNPARSED,
   describeDeadListings,
@@ -15,7 +16,9 @@ import {
   isGoneHostError,
   isGoneRedirect,
   isUnbuyableDeadLink,
+  isUndiagnosed,
   nextLinkHealth,
+  recheckHoursFor,
 } from "./link-health.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -351,8 +354,54 @@ assert.equal(
 // The queue must back dead rows off rather than re-fetch them every six hours.
 assert.match(
   scrapePy,
-  /CASE WHEN vk\."deadSince" IS NOT NULL/,
+  /WHEN vk\."deadSince" IS NOT NULL\s*\n\s*OR coalesce\(vk\."linkFailures", 0\) >= %s/,
   "fetch_price_candidates must give dead rows a slower cadence"
+);
+// …and a row it has reached no verdict about must NOT wait the full fortnight.
+// That arm is what lets a newly-shipped diagnosis reach the rows it was written
+// for: without it #156's dead-host check could not run against a single one of
+// the seven vendors it was for, because all of them had been parked the day
+// before it landed. The undiagnosed arm has to come FIRST in the CASE — SQL
+// takes the first matching WHEN, and an undiagnosed row also satisfies the
+// linkFailures test in the arm below it.
+assert.match(
+  scrapePy,
+  /CASE\s*\n\s*WHEN vk\."deadSince" IS NULL\s*\n\s*AND vk\."priceSource" IS NULL\s*\n\s*AND coalesce\(vk\."linkFailures", 0\) >= %s/,
+  "fetch_price_candidates must check the undiagnosed cadence before the dead one"
+);
+assert.equal(
+  eval(pyConst("UNDIAGNOSED_RECHECK_HOURS")),
+  UNDIAGNOSED_RECHECK_HOURS,
+  "scrape.py's UNDIAGNOSED_RECHECK_HOURS must match link-health.mjs"
+);
+// The shorter window is only worth having if it is shorter — and only worth
+// bounding if it is still slower than the normal cadence it backed off from.
+assert.ok(
+  UNDIAGNOSED_RECHECK_HOURS < DEAD_LINK_RECHECK_HOURS,
+  "an undiagnosed row must be rechecked sooner than one with a verdict"
+);
+
+// --- isUndiagnosed / recheckHoursFor ---------------------------------------
+// deadSince and priceSource are both verdicts; either one ends the short
+// cadence. All three priceSource marks count — SCRAPED, REFUSED and UNPARSED
+// each record something the pass learned about the row.
+assert.equal(isUndiagnosed({ deadSince: null, priceSource: null }), true);
+assert.equal(isUndiagnosed({ deadSince: T0, priceSource: null }), false);
+for (const mark of ["SCRAPED", PRICE_SOURCE_REFUSED, PRICE_SOURCE_UNPARSED]) {
+  assert.equal(
+    isUndiagnosed({ deadSince: null, priceSource: mark }),
+    false,
+    `${mark} is a verdict, so the row is diagnosed`
+  );
+}
+assert.equal(
+  recheckHoursFor({ deadSince: null, priceSource: null }),
+  UNDIAGNOSED_RECHECK_HOURS
+);
+assert.equal(recheckHoursFor({ deadSince: T0 }), DEAD_LINK_RECHECK_HOURS);
+assert.equal(
+  recheckHoursFor({ priceSource: "SCRAPED" }),
+  DEAD_LINK_RECHECK_HOURS
 );
 
 // --- the TypeScript half ---------------------------------------------------
@@ -360,6 +409,32 @@ const pricesTs = readFileSync(join(REPO_ROOT, "src", "lib", "import", "prices.ts
 assert.ok(
   /from "\.\.\/\.\.\/\.\.\/scripts\/lib\/link-health\.mjs"/.test(pricesTs),
   "prices.ts must import this module rather than restate the thresholds"
+);
+// The half that actually runs must carry the undiagnosed cadence too. Without
+// it a diagnosis shipped here reaches the nightly and never the six-hourly CI
+// run, which is the one that visits most rows — half a fix, again.
+assert.ok(
+  /UNDIAGNOSED_RECHECK_HOURS/.test(pricesTs),
+  "prices.ts must give an undiagnosed backed-off row the shorter cadence"
+);
+assert.ok(
+  /const undiagnosedCutoff =\s*\n\s*maxAgeHours <= 0\s*\n\s*\? cutoff/.test(pricesTs),
+  "FORCE_PRICE_REFRESH must override the undiagnosed cadence like the dead one"
+);
+// The two backed-off arms must be disjoint on the verdict columns, or the
+// fortnight arm also matches an undiagnosed row and Prisma's OR lets it back
+// in on the slow cadence — the bug this split exists to close.
+assert.ok(
+  /\{ deadSince: null \},\s*\n\s*\{ priceSource: null \},\s*\n\s*\{ linkFailures: \{ gte: DEAD_LINK_FAILURE_THRESHOLD \} \},\s*\n\s*\{ priceUpdatedAt: \{ lt: undiagnosedCutoff \} \},/.test(
+    pricesTs
+  ),
+  "the undiagnosed arm must require no deadSince AND no priceSource"
+);
+assert.ok(
+  /\{ deadSince: \{ not: null \} \},\s*\n\s*\{ priceSource: \{ not: null \} \},\s*\n\s*\],\s*\n\s*\},/.test(
+    pricesTs
+  ),
+  "the fortnight arm must require a verdict (deadSince or priceSource)"
 );
 // Same two paths as scrape.py: fetchShopifyPrice and fetchJsonLdPrice.
 assert.equal(

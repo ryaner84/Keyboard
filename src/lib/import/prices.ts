@@ -13,6 +13,7 @@ import {
 import {
   DEAD_LINK_FAILURE_THRESHOLD,
   DEAD_LINK_RECHECK_HOURS,
+  UNDIAGNOSED_RECHECK_HOURS,
   PRICE_SOURCE_REFUSED,
   PRICE_SOURCE_UNPARSED,
   isDeadLinkStatus,
@@ -1130,6 +1131,15 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
     maxAgeHours <= 0
       ? cutoff
       : new Date(Date.now() - DEAD_LINK_RECHECK_HOURS * 60 * 60 * 1000);
+  // The third cadence, for a backed-off row the pass has reached NO verdict
+  // about: six unreadable attempts, still no deadSince and still no
+  // priceSource. The fortnight above is priced against knowledge and this row
+  // has none, so all it buys is a fortnight during which no newly-shipped
+  // diagnosis can reach the row. See UNDIAGNOSED_RECHECK_HOURS.
+  const undiagnosedCutoff =
+    maxAgeHours <= 0
+      ? cutoff
+      : new Date(Date.now() - UNDIAGNOSED_RECHECK_HOURS * 60 * 60 * 1000);
 
   const candidates = await prisma.vendorKit.findMany({
     where: {
@@ -1154,14 +1164,24 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
       // An explicit id list means "price these NOW" — skip the staleness gate.
       ...(!ids?.length && {
         AND: {
-          // Two cadences, not one. A row whose page the store says is GONE, or
-          // that has been unreadable for DEAD_LINK_FAILURE_THRESHOLD runs in a
-          // row, waits DEAD_LINK_RECHECK_HOURS instead of `maxAgeHours` — it
-          // cannot be priced, and this run is time-boxed, so re-fetching it
-          // every six hours costs live listings their turn (and an unpriced
-          // live listing is hidden outright on a RELEASED set). It is a
-          // back-off, never a retirement: the row keeps its place and the
-          // first read that gets through resets both columns.
+          // THREE cadences, not one. A row whose page the store says is GONE,
+          // or that has been unreadable for DEAD_LINK_FAILURE_THRESHOLD runs in
+          // a row, waits instead of `maxAgeHours` — it cannot be priced, and
+          // this run is time-boxed, so re-fetching it every six hours costs
+          // live listings their turn (and an unpriced live listing is hidden
+          // outright on a RELEASED set). It is a back-off, never a retirement:
+          // the row keeps its place and the first read that gets through resets
+          // both columns.
+          //
+          // How long it waits depends on whether anything is KNOWN about it.
+          // A row carrying deadSince or priceSource has a verdict and will say
+          // the same thing tomorrow, so it waits DEAD_LINK_RECHECK_HOURS. A row
+          // carrying neither has produced no fact in six attempts, and the
+          // fortnight then buys nothing while costing the row every diagnosis
+          // shipped in the meantime — which is exactly how #156's dead-host
+          // check never once ran against the seven vendors it was written for.
+          // Those wait UNDIAGNOSED_RECHECK_HOURS and rejoin one of the other
+          // two cadences the moment a verdict lands.
           OR: [
             { priceUpdatedAt: null },
             {
@@ -1176,10 +1196,24 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
                 {
                   OR: [
                     { deadSince: { not: null } },
+                    { priceSource: { not: null } },
+                  ],
+                },
+                {
+                  OR: [
+                    { deadSince: { not: null } },
                     { linkFailures: { gte: DEAD_LINK_FAILURE_THRESHOLD } },
                   ],
                 },
                 { priceUpdatedAt: { lt: deadCutoff } },
+              ],
+            },
+            {
+              AND: [
+                { deadSince: null },
+                { priceSource: null },
+                { linkFailures: { gte: DEAD_LINK_FAILURE_THRESHOLD } },
+                { priceUpdatedAt: { lt: undiagnosedCutoff } },
               ],
             },
           ],

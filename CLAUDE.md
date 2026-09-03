@@ -490,6 +490,47 @@ RELEASED set. A backed-off row waits `DEAD_LINK_RECHECK_HOURS` (14 days)
 instead. It is a back-off, never a retirement: the row keeps its place in the
 queue, and `FORCE_PRICE_REFRESH` ignores it entirely.
 
+**And a back-off outlived the code that caused it, so every fix above reached
+the rows it was written for except on the rows that needed it.** The fortnight
+is priced against KNOWLEDGE: a row the store 404'd, or one the pass has read,
+will say the same thing in a fortnight, so waiting costs nothing. A row with
+neither `deadSince` nor `priceSource` is the opposite case — six attempts have
+produced no fact at all — and parking that for fourteen days freezes it against
+every improvement in diagnosis, which is the only thing that could ever change
+its answer. `isGoneHostError` (#156) shipped on 2026-08-30 to answer
+`DEAD_LINK` for a host that no longer resolves; by then all seven of the
+vendors it was written for had hit `DEAD_LINK_FAILURE_THRESHOLD` and been
+parked until 2026-09-13, so it never ran against one of the ~253 listings it
+was for. Four days of `audit:publishing` printed the same pre-fix sentence —
+"the price pass has never read one — the store's links are dead; relink or
+retire it" — about mykeyboard.eu (206 rows) and six other dead domains, about
+`olkb`, whose one link is a plain 404, and about eight stores that answer a
+runner perfectly well (rationalkeys.com.tr serves JSON-LD Product; thicthock
+521, zionstudios.ph 526 and alphakeys.ca 402 were blocking, not gone; auramech
+and hineybush serve an incomplete TLS chain; mkultra.click was an `EAI_AGAIN`).
+Nothing was wrong with any of those diagnoses except their date, and only
+`FORCE_PRICE_REFRESH` — a person, by hand, who happens to know — could correct
+them. `UNDIAGNOSED_RECHECK_HOURS` (24) is the third cadence: a backed-off row
+carrying no verdict waits a day, not a fortnight, so any answer this codebase
+learns reaches every row within one nightly run, and the row leaves that
+cadence for one of the other two the moment a verdict lands. Written twice, as
+ever — `prices.ts` builds the arm from the constant, `scrape.py` mirrors it as
+a third `WHEN`, and it must come FIRST in that `CASE`, because SQL takes the
+first matching arm and an undiagnosed row also satisfies the `linkFailures`
+test below it. `test:link-health` fails if the constants drift, if either
+half's arm stops requiring BOTH verdict columns to be null, or if
+`FORCE_PRICE_REFRESH` stops overriding it.
+
+A corollary for the report: every line `planPublishingReport` prints is read
+off columns a price ATTEMPT writes, so it describes the code as it was at
+`lastAttempt`, not as it is now. `audit:publishing` prints `attempted`,
+`failures` and `lastAttempt` beside each silent vendor for exactly that reason
+— a stale date on a fully backed-off store means re-read the rows before acting
+on the sentence next to it. `queued` is the companion count: the price queue
+filters on a non-blank `productUrl` and a BASE kit, so a row failing either is
+never fetched, never priced and never dead-marked, and leaves the identical
+residue as a store that never answered.
+
 **The price pass is written twice too** — `run_prices` in `scrape.py` (the
 nightly with a real browser) and `refreshPrices` in `src/lib/import/prices.ts`
 (the Vercel cron and `refresh-prices-ci`). `prices.ts` IMPORTS `link-health.mjs`

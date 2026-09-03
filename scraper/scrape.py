@@ -671,6 +671,19 @@ DEAD_LINK_FAILURE_THRESHOLD = 6
 # through resets both columns, so a store that comes back needs no help.
 DEAD_LINK_RECHECK_HOURS = 24 * 14
 
+# How long a backed-off row waits when the pass has reached NO VERDICT about it:
+# six unreadable attempts and still no deadSince and no priceSource.
+#
+# The fortnight above is priced against knowledge — a row the store 404'd, or one
+# the pass has read, says the same thing tomorrow, so waiting costs nothing. A
+# row with neither has produced no fact at all, and parking it for a fortnight
+# freezes it against every IMPROVEMENT in diagnosis. isGoneHostError (#156)
+# shipped on 2026-08-30 and every vendor it was written for had already been
+# parked until 2026-09-13, so it never ran against one of the ~253 listings it
+# was for. A day keeps four-fifths of the saving and bounds that to one run.
+# Mirror of UNDIAGNOSED_RECHECK_HOURS in scripts/lib/link-health.mjs.
+UNDIAGNOSED_RECHECK_HOURS = 24
+
 
 def is_gone_redirect(request_url, final_url) -> bool:
     """True when a request was answered by a storefront's FRONT DOOR.
@@ -1725,14 +1738,23 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
     # host patterns cannot tell those marker rows from gmk-direct, GMK's own
     # Warehouse Finds shop, whose listings legitimately live on gmk.net — so the
     # slug check comes first and the storefront is excused from the URL check.
-    # Two cadences, not one. A row whose page the store says is GONE
+    # THREE cadences, not one. A row whose page the store says is GONE
     # (deadSince), or that has been unreadable DEAD_LINK_FAILURE_THRESHOLD runs
-    # in a row, waits DEAD_LINK_RECHECK_HOURS instead of PRICE_MAX_AGE_HOURS. It
-    # cannot be priced, and this pass is time-boxed, so re-fetching it every six
-    # hours costs live listings their turn — and an unpriced live listing is
-    # hidden outright on a RELEASED set, which is where most listings are. Left
-    # on the fast cadence, several hundred permanently-dead rows were crowding
-    # out the stores that can still sell something.
+    # in a row, waits instead of PRICE_MAX_AGE_HOURS. It cannot be priced, and
+    # this pass is time-boxed, so re-fetching it every six hours costs live
+    # listings their turn — and an unpriced live listing is hidden outright on a
+    # RELEASED set, which is where most listings are. Left on the fast cadence,
+    # several hundred permanently-dead rows were crowding out the stores that
+    # can still sell something.
+    #
+    # How LONG it waits depends on whether anything is known about it. With a
+    # deadSince or a priceSource the row has a verdict and will say the same
+    # thing tomorrow: DEAD_LINK_RECHECK_HOURS. With neither, six attempts have
+    # produced no fact, and the fortnight buys nothing while costing the row
+    # every diagnosis shipped in the meantime — which is how #156's dead-host
+    # check never once ran against the seven vendors it was written for. Those
+    # wait UNDIAGNOSED_RECHECK_HOURS and rejoin one of the other two cadences as
+    # soon as a verdict lands.
     #
     # A back-off, never a retirement: the row keeps its place in the queue, and
     # next_link_health resets both columns on the first read that gets through,
@@ -1753,9 +1775,16 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
            AND (vk."priceSource" IS NULL OR vk."priceSource" <> 'MANUAL')
            AND (vk."priceUpdatedAt" IS NULL
                 OR vk."priceUpdatedAt" < now() - make_interval(hours =>
-                     CASE WHEN vk."deadSince" IS NOT NULL
-                                OR coalesce(vk."linkFailures", 0) >= %s
-                          THEN %s ELSE %s END))
+                     CASE
+                       WHEN vk."deadSince" IS NULL
+                            AND vk."priceSource" IS NULL
+                            AND coalesce(vk."linkFailures", 0) >= %s
+                         THEN %s
+                       WHEN vk."deadSince" IS NOT NULL
+                            OR coalesce(vk."linkFailures", 0) >= %s
+                         THEN %s
+                       ELSE %s
+                     END))
          ORDER BY vk."priceUpdatedAt" ASC NULLS FIRST
          LIMIT %s
     """
@@ -1764,6 +1793,8 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
             list(MANUFACTURER_VENDOR_SLUGS),
             list(MANUFACTURER_STOREFRONT_SLUGS),
             list(MANUFACTURER_URL_PATTERNS),
+            DEAD_LINK_FAILURE_THRESHOLD,
+            UNDIAGNOSED_RECHECK_HOURS,
             DEAD_LINK_FAILURE_THRESHOLD,
             DEAD_LINK_RECHECK_HOURS,
             PRICE_MAX_AGE_HOURS,
