@@ -67,6 +67,38 @@ export const DEAD_LINK_FAILURE_THRESHOLD = 6;
 export const DEAD_LINK_RECHECK_HOURS = 24 * 14;
 
 /**
+ * How long a backed-off row waits when the pass has reached NO VERDICT about it
+ * at all — six unreadable attempts and still no `deadSince` and no
+ * `priceSource`.
+ *
+ * The fortnight above is priced against knowledge: a row the store 404'd, or one
+ * the pass has read and understood, will say the same thing tomorrow, so waiting
+ * costs nothing. A row in neither state is the opposite case — six attempts have
+ * produced no fact whatsoever — and parking it for a fortnight has a cost the
+ * other two do not: it freezes the row against every IMPROVEMENT in diagnosis.
+ *
+ * That is not hypothetical. `isGoneHostError` (#156) shipped on 2026-08-30 to
+ * answer DEAD_LINK for a host that no longer resolves. By then all seven of the
+ * vendors it was written for had already hit DEAD_LINK_FAILURE_THRESHOLD and
+ * been parked until 2026-09-13, so the check never ran against a single one of
+ * the ~253 listings it was for. Four days of publishing audits printed the
+ * pre-fix sentence — "the price pass has never read one — the store's links are
+ * dead; relink or retire it" — about mykeyboard.eu (206 rows) and six others,
+ * and about eight more stores that answer perfectly well (rationalkeys.com.tr
+ * serves JSON-LD Product; thicthock, zionstudios.ph and alphakeys.ca were
+ * blocking, not gone). A verdict shipped is worth nothing until it reaches its
+ * rows, and only FORCE_PRICE_REFRESH — a person, by hand, who happens to know —
+ * could make that happen.
+ *
+ * A day is the compromise: still four-fifths of what the back-off was for (one
+ * attempt a day instead of four), and short enough that any diagnosis this
+ * codebase learns reaches every undiagnosed row on the next nightly run rather
+ * than a fortnight later. The moment a verdict does land — dead, read, refused
+ * or unparsed — the row leaves this cadence for one of the other two by itself.
+ */
+export const UNDIAGNOSED_RECHECK_HOURS = 24;
+
+/**
  * What `VendorKit.priceSource` records once the pass has READ a page.
  *
  * 'SCRAPED' used to be the only mark, so every read collapsed into one fact and
@@ -250,6 +282,35 @@ export function nextLinkHealth(current, outcome, now = new Date()) {
 export function isBackedOff(row) {
   if (row?.deadSince) return true;
   return (Number(row?.linkFailures ?? 0) || 0) >= DEAD_LINK_FAILURE_THRESHOLD;
+}
+
+/**
+ * True when a backed-off row carries no verdict of any kind.
+ *
+ * `deadSince` means the store answered "gone"; `priceSource` means the pass READ
+ * the page (SCRAPED, REFUSED or UNPARSED all count — each records something the
+ * pass learned). Neither means six attempts produced no fact at all, which is
+ * the only state where waiting DEAD_LINK_RECHECK_HOURS buys nothing and costs
+ * the row every diagnosis shipped in the meantime. See
+ * UNDIAGNOSED_RECHECK_HOURS.
+ *
+ * Deliberately about the ROW's stored evidence, not about why it failed: the
+ * pass cannot tell a Cloudflare block from a closed shop, which is the premise
+ * `linkFailures` exists on. It only asks whether anything is known yet.
+ */
+export function isUndiagnosed(row) {
+  return !row?.deadSince && !row?.priceSource;
+}
+
+/**
+ * Hours a backed-off row waits before the queue looks again.
+ *
+ * One function so the two halves cannot drift on which cadence applies to which
+ * row: prices.ts builds its Prisma filter from it and scrape.py mirrors the same
+ * CASE in SQL.
+ */
+export function recheckHoursFor(row) {
+  return isUndiagnosed(row) ? UNDIAGNOSED_RECHECK_HOURS : DEAD_LINK_RECHECK_HOURS;
 }
 
 /**

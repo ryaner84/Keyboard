@@ -117,6 +117,40 @@ try {
              AS dead_listings,
            (SELECT min(vk."deadSince") FROM public."VendorKit" vk
              WHERE vk."vendorId" = v.id) AS deadest_since,
+           -- How the price queue SEES this vendor, which is a different
+           -- question from what the price pass concluded — and the four reasons
+           -- above can only ever answer the second.
+           --
+           -- Every diagnosis here is read off columns a price ATTEMPT writes,
+           -- so a row the queue is not currently visiting yields the same
+           -- residue as one the store never answered: read=0, priced=0, dead=0,
+           -- and the confident sentence "the store's links are dead; relink or
+           -- retire it". On 2026-09-03 that sentence was being printed about
+           -- nineteen vendors whose rows had all been parked on the 14-day
+           -- back-off four days earlier, eight of which answer a runner
+           -- perfectly well. lastAttempt and failures are what tell the two
+           -- apart, and queued says whether the queue can select the row at
+           -- all (it filters on a non-blank productUrl and a BASE kit, so a row
+           -- failing either is never fetched, never priced and never
+           -- dead-marked — by our rule, not the store's).
+           --
+           -- A stale lastAttempt on a fully backed-off vendor means the
+           -- reason beside it describes the code as it was THEN. Re-read the
+           -- rows before acting on it: refresh-prices with force ignores the
+           -- back-off entirely.
+           (SELECT count(*)::int
+              FROM public."VendorKit" vk
+              JOIN public."Kit" k ON k.id = vk."kitId"
+             WHERE vk."vendorId" = v.id
+               AND k.type = 'BASE'
+               AND btrim(coalesce(vk."productUrl", '')) <> '') AS queued_listings,
+           (SELECT count(*)::int FROM public."VendorKit" vk
+             WHERE vk."vendorId" = v.id AND vk."priceUpdatedAt" IS NOT NULL)
+             AS attempted_listings,
+           (SELECT max(vk."priceUpdatedAt") FROM public."VendorKit" vk
+             WHERE vk."vendorId" = v.id) AS last_attempt,
+           (SELECT max(vk."linkFailures") FROM public."VendorKit" vk
+             WHERE vk."vendorId" = v.id) AS max_link_failures,
            (
              SELECT count(*)::int
                FROM public."VendorKit" vk
@@ -163,6 +197,10 @@ try {
     deadListings: r.dead_listings,
     deadestSince: r.deadest_since,
     visibleListings: r.visible_listings,
+    queuedListings: r.queued_listings,
+    attemptedListings: r.attempted_listings,
+    lastAttempt: r.last_attempt,
+    maxLinkFailures: r.max_link_failures,
   }));
   const bySlug = new Map(vendors.map((v) => [v.slug, v]));
   console.log(`Vendor publishing audit — ${vendors.length} vendor row(s).`);
@@ -245,7 +283,11 @@ try {
         ` | ${v.websiteUrl} | listings=${row.listings}` +
         ` read=${row.readListings} priced=${row.pricedListings}` +
         ` dead=${row.deadListings} refused=${row.refusedListings}` +
-        ` unparsed=${row.unparsedListings} | ${v.reason}` +
+        ` unparsed=${row.unparsedListings}` +
+        ` queued=${row.queuedListings} attempted=${row.attemptedListings}` +
+        ` failures=${row.maxLinkFailures ?? 0}` +
+        ` lastAttempt=${row.lastAttempt ? new Date(row.lastAttempt).toISOString().slice(0, 10) : "never"}` +
+        ` | ${v.reason}` +
         ` | ${sample(row.listingUrls)}`
     );
   }
