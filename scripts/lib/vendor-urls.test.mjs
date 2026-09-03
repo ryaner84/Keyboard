@@ -803,7 +803,7 @@ const silent = planPublishingReport(
     { slug: "dcs-wiki", websiteUrl: "https://dcs.wiki", visibleListings: 0 },
     { slug: "fancycustoms", websiteUrl: "https://fancycustoms.com", visibleListings: 0 },
   ],
-  new Set(["gmk", "dcs-wiki", "fancycustoms", "fancy-customs"])
+  new Set(["gmk", "dcs-wiki", "sxm-designs", "fancycustoms", "fancy-customs"])
 );
 assert.deepEqual(
   silent.map((v) => v.slug),

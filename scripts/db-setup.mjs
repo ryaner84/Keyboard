@@ -876,6 +876,10 @@ const _NON_PUBLISHING_SLUGS = new Set([
   // in agreement by manufacturer-vendors.test.ts and vendor-urls.test.mjs.
   "gmk",
   "dcs-wiki",
+  // A designer's portfolio, registered alongside them: sxmdesigns.com carries
+  // set pages and sells nothing, so "publishes no listing" is its correct and
+  // permanent state, not a fault to report every deploy.
+  "sxm-designs",
   // purgeBlockedVendors is about to remove these; naming them here is noise.
   "fancycustoms",
   "fancy-customs",
