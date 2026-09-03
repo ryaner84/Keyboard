@@ -63,7 +63,13 @@ if (!/localhost|127\.0\.0\.1/.test(connectionString)) {
 }
 
 // Same exclusions db-setup applies: catalog markers publish nothing by design.
-const NON_PUBLISHING_SLUGS = new Set(["gmk", "dcs-wiki", "fancycustoms", "fancy-customs"]);
+const NON_PUBLISHING_SLUGS = new Set([
+  "gmk",
+  "dcs-wiki",
+  "sxm-designs",
+  "fancycustoms",
+  "fancy-customs",
+]);
 
 const client = new pg.Client({
   connectionString,

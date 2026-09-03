@@ -19,8 +19,16 @@ const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
 
 assert.deepEqual(
   [...MANUFACTURER_VENDOR_SLUGS],
-  ["gmk", "dcs-wiki"],
-  "both catalog sources must be registered"
+  ["gmk", "dcs-wiki", "sxm-designs"],
+  "every non-store catalog source must be registered"
+);
+
+// A designer's portfolio is the same shape as a manufacturer's catalog: a host
+// that carries set pages and sells nothing. sxmdesigns.com has no price on any
+// page, so a row pointing at it can only ever answer NO_PRODUCT_DATA.
+assert.ok(
+  isManufacturerListingUrl("https://sxmdesigns.com/gmk-kitsune/"),
+  "sxmdesigns.com is a portfolio URL, not a listing"
 );
 
 assert.ok(
@@ -75,15 +83,15 @@ assert.ok(
 
 assert.deepEqual(
   NOT_MANUFACTURER_LISTING.vendor,
-  { slug: { notIn: ["gmk", "dcs-wiki"] } },
+  { slug: { notIn: [...MANUFACTURER_VENDOR_SLUGS] } },
   "the price queue must refuse every manufacturer slug, not just gmk"
 );
 assert.deepEqual(
   NOT_MANUFACTURER_LISTING.NOT,
   {
     AND: [
-      { vendor: { slug: { notIn: ["gmk-direct"] } } },
-      { OR: [{ productUrl: { contains: "gmk.net" } }, { productUrl: { contains: "dcs.wiki" } }] },
+      { vendor: { slug: { notIn: [...MANUFACTURER_STOREFRONT_SLUGS] } } },
+      { OR: MANUFACTURER_URL_HOSTS.map((host) => ({ productUrl: { contains: host } })) },
     ],
   },
   "the price queue must refuse every manufacturer host, except on the manufacturer's own shop"
@@ -125,7 +133,7 @@ assert.ok(
 
 assert.deepEqual(
   NOT_MANUFACTURER_VENDOR,
-  { slug: { notIn: ["gmk", "dcs-wiki"] } },
+  { slug: { notIn: [...MANUFACTURER_VENDOR_SLUGS] } },
   "the discovery rotation must refuse every manufacturer slug"
 );
 

@@ -142,6 +142,38 @@ into a `where` that sets its own `OR` and `AND`, so a clause added under either
 name is silently overwritten — it still typecheck, still reads correctly, and
 excludes nothing.
 
+**A Vendor row is not always a shop, and the third kind is a PORTFOLIO.** The
+registry was built for manufacturer catalogs (gmk.net, dcs.wiki);
+`sxm-designs` is a designer's showcase, which is the same shape for a different
+reason. sxmdesigns.com has no commerce layer at all — no WooCommerce namespace
+in `/wp-json/`, no `product` post type, no `/shop` or `/cart` route, no `<form>`,
+and its JSON-LD graph is `Organization / WebSite / BreadcrumbList / WebPage /
+Person / Article` with no `Product` and no `Offer`. Probed from a runner under
+four User-Agents including Googlebot, so it is not UA-conditional markup. The
+one "woocommerce" string that makes it read as a shop from a distance sits
+inside EWWW image-optimizer's minified `ewwwWooParseVariations` helper, which
+ships whether or not Woo is installed.
+
+Registered as a store, its rows answered `NO_PRODUCT_DATA` for ever. The worse
+half was still ahead: the row's `websiteUrl` is blank, which is the ONLY reason
+both discovery halves skip it, and `planStorefrontRelocation` exists precisely
+to fill that in from a row's own listing hosts — all of which are sxmdesigns.com.
+The next deploy that healed it would have pointed discovery at a portfolio,
+where the HTML fallback reads every "GMK …" nav anchor as a product and writes
+it back as a VendorKit with a null `priceUpdatedAt` — straight to the front of a
+time-boxed queue. That is the dcs.wiki failure the registry already documents,
+repeated.
+
+**Registering one means FOUR edits, not two.** `MANUFACTURER_VENDOR_SLUGS` +
+`MANUFACTURER_URL_HOSTS` in `src/lib/import/manufacturer-vendors.ts`, their
+mirrors in `scrape.py`, and `NON_PUBLISHING_SLUGS` in BOTH
+`scripts/vendor-publishing-audit.mjs` and `_NON_PUBLISHING_SLUGS` in
+`db-setup.mjs` — miss the last two and the publishing audit reports the source
+as a silent store on every run, for ever, which is the false alarm the report
+exists to avoid. `test:manufacturer-vendors` now derives its expectations from
+the registry rather than re-listing it: a hardcoded copy was a fifth place the
+list was written, and it went stale the moment a third source was added.
+
 The `Vendor` table has no `createdAt`/`updatedAt` columns. Naming them in an
 insert has broken a nightly run before.
 

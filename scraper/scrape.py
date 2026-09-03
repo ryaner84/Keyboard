@@ -1649,8 +1649,17 @@ TERMINAL_STATUSES = ("DELIVERED", "CANCELLED")
 # and because they had never been priced they sorted FIRST under
 # `priceUpdatedAt ASC NULLS FIRST`, pushing real vendor listings past the 500
 # row cap. Keep new manufacturer sources in this list.
-MANUFACTURER_VENDOR_SLUGS = ("gmk", "dcs-wiki")
-MANUFACTURER_URL_PATTERNS = ("%gmk.net%", "%dcs.wiki%")
+#
+# sxm-designs is the third and is a DESIGNER's portfolio, not a manufacturer's
+# catalog — same shape, different reason. sxmdesigns.com has no commerce layer
+# at all: no WooCommerce namespace in /wp-json/, no `product` post type, no
+# /shop or /cart route, no <form>, and no price-shaped token in the HTML or in
+# the WP page object behind it (checked under four User-Agents, Googlebot
+# included). Its lone "woocommerce" string lives inside EWWW image-optimizer's
+# minified helper. Mirror of MANUFACTURER_VENDOR_SLUGS in
+# src/lib/import/manufacturer-vendors.ts.
+MANUFACTURER_VENDOR_SLUGS = ("gmk", "dcs-wiki", "sxm-designs")
+MANUFACTURER_URL_PATTERNS = ("%gmk.net%", "%dcs.wiki%", "%sxmdesigns.com%")
 
 # The manufacturer's OWN shop, which sells from a catalog host. GMK's Warehouse
 # Finds sale is a real storefront and `gmk-direct` is a separate Vendor row from

@@ -33,12 +33,33 @@ import type { Prisma } from "@/generated/prisma";
 // reaching its rows: unpriced listings are hidden outright on released sets,
 // which is where the great majority of listings live. Anything that jumps the
 // price queue therefore takes real stores off the site.
-export const MANUFACTURER_VENDOR_SLUGS = ["gmk", "dcs-wiki"] as const;
+// `sxm-designs` is the third, and it is a DESIGNER's portfolio rather than a
+// manufacturer's catalog — same shape, different reason. sxmdesigns.com is a
+// WordPress/Elementor showcase with no commerce layer at all: no WooCommerce
+// (its /wp-json/ exposes no wc/v3 or wc/store/v1 namespace and the install has
+// no `product` post type), no /shop or /cart route under any spelling, no
+// <form> on any page, and not one price-shaped token in the rendered HTML or in
+// the server-side page object behind it. Probed under four User-Agents
+// including Googlebot, so it is not UA-conditional markup either. The single
+// "woocommerce" string in the page — the reason it reads as a shop from a
+// distance — sits inside EWWW image-optimizer's minified `ewwwWooParseVariations`
+// helper, which ships on every install whether or not Woo is present.
+//
+// It was registered as a store, so its rows sat in the price queue forever
+// answering NO_PRODUCT_DATA. Worse was still coming: the row's websiteUrl is
+// blank today, which is the only reason both discovery halves skip it, and
+// `planStorefrontRelocation` exists precisely to fill that in from the row's own
+// listing hosts — every one of which is sxmdesigns.com. The next deploy that
+// healed it would have pointed discovery at a portfolio, where the HTML
+// fallback reads each "GMK …" nav anchor as a product and writes it back as a
+// VendorKit with a null priceUpdatedAt — straight to the front of the queue,
+// which is the dcs.wiki failure described above, repeated.
+export const MANUFACTURER_VENDOR_SLUGS = ["gmk", "dcs-wiki", "sxm-designs"] as const;
 
 // Hosts owned by those sources. Matched as a substring, exactly like the SQL
 // `ILIKE '%gmk.net%'` and Prisma `contains` filters this list feeds, so a row
 // pointing at www.gmk.net or dcs.wiki/archive/… is caught too.
-export const MANUFACTURER_URL_HOSTS = ["gmk.net", "dcs.wiki"] as const;
+export const MANUFACTURER_URL_HOSTS = ["gmk.net", "dcs.wiki", "sxmdesigns.com"] as const;
 
 // The one exception: GMK's own Warehouse Finds sale is a real, purchasable
 // storefront whose listings legitimately live on gmk.net. It is a separate
