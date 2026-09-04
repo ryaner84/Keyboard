@@ -10,20 +10,19 @@ import {
   catalogAvailability,
   catalogStockUpdate,
 } from "../../../scripts/lib/catalog-stock.mjs";
-import { NONBASE_SUBKIT_RE, PRODUCT_ACCESSORY_RE } from "@/lib/kit-variants";
-import { TRACKED_PROFILE_RE } from "@/lib/set-name";
-
 // A catalog product whose RAW title names a subkit or accessory must never be
 // linked as a set's VendorKit: normalizeSetName strips bracketed qualifiers,
 // so "GMK Foo (Novelties)" would otherwise collide with the set name and the
 // relink branch would overwrite the base product's URL — the price pass then
 // stores the subkit's lone "Default Title" variant as the base price.
-// "alphas" is matched plural-only so a set legitimately named "… Alpha" still
-// links. ("extras" is NOT in this list — extras listings sell the base kit.)
-const SUBKIT_PRODUCT_RE = new RegExp(
-  `novelt|space\\s*bars?|\\balphas\\b|${NONBASE_SUBKIT_RE.source}|${PRODUCT_ACCESSORY_RE.source}`,
-  "i"
-);
+// ("extras" is NOT in this list — extras listings sell the base kit.)
+//
+// It used to be declared here. It is now imported, because the price passes ask
+// the SAME question of the tracked set's own name to decide whether a subkit
+// product is that set's base kit (see `allowSubkits`), and two copies of the
+// vocabulary would answer differently the first time either was edited.
+import { SUBKIT_PRODUCT_RE } from "@/lib/kit-variants";
+import { TRACKED_PROFILE_RE } from "@/lib/set-name";
 
 // Catalog discovery: instead of trusting the (often stale) per-set product
 // URLs from KeycapLendar, walk each vendor's own Shopify catalog, find every

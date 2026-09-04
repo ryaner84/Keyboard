@@ -236,7 +236,7 @@ assert.ok(
   "the price queue must select the vendor slug fetchVendorPrice decides on"
 );
 assert.ok(
-  /fetchVendorPrice\(vk\.productUrl, vk\.vendor\.currency, vk\.vendor\.slug\)/.test(prices),
+  /fetchVendorPrice\(\s*vk\.productUrl,\s*vk\.vendor\.currency,\s*vk\.vendor\.slug\b/.test(prices),
   "refreshOne must pass the row's vendor slug to fetchVendorPrice"
 );
 

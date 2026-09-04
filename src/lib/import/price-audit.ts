@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { parseVariants, pickBaseVariant } from "@/lib/kit-variants";
+import { isSubkitSetName, parseVariants, pickBaseVariant } from "@/lib/kit-variants";
 import { isPlausibleBaseKitPrice } from "./prices";
 
 // Nightly accuracy check over every stored scraped price. Two invariants:
@@ -37,7 +37,19 @@ export async function auditPrices(opts: AuditOptions = {}): Promise<AuditResult>
       price: { not: null },
       kit: { type: "BASE" },
     },
-    select: { id: true, price: true, currency: true, variants: true, productUrl: true },
+    select: {
+      id: true,
+      price: true,
+      currency: true,
+      variants: true,
+      productUrl: true,
+      // "The SAME pick the scraper makes" has to include the scraper's subkit
+      // exception, and that is derived from the SET name. Without it this pass
+      // would correct a subkit set's real base price back DOWN to an add-on
+      // every night — Saber Keebs' After School from $140 to the $10 BAE —
+      // which is worse than the nothing it published before.
+      kit: { select: { groupBuy: { select: { name: true } } } },
+    },
   });
 
   const result: AuditResult = {
@@ -65,7 +77,10 @@ export async function auditPrices(opts: AuditOptions = {}): Promise<AuditResult>
     const isPinned = !!row.productUrl && /[?&]variant=/.test(row.productUrl);
     const basePrice = isPinned
       ? null
-      : pickBaseVariant(parseVariants(row.variants))?.price ?? null;
+      : pickBaseVariant(
+            parseVariants(row.variants),
+            isSubkitSetName(row.kit?.groupBuy?.name)
+          )?.price ?? null;
     const target = basePrice ?? (row.price as number);
 
     if (!isPlausibleBaseKitPrice(target, row.currency)) {

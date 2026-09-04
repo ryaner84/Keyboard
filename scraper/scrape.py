@@ -1114,7 +1114,7 @@ def parse_woocommerce_variations(html: str) -> list[dict]:
     return out
 
 
-def parse_jsonld_offer(html: str):
+def parse_jsonld_offer(html: str, allow_subkits: bool = False):
     """Simple (non-variable) product price from JSON-LD Product/Offer.
 
     Name-aware, mirroring fetchJsonLdPrice (prices.ts): an offer whose name
@@ -1192,7 +1192,9 @@ def parse_jsonld_offer(html: str):
         return NO_BASE_KIT
     only = found[0]
     name = only["name"]
-    if name and (
+    # Same exception as the product-title guard in shopify_price: when the
+    # tracked set IS a subkit, an offer named for that subkit is its base offer.
+    if name and not allow_subkits and (
         classify_variant(name) in ("NOVELTIES", "SPACEBARS", "ALPHA")
         or _NONBASE_SUBKIT_RE.search(name)
         or _TITLE_ACCESSORY_RE.search(name)
@@ -1311,8 +1313,15 @@ def shopify_price(
         # /products/gmk-lavender). Clearing (NO_BASE_KIT) beats keeping: a
         # mislinked row's stale price must heal, not persist. A vendor-pinned
         # ?variant= link is ground truth and bypasses the guard.
+        # …and `allow_subkits` is the exception, without which the guard
+        # defeats itself one level up from choose_kit_variant. When the SET
+        # being priced IS a subkit product ("DCS After School 1992 40s kit"),
+        # its own store page necessarily trips this guard, so NO_BASE_KIT is
+        # returned before the variants are ever looked at and the allow_subkits
+        # below is unreachable. An unpriced row is hidden outright on a
+        # RELEASED set, so those sets published nothing from any Shopify store.
         product_title = str(data["product"].get("title") or "")
-        if not pinned_id and product_title:
+        if not pinned_id and not allow_subkits and product_title:
             title_category = classify_variant(product_title)
             if (
                 title_category in ("NOVELTIES", "SPACEBARS")
@@ -4356,7 +4365,7 @@ def generic_price(
         }
 
     # Simple product: single JSON-LD offer.
-    offer = parse_jsonld_offer(html)
+    offer = parse_jsonld_offer(html, allow_subkits=allow_subkits)
     if offer is None:
         # The page answered and carries no product markup any parser path here
         # knows — an unreadable platform, a placeholder page, or a bot check

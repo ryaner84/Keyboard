@@ -118,3 +118,11 @@ jobs:
       - name: manufacturer-vendors
         if: always()
         run: npm run test:manufacturer-vendors
+
+      # Also reads scrape.py: the subkit exception has to hold in the nightly
+      # AND in the half that runs four times a day, and it was written into
+      # neither's product-title guard — so a set that IS a subkit could not be
+      # priced by any pass, and its vendors published nothing.
+      - name: subkit-sets
+        if: always()
+        run: npm run test:subkit-sets

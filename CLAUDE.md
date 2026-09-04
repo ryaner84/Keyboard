@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Fifteen suites, all of which should pass before pushing:
+Sixteen suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -46,6 +46,7 @@ npm run test:catalog-stock
 npm run test:kit-bounds
 npm run test:host-throttle
 npm run test:manufacturer-vendors
+npm run test:subkit-sets
 npx tsc --noEmit
 ```
 
@@ -482,6 +483,34 @@ from a platform the parser cannot read, which is the whole reason `linkFailures`
 is a heuristic. A refusal on the Shopify path still falls through to the
 JSON-LD reader exactly as its `null` did, so which number gets stored is
 unchanged.
+
+**And a sixth `null`: a set that IS a subkit, refused by the rule that exists
+to protect it.** The dcs.wiki archive catalogs subkits as first-class sets —
+"DCS After School 1992 40s kit", "DCS 10U Spacebars", "DCS Bae Addon" — and a
+store sells each as ONE product whose base offering is, necessarily, a
+subkit-named variant. Every subkit rule in the price path exists to stop "GMK
+Foo Novelties" being priced as GMK Foo's base kit, and every one of them fires
+on these sets too, where it is exactly backwards. `allow_subkits` is the
+exception and it was threaded into `choose_kit_variant` ALONE, which is one
+level too deep: `shopify_price`'s product-title guard runs FIRST and returns
+`NO_BASE_KIT` before the variants are read, so on the Shopify path — which is
+where these products are — the exception below it was unreachable. The TS half
+never had the parameter at all, and that is the half that runs. So no pass
+could price these sets from any Shopify store, an unpriced row is hidden
+outright on a RELEASED set, and Saber Keebs — a Signature Plastics specialist
+whose catalogue is exactly these DCS subkit sets — published NOTHING while its
+storefront answered 200 with clean Shopify JSON. The audit called it "1 listing
+linked, none priced", which reads as a pricing backlog and sends the owner to
+`refresh-prices`: the one pass the guard guarantees can never fix it. The
+question is asked of the SET name (`isSubkitSetName`), never the product title
+— both say "40s", and only the tracked set knows which case it is —
+`SUBKIT_PRODUCT_RE` is one definition shared with discovery rather than a
+second copy, and `test:subkit-sets` fails if either half's guard drops the
+exception, if the queue stops selecting the set name, or if the two
+vocabularies drift. Saber Keebs' page is the worked example: variants "40s
+Monokit" $140, "BAE" $10, "LAE" $10, so dropping the 40s variant left the $10
+add-ons as the only candidates — the set would have priced at $10 if the guard
+above had not already cleared it.
 
 **And the refusal window was written FOUR times, so it could only ever be
 wrong.** `KIT_BOUNDS` is a backstop for parse errors — `pickBaseVariant` is what
