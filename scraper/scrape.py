@@ -573,26 +573,26 @@ _SUBKIT_PRODUCT_RE = re.compile(
 # legitimate prices on every deploy, which is what blanked released-set pricing
 # once before.
 _KIT_BOUNDS = {
-    "USD": (0, 300),
-    "EUR": (0, 280),
-    "GBP": (0, 240),
-    "AUD": (0, 460),
-    "CAD": (0, 415),
-    "SGD": (0, 415),
-    "JPY": (0, 45000),
-    "KRW": (0, 425000),
-    "CNY": (0, 2200),
-    "HKD": (0, 2400),
-    "THB": (0, 10800),
-    "TWD": (0, 9700),
+    "USD": (0, 400),
+    "EUR": (0, 375),
+    "GBP": (0, 320),
+    "AUD": (0, 615),
+    "CAD": (0, 555),
+    "SGD": (0, 555),
+    "JPY": (0, 60000),
+    "KRW": (0, 570000),
+    "CNY": (0, 2950),
+    "HKD": (0, 3200),
+    "THB": (0, 14400),
+    "TWD": (0, 13000),
     # Chilean Peso — used by Fancy Customs (CL). 1 USD ≈ 960 CLP as of 2025.
-    "CLP": (0, 280_000),
+    "CLP": (0, 375_000),
     # Indian Rupee — 1 USD ≈ 84 INR as of 2025.
-    "INR": (0, 25_000),
+    "INR": (0, 33_500),
     # Argentine Peso — used by Latamkeys. Volatile; bounds intentionally wide.
-    "ARS": (0, 535_000),
+    "ARS": (0, 715_000),
     # Malaysian Ringgit — 1 USD ≈ 4.71 MYR as of 2025.
-    "MYR": (0, 1470),
+    "MYR": (0, 1960),
 }
 
 # Currencies the site's Currency table can convert (db-setup ensureCurrencies).

@@ -498,11 +498,24 @@ async function fetchShopifyPrice(productUrl: string, vendorCurrency?: string): P
     // currencies the site can't convert. Both are refusals by THIS SITE of a
     // page it read and understood, so they answer PRICE_REFUSED — never null,
     // which would file a live, readable store as an unreachable one.
+    // Both tests ask about the SAME number, so both must ask in the same
+    // currency. The window used to be applied to `currency` alone — the store's
+    // own /meta.json — which is null whenever a shop blocks that endpoint, and
+    // isPlausibleBaseKitPrice bounds a null as USD. So a store that hides
+    // /meta.json had its CA$/A$/S$ prices measured against the USD ceiling and
+    // was refused for being expensive in a currency nobody had claimed it was
+    // priced in. The vendor row's own currency is that fallback everywhere
+    // else — the supported-currency test on the next line, the row's stored
+    // `currency: priceData.currency ?? vk.vendor.currency`, and
+    // `currency = currency or vendor_currency` in scrape.py, which has always
+    // done this — so the window was the one place a price was judged in money
+    // it would not be recorded in. The drift was here, in the half that runs
+    // four times a day.
     const effectiveCurrency = currency ?? vendorCurrency ?? null;
     if (effectiveCurrency && !SUPPORTED_CURRENCIES.has(effectiveCurrency)) {
       return PRICE_REFUSED;
     }
-    if (!isPlausibleBaseKitPrice(chosen.price, currency)) {
+    if (!isPlausibleBaseKitPrice(chosen.price, effectiveCurrency)) {
       return PRICE_REFUSED;
     }
 
@@ -948,9 +961,21 @@ export async function fetchVendorPrice(
   // read it" instead is what filed live shops as dead links.
   if (shopify && shopify !== PRICE_REFUSED) return shopify;
   const generic = await fetchJsonLdPrice(productUrl, vendorCurrency);
+  // The refusal survives everything except a better ANSWER: a price the page's
+  // own markup produced, or the store saying the page is gone. It used to
+  // survive only a null or NO_PRODUCT_DATA, and NO_BASE_KIT is the one a
+  // Shopify page reliably yields — Shopify emits one unnamed JSON-LD Offer per
+  // variant, so the reader sees several offers, can name none of them the base,
+  // and answers "ambiguous aggregate". The refusal was then overwritten by it
+  // on every such row: priceSource stamped 'SCRAPED' instead of 'REFUSED', the
+  // stored price CLEARED (a refusal never clears — the number was read, it was
+  // this site that turned it away), and the publishing audit reporting
+  // "N listing(s) linked, none priced", which sends the owner to refresh-prices
+  // — the one pass that can never end a refusal. keyspresso's single listing
+  // read that way for as long as the window sat below its price.
   if (
     shopify === PRICE_REFUSED &&
-    (generic === null || generic === NO_PRODUCT_DATA)
+    (generic === null || generic === NO_PRODUCT_DATA || generic === NO_BASE_KIT)
   ) {
     return PRICE_REFUSED;
   }
