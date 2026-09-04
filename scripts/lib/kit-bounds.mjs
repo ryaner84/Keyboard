@@ -21,6 +21,29 @@
 // the publishing audit named it, correctly, as "read and the price REFUSED by
 // this site … refresh-prices cannot help". Only a code change here can end it.
 //
+// AND IT HAPPENED AGAIN FIVE DOLLARS LATER. Raising 225 to 300 answered the
+// listing in hand rather than the trend it was evidence of: in-stock boutique
+// sets keep climbing, and keyspresso.ca sells "[Extras] GMK Harvest" — whose
+// base variant, "Hiragana Base - Inari", is a keycap base kit, in stock, in USD
+// — at 305. Refused, unpriced, hidden (the set is released), and that ONE row
+// is the vendor's only listing, so keyspresso published nothing at all.
+//
+// So the ceiling is now set against what the window is FOR, not against the
+// dearest kit anyone has yet found. It is a backstop for parse errors —
+// pickBaseVariant is what actually keeps a deskmat, a deposit or a bundle off a
+// set page — and the two ways it can be wrong are not symmetrical:
+//
+//   too HIGH  stores a visible wrong number, which the wrong-price report feed
+//             and the nightly price audit both exist to catch, and which any
+//             reader can see is wrong.
+//   too LOW   publishes nothing, silently, for ever, and reads from outside
+//             like a store nobody buys from.
+//
+// USD 400 keeps every real keycap kit we have seen (the dearest is 305) inside
+// the window with room for the next one, and still rejects the magnitudes the
+// backstop is aimed at — a bundle total, a whole keyboard, a decimal parsed a
+// place out.
+//
 // Every currency is the same USD-equivalent, deliberately: a window that is
 // generous in USD and tight in EUR publishes a set on one storefront and hides
 // it on another, for no reason a reader could ever discover.
@@ -53,26 +76,26 @@
  * refused at the bottom.
  */
 export const KIT_BOUNDS = Object.freeze({
-  USD: Object.freeze({ min: 0, max: 300 }),
-  EUR: Object.freeze({ min: 0, max: 280 }),
-  GBP: Object.freeze({ min: 0, max: 240 }),
-  AUD: Object.freeze({ min: 0, max: 460 }),
-  CAD: Object.freeze({ min: 0, max: 415 }),
-  SGD: Object.freeze({ min: 0, max: 415 }),
-  JPY: Object.freeze({ min: 0, max: 45000 }),
-  KRW: Object.freeze({ min: 0, max: 425000 }),
-  CNY: Object.freeze({ min: 0, max: 2200 }),
-  HKD: Object.freeze({ min: 0, max: 2400 }),
-  THB: Object.freeze({ min: 0, max: 10800 }),
-  TWD: Object.freeze({ min: 0, max: 9700 }),
+  USD: Object.freeze({ min: 0, max: 400 }),
+  EUR: Object.freeze({ min: 0, max: 375 }),
+  GBP: Object.freeze({ min: 0, max: 320 }),
+  AUD: Object.freeze({ min: 0, max: 615 }),
+  CAD: Object.freeze({ min: 0, max: 555 }),
+  SGD: Object.freeze({ min: 0, max: 555 }),
+  JPY: Object.freeze({ min: 0, max: 60000 }),
+  KRW: Object.freeze({ min: 0, max: 570000 }),
+  CNY: Object.freeze({ min: 0, max: 2950 }),
+  HKD: Object.freeze({ min: 0, max: 3200 }),
+  THB: Object.freeze({ min: 0, max: 14400 }),
+  TWD: Object.freeze({ min: 0, max: 13000 }),
   // Chilean Peso — used by Fancy Customs (CL). 1 USD ≈ 960 CLP.
-  CLP: Object.freeze({ min: 0, max: 280000 }),
+  CLP: Object.freeze({ min: 0, max: 375000 }),
   // Indian Rupee — 1 USD ≈ 84 INR.
-  INR: Object.freeze({ min: 0, max: 25000 }),
+  INR: Object.freeze({ min: 0, max: 33500 }),
   // Argentine Peso — used by Latamkeys. Volatile; deliberately wide.
-  ARS: Object.freeze({ min: 0, max: 535000 }),
+  ARS: Object.freeze({ min: 0, max: 715000 }),
   // Malaysian Ringgit — 1 USD ≈ 4.71 MYR.
-  MYR: Object.freeze({ min: 0, max: 1470 }),
+  MYR: Object.freeze({ min: 0, max: 1960 }),
 });
 
 /**

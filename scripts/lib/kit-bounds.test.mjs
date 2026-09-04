@@ -26,6 +26,26 @@ assert.equal(
 );
 assert.equal(isPlausibleBaseKitPrice(230, null), true, "unknown currency is bounded as USD");
 
+// ── And the same failure, five dollars past the raised ceiling ──────────────
+// keyspresso.ca, probed from a runner on 2026-09-04:
+//
+//   PRODUCT | [Extras] GMK Harvest (In-stock) | handle=extras-gmk-harvest
+//   VARIANT | title="Hiragana Base - Inari"     | price=305.00 | available=true
+//   VARIANT | title="Novelties - Travelling Merchant" | price=70.00
+//   SHOP CCY | USD (/meta.json)
+//
+// pickBaseVariant picks the Hiragana Base — a keycap base kit, in stock, in USD
+// — and the ceiling of 300 refused it. That row is the vendor's ONLY listing
+// and its set is released, so keyspresso published nothing at all. Raising 225
+// to 300 for norbauer answered the listing in hand rather than the trend, which
+// is why the ceiling now carries headroom over the dearest kit rather than
+// hugging it.
+assert.equal(
+  isPlausibleBaseKitPrice(305, "USD"),
+  true,
+  "keyspresso.ca's USD 305 base kit is a real price, not a parse error"
+);
+
 // The ceiling is still a ceiling. A bundle total or a keyboard that slipped
 // past pickBaseVariant is what it exists to reject.
 assert.equal(isPlausibleBaseKitPrice(650, "USD"), false);
@@ -122,6 +142,47 @@ assert.ok(
 assert.ok(
   /export const isPlausibleBaseKitPrice/.test(pricesTs),
   "prices.ts must keep exporting isPlausibleBaseKitPrice — price-audit.ts imports it"
+);
+
+// ── The window is applied in the currency the pass actually believes ────────
+// A window is only ever a window ON a currency. `currency` alone is the store's
+// /meta.json, which is null for every shop that blocks that endpoint, and a
+// null is bounded as USD — so a CA$/A$/S$ price was refused for exceeding a
+// ceiling in money it was never quoted in. effectiveCurrency is the same
+// fallback the supported-currency test one line above already uses, and the
+// same one scrape.py has always applied before its own check.
+assert.ok(
+  /isPlausibleBaseKitPrice\(chosen\.price, effectiveCurrency\)/.test(pricesTs),
+  "prices.ts must judge the Shopify price in effectiveCurrency, not the store's /meta.json alone"
+);
+assert.ok(
+  /currency = currency or vendor_currency/.test(
+    readFileSync(join(REPO_ROOT, "scraper", "scrape.py"), "utf8")
+  ),
+  "scrape.py must keep falling back to the vendor's currency before the plausibility test"
+);
+
+// ── A refusal must be RECORDED as a refusal ─────────────────────────────────
+// Otherwise the window being wrong is invisible: PRICE_REFUSED stamps
+// priceSource='REFUSED' and the publishing audit names the repair ("widen the
+// window … refresh-prices cannot help"), while NO_BASE_KIT stamps 'SCRAPED',
+// CLEARS the stored price and reads as an ordinary pricing backlog. Shopify
+// pages reach the JSON-LD reader with one unnamed Offer per variant, which
+// answers NO_BASE_KIT — so without this arm every refused Shopify listing was
+// filed as the backlog it is not.
+const refusalFallthrough = pricesTs.match(
+  /shopify === PRICE_REFUSED &&\s*\(([^)]*)\)/
+);
+assert.ok(refusalFallthrough, "prices.ts must keep the PRICE_REFUSED fall-through arm");
+for (const sentinel of ["generic === null", "generic === NO_PRODUCT_DATA", "generic === NO_BASE_KIT"]) {
+  assert.ok(
+    refusalFallthrough[1].includes(sentinel),
+    `a refusal must outlive ${sentinel.replace("generic === ", "")} from the JSON-LD reader`
+  );
+}
+assert.ok(
+  !refusalFallthrough[1].includes("DEAD_LINK"),
+  "a refusal must NOT outlive DEAD_LINK — the store saying 'gone' is the better answer"
 );
 
 // ── scrape.py mirrors the table exactly ─────────────────────────────────────

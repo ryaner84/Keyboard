@@ -503,6 +503,41 @@ half hand-writes a bound again. The purge is the half that must never drift
 low — it nulls stored prices on every deploy, and a purge tighter than the
 producers is what blanked released-set pricing once before.
 
+**And the ceiling was then set to the dearest kit anyone had found, so it went
+wrong again five dollars later.** keyspresso.ca sells "[Extras] GMK Harvest
+(In-stock)", whose base variant — "Hiragana Base - Inari", a keycap base kit, in
+stock, and USD per the store's own `/meta.json` — is 305 against a ceiling of
+300. That row is the vendor's only listing and its set is released, so
+keyspresso published nothing at all. The two ways the window can be wrong are
+not symmetrical: too HIGH stores a visible wrong number, which the wrong-price
+report feed and the nightly audit both exist to catch, while too LOW publishes
+nothing, silently, for ever. So USD 400 is headroom over the dearest kit, not a
+fit to it.
+
+**Three things had to be wrong at once for that to be invisible, and the other
+two are still the general lesson.** The window is only ever a window ON a
+currency, and `prices.ts` applied it to the store's `/meta.json` currency alone
+— null for any shop that blocks that endpoint, and `isPlausibleBaseKitPrice`
+bounds a null as USD, so a CA$/A$/S$ price was refused for exceeding a ceiling
+in money it was never quoted in. `effectiveCurrency` (the vendor row's own
+currency as fallback) is what the supported-currency test one line above already
+used and what `scrape.py` has always done — the drift was in the half that runs.
+And a refusal only survived a `null` or `NO_PRODUCT_DATA` from the JSON-LD
+reader, while a Shopify page reliably yields `NO_BASE_KIT` there: Shopify emits
+one UNNAMED JSON-LD Offer per variant, so the reader sees several offers, can
+name none of them the base, and answers "ambiguous aggregate". That overwrote
+the refusal on every refused Shopify row — `priceSource` stamped `'SCRAPED'`
+instead of `'REFUSED'`, the stored price CLEARED (a refusal never clears; the
+number was read and it was this site that turned it away), and the publishing
+audit reporting "none priced — unpriced rows are hidden", which sends the owner
+to `refresh-prices`, the one pass that can never end a refusal. A refusal now
+outlives every non-answer and yields only to a real price or a `DEAD_LINK`.
+`test:kit-bounds` pins all three.
+
+The probe reports `SHOP CCY` for the same reason: a price is only ever refused
+or accepted RELATIVE to a currency, so "READABLE" beside an unpriced row is not
+a diagnosis until you know which window the number was measured against.
+
 `scripts/lib/link-health.mjs` holds the rules and **two columns that mean
 different things on purpose**: `VendorKit.deadSince` is the first time the STORE
 answered 404/410 — definitive, so it is the only signal allowed to take a
