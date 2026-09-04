@@ -74,6 +74,8 @@ const EMPTY_DETAILS: CollectionItemDetails = {
   showPurchasePrice: false,
   switches: null,
   keycaps: null,
+  plateType: null,
+  mountType: null,
   buildDetails: null,
   notes: null,
   displayOrder: 0,
@@ -92,6 +94,37 @@ const CONDITION_LABELS: Record<string, string> = {
   FAIR: "Fair",
   PROJECT: "Project board",
 };
+
+// Suggestions for the plate and mount inputs, not a closed list — the field
+// stores whatever is typed. Ordered by how often they turn up in a group buy
+// spec sheet rather than alphabetically, so the common answer is the first one
+// a datalist offers.
+const PLATE_TYPE_SUGGESTIONS = [
+  "Aluminium",
+  "Brass",
+  "Carbon fibre",
+  "Copper",
+  "FR4",
+  "POM",
+  "Polycarbonate",
+  "PP",
+  "Steel",
+  "Titanium",
+  "Half plate",
+  "Plateless",
+];
+
+const MOUNT_TYPE_SUGGESTIONS = [
+  "Gasket",
+  "Top mount",
+  "Tray mount",
+  "O-ring",
+  "Integrated plate",
+  "Leaf spring",
+  "Sandwich",
+  "Burger mount",
+  "Plateless / PCB mount",
+];
 
 interface SpendingEntry {
   id: string;
@@ -390,6 +423,8 @@ function BuildSummary({
     build.condition ? CONDITION_LABELS[build.condition] || build.condition : null,
     build.switches,
     build.keycaps,
+    build.plateType,
+    build.mountType,
   ].filter(Boolean) as string[];
   const sold = build.isSold === true;
   if (sold) {
@@ -1389,11 +1424,46 @@ function BuildFields({
           />
         </Field>
       </div>
+      {/* Plate and mount get their own fields rather than staying inside the
+          Build specification blob below, whose placeholder used to name them.
+          A `list` suggests the usual answers without constraining the input:
+          half-plates, stacked mounts and one-off materials are ordinary here,
+          so the value is still whatever the owner types. */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Plate type">
+          <input
+            value={build.plateType || ""}
+            onChange={(event) => onChange({ plateType: event.target.value })}
+            placeholder="e.g. FR4, POM half plate"
+            list="plate-type-options"
+            className={inputClass}
+          />
+          <datalist id="plate-type-options">
+            {PLATE_TYPE_SUGGESTIONS.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+        </Field>
+        <Field label="Mount type">
+          <input
+            value={build.mountType || ""}
+            onChange={(event) => onChange({ mountType: event.target.value })}
+            placeholder="e.g. Gasket, Top mount"
+            list="mount-type-options"
+            className={inputClass}
+          />
+          <datalist id="mount-type-options">
+            {MOUNT_TYPE_SUGGESTIONS.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+        </Field>
+      </div>
       <Field label="Build specification">
         <textarea
           value={build.buildDetails || ""}
           onChange={(event) => onChange({ buildDetails: event.target.value })}
-          placeholder="Plate, mounting configuration, stabilizers, foam, artisan details…"
+          placeholder="Stabilizers, foam, mods, artisan details…"
           rows={3}
           className={inputClass}
         />
@@ -4181,6 +4251,8 @@ function KeyboardCollectionItemEditor({
         condition: first.condition || null,
         switches: first.switches || null,
         keycaps: first.keycaps || null,
+        plateType: first.plateType || null,
+        mountType: first.mountType || null,
         buildDetails: first.buildDetails || null,
         notes: first.notes || null,
         customImageUrl: first.imageUrl || null,

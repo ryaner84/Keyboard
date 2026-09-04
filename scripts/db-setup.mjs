@@ -1126,6 +1126,26 @@ async function ensureKeycapAcquisitionsColumn(client) {
 // switch that decides whether the public page reveals sold state at all.
 // Builds 2..N and per-purchase keycap records keep theirs inside the existing
 // `units` / `keycapAcquisitions` jsonb, so they need no column.
+// Plate and mount, recorded per build. Both used to live inside the free-text
+// `buildDetails` blob — its own placeholder read "Plate, mounting
+// configuration, stabilizers, foam, artisan details…" — so the two specs an
+// owner is most often asked about could be written down but never read back.
+//
+// Nullable text, not an enum: half-plates, stacked and hybrid mounts and
+// one-off materials are ordinary here, and a closed list would refuse them.
+// Builds 2..N carry theirs inside the `units` JSON, which needs no migration.
+async function ensureBuildSpecColumns(client) {
+  try {
+    await client.query(
+      `ALTER TABLE public."TrackerItem"
+       ADD COLUMN IF NOT EXISTS "plateType" text,
+       ADD COLUMN IF NOT EXISTS "mountType" text`
+    );
+  } catch (err) {
+    console.warn(`[db-setup] build spec columns setup skipped: ${err.message}`);
+  }
+}
+
 async function ensureSoldColumns(client) {
   try {
     await client.query(
@@ -1397,6 +1417,7 @@ async function main() {
         await ensureHiddenBuildsColumn(client);
         await ensureKeycapAcquisitionsColumn(client);
         await ensureSoldColumns(client);
+        await ensureBuildSpecColumns(client);
         await healWarehouseGalleries(client);
         await expireEndedGroupBuys(client);
         await ensureDiscoveryColumn(client);
@@ -1471,6 +1492,7 @@ async function main() {
     await ensureCollectionPhotoReportTable(client);
     await ensureKeycapAcquisitionsColumn(client);
     await ensureSoldColumns(client);
+    await ensureBuildSpecColumns(client);
     await purgeBlockedVendors(client);
     await purgeCancelledSets(client);
     await purgeBlockedVendorSetPairs(client);

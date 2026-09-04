@@ -52,6 +52,8 @@ const getPublicCollection = cache(async (slug: string) =>
           showSoldStatus: true,
           switches: true,
           keycaps: true,
+          plateType: true,
+          mountType: true,
           buildDetails: true,
           color: true,
           quantity: true,
@@ -296,6 +298,8 @@ function PublicCollectionCard({
     showSoldStatus: boolean;
     switches: string | null;
     keycaps: string | null;
+    plateType: string | null;
+    mountType: string | null;
     buildDetails: string | null;
     color: string | null;
     quantity: number;
@@ -399,12 +403,20 @@ function PublicCollectionCard({
             .join(" · ") || "From the private collection"}
         </p>
 
-        {!multiBuild && (specs.length > 0 || item.switches || item.keycaps || item.color) && (
+        {!multiBuild &&
+          (specs.length > 0 ||
+            item.switches ||
+            item.keycaps ||
+            item.plateType ||
+            item.mountType ||
+            item.color) && (
           <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-gray-100 pt-5 dark:border-white/10">
             {specs.length > 0 && <PublicSpec label="Format" value={specs.join(" · ")} />}
             {item.color && <PublicSpec label="Colour" value={item.color} />}
             {item.switches && <PublicSpec label="Switches" value={item.switches} />}
             {item.keycaps && <PublicSpec label="Keycaps" value={item.keycaps} />}
+            {item.plateType && <PublicSpec label="Plate" value={item.plateType} />}
+            {item.mountType && <PublicSpec label="Mount" value={item.mountType} />}
             {item.showPurchasePrice && item.purchasePrice != null && (
               <PublicSpec
                 label={item.quantity > 1 ? "Price per unit" : "Acquired for"}
@@ -621,6 +633,8 @@ function publicKeycapAcquisitions(item: {
     showPurchasePrice: false,
     switches: null,
     keycaps: null,
+    plateType: null,
+    mountType: null,
     buildDetails: null,
     notes: null,
     displayOrder: 0,
@@ -693,6 +707,8 @@ type PublicBuildShape = {
   condition: string | null;
   switches: string | null;
   keycaps: string | null;
+  plateType: string | null;
+  mountType: string | null;
   buildDetails: string | null;
   imageUrl: string | null;
   // Carried through regardless of the owner's switches; every render site
@@ -715,6 +731,8 @@ function assemblePublicBuilds(item: {
   condition: string | null;
   switches: string | null;
   keycaps: string | null;
+  plateType: string | null;
+  mountType: string | null;
   buildDetails: string | null;
   customImageUrl: string | null;
   quantity: number;
@@ -733,6 +751,8 @@ function assemblePublicBuilds(item: {
     condition: item.condition,
     switches: item.switches,
     keycaps: item.keycaps,
+    plateType: item.plateType,
+    mountType: item.mountType,
     buildDetails: item.buildDetails,
     imageUrl: item.customImageUrl,
     isSold: item.isSold === true,
@@ -760,6 +780,8 @@ function assemblePublicBuilds(item: {
         condition: (u?.condition as string) ?? null,
         switches: (u?.switches as string) ?? null,
         keycaps: (u?.keycaps as string) ?? null,
+        plateType: (u?.plateType as string) ?? null,
+        mountType: (u?.mountType as string) ?? null,
         buildDetails: (u?.buildDetails as string) ?? null,
         imageUrl: (u?.imageUrl as string) ?? null,
         // Unlike the purchase fields above there is NO inheritance from the
@@ -780,6 +802,8 @@ function assemblePublicBuilds(item: {
       condition: null,
       switches: null,
       keycaps: null,
+      plateType: null,
+      mountType: null,
       buildDetails: null,
       imageUrl: null,
       isSold: false,
@@ -826,6 +850,8 @@ function PublicBuild({
     build.condition ? formatCondition(build.condition) : null,
     build.switches,
     build.keycaps,
+    build.plateType,
+    build.mountType,
   ].filter(Boolean) as string[];
   // Only when the owner opted in; the amount needs the price switch as well.
   const soldPublicly = showSoldStatus && build.isSold;

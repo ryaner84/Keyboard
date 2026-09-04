@@ -17,6 +17,8 @@ const baseDetails: CollectionItemDetails = {
   showPurchasePrice: false,
   switches: null,
   keycaps: null,
+  plateType: null,
+  mountType: null,
   buildDetails: null,
   notes: "Legacy purchase",
   displayOrder: 0,
