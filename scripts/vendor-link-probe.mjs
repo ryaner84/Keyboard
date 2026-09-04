@@ -117,6 +117,28 @@ function causeChain(err) {
   return unique.length > 0 ? ` (${unique.join(", ")})` : "";
 }
 
+/**
+ * The currency the Shopify price path will judge this page's numbers in.
+ *
+ * Mirrors fetchShopifyCurrency: /meta.json on the shop origin, null when the
+ * store doesn't answer it. It is printed because a price is only ever refused
+ * or accepted RELATIVE to a currency — a store that hides /meta.json has its
+ * numbers measured against the fallback window, and "READABLE" plus an
+ * unpriced row is the shape that produces. Without this line the two are
+ * indistinguishable from outside.
+ */
+async function shopCurrency(url) {
+  try {
+    const { res, error } = await fetchOnce(`${new URL(url).origin}/meta.json`, "follow");
+    if (error) return { currency: null, note: error };
+    if (!res.ok) return { currency: null, note: `meta.json ${res.status}` };
+    const meta = JSON.parse(await res.text());
+    return { currency: meta?.currency ?? null, note: meta?.currency ? "" : "meta.json carries no currency" };
+  } catch (err) {
+    return { currency: null, note: err.message };
+  }
+}
+
 function hostOf(url) {
   try {
     return new URL(url).host;
@@ -249,6 +271,17 @@ for (const url of urls) {
     }
   }
   console.log(`  SHOPIFY   | ${shopify}`);
+  if (canonical) {
+    const { currency, note } = await shopCurrency(canonical);
+    console.log(
+      `  SHOP CCY  | ${
+        currency
+          ? `${currency} (/meta.json)`
+          : `unknown — ${note}; the price pass falls back to the vendor row's own currency` +
+            ` for the supported-currency test, and to USD for the KIT_BOUNDS window`
+      }`
+    );
+  }
 
   const woo = /data-product_variations\s*=/.test(body);
   const types = ldTypes(body);
