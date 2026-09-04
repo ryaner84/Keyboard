@@ -35,6 +35,8 @@ export async function GET() {
         showPurchasePrice: item.showPurchasePrice,
         switches: item.switches,
         keycaps: item.keycaps,
+        plateType: item.plateType,
+        mountType: item.mountType,
         buildDetails: item.buildDetails,
         notes: item.notes,
         displayOrder: item.displayOrder,

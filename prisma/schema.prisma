@@ -329,6 +329,14 @@ model TrackerItem {
   showSoldStatus    Boolean   @default(false)
   switches          String?
   keycaps           String?
+  // Plate and mount are the two specs an enthusiast asks about first, and they
+  // were only ever recorded inside the free-text `buildDetails` blob — whose
+  // own placeholder said "Plate, mounting configuration, …". Free text there
+  // cannot be read back, so they are their own columns now. Still nullable
+  // strings rather than enums: half-plates, stacked mounts and one-off
+  // materials are ordinary in this hobby, and a closed list would refuse them.
+  plateType         String?
+  mountType         String?
   buildDetails      String?
   notes             String?
   displayOrder      Int       @default(0)

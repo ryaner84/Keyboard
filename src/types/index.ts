@@ -142,6 +142,8 @@ export interface CollectionUnit {
   condition: string | null;
   switches: string | null;
   keycaps: string | null;
+  plateType: string | null;
+  mountType: string | null;
   buildDetails: string | null;
   notes: string | null;
   imageUrl: string | null;
@@ -237,6 +239,8 @@ export interface CollectionItemDetails {
   showSoldStatus?: boolean;
   switches: string | null;
   keycaps: string | null;
+  plateType: string | null;
+  mountType: string | null;
   buildDetails: string | null;
   notes: string | null;
   displayOrder: number;
