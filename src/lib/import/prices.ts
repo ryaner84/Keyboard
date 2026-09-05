@@ -17,9 +17,11 @@ import {
   PRICE_SOURCE_REFUSED,
   PRICE_SOURCE_UNPARSED,
   isDeadLinkStatus,
+  isGoneFrontPage,
   isGoneHostError,
   isGoneRedirect,
   nextLinkHealth,
+  pageFingerprint,
 } from "../../../scripts/lib/link-health.mjs";
 import { isPlausibleBaseKitPrice as isPlausibleBaseKitPriceImpl } from "../../../scripts/lib/kit-bounds.mjs";
 import {
@@ -573,6 +575,36 @@ async function fetchShopifyCurrency(productUrl: string): Promise<string | null> 
   return null;
 }
 
+// A storefront's front page, fingerprinted, so a soft 404 can be recognised as
+// one — see isGoneFrontPage in scripts/lib/link-health.mjs.
+//
+// Cached per ORIGIN and fetched at most once per run, exactly like the currency
+// above, and asked for only on the branch where a page produced no product
+// markup at all. A healthy storefront therefore never pays for it: the extra
+// request happens once per silent host per run, not once per row, which is what
+// makes a body comparison affordable in a time-boxed pass at all.
+//
+// The empty string is cached for a front page that could not be read, and
+// isGoneFrontPage refuses an empty fingerprint — a store that would not serve us
+// its root tells us nothing about this URL, and a block may never hide a
+// listing.
+const frontPageCache = new Map<string, string>();
+async function frontPageFingerprint(origin: string): Promise<string> {
+  const cached = frontPageCache.get(origin);
+  if (cached !== undefined) return cached;
+  let fingerprint = "";
+  try {
+    const res = await fetchWithTimeout(`${origin}/`);
+    // Only a front page the store actually served counts. A 404 or a block on
+    // the root is not evidence about the product URL either way.
+    if (res.ok) fingerprint = pageFingerprint(await res.text());
+  } catch {
+    // Unreachable root — no verdict, same as above.
+  }
+  frontPageCache.set(origin, fingerprint);
+  return fingerprint;
+}
+
 // Minimal HTML-entity decoder for the attribute-escaped WooCommerce blob
 // below. The blob only ever contains &quot; (JSON quotes), the occasional
 // numeric entity, and &amp; for literal ampersands — decode &amp; LAST so a
@@ -914,7 +946,32 @@ async function fetchJsonLdPrice(
     //     product page and simply had no price on it this time.
     if (sawRefusedPrice) return PRICE_REFUSED;
     if (sawAmbiguousAggregate) return NO_BASE_KIT;
-    if (!sawProductMarkup) return NO_PRODUCT_DATA;
+    if (!sawProductMarkup) {
+      // Nothing to read on this page — which is also what a store that has been
+      // retired behind a catch-all rewrite looks like, and those two need
+      // opposite repairs. Ask the store for its front page and compare: if this
+      // URL was answered with the front door's own document, the listing is
+      // gone, exactly as it is when the store redirects there (isGoneRedirect
+      // above) — the only difference is that this store said so without a
+      // Location header. drop.com, zfrontier.com, captus.io and kingly-keys.xyz
+      // all answer that way, and between them held 224 rows filed as "teach the
+      // parser this platform".
+      //
+      // Asked only here, on the branch that already knows the page yielded
+      // nothing: a page the parser CAN read is never gone, and a healthy
+      // storefront never pays for the extra fetch.
+      let origin: string | null = null;
+      try {
+        origin = new URL(res.url).origin;
+      } catch {
+        origin = null;
+      }
+      if (origin) {
+        const root = await frontPageFingerprint(origin);
+        if (isGoneFrontPage(productUrl, res.url, html, root)) return DEAD_LINK;
+      }
+      return NO_PRODUCT_DATA;
+    }
     return null;
   } catch (err) {
     // The third way a store says "gone", and the only one with no HTTP answer:

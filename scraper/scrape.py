@@ -717,6 +717,79 @@ def is_gone_redirect(request_url, final_url) -> bool:
     return target and not origin
 
 
+def page_fingerprint(html) -> str:
+    """Whitespace-normalized page body, for front-page comparison.
+
+    Idempotent, so a cached fingerprint can be handed straight back to
+    is_gone_front_page. Whitespace is the only tolerance on purpose: two
+    documents differing by so much as a nonce are not the same page, and a false
+    negative costs nothing while a false positive hides a live listing. Mirror
+    of pageFingerprint in scripts/lib/link-health.mjs.
+    """
+    return re.sub(r"\s+", " ", str(html or "")).strip()
+
+
+def is_gone_front_page(request_url, final_url, page_body, root_body) -> bool:
+    """True when a store answered THIS EXACT URL with its own front page.
+
+    The fourth way a store says "gone", and the one no other check can see: the
+    rewrite happens on the server, so the status is 200, the URL is unchanged
+    and the host resolves. All the pass gets back is a page with no product
+    markup, which reads as an unreadable platform — so the publishing report
+    asks the owner to teach the parser a shop that no longer exists. drop.com
+    (acquired by Corsair) serves its landing page for every /buy/<slug>;
+    captus.io and kingly-keys.xyz answer everything with the 114-byte
+    placeholder their root serves.
+
+    Narrow in the same way is_gone_redirect is: the request must not have
+    STARTED at the root, the answer must name the same host and the same path
+    (an http→https upgrade is the same page; a hop onto /password or onto the
+    root is somebody else's verdict), and both bodies must be non-empty and
+    equal after whitespace normalization. The caller adds the condition that
+    matters most — this is only ever asked about a page that yielded NO product
+    markup.
+
+    Byte equality is the safety, and the store it protects is a LIVE one: a
+    client-rendered shop serves one shell for every route, root included, so
+    "the body equals the root's" is true of a live single-page app for the same
+    reason it is true of a retired catch-all, and no HTTP-level test separates
+    them. What separates them in practice is that a real app's shell is not
+    static — zfrontier.com carries a per-request token and fails this comparison,
+    and it is a live shop that run_zfrontier reads through its app API. So the
+    tolerance is whitespace and nothing else; loosening it would hide the
+    listings of every app-rendered store on the roster. Mirror of
+    isGoneFrontPage in scripts/lib/link-health.mjs.
+    """
+
+    def parts(url):
+        try:
+            split = urllib.parse.urlsplit(str(url or ""))
+        except ValueError:
+            return None
+        if not split.scheme or not split.netloc:
+            return None
+        return split
+
+    source = parts(request_url)
+    target = parts(final_url)
+    if source is None or target is None:
+        return False
+    if source.path.rstrip("/") == "":
+        return False
+    # A redirect to the root is is_gone_redirect's answer, not this one.
+    if target.path.rstrip("/") == "":
+        return False
+    if source.netloc != target.netloc:
+        return False
+    if source.path.rstrip("/") != target.path.rstrip("/"):
+        return False
+    page = page_fingerprint(page_body)
+    root = page_fingerprint(root_body)
+    if not page or not root:
+        return False
+    return page == root
+
+
 # The network-level answers that mean the HOST itself is gone — NXDOMAIN, in
 # each spelling this pass can be handed one: Chromium (Playwright's page.goto)
 # says ERR_NAME_NOT_RESOLVED, a Python socket.gaierror carries the libc string,
@@ -4257,6 +4330,59 @@ def run_discovery(
     return stats
 
 
+# A storefront's front page, fetched at most once per origin per run.
+#
+# Mirrors frontPageCache in src/lib/import/prices.ts: the comparison that turns
+# a catch-all rewrite into DEAD_LINK is only affordable in a time-boxed pass
+# because it costs one request per SILENT host, never one per row. The empty
+# string is cached for a root that could not be read — is_gone_front_page
+# refuses an empty fingerprint, because a store that will not serve us its root
+# has told us nothing about this URL, and a block may never hide a listing.
+_FRONT_PAGE_CACHE: dict[str, str] = {}
+
+
+def _front_page_html(
+    page: Page,
+    scrapling: ScraplingClient | None,
+    html_source: str | None,
+    landed_url: str,
+) -> str:
+    """The storefront root, fetched the SAME way the product page was.
+
+    A browser-rendered DOM and Scrapling's raw markup are different documents
+    for the same page, so comparing one against the other could never match —
+    and a comparison that can never match is a check that silently does nothing.
+    """
+    try:
+        parts = urllib.parse.urlsplit(landed_url)
+    except ValueError:
+        return ""
+    if not parts.scheme or not parts.netloc:
+        return ""
+    origin = f"{parts.scheme}://{parts.netloc}/"
+    if origin in _FRONT_PAGE_CACHE:
+        return _FRONT_PAGE_CACHE[origin]
+
+    body = ""
+    if html_source == "scrapling" and scrapling is not None and scrapling.available:
+        body = scrapling.get_html(origin, protected=True) or ""
+    elif html_source == "browser":
+        try:
+            response = page.goto(
+                origin, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS
+            )
+            status = response.status if response is not None else None
+            content = page.content()
+            # A blocked or errored root is not evidence about the product URL.
+            if response is not None and response.ok and content:
+                if not response_is_blocked(status, content):
+                    body = content
+        except Exception:  # noqa: BLE001
+            body = ""
+    _FRONT_PAGE_CACHE[origin] = body
+    return body
+
+
 def generic_price(
     page: Page,
     product_url: str,
@@ -4281,6 +4407,10 @@ def generic_price(
     # Why the navigation failed, when it did: a DNS failure is the store saying
     # "gone" and every other error is a block. See is_gone_host_error.
     nav_error: Exception | None = None
+    # Which transport produced `html`. The front-page comparison below has to
+    # fetch the storefront's root the SAME way, or it would be comparing a
+    # browser-rendered DOM against raw markup and could never match.
+    html_source: str | None = None
     try:
         response = page.goto(
             product_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS
@@ -4290,12 +4420,15 @@ def generic_price(
         content = page.content()
         if content and not response_is_blocked(status, content):
             html = content
+            html_source = "browser"
     except Exception as exc:  # noqa: BLE001
         nav_error = exc
         log(f"  generic fetch error ({product_url}): {type(exc).__name__}: {exc}")
 
     if html is None and scrapling is not None and scrapling.available:
         html = scrapling.get_html(product_url, protected=True)
+        if html:
+            html_source = "scrapling"
 
     if not html:
         # A genuinely removed listing (404/410) clears the stale price; a
@@ -4362,6 +4495,27 @@ def generic_price(
         # knows — an unreadable platform, a placeholder page, or a bot check
         # served as a 200. Distinct from None so the row records what was
         # learned instead of reading as a link nobody could reach.
+        #
+        # …but it is ALSO what a store retired behind a catch-all rewrite looks
+        # like, and those two need opposite repairs. Ask the storefront for its
+        # front page and compare: if this URL was answered with the front door's
+        # own document, the listing is gone exactly as it is when the store
+        # redirects there — this store simply said so without a Location header.
+        # Only asked here, where the page is already known to carry nothing, so
+        # a readable storefront never pays for the extra fetch.
+        #
+        # Only when the navigation reported where it landed: the rule's safety
+        # rests on the store having answered THIS page, and a Scrapling fetch
+        # follows redirects without telling us where it ended up — the same
+        # reason is_gone_redirect above cannot judge one either.
+        if final_url:
+            root_html = _front_page_html(page, scrapling, html_source, final_url)
+            if is_gone_front_page(product_url, final_url, html, root_html):
+                log(
+                    "  dead link (store answers with its own front page)"
+                    f" — clearing price ({product_url})"
+                )
+                return DEAD_LINK
         return NO_PRODUCT_DATA
     if offer is NO_BASE_KIT:
         # Ambiguous multi-kit aggregate or a lone subkit/accessory offer —

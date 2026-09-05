@@ -29,6 +29,17 @@
 // a word, so all the price pass ever saw was a 200 on a page that is not the
 // listing. isGoneRedirect below is that answer, read off the final URL.
 //
+// And a store can say it with no redirect at all. drop.com (acquired by
+// Corsair) serves its Corsair landing page for every /buy/<slug> path, 200, URL
+// unchanged; captus.io and kingly-keys.xyz answer every path with the 114-byte
+// placeholder their front door serves. Nothing in the response says so — the
+// rewrite is server-side, so there is no Location header, the status is 200 and
+// the host resolves — and the page carries no product markup, so all three
+// checks above pass it through as "an unreadable platform" and the report asks
+// the owner to teach the parser a store that no longer exists. isGoneFrontPage
+// is that answer, read off the BODY: the store's reply to this URL was its own
+// front page.
+//
 // Two columns carry the evidence, and they mean different things on purpose:
 //
 //   deadSince     the store itself said the page is not there — a 404/410, or
@@ -167,6 +178,94 @@ export function isGoneRedirect(requestUrl, finalUrl) {
   if (!from || !to) return false;
   if (isFrontDoor(from)) return false;
   return isFrontDoor(to);
+}
+
+/**
+ * The whitespace-normalized body of a page, for front-page comparison.
+ *
+ * Idempotent, so a caller may cache the fingerprint of a storefront's front
+ * page and hand it straight back to isGoneFrontPage without the module needing
+ * two entry points. Normalizing whitespace is all the tolerance there is on
+ * purpose: two documents that differ by so much as a nonce are not "the same
+ * page", and a false negative here costs nothing while a false positive hides
+ * a live listing.
+ */
+export function pageFingerprint(html) {
+  return String(html ?? "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * True when a store answered THIS EXACT product URL with its own front page —
+ * a soft 404, served 200, with no redirect to give it away.
+ *
+ * This is the fourth way a store says "gone", after the 404, the front-door
+ * redirect and the host that stopped resolving, and it is invisible to all
+ * three. `isDeadLinkStatus` sees a 200. `isGoneRedirect` reads the final URL,
+ * which is still the product URL — the rewrite happens on the server, so there
+ * is no Location header at all. `isGoneHostError` sees a host that resolves
+ * perfectly. What the pass got back was a page with no product markup on it, so
+ * the row was filed NO_PRODUCT_DATA, and the publishing report told the owner to
+ * "teach the parser or retire it" about a shop that no longer exists.
+ *
+ * Measured against production on 2026-09-05, three vendors and 34 listings were
+ * in that state. drop.com serves every /buy/<slug> — all 32 tracked listings —
+ * as a byte-identical 27,140-byte "Drop - Gaming Collaborations by Corsair"
+ * landing page, the same document its root returns. captus.io and
+ * kingly-keys.xyz both answer every path with the same 114-byte placeholder
+ * their front door serves.
+ *
+ * The rule is the one isGoneRedirect already states, read off the BODY instead
+ * of the Location header: the store's answer to this URL was its front door. It
+ * is deliberately as narrow as that phrasing:
+ *
+ *   • the request must not have STARTED at the root — several vendors carry a
+ *     bare homepage as a listing URL, which would match itself trivially;
+ *   • the store must have answered this page and not another, so the final URL
+ *     has to name the same host and the same path (an http→https upgrade is
+ *     fine — that is the same page). A hop onto /password or onto a renamed
+ *     handle is somebody else's verdict, and a hop onto the root is already
+ *     isGoneRedirect's;
+ *   • both bodies must be non-empty, and equal after nothing but whitespace
+ *     normalization.
+ *
+ * The caller adds the last condition, and it is the important one: this is only
+ * ever asked about a page that yielded NO product markup. A page the parser
+ * could read is never "gone" however much it resembles the front door, and
+ * asking only on the no-markup path also means a healthy storefront never pays
+ * for the extra front-page fetch.
+ *
+ * BYTE EQUALITY IS THE SAFETY, and the store it protects is a live one. A
+ * client-rendered storefront serves ONE shell for every route, root included,
+ * and fills the page in from JavaScript — so "the body equals the root's" is
+ * true of a live single-page app for exactly the same reason it is true of a
+ * retired catch-all, and no HTTP-level test separates them. What separates them
+ * in practice is that a real app's shell is not static: zfrontier.com, whose
+ * /app/ pages are 20,939 bytes and looked identical to its root on one probe,
+ * carries a per-request token and fails this comparison on the next — and it is
+ * a live shop, which run_zfrontier in scrape.py reads through its app API. That
+ * is why the tolerance here is whitespace and nothing else. Loosening it to
+ * ignore inline script contents would "fix" zfrontier by hiding the listings of
+ * every live app-rendered store on the roster, which is the one failure this
+ * module exists to prevent. A store whose retirement page varies per request is
+ * left as NO_PRODUCT_DATA, which is merely the previous, safe answer.
+ *
+ * Self-healing like the other three: nextLinkHealth clears deadSince on the
+ * first read that gets through, so a shop behind a maintenance splash for a day
+ * costs a fortnight of slow cadence, never a retirement.
+ */
+export function isGoneFrontPage(requestUrl, finalUrl, pageBody, rootBody) {
+  const from = parseUrl(requestUrl);
+  const to = parseUrl(finalUrl);
+  if (!from || !to) return false;
+  if (isFrontDoor(from)) return false;
+  // A redirect to the root is isGoneRedirect's answer, not this one.
+  if (isFrontDoor(to)) return false;
+  if (from.host !== to.host) return false;
+  if (from.pathname.replace(/\/+$/, "") !== to.pathname.replace(/\/+$/, "")) return false;
+  const page = pageFingerprint(pageBody);
+  const root = pageFingerprint(rootBody);
+  if (!page || !root) return false;
+  return page === root;
 }
 
 /**
@@ -339,10 +438,13 @@ export function describeDeadListings(listings, deadListings, deadestSince) {
   const dead = Number(deadListings ?? 0);
   if (!(dead > 0) || !(total > 0)) return null;
   const since = deadestSince ? ` since ${new Date(deadestSince).toISOString().slice(0, 10)}` : "";
-  // "gone" covers all three answers a store gives: 404/410, a redirect to its
-  // front door, and a host that no longer resolves. Naming only the status sent
-  // the owner looking for a 404 that the commonest cases never produce.
-  const how = "404/410, redirected to the storefront's front door, or the host no longer resolves";
+  // "gone" covers all four answers a store gives: 404/410, a redirect to its
+  // front door, the storefront's front page served for the URL itself, and a
+  // host that no longer resolves. Naming only the status sent the owner looking
+  // for a 404 that the commonest cases never produce.
+  const how =
+    "404/410, redirected to the storefront's front door, answered with the " +
+    "storefront's own front page, or the host no longer resolves";
   if (dead >= total) {
     return (
       `all ${total} listing(s) are gone${since} (${how}) — relink or retire it ` +

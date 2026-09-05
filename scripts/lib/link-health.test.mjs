@@ -13,9 +13,11 @@ import {
   isBackedOff,
   isDeadLinkStatus,
   GONE_HOST_ERROR_MARKERS,
+  isGoneFrontPage,
   isGoneHostError,
   isGoneRedirect,
   isUnbuyableDeadLink,
+  pageFingerprint,
   isUndiagnosed,
   nextLinkHealth,
   recheckHoursFor,
@@ -78,6 +80,129 @@ assert.equal(isGoneRedirect("https://mykeyboard.eu/", "https://mykeyboard.eu/"),
 assert.equal(isGoneRedirect("https://shop.example/products/x", undefined), false);
 assert.equal(isGoneRedirect("not a url", "https://shop.example/"), false);
 assert.equal(isGoneRedirect(null, null), false);
+
+// --- pageFingerprint / isGoneFrontPage -------------------------------------
+// The fourth answer, and the only one with nothing in the response to give it
+// away: 200, no redirect, host resolves. Measured against production on
+// 2026-09-05, drop.com served all 32 of its tracked /buy/ links as the same
+// 27,140-byte Corsair landing page its root returns, and captus.io and
+// kingly-keys.xyz answered everything with the same 114-byte placeholder their
+// front door serves. 34 rows, filed as "teach the parser this platform".
+assert.equal(pageFingerprint("  <a>  x\n\ty </a>\n"), "<a> x y </a>");
+// Idempotent, so a cached front-page fingerprint can be passed straight back in.
+assert.equal(pageFingerprint(pageFingerprint(" a  b ")), pageFingerprint(" a  b "));
+assert.equal(pageFingerprint(null), "");
+
+const LANDING = "<html><head><title>Drop - Gaming Collaborations by Corsair</title></head></html>";
+assert.equal(
+  isGoneFrontPage(
+    "https://drop.com/buy/drop-full-metal-gmk-mecha-01-r2",
+    "https://drop.com/buy/drop-full-metal-gmk-mecha-01-r2",
+    LANDING,
+    LANDING
+  ),
+  true,
+  "a catch-all rewrite: the product URL answers with the storefront's own front page"
+);
+// An http→https upgrade is the same page: a store that only ever answers on
+// https must not escape the check by upgrading the vendor's stored http link.
+assert.equal(
+  isGoneFrontPage(
+    "http://shop.example/buy/gmk-x",
+    "https://shop.example/buy/gmk-x",
+    LANDING,
+    `\n  ${LANDING}  \n`
+  ),
+  true,
+  "a scheme upgrade to the same path is still the same page"
+);
+// The controls, each probed live on 2026-09-05 and each of which MUST stay
+// readable-but-unpriced rather than be hidden:
+//   funkeys  a real product page ("GMK Monochrome") on a platform we can't read
+//   mokbstore a 301 onto a renamed handle — a different page, so no verdict
+//   hexkeyboards a hop onto /password — a locked shop, not a gone one
+assert.equal(
+  isGoneFrontPage(
+    "https://groupbuy.funkeys.com.ua/gmk_monochrome",
+    "https://groupbuy.funkeys.com.ua/gmk_monochrome",
+    "<html><title>GMK Monochrome</title></html>",
+    "<html><title>Групбай</title></html>"
+  ),
+  false,
+  "a page that differs from the root is a real page on an unread platform"
+);
+assert.equal(
+  isGoneFrontPage(
+    "https://mokbstore.com/gb-mv-expo-gmk-cyl",
+    "https://mokbstore.com/gmk-mv-expo-keycaps",
+    LANDING,
+    LANDING
+  ),
+  false,
+  "a redirect onto another path says nothing about this listing, whatever the body"
+);
+assert.equal(
+  isGoneFrontPage(
+    "https://hexkeyboards.com/collections/group-buys/products/gmk-handarbeige",
+    "https://hexkeyboards.com/password",
+    LANDING,
+    LANDING
+  ),
+  false,
+  "a storefront password page is a locked shop, and a block may never hide a listing"
+);
+// A redirect to the ROOT is isGoneRedirect's verdict, reached before the body
+// is ever fetched — this check must not claim it too.
+assert.equal(
+  isGoneFrontPage("https://kono.store/products/x", "https://kono.store/", LANDING, LANDING),
+  false
+);
+// Several vendors carry a bare homepage as a listing URL; it matches the front
+// page by definition and is a bad link, not a gone one.
+assert.equal(
+  isGoneFrontPage("https://mykeyboard.eu/", "https://mykeyboard.eu/", LANDING, LANDING),
+  false
+);
+// A root we could not read tells us nothing, and neither does an empty page.
+assert.equal(
+  isGoneFrontPage("https://shop.example/products/x", "https://shop.example/products/x", LANDING, ""),
+  false
+);
+assert.equal(
+  isGoneFrontPage("https://shop.example/products/x", "https://shop.example/products/x", "", ""),
+  false
+);
+// A different host is a different shop's front page, which proves nothing here.
+assert.equal(
+  isGoneFrontPage(
+    "https://shop.example/products/x",
+    "https://other.example/products/x",
+    LANDING,
+    LANDING
+  ),
+  false
+);
+assert.equal(isGoneFrontPage(null, null, LANDING, LANDING), false);
+// Byte equality is the safety, and the store it protects is a LIVE one. A
+// client-rendered shop serves one shell for every route, its root included, so
+// body-equals-root is true of a live single-page app for the same reason it is
+// true of a retired catch-all — no HTTP-level test separates them. What
+// separates them in practice is that a real app's shell is not static:
+// zfrontier.com's 20,939-byte /app/ pages looked identical to its root on one
+// probe and differed by a per-request token on the next, and it is a live shop
+// (run_zfrontier reads it through its app API). Whitespace is therefore the
+// ONLY tolerance: a comparison that ignored inline script contents would catch
+// zfrontier by hiding every app-rendered store on the roster.
+assert.equal(
+  isGoneFrontPage(
+    "https://spa.example/app/mch/abc",
+    "https://spa.example/app/mch/abc",
+    '<html><body><div id="app"></div><script>window.t="a1b2c3"</script></body></html>',
+    '<html><body><div id="app"></div><script>window.t="d4e5f6"</script></body></html>'
+  ),
+  false,
+  "a live app shell carrying a per-request token must never be called gone"
+);
 
 // --- nextLinkHealth --------------------------------------------------------
 const T0 = new Date("2026-08-01T00:00:00Z");
@@ -177,8 +302,10 @@ assert.equal(describeDeadListings(0, 3), null);
   // Both answers are named. Saying only "404/410" sent the owner looking for a
   // status the commonest case never produces.
   assert.match(all, /redirected to the storefront's front door/);
-  // …and the third, which produces no HTTP answer at all.
+  // …the third, which produces no HTTP answer at all…
   assert.match(all, /host no longer resolves/);
+  // …and the fourth, which produces a perfectly ordinary 200 on the URL itself.
+  assert.match(all, /answered with the storefront's own front page/);
   assert.match(all, /relink or retire/);
   // The whole point: never send the owner to the pass that cannot help.
   assert.match(all, /refresh-prices cannot help/);
@@ -286,6 +413,22 @@ assert.ok(
   /def is_gone_host_error\(/.test(scrapePy),
   "scrape.py must mirror isGoneHostError as is_gone_host_error"
 );
+assert.ok(
+  /def is_gone_front_page\(/.test(scrapePy),
+  "scrape.py must mirror isGoneFrontPage as is_gone_front_page"
+);
+assert.ok(
+  /def page_fingerprint\(/.test(scrapePy),
+  "scrape.py must mirror pageFingerprint as page_fingerprint"
+);
+// The comparison is only meaningful between two documents fetched the SAME way:
+// a browser-rendered DOM and Scrapling's raw markup are different documents for
+// the same page, so a mismatched pair could never be equal and the check would
+// silently do nothing.
+assert.ok(
+  /def _front_page_html\(/.test(scrapePy),
+  "scrape.py must fetch the storefront root the same way it fetched the product page"
+);
 // The marker list decides which network failures may hide a listing, so the two
 // copies drifting is the whole hazard: one half retiring a store the other half
 // keeps re-fetching, and neither summary looking wrong.
@@ -315,9 +458,21 @@ assert.ok(
 // same way for a redirect to the front door, which is why there are four.
 assert.equal(
   (scrapePy.match(/return DEAD_LINK\b/g) ?? []).length,
-  6,
+  7,
   "both of scrape.py's price paths must return DEAD_LINK on 404/410, on a " +
-    "redirect to the storefront's front door, AND on a host that no longer resolves"
+    "redirect to the storefront's front door, AND on a host that no longer " +
+    "resolves — plus the generic reader's fourth answer, a catch-all rewrite " +
+    "that serves the storefront's front page for the URL itself"
+);
+// The front-page comparison lives in the reader that has a PAGE to compare:
+// scrape.py picks one path per URL and the Shopify half reads JSON endpoints,
+// never the rendered product page. The TS half — the one that runs four times a
+// day — falls through to this same reader for every URL shape, so no listing
+// depends on the Python Shopify path learning it.
+assert.equal(
+  (scrapePy.match(/(?<!def )is_gone_front_page\(/g) ?? []).length,
+  1,
+  "scrape.py's generic reader must judge an unreadable 200 for a catch-all rewrite"
 );
 // The third answer, in both paths. scrape.py picks ONE path per URL, so a half
 // that cannot recognise NXDOMAIN keeps re-fetching a domain that is gone.
