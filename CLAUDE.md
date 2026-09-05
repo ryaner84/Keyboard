@@ -414,6 +414,55 @@ audit:publishing` re-diagnoses those vendors as gone; `scripts/vendor-link-probe
 (the **Vendor probe** workflow) is how a silent store's answer is read in the
 first place, from a runner IP rather than guessed at.
 
+**And a store can say "gone" with no redirect at all — it just serves its front
+page.** A retired shop is often not taken down but rewritten: every path under
+it answers 200, with the URL unchanged, carrying the landing page the root
+serves. Nothing in that response says so. `isDeadLinkStatus` sees a 200,
+`isGoneRedirect` reads a final URL that is still the product URL (the rewrite is
+server-side, so there is no Location header at all), `isGoneHostError` sees a
+host that resolves — and the page has no product markup, so all three passed it
+through as `NO_PRODUCT_DATA` and the report asked the owner to "teach the parser
+or retire it" about shops that no longer exist. Probed from a runner on
+2026-09-05: **drop.com** (acquired by Corsair) serves every `/buy/<slug>` as the
+same 27,140-byte "Drop - Gaming Collaborations by Corsair" page its root
+returns — all 32 tracked listings; **captus.io** and **kingly-keys.xyz** answer
+every path with the same 114-byte placeholder their front door serves. 34 rows
+under the one diagnosis that could never end them. `isGoneFrontPage` (mirrored
+as `is_gone_front_page`) is that answer, read off the BODY rather than the
+Location header, and it is `isGoneRedirect`'s rule restated: the store's reply to
+this URL was its front door. Narrow the same way — the request may not have
+STARTED at the root, the answer must name the same host and the same path (an
+http→https upgrade is the same page; a hop onto `/password` or onto a renamed
+handle is somebody else's verdict, and a hop onto the root is already
+`isGoneRedirect`'s), and both bodies must be non-empty and equal after nothing
+but whitespace normalization. The caller adds the condition that carries the
+safety: it is only ever asked about a page that yielded NO product markup, which
+is also what makes the extra fetch affordable — the storefront's root is
+fingerprinted once per SILENT origin per run (`frontPageCache` /
+`_FRONT_PAGE_CACHE`), never once per row, and a readable store never pays for it
+at all. The two halves must fetch that root the way they fetched the product
+page: a browser-rendered DOM and raw markup are different documents for the same
+page, so a mismatched pair could never be equal and the check would silently do
+nothing. `test:link-health` fails if either half stops asking, and the four
+controls above — funkeys (a real page we cannot parse), mokbstore (a renamed
+handle), hexkeyboards (`/password`), saberkeebs and gmk.net (readable) — are
+pinned in both test suites, because a false positive here hides a live listing.
+
+**Byte equality is what makes that rule safe, and the store it protects is a
+LIVE one.** A client-rendered shop serves ONE shell for every route, its root
+included, so "this body equals the root's" is true of a live single-page app for
+exactly the same reason it is true of a retired catch-all — and no HTTP-level
+test separates them. What separates them in practice is that a real app's shell
+is not static: **zfrontier.com** looked like the fourth case on one probe (all
+190 `/app/` rows, 20,939 bytes, identical to its root) and failed the comparison
+on the next, because the shell carries a per-request token — and it is a live
+shop, which `run_zfrontier` reads through its app API rather than through the
+price pass at all. So the tolerance is whitespace and NOTHING else. Loosening it
+to ignore inline script contents would "catch" zfrontier by hiding the listings
+of every app-rendered store on the roster, which is the one failure this whole
+chain exists to prevent; a retirement page that varies per request stays
+`NO_PRODUCT_DATA`, which is merely the previous, safe answer.
+
 **And a third answer gives no status, no redirect and no page at all: the
 DOMAIN is gone.** Every guard in the vendor chain judges a storefront by the
 SHAPE of its URL — `needsStorefront`, `planStorefrontOwnership`,

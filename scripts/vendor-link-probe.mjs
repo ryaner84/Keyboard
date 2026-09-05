@@ -31,7 +31,7 @@
 
 import { lookup as dnsLookup } from "node:dns/promises";
 
-import { isGoneHostError } from "./lib/link-health.mjs";
+import { isGoneFrontPage, isGoneHostError } from "./lib/link-health.mjs";
 
 const urls = (process.env.PROBE_URLS ?? process.argv.slice(2).join(" "))
   .split(/[\s,]+/)
@@ -297,10 +297,43 @@ for (const url of urls) {
 
   const readable =
     shopify.includes("variant(s)") || woo || types.includes("Product") || ogTag;
+  if (readable) {
+    console.log(
+      `  VERDICT   | READABLE — a price parser path exists; if the row is unpriced the picker is at fault`
+    );
+    continue;
+  }
+
+  // Nothing machine-readable is where two opposite diagnoses meet: a platform
+  // the parser has never been taught, and a shop that has been retired behind a
+  // catch-all rewrite. The second answers 200 on the URL itself with no
+  // redirect, so only the BODY tells them apart — ask the store for its front
+  // page and compare. See isGoneFrontPage in scripts/lib/link-health.mjs.
+  let frontPage = "";
+  try {
+    const { res: rootRes, error: rootError } = await fetchOnce(
+      `${new URL(finalUrl).origin}/`,
+      "follow"
+    );
+    if (!rootError && rootRes.ok) frontPage = await rootRes.text();
+  } catch {
+    frontPage = "";
+  }
+  const isFrontPage = isGoneFrontPage(url, finalUrl, body, frontPage);
+  console.log(
+    `  ROOT PAGE | ${
+      !frontPage
+        ? "storefront root unreadable — cannot tell a catch-all rewrite from an unknown platform"
+        : isFrontPage
+          ? "IDENTICAL to the storefront root — this URL is not a page there"
+          : `differs from the storefront root (${frontPage.length} bytes) — a real page on an unread platform`
+    }`
+  );
   console.log(
     `  VERDICT   | ${
-      readable
-        ? "READABLE — a price parser path exists; if the row is unpriced the picker is at fault"
+      isFrontPage
+        ? "DEAD_LINK — the store answers this URL with its own front page (a soft 404);" +
+          " relink or retire it, teaching the parser cannot help"
         : "200 but NOTHING MACHINE-READABLE — the page carries no product markup the parser knows"
     }`
   );

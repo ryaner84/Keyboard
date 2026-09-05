@@ -2131,6 +2131,97 @@ class LinkHealthTests(unittest.TestCase):
         )
         self.assertFalse(scrape.is_gone_redirect("not a url", "https://shop.example/"))
 
+    def test_a_catch_all_front_page_is_gone(self):
+        # The fourth answer, and the only one with nothing in the response to
+        # give it away: 200, no redirect, host resolves. Probed live on
+        # 2026-09-05, drop.com served all 32 of its tracked /buy/ links as the
+        # same 27,140-byte Corsair landing page its root returns, and captus.io
+        # and kingly-keys.xyz answered everything with the same 114-byte
+        # placeholder their root serves — 34 rows filed NO_PRODUCT_DATA, i.e.
+        # "teach the parser this platform", about shops that no longer exist.
+        landing = "<html><title>Drop - Gaming Collaborations by Corsair</title></html>"
+        self.assertTrue(
+            scrape.is_gone_front_page(
+                "https://drop.com/buy/drop-full-metal-gmk-mecha-01-r2",
+                "https://drop.com/buy/drop-full-metal-gmk-mecha-01-r2",
+                landing,
+                landing,
+            )
+        )
+        # An http→https upgrade is the same page: a store that only answers on
+        # https must not escape the check by upgrading a stored http link.
+        self.assertTrue(
+            scrape.is_gone_front_page(
+                "http://shop.example/buy/gmk-x",
+                "https://shop.example/buy/gmk-x",
+                landing,
+                "\n  " + landing + "  \n",
+            )
+        )
+
+    def test_only_an_unchanged_url_answered_with_the_root_is_gone(self):
+        # The controls, each probed live on the same day, and each of which must
+        # stay merely unreadable rather than be hidden: a real product page on a
+        # platform we cannot parse (funkeys), a 301 onto a renamed handle
+        # (mokbstore), and a hop onto a storefront password page (hexkeyboards).
+        landing = "<html><title>gone</title></html>"
+        self.assertFalse(
+            scrape.is_gone_front_page(
+                "https://groupbuy.funkeys.com.ua/gmk_monochrome",
+                "https://groupbuy.funkeys.com.ua/gmk_monochrome",
+                "<html><title>GMK Monochrome</title></html>",
+                "<html><title>Групбай</title></html>",
+            )
+        )
+        for request, final in (
+            ("https://mokbstore.com/gb-mv-expo-gmk-cyl", "https://mokbstore.com/gmk-mv-expo-keycaps"),
+            ("https://hexkeyboards.com/collections/gb/products/x", "https://hexkeyboards.com/password"),
+            # A redirect to the ROOT is is_gone_redirect's verdict, taken before
+            # any body is compared; this check must not claim it as well.
+            ("https://kono.store/products/x", "https://kono.store/"),
+            # A different host is some other shop's front page, which proves
+            # nothing about this listing.
+            ("https://shop.example/products/x", "https://other.example/products/x"),
+        ):
+            with self.subTest(final=final):
+                self.assertFalse(
+                    scrape.is_gone_front_page(request, final, landing, landing)
+                )
+        # A bare homepage carried as a listing URL matches the front page by
+        # definition. It is a bad link, not a gone one.
+        self.assertFalse(
+            scrape.is_gone_front_page(
+                "https://mykeyboard.eu/", "https://mykeyboard.eu/", landing, landing
+            )
+        )
+        # A root we could not read tells us nothing, and a block may never hide
+        # a listing.
+        self.assertFalse(
+            scrape.is_gone_front_page(
+                "https://shop.example/products/x",
+                "https://shop.example/products/x",
+                landing,
+                "",
+            )
+        )
+        # Nothing to judge: no navigation happened (Scrapling served the page).
+        self.assertFalse(
+            scrape.is_gone_front_page(
+                "https://shop.example/products/x", None, landing, landing
+            )
+        )
+
+    def test_page_fingerprint_normalizes_only_whitespace(self):
+        # Whitespace is the whole tolerance: two documents differing by so much
+        # as a nonce are not the same page. Idempotent, so a cached front-page
+        # fingerprint can be handed straight back in.
+        self.assertEqual(scrape.page_fingerprint("  <a>  x\n\ty </a>\n"), "<a> x y </a>")
+        self.assertEqual(
+            scrape.page_fingerprint(scrape.page_fingerprint(" a  b ")),
+            scrape.page_fingerprint(" a  b "),
+        )
+        self.assertEqual(scrape.page_fingerprint(None), "")
+
     def test_a_host_that_does_not_resolve_is_gone(self):
         # The third answer, and the only one with no HTTP status at all: the
         # domain itself has lapsed. Chromium's spelling is what page.goto
