@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
+  AWAITING_OWN_FIX_PRICE_SOURCES,
   DEAD_LINK_FAILURE_THRESHOLD,
   DEAD_LINK_RECHECK_HOURS,
   DEAD_LINK_STATUSES,
@@ -10,6 +11,7 @@ import {
   PRICE_SOURCE_REFUSED,
   PRICE_SOURCE_UNPARSED,
   describeDeadListings,
+  isAwaitingOwnFix,
   isBackedOff,
   isDeadLinkStatus,
   GONE_HOST_ERROR_MARKERS,
@@ -519,9 +521,12 @@ assert.match(
 // before it landed. The undiagnosed arm has to come FIRST in the CASE — SQL
 // takes the first matching WHEN, and an undiagnosed row also satisfies the
 // linkFailures test in the arm below it.
+// …and that arm has to carry BOTH cases the short cadence is for: no verdict at
+// all, and a verdict that only a change here can end. Naming just the first is
+// what left #164 parked against every listing it was written for.
 assert.match(
   scrapePy,
-  /CASE\s*\n\s*WHEN vk\."deadSince" IS NULL\s*\n\s*AND vk\."priceSource" IS NULL\s*\n\s*AND coalesce\(vk\."linkFailures", 0\) >= %s/,
+  /CASE\s*\n\s*WHEN vk\."deadSince" IS NULL\s*\n\s*AND \(vk\."priceSource" IS NULL\s*\n\s*OR vk\."priceSource" = ANY\(%s\)\)\s*\n\s*AND coalesce\(vk\."linkFailures", 0\) >= %s/,
   "fetch_price_candidates must check the undiagnosed cadence before the dead one"
 );
 assert.equal(
@@ -529,6 +534,23 @@ assert.equal(
   UNDIAGNOSED_RECHECK_HOURS,
   "scrape.py's UNDIAGNOSED_RECHECK_HOURS must match link-health.mjs"
 );
+// The ANY() above is only that arm if it is handed the same two marks. A tuple
+// with SCRAPED in it would put every read row on the daily cadence and undo the
+// back-off; one missing UNPARSED reopens the bug this arm exists to close.
+{
+  const pyList = pyConst("AWAITING_OWN_FIX_PRICE_SOURCES");
+  const pyMarks = [...pyList.matchAll(/PRICE_SOURCE_(\w+)/g)].map((m) => m[1]);
+  assert.deepEqual(
+    pyMarks,
+    AWAITING_OWN_FIX_PRICE_SOURCES.map((mark) => mark.toUpperCase()),
+    "scrape.py's AWAITING_OWN_FIX_PRICE_SOURCES must match link-health.mjs"
+  );
+  assert.match(
+    scrapePy,
+    /list\(AWAITING_OWN_FIX_PRICE_SOURCES\),/,
+    "fetch_price_candidates must pass the marks to its ANY() placeholder"
+  );
+}
 // The shorter window is only worth having if it is shorter — and only worth
 // bounding if it is still slower than the normal cadence it backed off from.
 assert.ok(
@@ -559,6 +581,43 @@ assert.equal(
   DEAD_LINK_RECHECK_HOURS
 );
 
+// --- isAwaitingOwnFix ------------------------------------------------------
+// REFUSED and UNPARSED are verdicts, so isUndiagnosed is false for them — but
+// what they record is OUR inability to store the page's number, never the
+// store's answer, so the fortnight buys nothing and freezes the row against the
+// only thing that can end it. #164 shipped isGoneFrontPage for drop.com,
+// captus.io and kingly-keys.xyz and every one of those 34 rows was already
+// stamped UNPARSED with eight failures — parked until 2026-09-18 against the
+// listings it was written for, which is #156's failure repeated exactly.
+assert.deepEqual(AWAITING_OWN_FIX_PRICE_SOURCES, [
+  PRICE_SOURCE_REFUSED,
+  PRICE_SOURCE_UNPARSED,
+]);
+assert.ok(
+  !AWAITING_OWN_FIX_PRICE_SOURCES.includes("SCRAPED"),
+  "SCRAPED is the store's answer read and understood — it keeps the fortnight"
+);
+for (const mark of AWAITING_OWN_FIX_PRICE_SOURCES) {
+  assert.equal(isAwaitingOwnFix({ deadSince: null, priceSource: mark }), true);
+  assert.equal(
+    recheckHoursFor({ deadSince: null, priceSource: mark }),
+    UNDIAGNOSED_RECHECK_HOURS,
+    `${mark} names a repair in this repo, so the row must not wait a fortnight`
+  );
+  // deadSince outranks it: the store answering "gone" IS knowledge about the
+  // store, whatever a later unparseable fetch stamped on top of it. UNPARSED
+  // preserves deadSince (nextLinkHealth), so this pair really does occur.
+  assert.equal(isAwaitingOwnFix({ deadSince: T0, priceSource: mark }), false);
+  assert.equal(
+    recheckHoursFor({ deadSince: T0, priceSource: mark }),
+    DEAD_LINK_RECHECK_HOURS,
+    `deadSince must outrank ${mark}`
+  );
+}
+assert.equal(isAwaitingOwnFix({ deadSince: null, priceSource: null }), false);
+assert.equal(isAwaitingOwnFix({ deadSince: null, priceSource: "SCRAPED" }), false);
+assert.equal(isAwaitingOwnFix(undefined), false);
+
 // --- the TypeScript half ---------------------------------------------------
 const pricesTs = readFileSync(join(REPO_ROOT, "src", "lib", "import", "prices.ts"), "utf8");
 assert.ok(
@@ -577,19 +636,30 @@ assert.ok(
   "FORCE_PRICE_REFRESH must override the undiagnosed cadence like the dead one"
 );
 // The two backed-off arms must be disjoint on the verdict columns, or the
-// fortnight arm also matches an undiagnosed row and Prisma's OR lets it back
+// fortnight arm also matches a short-cadence row and Prisma's OR lets it back
 // in on the slow cadence — the bug this split exists to close.
+//
+// The short arm carries BOTH cases: no verdict at all, and a verdict only a
+// change here can end. The fortnight arm has to exclude the second explicitly —
+// `priceSource: { not: null }` is true of an UNPARSED row, which is how #164
+// shipped parked against every listing it was written for.
 assert.ok(
-  /\{ deadSince: null \},\s*\n\s*\{ priceSource: null \},\s*\n\s*\{ linkFailures: \{ gte: DEAD_LINK_FAILURE_THRESHOLD \} \},\s*\n\s*\{ priceUpdatedAt: \{ lt: undiagnosedCutoff \} \},/.test(
+  /\{ deadSince: null \},\s*\n\s*\{\s*\n\s*OR: \[\s*\n\s*\{ priceSource: null \},\s*\n\s*\{ priceSource: \{ in: AWAITING_OWN_FIX_PRICE_SOURCES \} \},\s*\n\s*\],\s*\n\s*\},\s*\n\s*\{ linkFailures: \{ gte: DEAD_LINK_FAILURE_THRESHOLD \} \},\s*\n\s*\{ priceUpdatedAt: \{ lt: undiagnosedCutoff \} \},/.test(
     pricesTs
   ),
-  "the undiagnosed arm must require no deadSince AND no priceSource"
+  "the short arm must take no deadSince and either no priceSource or an own-fix one"
 );
 assert.ok(
   /\{ deadSince: \{ not: null \} \},\s*\n\s*\{ priceSource: \{ not: null \} \},\s*\n\s*\],\s*\n\s*\},/.test(
     pricesTs
   ),
   "the fortnight arm must require a verdict (deadSince or priceSource)"
+);
+assert.ok(
+  /\{ deadSince: \{ not: null \} \},\s*\n\s*\{ priceSource: \{ notIn: AWAITING_OWN_FIX_PRICE_SOURCES \} \},/.test(
+    pricesTs
+  ),
+  "the fortnight arm must require the verdict to be the STORE's, not ours"
 );
 // Same two paths as scrape.py: fetchShopifyPrice and fetchJsonLdPrice.
 assert.equal(

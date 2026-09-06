@@ -104,8 +104,11 @@ export const DEAD_LINK_RECHECK_HOURS = 24 * 14;
  * A day is the compromise: still four-fifths of what the back-off was for (one
  * attempt a day instead of four), and short enough that any diagnosis this
  * codebase learns reaches every undiagnosed row on the next nightly run rather
- * than a fortnight later. The moment a verdict does land — dead, read, refused
- * or unparsed — the row leaves this cadence for one of the other two by itself.
+ * than a fortnight later. The moment the STORE's answer is known — gone, or read
+ * and understood — the row leaves this cadence for the fortnight by itself.
+ *
+ * It also carries the rows whose only verdict is REFUSED or UNPARSED, for the
+ * same reason and by the same argument. See AWAITING_OWN_FIX_PRICE_SOURCES.
  */
 export const UNDIAGNOSED_RECHECK_HOURS = 24;
 
@@ -131,6 +134,47 @@ export const UNDIAGNOSED_RECHECK_HOURS = 24;
  */
 export const PRICE_SOURCE_REFUSED = "REFUSED";
 export const PRICE_SOURCE_UNPARSED = "UNPARSED";
+
+/**
+ * The `priceSource` marks whose repair is a change in THIS repository, never
+ * another scrape — and which therefore buy no time on the fortnight.
+ *
+ * UNDIAGNOSED_RECHECK_HOURS exists because the fortnight is priced against
+ * KNOWLEDGE: a row the store 404'd, or one the pass read and understood, says the
+ * same thing in a fortnight, so waiting costs nothing. #160 applied that to the
+ * row carrying no verdict at all. These two are the same case one step along, and
+ * the argument is if anything stronger:
+ *
+ *   REFUSED   the page parsed and THIS SITE turned the number away (KIT_BOUNDS,
+ *             the Currency table). Only widening the window or adding the
+ *             currency ends it.
+ *   UNPARSED  the page answered 200 and no parser path HERE could read it. Only
+ *             teaching the parser — or learning that the answer means the store
+ *             is gone — ends it.
+ *
+ * Neither is a fact about the store. Both are this codebase saying "I could not
+ * turn this page into a price", which is precisely the state a code change is
+ * shipped to end, so parking the row for a fortnight freezes it against the only
+ * thing that could ever change its answer.
+ *
+ * That is not hypothetical either, and it happened to the very next fix. #164
+ * shipped isGoneFrontPage on 2026-09-06 for three stores that answer every
+ * product URL with their own front page — drop.com (32 listings), captus.io (1),
+ * kingly-keys.xyz (1). Every one of those rows was already stamped UNPARSED with
+ * eight consecutive failures, so #164 was parked until 2026-09-18 against all 34
+ * of the listings it was written for, exactly as #156 had been. 276 listings
+ * across ten vendors were on the fortnight in that state, zfrontier-cn's 212
+ * among them — the largest silent vendor on the site, and the one a parser fix
+ * would publish most of.
+ *
+ * `deadSince` still outranks both: the store answering "gone" IS knowledge about
+ * the store, whatever a later unparseable fetch stamped on top of it, so a row
+ * carrying it keeps the fortnight.
+ */
+export const AWAITING_OWN_FIX_PRICE_SOURCES = [
+  PRICE_SOURCE_REFUSED,
+  PRICE_SOURCE_UNPARSED,
+];
 
 /** True for a status that means the page is gone rather than unavailable. */
 export function isDeadLinkStatus(status) {
@@ -402,14 +446,38 @@ export function isUndiagnosed(row) {
 }
 
 /**
+ * True when the row's only verdict is one THIS repository has to repair.
+ *
+ * REFUSED and UNPARSED both record something the pass learned, so `isUndiagnosed`
+ * is false for them — but what they record is our own inability to store the
+ * page's number, not the store's answer. Waiting a fortnight for that to change
+ * by itself is waiting for nothing, and it costs the row every diagnosis and
+ * parser shipped in the meantime. See AWAITING_OWN_FIX_PRICE_SOURCES.
+ *
+ * `deadSince` short-circuits: the store said gone, which is knowledge, and the
+ * fortnight is correct for it.
+ */
+export function isAwaitingOwnFix(row) {
+  if (row?.deadSince) return false;
+  return AWAITING_OWN_FIX_PRICE_SOURCES.includes(row?.priceSource);
+}
+
+/**
  * Hours a backed-off row waits before the queue looks again.
  *
  * One function so the two halves cannot drift on which cadence applies to which
  * row: prices.ts builds its Prisma filter from it and scrape.py mirrors the same
  * CASE in SQL.
+ *
+ * Two cadences, and the question is whose fact the row is carrying. Only the
+ * STORE's answer — gone, or a page read and understood — buys the fortnight.
+ * Nothing known yet, or a verdict that names our own code as the repair, waits a
+ * day so the next fix reaches the row on the next run.
  */
 export function recheckHoursFor(row) {
-  return isUndiagnosed(row) ? UNDIAGNOSED_RECHECK_HOURS : DEAD_LINK_RECHECK_HOURS;
+  return isUndiagnosed(row) || isAwaitingOwnFix(row)
+    ? UNDIAGNOSED_RECHECK_HOURS
+    : DEAD_LINK_RECHECK_HOURS;
 }
 
 /**
