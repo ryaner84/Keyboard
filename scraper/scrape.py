@@ -657,6 +657,17 @@ NO_PRODUCT_DATA = "NO_PRODUCT_DATA"
 PRICE_SOURCE_REFUSED = "REFUSED"
 PRICE_SOURCE_UNPARSED = "UNPARSED"
 
+# The priceSource marks whose repair is a change in THIS repository rather than
+# another scrape, so they buy no time on the fortnight below. REFUSED means the
+# page parsed and this site turned the number away (KIT_BOUNDS, the Currency
+# table); UNPARSED that no parser path here could read a 200 that came back.
+# Neither is a fact about the store, and parking such a row for a fortnight
+# freezes it against the only thing that could ever change its answer — which is
+# how #164's front-page check shipped parked until 2026-09-18 against all 34 of
+# the listings it was written for. Mirror of AWAITING_OWN_FIX_PRICE_SOURCES in
+# scripts/lib/link-health.mjs.
+AWAITING_OWN_FIX_PRICE_SOURCES = (PRICE_SOURCE_REFUSED, PRICE_SOURCE_UNPARSED)
+
 # HTTP statuses that mean the listing is gone rather than blocked.
 DEAD_LINK_STATUSES = (404, 410)
 
@@ -671,8 +682,9 @@ DEAD_LINK_FAILURE_THRESHOLD = 6
 # through resets both columns, so a store that comes back needs no help.
 DEAD_LINK_RECHECK_HOURS = 24 * 14
 
-# How long a backed-off row waits when the pass has reached NO VERDICT about it:
-# six unreadable attempts and still no deadSince and no priceSource.
+# How long a backed-off row waits when it carries no answer from the STORE: six
+# unreadable attempts and either no verdict at all, or one of
+# AWAITING_OWN_FIX_PRICE_SOURCES.
 #
 # The fortnight above is priced against knowledge — a row the store 404'd, or one
 # the pass has read, says the same thing tomorrow, so waiting costs nothing. A
@@ -1829,14 +1841,18 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
     # several hundred permanently-dead rows were crowding out the stores that
     # can still sell something.
     #
-    # How LONG it waits depends on whether anything is known about it. With a
-    # deadSince or a priceSource the row has a verdict and will say the same
-    # thing tomorrow: DEAD_LINK_RECHECK_HOURS. With neither, six attempts have
-    # produced no fact, and the fortnight buys nothing while costing the row
-    # every diagnosis shipped in the meantime — which is how #156's dead-host
-    # check never once ran against the seven vendors it was written for. Those
-    # wait UNDIAGNOSED_RECHECK_HOURS and rejoin one of the other two cadences as
-    # soon as a verdict lands.
+    # How LONG it waits depends on WHOSE fact it is carrying. Only the store's
+    # answer — gone (deadSince), or a page read and understood ('SCRAPED') — will
+    # still say the same thing in a fortnight, so only that gets
+    # DEAD_LINK_RECHECK_HOURS. A row with no verdict has produced no fact in six
+    # attempts, and the fortnight buys nothing while costing the row every
+    # diagnosis shipped in the meantime — which is how #156's dead-host check
+    # never once ran against the seven vendors it was written for. REFUSED and
+    # UNPARSED are the same case one step along: they record that THIS SITE could
+    # not store the page's number, which is exactly the state a code change is
+    # shipped to end, so #164's front-page check was parked for a fortnight
+    # against all 34 of the listings it was for. Both wait
+    # UNDIAGNOSED_RECHECK_HOURS and join the fortnight once the store answers.
     #
     # A back-off, never a retirement: the row keeps its place in the queue, and
     # next_link_health resets both columns on the first read that gets through,
@@ -1859,7 +1875,8 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
                 OR vk."priceUpdatedAt" < now() - make_interval(hours =>
                      CASE
                        WHEN vk."deadSince" IS NULL
-                            AND vk."priceSource" IS NULL
+                            AND (vk."priceSource" IS NULL
+                                 OR vk."priceSource" = ANY(%s))
                             AND coalesce(vk."linkFailures", 0) >= %s
                          THEN %s
                        WHEN vk."deadSince" IS NOT NULL
@@ -1875,6 +1892,7 @@ def fetch_price_candidates(conn, limit: int = 500) -> list[dict]:
             list(MANUFACTURER_VENDOR_SLUGS),
             list(MANUFACTURER_STOREFRONT_SLUGS),
             list(MANUFACTURER_URL_PATTERNS),
+            list(AWAITING_OWN_FIX_PRICE_SOURCES),
             DEAD_LINK_FAILURE_THRESHOLD,
             UNDIAGNOSED_RECHECK_HOURS,
             DEAD_LINK_FAILURE_THRESHOLD,

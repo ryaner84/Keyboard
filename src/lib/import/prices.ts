@@ -11,6 +11,7 @@ import {
   isUnpriceableManufacturerListing,
 } from "./manufacturer-vendors";
 import {
+  AWAITING_OWN_FIX_PRICE_SOURCES,
   DEAD_LINK_FAILURE_THRESHOLD,
   DEAD_LINK_RECHECK_HOURS,
   UNDIAGNOSED_RECHECK_HOURS,
@@ -1213,11 +1214,12 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
     maxAgeHours <= 0
       ? cutoff
       : new Date(Date.now() - DEAD_LINK_RECHECK_HOURS * 60 * 60 * 1000);
-  // The third cadence, for a backed-off row the pass has reached NO verdict
-  // about: six unreadable attempts, still no deadSince and still no
-  // priceSource. The fortnight above is priced against knowledge and this row
-  // has none, so all it buys is a fortnight during which no newly-shipped
-  // diagnosis can reach the row. See UNDIAGNOSED_RECHECK_HOURS.
+  // The third cadence, for a backed-off row whose answer is not the STORE's:
+  // six unreadable attempts and either no verdict at all, or one that names our
+  // own code as the repair (REFUSED / UNPARSED). The fortnight above is priced
+  // against knowledge and neither row has any about the store, so all it buys is
+  // a fortnight during which no newly-shipped diagnosis or parser can reach the
+  // row. See UNDIAGNOSED_RECHECK_HOURS and AWAITING_OWN_FIX_PRICE_SOURCES.
   const undiagnosedCutoff =
     maxAgeHours <= 0
       ? cutoff
@@ -1255,15 +1257,21 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
           // the row keeps its place and the first read that gets through resets
           // both columns.
           //
-          // How long it waits depends on whether anything is KNOWN about it.
-          // A row carrying deadSince or priceSource has a verdict and will say
-          // the same thing tomorrow, so it waits DEAD_LINK_RECHECK_HOURS. A row
-          // carrying neither has produced no fact in six attempts, and the
-          // fortnight then buys nothing while costing the row every diagnosis
-          // shipped in the meantime — which is exactly how #156's dead-host
-          // check never once ran against the seven vendors it was written for.
-          // Those wait UNDIAGNOSED_RECHECK_HOURS and rejoin one of the other
-          // two cadences the moment a verdict lands.
+          // How long it waits depends on WHOSE fact it is carrying. Only the
+          // store's answer — gone (deadSince), or a page read and understood
+          // (priceSource 'SCRAPED') — will still say the same thing in a
+          // fortnight, so only that buys DEAD_LINK_RECHECK_HOURS.
+          //
+          // A row carrying no verdict has produced no fact in six attempts, and
+          // the fortnight then buys nothing while costing the row every
+          // diagnosis shipped in the meantime — which is exactly how #156's
+          // dead-host check never once ran against the seven vendors it was
+          // written for. REFUSED and UNPARSED are the same case one step along:
+          // they record that THIS SITE could not store the page's number, which
+          // is the state a code change is shipped to end, so #164's front-page
+          // check was parked for a fortnight against all 34 of the listings it
+          // was written for. Both wait UNDIAGNOSED_RECHECK_HOURS and join the
+          // fortnight the moment the store's own answer lands.
           OR: [
             { priceUpdatedAt: null },
             {
@@ -1287,13 +1295,27 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
                     { linkFailures: { gte: DEAD_LINK_FAILURE_THRESHOLD } },
                   ],
                 },
+                // …and the verdict has to be the store's. `notIn` is NULL-safe
+                // in the direction that matters: a NULL priceSource fails it,
+                // and such a row belongs to the arm below anyway.
+                {
+                  OR: [
+                    { deadSince: { not: null } },
+                    { priceSource: { notIn: AWAITING_OWN_FIX_PRICE_SOURCES } },
+                  ],
+                },
                 { priceUpdatedAt: { lt: deadCutoff } },
               ],
             },
             {
               AND: [
                 { deadSince: null },
-                { priceSource: null },
+                {
+                  OR: [
+                    { priceSource: null },
+                    { priceSource: { in: AWAITING_OWN_FIX_PRICE_SOURCES } },
+                  ],
+                },
                 { linkFailures: { gte: DEAD_LINK_FAILURE_THRESHOLD } },
                 { priceUpdatedAt: { lt: undiagnosedCutoff } },
               ],

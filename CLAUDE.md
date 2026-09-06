@@ -637,6 +637,31 @@ test below it. `test:link-health` fails if the constants drift, if either
 half's arm stops requiring BOTH verdict columns to be null, or if
 `FORCE_PRICE_REFRESH` stops overriding it.
 
+**And "carrying a verdict" was the wrong test, so the fix shipped the next day
+was parked exactly as #156 had been.** The fortnight is priced against knowledge
+about the STORE — a page it 404'd, or one the pass read and understood, says the
+same thing in a fortnight. `REFUSED` and `UNPARSED` are not that. They record
+that THIS SITE could not turn the page into a stored price: the number was
+outside `KIT_BOUNDS` or in a currency the `Currency` table cannot convert, or no
+parser path here could read a 200 that came back. That is precisely the state a
+code change is shipped to end, and it is the state the audit script itself
+describes as "a code change HERE, not another scrape" — yet `isUndiagnosed`
+counted both as verdicts, so both bought the 14-day cadence. #164 shipped
+`isGoneFrontPage` on 2026-09-06 for the three stores that answer every product
+URL with their own front page, and every one of drop.com's 32 listings,
+captus.io's 1 and kingly-keys.xyz's 1 was already stamped `UNPARSED` with eight
+consecutive failures — parked until 2026-09-18, against all 34 of the listings
+the check was written for. 276 listings across ten vendors were on the fortnight
+in that state, zfrontier-cn's 212 among them: the largest silent vendor on the
+site, and the one a parser fix would publish most of. So the cadence turns on
+WHOSE fact the row carries, not on whether it carries one:
+`AWAITING_OWN_FIX_PRICE_SOURCES` is the two marks that name our own code as the
+repair, `isAwaitingOwnFix` joins `isUndiagnosed` on the short cadence, and
+`deadSince` still outranks both — the store answering "gone" is knowledge,
+whatever a later unparseable fetch stamped over it. Adding a third mark to that
+list is a decision about who repairs it: `SCRAPED` must never be in it, or every
+read row drops onto the daily cadence and the back-off is gone.
+
 A corollary for the report: every line `planPublishingReport` prints is read
 off columns a price ATTEMPT writes, so it describes the code as it was at
 `lastAttempt`, not as it is now. `audit:publishing` prints `attempted`,
