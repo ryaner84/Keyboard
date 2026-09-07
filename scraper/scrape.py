@@ -4567,8 +4567,32 @@ def generic_price(
 #
 # Flow, all plain HTTP (validated live): parent page → parse options → variant
 # switch endpoint (?switched=<group>&options={group:option}) → variant URL →
-# variant page's buy-box price. Only "... Base Set" options are priced; subkit
-# options are ignored, and a sold-out Base Set clears the price (inStock=false).
+# variant page's price. Only "... Base Set" options are priced; subkit options
+# are ignored.
+#
+# A SOLD-OUT SET IS STILL A LISTING. The pass used to answer a disabled option
+# by clearing the price ("keep the row but clear the price"), which is not what
+# it does: an unpriced row is hidden outright on a RELEASED set, and every set
+# in a warehouse sale is released. Probed from a runner on 2026-09-07, all
+# eleven Base Set options were disabled — so the vendor published nothing at
+# all, and `audit:publishing` named gmk-direct under "9 listing(s) linked, none
+# priced", which sends the owner to refresh-prices, a pass that cannot end it.
+# The store quotes the price either way (the sold-out Lazurite variant carries
+# product:price:amount=131.17), so the row is stored priced and out of stock,
+# exactly as every Shopify vendor's sold-out listing is.
+#
+# THE PRICE IS NOT ALWAYS IN THE BUY BOX, and never in € from here. Shopware
+# omits the buy-box <meta itemprop="price"> block on a sold-out variant, and
+# gmk.net quotes per geo — a GitHub runner is served USD, so the € text reader
+# could not match either. The OpenGraph product:price:* meta carries the number
+# and its currency on every variant page, in stock or not, and is read as the
+# fallback; the currency is STORED rather than assumed, because writing a USD
+# number under a hardcoded 'EUR' publishes a wrong price rather than none.
+#
+# Each option is also linked to ITS OWN variant URL. Every row used to carry the
+# parent URL, which is whichever variant gmk.net happens to serve there — so all
+# nine listings pointed at one set's page, and the six-hourly price pass reading
+# that page saw one price to write onto all of them.
 # ----------------------------------------------------------------------------
 GMK_DIRECT_PAGES = [
     "https://www.gmk.net/shop/en/gmk-warehouse-finds/fptk1339",
@@ -4581,11 +4605,31 @@ _GMK_WF_OPTION_RE = re.compile(
 )
 _GMK_WF_SWITCH_RE = re.compile(r'data-variant-switch-options="([^"]+)"')
 # Price inside the buy box only — the header cart also renders €0.00 amounts.
+# Present on a purchasable variant, absent on a sold-out one.
 _GMK_WF_PRICE_RE = re.compile(
     r'product-detail-price-container[\s\S]{0,300}?itemprop="price"\s+content="([0-9][0-9.]*)"'
 )
+# The same number in the page's OpenGraph meta, which Shopware emits for every
+# variant whether or not it can be bought. This is the only reader that answers
+# on a sold-out set, and the only one that names the currency the shop quoted.
+_GMK_WF_OG_PRICE_RE = re.compile(
+    r'property="product:price:amount"[^>]*content="([0-9][0-9.,]*)"'
+)
+_GMK_WF_OG_CURRENCY_RE = re.compile(
+    r'property="product:price:currency"[^>]*content="([A-Z]{3})"'
+)
+_GMK_WF_ITEMPROP_CURRENCY_RE = re.compile(
+    r'itemprop="priceCurrency"[^>]*content="([A-Z]{3})"'
+)
+# Last resort: the rendered buy-box amount. Only ever € — the shop serves that
+# spelling to EU addresses, which is where a browser run from Europe lands.
 _GMK_WF_PRICE_TEXT_RE = re.compile(
     r'product-detail-price"\s*>\s*€\s*([0-9][0-9,.]*)'
+)
+# schema.org microdata on the buy box: the variant's own stock, straight from
+# the store rather than inferred from the configurator's disabled classes.
+_GMK_WF_AVAILABILITY_RE = re.compile(
+    r'itemprop="availability"[^>]*(?:href|content)="[^"]*schema\.org/(\w+)"'
 )
 _GMK_WF_BASE_RE = re.compile(r"^(.+?)\s+(?:Latin\s+)?Base\s+Set$", re.IGNORECASE)
 
@@ -4623,19 +4667,91 @@ def gmk_wf_base_set_name(label: str) -> str | None:
     return f"GMK {m.group(1)}" if m else None
 
 
-def gmk_wf_price_from_html(html_doc: str) -> float | None:
-    """The variant page's buy-box price in EUR, sanity-bounded."""
-    m = _GMK_WF_PRICE_RE.search(html_doc)
-    if not m:
-        m = _GMK_WF_PRICE_TEXT_RE.search(html_doc)
+def gmk_wf_price_from_html(html_doc: str) -> tuple[float, str | None] | None:
+    """The variant page's price and the currency the shop quoted it in.
+
+    Three readers, most specific first: the buy box (this variant's own price,
+    and never the header cart's €0.00), the OpenGraph meta (the same number,
+    but also present on a SOLD-OUT variant, where Shopware drops the buy-box
+    block altogether), then the rendered € amount.
+
+    The currency is read, never assumed: gmk.net quotes per geo — USD to a
+    GitHub runner, € to a European one — so a hardcoded 'EUR' would publish a
+    USD number as euros. None means the page named no currency; the caller
+    falls back to the vendor row's own.
+
+    Bounded by is_plausible_base_price, the one window this codebase keeps (see
+    scripts/lib/kit-bounds.mjs) rather than a fourth hand-written pair — and a
+    window is only ever a window ON a currency, which is the other reason the
+    currency has to come out of this function.
+    """
+    currency = None
+    m = _GMK_WF_OG_CURRENCY_RE.search(html_doc) or _GMK_WF_ITEMPROP_CURRENCY_RE.search(html_doc)
+    if m:
+        currency = m.group(1)
+
+    m = (
+        _GMK_WF_PRICE_RE.search(html_doc)
+        or _GMK_WF_OG_PRICE_RE.search(html_doc)
+        or _GMK_WF_PRICE_TEXT_RE.search(html_doc)
+    )
     if not m:
         return None
     try:
         price = float(m.group(1).replace(",", ""))
     except ValueError:
         return None
-    # A GMK base kit, even clearance-priced, lives well inside this window.
-    return price if 10 <= price <= 500 else None
+    if not is_plausible_base_price(price, currency):
+        return None
+    return price, currency
+
+
+def gmk_wf_in_stock_from_html(html_doc: str) -> bool | None:
+    """The variant's own stock per the buy box's schema.org microdata.
+
+    None when the page says nothing — the third answer matters here for the
+    same reason it does in catalog_availability(): collapsing "not stated" into
+    "sold out" would mark a whole catalogue unbuyable.
+    """
+    m = _GMK_WF_AVAILABILITY_RE.search(html_doc)
+    if not m:
+        return None
+    return not re.search(r"outofstock|soldout|discontinued", m.group(1), re.IGNORECASE)
+
+
+def gmk_wf_switch_variant_url(body: str) -> str | None:
+    """The variant URL the switch endpoint answers with, or None."""
+    m = re.search(r'\{[^{}]*"url"[^{}]*\}', body or "")
+    if not m:
+        return None
+    try:
+        return json.loads(html_unescape(m.group(0))).get("url")
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return None
+
+
+def gmk_wf_listing(option_available: bool, html_doc: str) -> dict | None:
+    """What one configurator option becomes: {price, currency, inStock}.
+
+    None when the page carries no price at all — the caller then leaves the row
+    alone, because a page we could not read says nothing about the last good
+    price.
+
+    Stock is one-directional, like the catalog feed's next door: either the
+    configurator's disabled class or the variant page's own microdata may say
+    SOLD OUT, and in-stock needs both to agree. A sold-out set is still stored
+    WITH its price — clearing it hides the row outright on a released set,
+    which is the whole reason this vendor published nothing.
+    """
+    priced = gmk_wf_price_from_html(html_doc)
+    if priced is None:
+        return None
+    price, currency = priced
+    return {
+        "price": price,
+        "currency": currency,
+        "inStock": option_available and gmk_wf_in_stock_from_html(html_doc) is not False,
+    }
 
 
 def ensure_gmk_direct_vendor(conn) -> str:
@@ -4665,12 +4781,18 @@ def run_gmk_direct(
 ) -> dict:
     """Price gmk.net Warehouse Finds base sets under the GMK Direct vendor."""
     stats = {"pages": 0, "base_options": 0, "priced": 0,
-             "out_of_stock": 0, "unmatched": 0}
+             "out_of_stock": 0, "unmatched": 0, "unpriced": 0}
     vendor_id = ensure_gmk_direct_vendor(conn)
     by_full, by_base = _build_set_index(conn)
     page = context.new_page()
+    # Every request this pass makes goes to ONE host, and resolving each option
+    # to its own variant page turned a handful into ~two dozen — the burst shape
+    # HostThrottle exists for. A 429 here costs exactly what the pass is being
+    # fixed to deliver: an unpriced row, hidden on a released set.
+    throttle = HostThrottle()
 
     def fetch_text(url: str) -> str | None:
+        throttle.wait(url)
         if scrapling and scrapling.available:
             body = scrapling.get_html(url)
             if body:
@@ -4684,17 +4806,19 @@ def run_gmk_direct(
             pass
         return None
 
-    def upsert(kit_id: str, price: float | None, in_stock: bool, url: str) -> None:
+    def upsert(
+        kit_id: str, price: float | None, in_stock: bool, url: str, currency: str
+    ) -> None:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO "VendorKit"
                     (id, "kitId", "vendorId", price, currency, "inStock",
                      "productUrl", "gbUrl", "priceUpdatedAt", "priceSource", "updatedAt")
                 VALUES
-                    (gen_random_uuid()::text, %s, %s, %s, 'EUR', %s, %s, %s, now(), 'SCRAPED', now())
+                    (gen_random_uuid()::text, %s, %s, %s, %s, %s, %s, %s, now(), 'SCRAPED', now())
                 ON CONFLICT ("kitId", "vendorId") DO UPDATE SET
                     price = EXCLUDED.price,
-                    currency = 'EUR',
+                    currency = EXCLUDED.currency,
                     "inStock" = EXCLUDED."inStock",
                     "productUrl" = EXCLUDED."productUrl",
                     "gbUrl" = COALESCE("VendorKit"."gbUrl", EXCLUDED."gbUrl"),
@@ -4702,8 +4826,18 @@ def run_gmk_direct(
                     "priceSource" = 'SCRAPED',
                     "updatedAt" = now()
                 WHERE "VendorKit"."priceSource" IS DISTINCT FROM 'MANUAL'
-            """, (kit_id, vendor_id, price, in_stock, url, url))
+            """, (kit_id, vendor_id, price, currency, in_stock, url, url))
         conn.commit()
+
+    def variant_url_for(switch_url: str | None, opt: dict, parent_url: str) -> str:
+        """The option's OWN page, so each row links to the set it names."""
+        if not switch_url:
+            return parent_url
+        params = urllib.parse.urlencode({
+            "switched": opt["group"],
+            "options": json.dumps({opt["group"]: opt["option_id"]}),
+        })
+        return gmk_wf_switch_variant_url(fetch_text(f"{switch_url}?{params}") or "") or parent_url
 
     try:
         for parent_url in GMK_DIRECT_PAGES:
@@ -4730,42 +4864,38 @@ def run_gmk_direct(
                     log(f"  warehouse option not matched to a set: {opt['label']}")
                     continue
 
-                if not opt["available"]:
-                    # Sold out at GMK — keep the row but clear the price.
-                    upsert(match["base_kit_id"], None, False, parent_url)
-                    stats["out_of_stock"] += 1
-                    continue
-
-                variant_url = parent_url
-                if switch_url:
-                    params = urllib.parse.urlencode({
-                        "switched": opt["group"],
-                        "options": json.dumps({opt["group"]: opt["option_id"]}),
-                    })
-                    body = fetch_text(f"{switch_url}?{params}")
-                    if body:
-                        try:
-                            m = re.search(r'\{[^{}]*"url"[^{}]*\}', body)
-                            switched = json.loads(html_unescape(m.group(0))) if m else None
-                            if switched and switched.get("url"):
-                                variant_url = switched["url"]
-                        except (json.JSONDecodeError, AttributeError):
-                            pass
-
+                # Sold-out options are resolved and priced like any other: the
+                # store still quotes them, and an unpriced row is hidden
+                # outright on a released set — which every warehouse set is.
+                variant_url = variant_url_for(switch_url, opt, parent_url)
                 vdoc = doc if variant_url == parent_url else fetch_text(variant_url)
-                price = gmk_wf_price_from_html(vdoc or "")
-                if price is None:
+                listing = gmk_wf_listing(opt["available"], vdoc or "")
+                if listing is None:
+                    # Read nothing we could price. Leave the row alone rather
+                    # than clear it: a page that yielded no number says nothing
+                    # about the last good one.
+                    stats["unpriced"] += 1
                     log(f"  no price found for {opt['label']} ({variant_url})")
                     continue
-                upsert(match["base_kit_id"], price, True, variant_url)
+                currency = listing["currency"] or "EUR"
+                upsert(
+                    match["base_kit_id"], listing["price"], listing["inStock"],
+                    variant_url, currency,
+                )
                 stats["priced"] += 1
-                log(f"  GMK Direct priced: {opt['label']} -> EUR {price} ({variant_url})")
+                if not listing["inStock"]:
+                    stats["out_of_stock"] += 1
+                log(
+                    f"  GMK Direct priced: {opt['label']} -> {currency} {listing['price']}"
+                    f" ({'in stock' if listing['inStock'] else 'sold out'})"
+                    f" ({variant_url})"
+                )
     finally:
         page.close()
 
     log(f"GMK Direct -> pages={stats['pages']} base_options={stats['base_options']} "
         f"priced={stats['priced']} out_of_stock={stats['out_of_stock']} "
-        f"unmatched={stats['unmatched']}")
+        f"unpriced={stats['unpriced']} unmatched={stats['unmatched']}")
     return stats
 
 
@@ -7153,7 +7283,8 @@ def main() -> int:
         f"products={out_stats['products']} linked={out_stats['linked']} "
         f"skipped_hosts={out_stats['skipped_hosts']}")
     log(f"GMK Direct -> pages={gd_stats['pages']} priced={gd_stats['priced']} "
-        f"out_of_stock={gd_stats['out_of_stock']} unmatched={gd_stats['unmatched']}")
+        f"out_of_stock={gd_stats['out_of_stock']} unpriced={gd_stats['unpriced']} "
+        f"unmatched={gd_stats['unmatched']}")
     log(f"Prices  -> throttle_wait={price_stats['throttled_s']:.0f}s")
     # `dead` is a subset of `failed`: the store answered 404/410. Split out so a
     # run whose failures are all dead links doesn't read as a blocked run.

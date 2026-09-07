@@ -142,6 +142,46 @@ into a `where` that sets its own `OR` and `AND`, so a clause added under either
 name is silently overwritten — it still typecheck, still reads correctly, and
 excludes nothing.
 
+**And once it was allowed to be priced, it still wasn't — because the pass that
+owns it answers "sold out" by DELETING the price.** `run_gmk_direct` is the only
+pass that understands gmk.net's Shopware configurator ("Available Sets": one
+radio per kit, disabled when it cannot be bought), and its sold-out branch
+upserted `price = NULL` under the comment "keep the row but clear the price".
+That is not what clearing does: an unpriced row is hidden outright on a RELEASED
+set, which every set in a warehouse sale is. Probed from a runner on 2026-09-07,
+all eleven Base Set options were disabled — the alphas, novelties and spacebar
+kits beside them were not — so every one of gmk-direct's 9 rows was written
+NULL, nightly, and the audit named the vendor under "9 listing(s) linked, none
+priced", which sends the owner to `refresh-prices`, the one pass that cannot end
+it. The store quotes the number either way (the sold-out Lazurite variant serves
+`product:price:amount=131.17`), so a sold-out set is now stored PRICED with
+`inStock=false`, exactly as every Shopify vendor's sold-out listing already is.
+
+**Two more things had to be wrong for that to stay invisible, and both are the
+general lesson.** The price was read from the buy box alone — and Shopware drops
+that block entirely on a sold-out variant, so the reader could never answer for
+the state the pass was in; the OpenGraph `product:price:*` meta carries the
+number on every variant page, in stock or not, and is the fallback. And the
+currency was HARDCODED `'EUR'` while gmk.net quotes per geo: a GitHub runner is
+served USD, so the `€`-only text reader could not match from CI either, and the
+first price the pass ever did store would have been a USD number published as
+euros. The currency is read off the page and stored; the ceiling is
+`is_plausible_base_price` (the one window, `scripts/lib/kit-bounds.mjs`) rather
+than the fourth hand-written `10 <= price <= 500` pair it used to carry — a
+window is only ever a window ON a currency.
+
+Each option is also linked to ITS OWN variant URL now (resolved through the
+switch endpoint for sold-out options too, not just purchasable ones). Every row
+used to carry the parent URL, which is whichever variant gmk.net happens to
+serve there, so all nine listings pointed at one set's page — and the six-hourly
+price pass reading that page saw one price to write onto all of them. That pass
+reads gmk.net through the OpenGraph branch, which had no availability signal at
+all here (Shopware states stock as schema.org microdata, not
+`product:availability`), so it would have put a Buy link on nine sold-out sets
+between nightly runs; `fetchJsonLdPrice` now falls back to that microdata,
+one-directionally — it can only ever say SOLD OUT, and a page with no
+availability markup still defaults to in stock.
+
 **A Vendor row is not always a shop, and the third kind is a PORTFOLIO.** The
 registry was built for manufacturer catalogs (gmk.net, dcs.wiki);
 `sxm-designs` is a designer's showcase, which is the same shape for a different
