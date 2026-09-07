@@ -518,25 +518,94 @@ class GmkDirectTests(unittest.TestCase):
         self.assertIsNone(scrape.gmk_wf_base_set_name("Blossom Accent Kit"))
         self.assertIsNone(scrape.gmk_wf_base_set_name("Hazakura Hiragana Set"))
 
-    def test_price_from_buy_box_only(self):
-        doc = (
-            '<span class="header-cart-total">€0.00</span>'
-            '<span class="product-detail-price-container">'
-            '<meta itemprop="price" content="129">'
-            '<p class="product-detail-price"> €129.00 </p></span>'
+    # The buy box of a purchasable variant (fptk1396, probed 2026-09-07): the
+    # price meta is present, the currency is NOT, and the shop quotes USD to a
+    # runner. The € spelling only ever reaches a European address.
+    IN_STOCK_HTML = (
+        '<meta property="product:price:amount" content="24.4">'
+        '<meta property="product:price:currency" content="USD">'
+        '<link itemprop="availability" href="https://schema.org/InStock">'
+        '<span class="header-cart-total">€0.00</span>'
+        '<span class="product-detail-price-container">'
+        '<meta itemprop="price" content="24.4">'
+        '<p class="product-detail-price"> $24.40 </p></span>'
+    )
+    # A SOLD-OUT variant (the Lazurite Base Set fptk1339 serves): Shopware drops
+    # the buy-box price block entirely, so only the OpenGraph meta carries the
+    # number — and the store is still quoting it.
+    SOLD_OUT_HTML = (
+        '<meta property="product:price:amount" content="131.17">'
+        '<meta property="product:price:currency" content="USD">'
+        '<meta itemprop="priceCurrency" content="USD">'
+        '<link itemprop="availability" href="https://schema.org/OutOfStock">'
+        '<span class="header-cart-total">€0.00</span>'
+    )
+
+    def test_price_from_buy_box_then_opengraph(self):
+        self.assertEqual(
+            scrape.gmk_wf_price_from_html(self.IN_STOCK_HTML), (24.4, "USD")
         )
-        self.assertEqual(scrape.gmk_wf_price_from_html(doc), 129.0)
-        # No buy box → no price (the €0.00 header must never match).
+        # The sold-out page has no buy box at all; OpenGraph answers, and it is
+        # the reader that names the currency the shop actually quoted.
+        self.assertEqual(
+            scrape.gmk_wf_price_from_html(self.SOLD_OUT_HTML), (131.17, "USD")
+        )
+        # The rendered € amount stays the last resort, for a page served in EUR.
+        self.assertEqual(
+            scrape.gmk_wf_price_from_html('<p class="product-detail-price"> €129.00 </p>'),
+            (129.0, None),
+        )
+        # No price anywhere → nothing (the €0.00 header must never match).
         self.assertIsNone(
             scrape.gmk_wf_price_from_html('<span class="header-cart-total">€0.00</span>')
         )
-        # Implausible values are rejected.
+        # Bounded by the ONE window (kit-bounds.mjs / _KIT_BOUNDS), against the
+        # currency the page named — never a fourth hand-written pair.
         self.assertIsNone(
             scrape.gmk_wf_price_from_html(
+                '<meta property="product:price:currency" content="USD">'
                 '<span class="product-detail-price-container">'
                 '<meta itemprop="price" content="9999"></span>'
             )
         )
+
+    def test_stock_from_microdata(self):
+        self.assertIs(scrape.gmk_wf_in_stock_from_html(self.IN_STOCK_HTML), True)
+        self.assertIs(scrape.gmk_wf_in_stock_from_html(self.SOLD_OUT_HTML), False)
+        # A page that says nothing is the third answer, never "sold out".
+        self.assertIsNone(scrape.gmk_wf_in_stock_from_html("<html></html>"))
+
+    def test_sold_out_option_is_stored_priced(self):
+        """The bug that silenced the vendor: clearing the price hides the row.
+
+        An unpriced row is hidden outright on a RELEASED set, and every set in a
+        warehouse sale is released — so answering "sold out" with price=None
+        published nothing at all. The store quotes the price either way.
+        """
+        listing = scrape.gmk_wf_listing(False, self.SOLD_OUT_HTML)
+        self.assertEqual(listing["price"], 131.17)
+        self.assertEqual(listing["currency"], "USD")
+        self.assertFalse(listing["inStock"])
+
+    def test_stock_needs_both_signals_to_be_true(self):
+        # One-directional, like catalog_availability: either the configurator's
+        # disabled class or the page's own microdata may say sold out.
+        self.assertTrue(scrape.gmk_wf_listing(True, self.IN_STOCK_HTML)["inStock"])
+        self.assertFalse(scrape.gmk_wf_listing(False, self.IN_STOCK_HTML)["inStock"])
+        self.assertFalse(scrape.gmk_wf_listing(True, self.SOLD_OUT_HTML)["inStock"])
+        # No price to read → no row written, so the last good one survives.
+        self.assertIsNone(scrape.gmk_wf_listing(True, "<html></html>"))
+
+    def test_switch_endpoint_variant_url(self):
+        self.assertEqual(
+            scrape.gmk_wf_switch_variant_url(
+                '{"url":"https:\\/\\/www.gmk.net\\/shop\\/en\\/gmk-warehouse-finds\\/fptk1396",'
+                '"productId":"019c"}'
+            ),
+            "https://www.gmk.net/shop/en/gmk-warehouse-finds/fptk1396",
+        )
+        self.assertIsNone(scrape.gmk_wf_switch_variant_url(""))
+        self.assertIsNone(scrape.gmk_wf_switch_variant_url("not json"))
 
     def test_warehouse_label_matches_set_index(self):
         entry = {"status": "IN_STOCK", "gbStart": None}

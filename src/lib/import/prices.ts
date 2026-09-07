@@ -920,7 +920,15 @@ async function fetchJsonLdPrice(
       html.match(/content=["']([A-Z]{3})["'][^>]*property=["']product:price:currency["']/i);
     const availability =
       html.match(/property=["']product:availability["'][^>]*content=["']([^"']+)["']/i) ??
-      html.match(/content=["']([^"']+)["'][^>]*property=["']product:availability["']/i);
+      html.match(/content=["']([^"']+)["'][^>]*property=["']product:availability["']/i) ??
+      // Shopware states the stock as schema.org microdata on the buy box and
+      // emits no product:availability meta at all, so a page read through this
+      // branch alone came back "in stock" whatever it said. gmk.net's Warehouse
+      // Finds sale is the case in hand: every base set is currently sold out,
+      // and without this the six-hourly pass would put a Buy link on all nine.
+      // Read-only in one direction — the token can only ever say SOLD OUT, and
+      // a page with no availability markup still defaults to in stock.
+      html.match(/itemprop=["']availability["'][^>]*(?:href|content)=["'][^"']*schema\.org\/(\w+)["']/i);
     if (amount) {
       sawProductMarkup = true;
       const price = Number(amount[1].replace(/,/g, ""));
