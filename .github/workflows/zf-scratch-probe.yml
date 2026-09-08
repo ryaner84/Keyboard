@@ -2,7 +2,9 @@
 name: zf scratch probe
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [claude/compassionate-dijkstra-kzsddh]
+    paths: ["scripts/zf-scratch-probe.mjs", ".github/workflows/zf-scratch-probe.yml"]
 
 jobs:
   probe:
