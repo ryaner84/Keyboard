@@ -2291,6 +2291,80 @@ class LinkHealthTests(unittest.TestCase):
         )
         self.assertEqual(scrape.page_fingerprint(None), "")
 
+    def test_a_live_app_shell_is_never_the_front_page_verdict(self):
+        # #164 read the front-page verdict off byte equality alone, on the
+        # premise that a live single-page app's shell varies per request. It does
+        # not have to: www.zfrontier.com serves its 20,939-byte shell from a
+        # cache, and probed from a runner on 2026-09-08, two of three LIVE
+        # zFrontier listings answered with a body byte-identical to the root and
+        # were called DEAD_LINK — the one verdict that takes a listing off the
+        # site, on the one document that can never clear it, since a shell never
+        # parses and only a successful read withdraws deadSince. Every deadSince
+        # on a www.zfrontier.com row had been written since #164 shipped, and the
+        # app never 404s (a nonsense hash answers 200 with the same shell), so no
+        # other rule could have written one.
+        shell = (
+            "<html><head><title>zFrontier 装备前线</title></head><body>"
+            '<div id="app"></div>'
+            '<script src="https://b1.zfrontier.com/www/21/vendor.js"></script>'
+            "<script>window.csrf_token = '1788878653'</script>"
+            "</body></html>"
+        )
+        self.assertTrue(scrape.is_client_rendered_shell(shell))
+        self.assertFalse(
+            scrape.is_gone_front_page(
+                "https://www.zfrontier.com/app/mch/1xmjEGd2dQml",
+                "https://www.zfrontier.com/app/mch/1xmjEGd2dQml",
+                shell,
+                shell,
+            )
+        )
+        # Both stores #164 shipped for keep their verdict, and each keeps it for
+        # a different half of the test. drop.com's landing page IS 2,504
+        # characters of Corsair copy — content, which is what makes it evidence.
+        landing = (
+            "<html><head><title>Drop - Gaming Collaborations by Corsair</title></head>"
+            '<body><script src="/_next/static/chunk.js"></script><p>'
+            + "Suit up for the carnage. " * 20
+            + "</p></body></html>"
+        )
+        self.assertFalse(scrape.is_client_rendered_shell(landing))
+        self.assertTrue(
+            scrape.is_gone_front_page(
+                "https://drop.com/buy/drop-full-metal-gmk-mecha-01-r2",
+                "https://drop.com/buy/drop-full-metal-gmk-mecha-01-r2",
+                landing,
+                landing,
+            )
+        )
+        # captus.io and kingly-keys.xyz answer every path with a 114-byte
+        # placeholder: no text AND no script coming to fill it in. Nothing is
+        # being rendered — that is the whole of the store's answer.
+        placeholder = '<html><head><meta charset="utf-8"></head><body></body></html>'
+        self.assertFalse(scrape.is_client_rendered_shell(placeholder))
+        self.assertTrue(
+            scrape.is_gone_front_page(
+                "https://captus.io/collections/keycaps/products/gmk-euler",
+                "https://captus.io/collections/keycaps/products/gmk-euler",
+                placeholder,
+                placeholder,
+            )
+        )
+        # Script CONTENTS are instructions, not content: counting them would
+        # make a shell — which is almost entirely script — read as the wordiest
+        # page on the roster.
+        self.assertTrue(
+            scrape.is_client_rendered_shell(
+                '<html><body><script src="/app.js"></script><script>'
+                'var config = {"blurb": "' + "x" * 400 + '"};'
+                "</script></body></html>"
+            )
+        )
+        self.assertFalse(scrape.is_client_rendered_shell(""))
+        self.assertFalse(scrape.is_client_rendered_shell(None))
+        self.assertGreater(scrape.APP_SHELL_MAX_TEXT, 14)
+        self.assertLess(scrape.APP_SHELL_MAX_TEXT, 2504)
+
     def test_a_host_that_does_not_resolve_is_gone(self):
         # The third answer, and the only one with no HTTP status at all: the
         # domain itself has lapsed. Chromium's spelling is what page.goto

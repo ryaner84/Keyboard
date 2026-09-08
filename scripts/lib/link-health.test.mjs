@@ -15,6 +15,8 @@ import {
   isBackedOff,
   isDeadLinkStatus,
   GONE_HOST_ERROR_MARKERS,
+  APP_SHELL_MAX_TEXT,
+  isClientRenderedShell,
   isGoneFrontPage,
   isGoneHostError,
   isGoneRedirect,
@@ -188,13 +190,17 @@ assert.equal(isGoneFrontPage(null, null, LANDING, LANDING), false);
 // Byte equality is the safety, and the store it protects is a LIVE one. A
 // client-rendered shop serves one shell for every route, its root included, so
 // body-equals-root is true of a live single-page app for the same reason it is
-// true of a retired catch-all — no HTTP-level test separates them. What
-// separates them in practice is that a real app's shell is not static:
-// zfrontier.com's 20,939-byte /app/ pages looked identical to its root on one
-// probe and differed by a per-request token on the next, and it is a live shop
-// (run_zfrontier reads it through its app API). Whitespace is therefore the
-// ONLY tolerance: a comparison that ignored inline script contents would catch
-// zfrontier by hiding every app-rendered store on the roster.
+// true of a retired catch-all — no HTTP-level test separates them.
+//
+// #164 relied on such a shell differing by its per-request nonce, and this
+// assertion was written that way. MEASURED FROM A RUNNER ON 2026-09-08, THAT IS
+// FALSE: www.zfrontier.com serves its 20,939-byte shell from a cache, and two of
+// three LIVE zFrontier listings came back byte-identical to the root and were
+// called DEAD_LINK. The production database had begun recording it — every
+// deadSince on a www.zfrontier.com row was written on or after #164 shipped, and
+// the app never 404s (a nonsense hash answers 200 with the same shell), so no
+// other rule could have written one. So the shape is recognised instead of
+// gambled on, and the token case must hold either way.
 assert.equal(
   isGoneFrontPage(
     "https://spa.example/app/mch/abc",
@@ -204,6 +210,74 @@ assert.equal(
   ),
   false,
   "a live app shell carrying a per-request token must never be called gone"
+);
+const ZF_SHELL =
+  "<html><head><title>zFrontier 装备前线</title></head><body>" +
+  '<div id="app"></div>' +
+  '<script src="https://b1.zfrontier.com/www/21/vendor.7a32b5a317f4388cb954.js"></script>' +
+  "<script>window.csrf_token = '17888786538ebd95c83385cddbfaf6387dd7f349'</script>" +
+  "</body></html>";
+assert.equal(
+  isGoneFrontPage(
+    "https://www.zfrontier.com/app/mch/1xmjEGd2dQml",
+    "https://www.zfrontier.com/app/mch/1xmjEGd2dQml",
+    ZF_SHELL,
+    ZF_SHELL
+  ),
+  false,
+  "the SAME shell, served from cache to page and root alike, is still not a verdict"
+);
+
+// --- isClientRenderedShell -------------------------------------------------
+// The three documents this has to keep apart, each measured live on 2026-09-08.
+assert.equal(isClientRenderedShell(ZF_SHELL), true, "zfrontier: 14 chars of text, 6 bundles");
+// drop.com's retirement page IS its content — 2,504 characters of Corsair
+// landing copy — which is exactly what makes it evidence about the URL.
+assert.equal(
+  isClientRenderedShell(
+    `<html><head><title>Drop - Gaming Collaborations by Corsair</title></head><body>` +
+      `<script src="/_next/static/chunk.js"></script><p>${"Suit up for the carnage. ".repeat(20)}</p>` +
+      `</body></html>`
+  ),
+  false,
+  "a landing page that carries real copy is a page, however it was built"
+);
+// captus.io and kingly-keys.xyz answer every path with a 114-byte placeholder:
+// no text AND no script coming to fill it in. Nothing is being rendered here —
+// this is the whole of the store's answer, and #164's verdict stands.
+assert.equal(
+  isClientRenderedShell('<html><head><meta charset="utf-8"></head><body></body></html>'),
+  false,
+  "a scriptless placeholder is not a shell — nothing is coming to draw it"
+);
+assert.equal(isClientRenderedShell(""), false);
+assert.equal(isClientRenderedShell(null), false);
+// Script CONTENTS are instructions, not content: counting them would make the
+// shell — which is almost entirely script — read as the wordiest page around.
+assert.equal(
+  isClientRenderedShell(
+    '<html><body><script src="/app.js"></script><script>' +
+      `var config = ${JSON.stringify({ blurb: "x".repeat(400) })};` +
+      "</script></body></html>"
+  ),
+  true,
+  "an inline blob of script does not make a shell into a page"
+);
+assert.ok(
+  APP_SHELL_MAX_TEXT > 14 && APP_SHELL_MAX_TEXT < 2504,
+  "the window has to clear zfrontier's title-only shell and stay under drop.com's copy"
+);
+// The other half of the pair: a page with plenty of text is judged on the body
+// comparison as before, so drop.com keeps the verdict #164 shipped for it.
+assert.equal(
+  isGoneFrontPage(
+    "https://drop.com/buy/drop-full-metal-gmk-mecha-01-r2",
+    "https://drop.com/buy/drop-full-metal-gmk-mecha-01-r2",
+    LANDING,
+    LANDING
+  ),
+  true,
+  "a text-carrying landing page served for a product URL is still gone"
 );
 
 // --- nextLinkHealth --------------------------------------------------------
@@ -422,6 +496,31 @@ assert.ok(
 assert.ok(
   /def page_fingerprint\(/.test(scrapePy),
   "scrape.py must mirror pageFingerprint as page_fingerprint"
+);
+// The half that runs nightly has a browser, so its shells are rendered DOMs
+// rather than bootstrap markup — but it reads the storefront root the same way
+// (see _front_page_html below), so an app-rendered store can hand it two equal
+// documents just as it does the TS half. A copy that drops this check retires
+// live listings on exactly the stores the other copy protects.
+assert.ok(
+  /def is_client_rendered_shell\(/.test(scrapePy),
+  "scrape.py must mirror isClientRenderedShell as is_client_rendered_shell"
+);
+assert.ok(
+  /def rendered_text\(/.test(scrapePy),
+  "scrape.py must mirror renderedText as rendered_text"
+);
+assert.equal(
+  Number(pyConst("APP_SHELL_MAX_TEXT")),
+  APP_SHELL_MAX_TEXT,
+  "scrape.py's APP_SHELL_MAX_TEXT must match link-health.mjs"
+);
+// Both halves must ASK, not merely define it: the whole failure was a rule that
+// looked right and hid a live shop's listings on one of the two paths.
+assert.equal(
+  (scrapePy.match(/(?<!def )is_client_rendered_shell\(/g) ?? []).length,
+  1,
+  "scrape.py's front-page comparison must refuse a client-rendered shell"
 );
 // The comparison is only meaningful between two documents fetched the SAME way:
 // a browser-rendered DOM and Scrapling's raw markup are different documents for

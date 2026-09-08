@@ -239,6 +239,85 @@ export function pageFingerprint(html) {
 }
 
 /**
+ * The rendered text of a document — what a reader sees with JavaScript off.
+ *
+ * Scripts, styles and comments are dropped rather than stripped of tags: their
+ * contents are instructions, not content, and counting them would make an app
+ * shell (which is almost entirely script) look like the wordiest page on the
+ * roster.
+ */
+function renderedText(html) {
+  return String(html ?? "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&[a-z]+;|&#\d+;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * How much rendered text a document must carry before it counts as a PAGE
+ * rather than the shell a page is drawn into.
+ *
+ * Measured from a runner on 2026-09-08, against the exact documents this rule
+ * has to separate:
+ *
+ *   www.zfrontier.com/app/…      14 chars ("zFrontier 装备前线", i.e. the
+ *                                <title> and nothing else) — a LIVE shop
+ *   captus.io / kingly-keys.xyz   0 chars, and no scripts — retired
+ *   drop.com/buy/…            2,504 chars of Corsair landing copy — retired
+ *
+ * 200 sits an order of magnitude clear of both edges. It is not a fit to the
+ * cases: it is "a document whose entire rendered content is a title and a
+ * crumb of chrome has not said anything about this URL".
+ */
+export const APP_SHELL_MAX_TEXT = 200;
+
+/**
+ * True when a document is an application SHELL rather than a page.
+ *
+ * A client-rendered storefront serves ONE bootstrap document for every route —
+ * its root included — and draws the actual page in from JavaScript afterwards.
+ * Fetched without a browser, every URL on such a site therefore answers with
+ * the same bytes, which is *identical to the front page* by construction and
+ * says nothing whatever about whether this listing still exists.
+ *
+ * That is not a hypothetical shape. www.zfrontier.com answers every /app/ path
+ * — live listings included — with the same 20,939-byte shell, whose only
+ * per-request content is a `window.csrf_token` nonce; when a cached response
+ * hands the same nonce to two fetches, the shell is byte-identical to the root
+ * and isGoneFrontPage called a live shop's listing GONE. Probed on 2026-09-08,
+ * two of three live zFrontier listings came out DEAD_LINK that way, and the
+ * production database had begun recording it: `deadSince` is the one column
+ * allowed to hide a listing outright, and it is the one column no later read of
+ * an unreadable page ever clears.
+ *
+ * The two halves of the test are each doing work:
+ *
+ *   almost no rendered text  a shell has nothing in it yet. drop.com's
+ *                            retirement page carries 2,504 characters of real
+ *                            copy — it IS the content, which is what makes it
+ *                            evidence.
+ *   a script to render it    captus.io and kingly-keys.xyz answer every path
+ *                            with a 114-byte placeholder carrying no text AND
+ *                            no scripts. Nothing is coming to fill that in; it
+ *                            is the whole of the store's answer, and those two
+ *                            keep the verdict #164 shipped for them.
+ *
+ * Both halves must hold. A retired single-page app is left as NO_PRODUCT_DATA,
+ * which is merely the previous, safe answer — the asymmetry this module runs
+ * on, where a false negative costs a slower diagnosis and a false positive
+ * hides a live listing.
+ */
+export function isClientRenderedShell(html) {
+  const body = String(html ?? "");
+  if (renderedText(body).length > APP_SHELL_MAX_TEXT) return false;
+  return /<script[^>]+\bsrc\s*=/i.test(body);
+}
+
+/**
  * True when a store answered THIS EXACT product URL with its own front page —
  * a soft 404, served 200, with no redirect to give it away.
  *
@@ -282,16 +361,29 @@ export function pageFingerprint(html) {
  * client-rendered storefront serves ONE shell for every route, root included,
  * and fills the page in from JavaScript — so "the body equals the root's" is
  * true of a live single-page app for exactly the same reason it is true of a
- * retired catch-all, and no HTTP-level test separates them. What separates them
- * in practice is that a real app's shell is not static: zfrontier.com, whose
- * /app/ pages are 20,939 bytes and looked identical to its root on one probe,
- * carries a per-request token and fails this comparison on the next — and it is
- * a live shop, which run_zfrontier in scrape.py reads through its app API. That
- * is why the tolerance here is whitespace and nothing else. Loosening it to
- * ignore inline script contents would "fix" zfrontier by hiding the listings of
- * every live app-rendered store on the roster, which is the one failure this
- * module exists to prevent. A store whose retirement page varies per request is
- * left as NO_PRODUCT_DATA, which is merely the previous, safe answer.
+ * retired catch-all, and no HTTP-level test separates them.
+ *
+ * #164 answered that with the observation that a real app's shell is not
+ * static: zfrontier.com's /app/ pages looked identical to its root on one probe
+ * and differed by a per-request token on the next, so byte equality would keep
+ * a live shop out of this verdict by itself. MEASURED, THAT IS FALSE, and the
+ * failure it hides is the exact one this module exists to prevent. The token is
+ * the only per-request content in a 20,939-byte document, and zfrontier serves
+ * it from a cache: probed from a runner on 2026-09-08, two of three LIVE
+ * zFrontier listings answered with a shell byte-identical to the root and were
+ * called DEAD_LINK — the one verdict that takes a listing off the site, on the
+ * one kind of page no later read can ever clear it from, since a shell never
+ * parses and only a successful READ withdraws `deadSince`.
+ *
+ * So the shape is recognised rather than gambled on: isClientRenderedShell
+ * above refuses the verdict for a document that carries no rendered text and a
+ * script to draw one, which is what a bootstrap shell is and what neither
+ * drop.com's landing copy nor captus.io's scriptless placeholder is. The
+ * tolerance stays whitespace and nothing else — loosening THAT to ignore inline
+ * script contents would still hide every app-rendered store whose shell differs
+ * only by a nonce, which is the same failure from the other side. A store whose
+ * retirement page varies per request, and a retired single-page app, are both
+ * left as NO_PRODUCT_DATA: merely the previous, safe answer.
  *
  * Self-healing like the other three: nextLinkHealth clears deadSince on the
  * first read that gets through, so a shop behind a maintenance splash for a day
@@ -309,6 +401,10 @@ export function isGoneFrontPage(requestUrl, finalUrl, pageBody, rootBody) {
   const page = pageFingerprint(pageBody);
   const root = pageFingerprint(rootBody);
   if (!page || !root) return false;
+  // A bootstrap shell is identical to the front page by construction, on every
+  // route a live app-rendered store serves. Asked before the comparison, not
+  // after: the equality is not evidence here, so there is nothing to weigh.
+  if (isClientRenderedShell(pageBody)) return false;
   return page === root;
 }
 

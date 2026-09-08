@@ -31,7 +31,7 @@
 
 import { lookup as dnsLookup } from "node:dns/promises";
 
-import { isGoneFrontPage, isGoneHostError } from "./lib/link-health.mjs";
+import { isClientRenderedShell, isGoneFrontPage, isGoneHostError } from "./lib/link-health.mjs";
 
 const urls = (process.env.PROBE_URLS ?? process.argv.slice(2).join(" "))
   .split(/[\s,]+/)
@@ -320,13 +320,21 @@ for (const url of urls) {
     frontPage = "";
   }
   const isFrontPage = isGoneFrontPage(url, finalUrl, body, frontPage);
+  // A bootstrap shell is identical to the front page on every route the store
+  // serves, so the comparison says nothing about this URL — printed separately
+  // because "IDENTICAL to the root" and "not gone" read as a contradiction
+  // otherwise, and that pairing is what a live app-rendered store looks like.
+  const shell = isClientRenderedShell(body);
   console.log(
     `  ROOT PAGE | ${
       !frontPage
         ? "storefront root unreadable — cannot tell a catch-all rewrite from an unknown platform"
-        : isFrontPage
-          ? "IDENTICAL to the storefront root — this URL is not a page there"
-          : `differs from the storefront root (${frontPage.length} bytes) — a real page on an unread platform`
+        : shell
+          ? "a client-rendered app SHELL — every route on this store answers with it," +
+            " root included, so a match here is not evidence about this listing"
+          : isFrontPage
+            ? "IDENTICAL to the storefront root — this URL is not a page there"
+            : `differs from the storefront root (${frontPage.length} bytes) — a real page on an unread platform`
     }`
   );
   console.log(
