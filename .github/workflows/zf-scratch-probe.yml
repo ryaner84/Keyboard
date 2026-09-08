@@ -1,0 +1,12 @@
+# TEMPORARY diagnostic workflow — removed before this branch is proposed.
+name: zf scratch probe
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: node scripts/zf-scratch-probe.mjs
