@@ -741,6 +741,63 @@ def page_fingerprint(html) -> str:
     return re.sub(r"\s+", " ", str(html or "")).strip()
 
 
+def rendered_text(html) -> str:
+    """The text a reader sees with JavaScript off.
+
+    Scripts, styles and comments are DROPPED rather than stripped of their tags:
+    their contents are instructions, not content, and counting them would make
+    an app shell — which is almost entirely script — look like the wordiest page
+    on the roster. Mirror of renderedText in scripts/lib/link-health.mjs.
+    """
+    body = str(html or "")
+    body = re.sub(r"<script[\s\S]*?</script>", " ", body, flags=re.IGNORECASE)
+    body = re.sub(r"<style[\s\S]*?</style>", " ", body, flags=re.IGNORECASE)
+    body = re.sub(r"<!--[\s\S]*?-->", " ", body)
+    body = re.sub(r"<[^>]+>", " ", body)
+    body = re.sub(r"&[a-z]+;|&#\d+;", " ", body, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", body).strip()
+
+
+# How much rendered text a document must carry before it counts as a PAGE rather
+# than the shell a page is drawn into. Measured from a runner on 2026-09-08:
+# www.zfrontier.com's /app/ shell carries 14 characters (its <title>, and it is
+# a LIVE shop), captus.io and kingly-keys.xyz's retirement placeholder carries 0
+# with no scripts, and drop.com's retirement landing page carries 2,504 of real
+# copy. 200 sits an order of magnitude clear of both edges. Mirror of
+# APP_SHELL_MAX_TEXT in scripts/lib/link-health.mjs.
+APP_SHELL_MAX_TEXT = 200
+
+
+def is_client_rendered_shell(html) -> bool:
+    """True when a document is an application SHELL rather than a page.
+
+    A client-rendered storefront serves ONE bootstrap document for every route,
+    its root included, and draws the page in from JavaScript afterwards — so
+    fetched without a browser, every URL on such a site answers with the same
+    bytes, which is identical to the front page BY CONSTRUCTION and says nothing
+    about whether this listing still exists.
+
+    #164 relied on such a shell differing by its per-request nonce. Measured,
+    that is false: www.zfrontier.com serves its 20,939-byte shell from a cache,
+    and on 2026-09-08 two of three LIVE zFrontier listings answered with a body
+    byte-identical to the root and were called DEAD_LINK — the one verdict that
+    takes a listing off the site, on the one kind of page that can never clear
+    it, since a shell never parses and only a successful read withdraws
+    deadSince.
+
+    Both halves of the test do work: a shell has almost no rendered text (where
+    drop.com's landing page IS 2,504 characters of content), and it has a script
+    coming to fill it in (where captus.io's placeholder has neither text nor
+    scripts, so it stays gone). A retired single-page app is left as
+    NO_PRODUCT_DATA — merely the previous, safe answer. Mirror of
+    isClientRenderedShell in scripts/lib/link-health.mjs.
+    """
+    body = str(html or "")
+    if len(rendered_text(body)) > APP_SHELL_MAX_TEXT:
+        return False
+    return re.search(r"<script[^>]+\bsrc\s*=", body, re.IGNORECASE) is not None
+
+
 def is_gone_front_page(request_url, final_url, page_body, root_body) -> bool:
     """True when a store answered THIS EXACT URL with its own front page.
 
@@ -765,12 +822,15 @@ def is_gone_front_page(request_url, final_url, page_body, root_body) -> bool:
     client-rendered shop serves one shell for every route, root included, so
     "the body equals the root's" is true of a live single-page app for the same
     reason it is true of a retired catch-all, and no HTTP-level test separates
-    them. What separates them in practice is that a real app's shell is not
-    static — zfrontier.com carries a per-request token and fails this comparison,
-    and it is a live shop that run_zfrontier reads through its app API. So the
-    tolerance is whitespace and nothing else; loosening it would hide the
-    listings of every app-rendered store on the roster. Mirror of
-    isGoneFrontPage in scripts/lib/link-health.mjs.
+    them. #164 answered that by relying on a real app's shell not being static —
+    zfrontier.com carries a per-request token — but measured on 2026-09-08 it
+    serves that shell from a cache, and two of three LIVE zFrontier listings
+    came out DEAD_LINK. So the shape is recognised instead:
+    is_client_rendered_shell refuses the verdict for a document with no rendered
+    text and a script to draw one. The whitespace tolerance stays as it is —
+    loosening THAT to ignore inline scripts would hide every app-rendered store
+    whose shell differs only by a nonce, the same failure from the other side.
+    Mirror of isGoneFrontPage in scripts/lib/link-health.mjs.
     """
 
     def parts(url):
@@ -798,6 +858,11 @@ def is_gone_front_page(request_url, final_url, page_body, root_body) -> bool:
     page = page_fingerprint(page_body)
     root = page_fingerprint(root_body)
     if not page or not root:
+        return False
+    # A bootstrap shell is identical to the front page by construction, on every
+    # route a live app-rendered store serves. Asked before the comparison, not
+    # after: the equality is not evidence here, so there is nothing to weigh.
+    if is_client_rendered_shell(page_body):
         return False
     return page == root
 

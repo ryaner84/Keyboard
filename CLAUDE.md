@@ -492,16 +492,37 @@ pinned in both test suites, because a false positive here hides a live listing.
 LIVE one.** A client-rendered shop serves ONE shell for every route, its root
 included, so "this body equals the root's" is true of a live single-page app for
 exactly the same reason it is true of a retired catch-all — and no HTTP-level
-test separates them. What separates them in practice is that a real app's shell
-is not static: **zfrontier.com** looked like the fourth case on one probe (all
-190 `/app/` rows, 20,939 bytes, identical to its root) and failed the comparison
-on the next, because the shell carries a per-request token — and it is a live
-shop, which `run_zfrontier` reads through its app API rather than through the
-price pass at all. So the tolerance is whitespace and NOTHING else. Loosening it
-to ignore inline script contents would "catch" zfrontier by hiding the listings
-of every app-rendered store on the roster, which is the one failure this whole
-chain exists to prevent; a retirement page that varies per request stays
-`NO_PRODUCT_DATA`, which is merely the previous, safe answer.
+test separates them. #164 answered that with the observation that a real app's
+shell is not static: **zfrontier.com** looked like the fourth case on one probe
+(all 190 `/app/` rows, 20,939 bytes, identical to its root) and failed the
+comparison on the next, because the shell carries a per-request token.
+
+**That premise is FALSE, and it was hiding the live shop it was written about.**
+The token is the only per-request content in the whole document and zfrontier
+serves the shell from a cache, so whether page and root match is a coin flip:
+probed from a runner on 2026-09-08, two of three LIVE zFrontier listings came
+back byte-identical to the root and were called `DEAD_LINK`. Production had
+begun recording it — every `deadSince` on a `www.zfrontier.com` row was written
+on or after #164 shipped, and the app never 404s (a nonsense hash answers 200
+with the same shell), so no other rule could have written one. It is the worst
+column to be wrong in: `deadSince` is the only signal allowed to take a listing
+off the site, and it is the one a shell can never clear, because only a
+successful READ withdraws it and a shell never parses. 225 rows across
+`zfrontier` (a vendor that publishes, including its live-GB rows) and
+`zfrontier-cn` were on that path, a few more each nightly run.
+
+So the shape is RECOGNISED rather than gambled on. `isClientRenderedShell`
+refuses the verdict for a document that carries no rendered text and a script to
+draw one, and both halves of that test do work: drop.com's retirement page is
+2,504 characters of Corsair landing copy — it IS the content, which is what
+makes it evidence — while captus.io and kingly-keys.xyz answer with a 114-byte
+placeholder carrying no text AND no scripts, so nothing is coming to fill it in
+and #164's verdict stands for them. The whitespace tolerance stays exactly as it
+was: loosening THAT to ignore inline script contents would hide every
+app-rendered store whose shell differs only by a nonce, which is the same
+failure from the other side. A retirement page that varies per request, and a
+retired single-page app, both stay `NO_PRODUCT_DATA` — merely the previous, safe
+answer, which is the asymmetry this whole chain runs on.
 
 **And a third answer gives no status, no redirect and no page at all: the
 DOMAIN is gone.** Every guard in the vendor chain judges a storefront by the
