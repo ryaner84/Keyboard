@@ -1,13 +1,16 @@
 // TEMPORARY diagnostic — removed before this branch is proposed.
 //
-// Two questions the standard vendor probe cannot answer:
-//   1. Is www.zfrontier.com/app/<kind>/<hash> byte-identical to the site root,
-//      and if not, WHERE do the two documents differ? isGoneFrontPage answers
-//      DEAD_LINK when they are equal after whitespace normalization, and it
-//      answered DEAD_LINK for two of three live listings on run 34239886634.
-//   2. Does the page carry the product data anywhere a parser could read it —
-//      an embedded state blob, or an app API keyed by the hash?
-import { pageFingerprint } from "./lib/link-health.mjs";
+// Round 2. Round 1 established that www.zfrontier.com serves ONE 20,939-byte
+// shell for every route (visible text: "zFrontier 装备前线", everything else
+// loaded from <script src>), differing from its own root only in a
+// per-request window.csrf_token — and that when a cached response makes the
+// two match, isGoneFrontPage answers DEAD_LINK for a live listing. Two of the
+// three live URLs probed on run 34239886634 came out DEAD_LINK.
+//
+// The question now: what separates that shell from the pages isGoneFrontPage
+// was written for? Measure the visible text of every control the link-health
+// suite pins, plus the three stores #164 shipped for, and the DB rows at risk.
+import pg from "pg";
 
 const HEADERS = {
   "User-Agent":
@@ -16,17 +19,12 @@ const HEADERS = {
   "Accept-Language": "en-US,en;q=0.9",
 };
 
-async function get(url, accept) {
+async function get(url) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20_000);
   try {
-    const res = await fetch(url, {
-      headers: accept ? { ...HEADERS, Accept: accept } : HEADERS,
-      redirect: "follow",
-      signal: controller.signal,
-    });
-    const body = await res.text();
-    return { status: res.status, url: res.url, body, type: res.headers.get("content-type") };
+    const res = await fetch(url, { headers: HEADERS, redirect: "follow", signal: controller.signal });
+    return { status: res.status, url: res.url, body: await res.text() };
   } catch (err) {
     return { error: err.message };
   } finally {
@@ -34,79 +32,87 @@ async function get(url, accept) {
   }
 }
 
-const ORIGIN = "https://www.zfrontier.com";
-const PAGES = [
-  "/app/mch/1xmjEGd2dQml",
-  "/app/eqp/RG65AYaX2eQl",
-  "/app/mch/B5xZk90GGz9o",
-];
-
-// ── 1. Is the shell stable, and how does it differ from the root? ────────────
-console.log("=== SHELL STABILITY");
-const roots = [await get(`${ORIGIN}/`), await get(`${ORIGIN}/`)];
-console.log(
-  `root fetched twice: ${roots.map((r) => r.body?.length ?? r.error).join(" vs ")} bytes, ` +
-    `identical=${pageFingerprint(roots[0].body) === pageFingerprint(roots[1].body)}`
-);
-
-for (const path of PAGES) {
-  const a = await get(`${ORIGIN}${path}`);
-  const b = await get(`${ORIGIN}${path}`);
-  if (a.error || b.error) {
-    console.log(`${path} | ERROR ${a.error ?? b.error}`);
-    continue;
-  }
-  const fa = pageFingerprint(a.body);
-  const fb = pageFingerprint(b.body);
-  const froot = pageFingerprint(roots[0].body);
-  console.log(
-    `${path} | ${a.body.length}b | self-stable=${fa === fb} | equals-root=${fa === froot}`
-  );
-  if (fa !== froot) {
-    let i = 0;
-    while (i < fa.length && i < froot.length && fa[i] === froot[i]) i++;
-    console.log(`   first difference at ${i}: page=${JSON.stringify(fa.slice(i - 60, i + 90))}`);
-    console.log(`                            root=${JSON.stringify(froot.slice(i - 60, i + 90))}`);
-  }
-  // Visible text (scripts/styles stripped): an app SHELL renders its content
-  // client-side and so carries almost none; a retirement landing page IS the
-  // content and carries plenty.
-  const text = a.body
+function visibleText(html) {
+  return String(html ?? "")
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<[^>]+>/g, " ")
+    .replace(/&[a-z]+;|&#\d+;/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
-  console.log(`   visible text ${text.length} chars: ${JSON.stringify(text.slice(0, 200))}`);
-  const scripts = [...a.body.matchAll(/<script[^>]*src=["']([^"']+)["']/gi)].map((m) => m[1]);
-  console.log(`   ${scripts.length} external script(s): ${scripts.slice(0, 4).join(" ")}`);
-  const stateKeys = [...a.body.matchAll(/window\.(__[A-Z_]+__|[A-Za-z_$]+)\s*=/g)].map((m) => m[1]);
-  console.log(`   window assignments: ${[...new Set(stateKeys)].slice(0, 8).join(", ") || "(none)"}`);
 }
 
-// ── 2. Where does the app get its data? ─────────────────────────────────────
-console.log("\n=== API CANDIDATES");
-const hash = "1xmjEGd2dQml";
-const CANDIDATES = [
-  `${ORIGIN}/v2/mch/detail?hash=${hash}`,
-  `${ORIGIN}/v2/mch/${hash}`,
-  `${ORIGIN}/api/mch/${hash}`,
-  `${ORIGIN}/api/v2/mch/detail?hash=${hash}`,
-  `${ORIGIN}/app/api/mch/${hash}`,
-  `${ORIGIN}/v2/flow/detail?hash=${hash}`,
-  `${ORIGIN}/api/flow/${hash}`,
-  `${ORIGIN}/v2/eqp/detail?hash=RG65AYaX2eQl`,
+const CASES = [
+  // The three stores #164 shipped isGoneFrontPage for — these MUST stay DEAD_LINK.
+  ["drop (retired: Corsair landing page)", "https://drop.com/buy/drop-full-metal-gmk-mecha-01-r2"],
+  ["captus (retired: 114-byte placeholder)", "https://captus.io/collections/keycaps/products/gmk-euler"],
+  ["kingly-keys (retired: placeholder)", "https://kingly-keys.xyz/products/gb-gmk-fro-yo"],
+  // Live shops the check must never touch.
+  ["zfrontier (LIVE app shell)", "https://www.zfrontier.com/app/mch/1xmjEGd2dQml"],
+  ["funkeys (LIVE, unread platform)", "https://groupbuy.funkeys.com.ua/gmk_colorchrome"],
+  ["mokbstore (LIVE, renamed handle)", "https://mokbstore.com/gb-mv-expo-gmk-cyl"],
+  ["hexkeyboards (LIVE, /password)", "https://hexkeyboards.com/collections/group-buys/products/gb-gmk-blot"],
 ];
-for (const url of CANDIDATES) {
-  const r = await get(url, "application/json, text/plain, */*");
-  if (r.error) {
-    console.log(`${url} | ERROR ${r.error}`);
+
+console.log("=== PAGE vs ROOT, and how much text each carries");
+for (const [label, url] of CASES) {
+  const page = await get(url);
+  if (page.error) {
+    console.log(`${label}\n   ERROR ${page.error}`);
     continue;
   }
-  const looksJson = (r.type ?? "").includes("json");
+  const root = await get(new URL(page.url).origin + "/");
+  const norm = (h) => String(h ?? "").replace(/\s+/g, " ").trim();
+  const equal = !!root.body && norm(page.body) === norm(root.body);
+  const text = visibleText(page.body);
+  const rootText = visibleText(root.body);
+  const scripts = [...page.body.matchAll(/<script[^>]*src=["'][^"']+["']/gi)].length;
   console.log(
-    `${url} | ${r.status} | ${r.type} | ${r.body.length}b${
-      looksJson ? ` | ${JSON.stringify(r.body.slice(0, 300))}` : ""
-    }`
+    `${label}\n   ${page.status} ${page.body.length}b | equals-root=${equal}` +
+      ` | page-text=${text.length} | root-text=${rootText.length} | script-src=${scripts}`
   );
+  console.log(`   text: ${JSON.stringify(text.slice(0, 180))}`);
+}
+
+// ── Which rows the false verdict can reach ──────────────────────────────────
+if (process.env.DATABASE_URL) {
+  let cs = process.env.DATABASE_URL;
+  if (cs.includes("__PASSWORD__")) {
+    cs = cs.replace("__PASSWORD__", encodeURIComponent(process.env.DATABASE_PASSWORD ?? ""));
+  }
+  cs = cs.replace(/:5432(\/|$|\?)/, ":6543$1");
+  const client = new pg.Client({ connectionString: cs, ssl: { rejectUnauthorized: false } });
+  await client.connect();
+  const { rows } = await client.query(`
+    SELECT v.slug, gb.status::text AS gb_status,
+           count(*)::int AS rows,
+           count(*) FILTER (WHERE vk."deadSince" IS NOT NULL)::int AS dead,
+           count(*) FILTER (WHERE vk.price IS NOT NULL)::int AS priced,
+           max(vk."deadSince") AS newest_dead
+      FROM public."VendorKit" vk
+      JOIN public."Vendor" v ON v.id = vk."vendorId"
+      JOIN public."Kit" k ON k.id = vk."kitId"
+      JOIN public."GroupBuy" gb ON gb.id = k."groupBuyId"
+     WHERE vk."productUrl" ILIKE '%zfrontier.com%'
+     GROUP BY v.slug, gb.status
+     ORDER BY v.slug, gb.status
+  `);
+  console.log("\n=== zfrontier.com rows in production, by vendor and set status");
+  for (const r of rows) {
+    console.log(
+      `${r.slug} | ${r.gb_status} | rows=${r.rows} dead=${r.dead} priced=${r.priced}` +
+        ` newestDead=${r.newest_dead ? new Date(r.newest_dead).toISOString().slice(0, 10) : "-"}`
+    );
+  }
+  const { rows: recent } = await client.query(`
+    SELECT v.slug, count(*)::int AS newly_dead
+      FROM public."VendorKit" vk
+      JOIN public."Vendor" v ON v.id = vk."vendorId"
+     WHERE vk."deadSince" >= now() - interval '3 days'
+     GROUP BY v.slug ORDER BY 2 DESC LIMIT 15
+  `);
+  console.log("\n=== rows marked gone in the last 3 days");
+  for (const r of recent) console.log(`${r.slug} | ${r.newly_dead}`);
+  await client.end();
 }
