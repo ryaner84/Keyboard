@@ -21,6 +21,8 @@ import {
   isGoneHostError,
   isGoneRedirect,
   isUnbuyableDeadLink,
+  isUnresolvedHostError,
+  UNRESOLVED_HOST_ERROR_MARKERS,
   pageFingerprint,
   isUndiagnosed,
   nextLinkHealth,
@@ -444,6 +446,70 @@ for (const [label, err] of [
   assert.equal(isGoneHostError(err), false, `${label} is a block, not a dead host`);
 }
 
+// --- isUnresolvedHostError --------------------------------------------------
+// The cheap question next door: did the request get an ADDRESS? It hides
+// nothing — it only lets a run stop paying the full navigation timeout once per
+// LISTING for a host that will not resolve. mykeyboard.eu holds 206 of them,
+// its lookups take ~10s to end EAI_AGAIN, and refresh-prices is time-boxed to
+// twelve minutes; the rows that budget crowds out are live listings, and an
+// unpriced live listing is hidden outright on a released set.
+{
+  // Everything isGoneHostError calls gone is unresolved too — that is the
+  // superset, and it is what lets the memo re-raise the ORIGINAL error and let
+  // every row reach the verdict its own fetch would have reached.
+  for (const marker of GONE_HOST_ERROR_MARKERS) {
+    assert.ok(
+      UNRESOLVED_HOST_ERROR_MARKERS.includes(marker),
+      `${marker} must stay a resolution failure as well as a dead host`
+    );
+  }
+  const nxdomain = new TypeError("fetch failed");
+  nxdomain.cause = Object.assign(new Error("getaddrinfo ENOTFOUND mykeyboard.eu"), {
+    code: "ENOTFOUND",
+  });
+  assert.equal(isUnresolvedHostError(nxdomain), true, "NXDOMAIN never resolved");
+
+  // …and the one that is NOT a dead host, which is the whole reason this
+  // question exists separately. The resolver declined to answer; the domain may
+  // be perfectly alive, so this must stay false for isGoneHostError.
+  const again = Object.assign(new TypeError("fetch failed"), { cause: { code: "EAI_AGAIN" } });
+  assert.equal(isUnresolvedHostError(again), true, "EAI_AGAIN never resolved either");
+  assert.equal(again && isGoneHostError(again), false, "EAI_AGAIN is still not a dead host");
+
+  // Chromium's spelling, i.e. what Playwright hands scrape.py.
+  assert.equal(
+    isUnresolvedHostError(new Error("page.goto: net::ERR_NAME_NOT_RESOLVED at https://x/y")),
+    true,
+    "Chromium name failure"
+  );
+  assert.equal(
+    isUnresolvedHostError(new Error("[Errno -3] Temporary failure in name resolution")),
+    true,
+    "gaierror EAI_AGAIN"
+  );
+
+  // A host that EXISTS must never be memoized: the connection reached a server
+  // (or a certificate), so one slow or hostile page says nothing about the next
+  // listing on the same store — and skipping the rest of a healthy store's rows
+  // is exactly the failure this speed-up must not introduce.
+  for (const [label, err] of [
+    ["refused", Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } })],
+    ["timeout", Object.assign(new TypeError("fetch failed"), { cause: { code: "ETIMEDOUT" } })],
+    ["reset", Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } })],
+    ["expired cert", Object.assign(new TypeError("fetch failed"), { cause: { code: "CERT_HAS_EXPIRED" } })],
+    ["incomplete chain", Object.assign(new TypeError("fetch failed"), { cause: { code: "UNABLE_TO_GET_ISSUER_CERT_LOCALLY" } })],
+    ["abort", Object.assign(new Error("This operation was aborted"), { name: "AbortError" })],
+    ["nothing", null],
+    ["empty", {}],
+  ]) {
+    assert.equal(
+      isUnresolvedHostError(err),
+      false,
+      `${label} reached a host — the rest of its listings must still be fetched`
+    );
+  }
+}
+
 // --- the Python mirror -----------------------------------------------------
 // The price pass is written twice — run_prices in scraper/scrape.py (the
 // nightly that actually crawls, with a real browser) and refreshPrices in
@@ -550,6 +616,52 @@ assert.ok(
       `${notGone} is a block, and a block may never hide a listing`
     );
   }
+}
+
+// The resolution-failure list is mirrored too, and it is the one place EAI_AGAIN
+// is allowed to appear — so a drift here is a half that either keeps paying the
+// timeout per row, or (far worse) starts treating one as a verdict.
+{
+  const m = scrapePy.match(
+    /^UNRESOLVED_HOST_ERROR_MARKERS = GONE_HOST_ERROR_MARKERS \+ \(([\s\S]*?)\)$/m
+  );
+  assert.ok(m, "scrape.py must define UNRESOLVED_HOST_ERROR_MARKERS off the gone list");
+  const extra = [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+  assert.deepEqual(
+    [...GONE_HOST_ERROR_MARKERS, ...extra],
+    UNRESOLVED_HOST_ERROR_MARKERS,
+    "scrape.py's UNRESOLVED_HOST_ERROR_MARKERS must match link-health.mjs"
+  );
+  assert.ok(
+    /def is_unresolved_host_error\(/.test(scrapePy),
+    "scrape.py must mirror isUnresolvedHostError as is_unresolved_host_error"
+  );
+}
+
+// scrape.py must actually CONSULT the memo, and must record into it.
+// Remembering without consulting is a no-op; consulting without remembering can
+// never fire. It asks before it navigates and records in the except block that
+// already exists, so the row's verdict is unchanged either way. (prices.ts's
+// half of the same pair is asserted below, once that file is read.)
+{
+  assert.ok(
+    /_UNRESOLVED_HOSTS: dict\[str, Exception\] = \{\}/.test(scrapePy),
+    "scrape.py must mirror the per-host memo"
+  );
+  assert.equal(
+    (scrapePy.match(/raise_if_host_unresolved\(product_url\)/g) ?? []).length,
+    2,
+    "both of scrape.py's price paths must consult the memo before navigating"
+  );
+  assert.equal(
+    (scrapePy.match(/remember_unresolved_host\(product_url, exc\)/g) ?? []).length,
+    2,
+    "both of scrape.py's price paths must record a resolver failure"
+  );
+  assert.ok(
+    /_UNRESOLVED_HOSTS\.clear\(\)/.test(scrapePy),
+    "run_prices must clear the memo at the start of each run"
+  );
 }
 
 // A 404 must return DEAD_LINK, not NO_BASE_KIT, in BOTH of scrape.py's price
@@ -796,6 +908,50 @@ assert.equal(
   1,
   "only the human-product-page path may declare a host gone"
 );
+// The TypeScript half of the memo pair. It lives in fetchWithTimeout, so every
+// fetch a row makes — the Shopify JSON, the page, /meta.json, the storefront
+// root — is covered by one guard rather than four.
+{
+  assert.ok(
+    /const hostResolution = new Map<string, unknown>\(\);/.test(pricesTs),
+    "prices.ts must memoize the resolver error per host"
+  );
+  assert.ok(
+    /const settled = host === null \? null : hostResolution\.get\(host\);\s*\n\s*if \(settled\) throw settled;/.test(
+      pricesTs
+    ),
+    "fetchWithTimeout must re-raise the memoized error instead of re-fetching"
+  );
+  assert.ok(
+    /if \(host !== null\) await settleHostResolution\(host, err\);/.test(pricesTs),
+    "fetchWithTimeout must settle the host after a failed fetch"
+  );
+  // The subtle half. FETCH_TIMEOUT_MS is 6s and a lame domain takes ~10s to
+  // answer EAI_AGAIN, so the abort fires FIRST and all the pass ever catches is
+  // an AbortError. Inferring "unresolvable" from that would be wrong in the
+  // dangerous direction — a slow page on a healthy store looks identical — so
+  // the resolver has to be asked outright, and only its answer may memoize.
+  assert.ok(
+    /async function hostResolutionFailure\(host: string\): Promise<unknown> \{/.test(pricesTs),
+    "prices.ts must ask the resolver directly, not infer a dead name from a timeout"
+  );
+  assert.ok(
+    /return isUnresolvedHostError\(err\) \? err : null;/.test(pricesTs),
+    "only the resolver's own no-address answer may short-circuit a host"
+  );
+  // Claimed before the probe, so eight lanes ask once and a host that resolves
+  // is never asked about twice.
+  assert.ok(
+    /hostResolution\.set\(host, null\);/.test(pricesTs),
+    "settleHostResolution must claim the host before probing it"
+  );
+  // Per run. The module outlives one invocation in CI and on Vercel, so a
+  // domain that comes back must not stay memoized as unreachable for ever.
+  assert.ok(
+    /hostResolution\.clear\(\);/.test(pricesTs),
+    "refreshPrices must clear the memo at the start of each run"
+  );
+}
 {
   const branch = pricesTs.slice(
     pricesTs.indexOf("if (priceData === DEAD_LINK) {"),

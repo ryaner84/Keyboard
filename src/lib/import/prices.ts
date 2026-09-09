@@ -1,3 +1,5 @@
+import { lookup as dnsLookup } from "node:dns/promises";
+
 import { prisma } from "@/lib/prisma";
 import {
   classifyVariant,
@@ -21,6 +23,7 @@ import {
   isGoneFrontPage,
   isGoneHostError,
   isGoneRedirect,
+  isUnresolvedHostError,
   nextLinkHealth,
   pageFingerprint,
 } from "../../../scripts/lib/link-health.mjs";
@@ -130,7 +133,97 @@ export type FetchPriceOutcome =
   | typeof NO_PRODUCT_DATA
   | null;
 
+/**
+ * What this run has settled about a host's NAME: the resolver error to re-raise,
+ * or null when the host resolves fine and must never be short-circuited.
+ *
+ * A host that does not resolve costs a full timeout before it fails, and
+ * fetchVendorPrice makes several fetches per row. mykeyboard.eu holds 206
+ * listings, 196 of them queued, and its lookups take ~10s to end in EAI_AGAIN —
+ * so one lapsed domain can spend the better part of this run's twelve-minute
+ * budget re-learning the same thing two hundred times, while the live listings
+ * it crowds out stay unpriced and, on a released set, hidden.
+ *
+ * The ERROR is memoized rather than a verdict, and it is rethrown unchanged, so
+ * every row on the host reaches exactly the answer the real fetch would have
+ * given it — isGoneHostError still sees NXDOMAIN and answers DEAD_LINK, and
+ * still does NOT see EAI_AGAIN, which stays the block it has always been. This
+ * is a speed-up with no verdict of its own: it cannot mark a row dead that
+ * today's code would not, and it cannot hide a listing.
+ *
+ * Per run, like frontPageCache; refreshPrices clears it so a domain that comes
+ * back is retried on the next run.
+ */
+const hostResolution = new Map<string, unknown>();
+
+function hostOfUrl(url: string): string | null {
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Longest this run will wait for one direct resolver answer about a host.
+ *
+ * getaddrinfo bounds itself by resolv.conf (5s per nameserver, twice by
+ * default), so this is a backstop against a pathological resolver rather than
+ * the normal ceiling. Paid at most once per failing host per run.
+ */
+const DNS_PROBE_TIMEOUT_MS = 15_000;
+
+/**
+ * Ask the resolver directly whether a host has an address, and return the
+ * failure if it has none.
+ *
+ * Needed because FETCH_TIMEOUT_MS (6s) is SHORTER than a lame domain's
+ * resolution (~10s to EAI_AGAIN, measured on mykeyboard.eu from a runner on
+ * 2026-09-09): the abort fires first, so what the price pass actually catches is
+ * an AbortError, which says nothing about the name. Inferring "unresolvable"
+ * from a timeout would be wrong in the dangerous direction — a slow PAGE on a
+ * healthy store looks identical — so the question is asked outright instead.
+ *
+ * Returns null unless the resolver itself said no address, so a host that
+ * answers is never short-circuited and a probe that times out simply forfeits
+ * the speed-up.
+ */
+async function hostResolutionFailure(host: string): Promise<unknown> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      dnsLookup(host),
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("dns probe timeout")), DNS_PROBE_TIMEOUT_MS);
+      }),
+    ]);
+    return null;
+  } catch (err) {
+    return isUnresolvedHostError(err) ? err : null;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/** Settle a host's name once per run, after one of its fetches has failed. */
+async function settleHostResolution(host: string, err: unknown): Promise<void> {
+  if (hostResolution.has(host)) return;
+  // The fetch already named the resolver failure — no need to ask again.
+  if (isUnresolvedHostError(err)) {
+    hostResolution.set(host, err);
+    return;
+  }
+  // Claim the host first so the other lanes don't all probe it at once, and so
+  // a host that turns out to resolve is never asked about twice.
+  hostResolution.set(host, null);
+  const failure = await hostResolutionFailure(host);
+  if (failure) hostResolution.set(host, failure);
+}
+
 async function fetchWithTimeout(url: string, extraHeaders?: Record<string, string>): Promise<Response> {
+  const host = hostOfUrl(url);
+  const settled = host === null ? null : hostResolution.get(host);
+  if (settled) throw settled;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -138,6 +231,9 @@ async function fetchWithTimeout(url: string, extraHeaders?: Record<string, strin
       headers: { ...BROWSER_HEADERS, ...extraHeaders },
       signal: controller.signal,
     });
+  } catch (err) {
+    if (host !== null) await settleHostResolution(host, err);
+    throw err;
   } finally {
     clearTimeout(timer);
   }
@@ -1214,6 +1310,9 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
     maxRuntimeMs = DEFAULT_MAX_RUNTIME_MS,
     ids,
   } = opts;
+  // Per RUN, never across runs: a domain that comes back must be retried, and
+  // this module outlives one invocation in both CI and the Vercel function.
+  hostResolution.clear();
   const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
   // `maxAgeHours: 0` is FORCE_PRICE_REFRESH — a person saying "check
   // everything now". The back-off is an optimisation, not a quarantine, so it

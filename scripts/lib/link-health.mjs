@@ -451,6 +451,18 @@ export const GONE_HOST_ERROR_MARKERS = [
  * that gets through — so a domain that comes back needs no intervention.
  */
 export function isGoneHostError(err) {
+  return GONE_HOST_ERROR_MARKERS.some((marker) => errorText(err).includes(marker));
+}
+
+/**
+ * Every code and message in an error's cause chain, flattened to one string.
+ *
+ * `fetch()` reports a transport failure as a bare "TypeError: fetch failed" and
+ * buries the reason in `cause`; undici tries every address a host resolves to
+ * and hands back an AggregateError over the lot. Both host questions below have
+ * to read through that, so they read through it once, here.
+ */
+function errorText(err) {
   const seen = new Set();
   const stack = [err];
   const text = [];
@@ -464,8 +476,56 @@ export function isGoneHostError(err) {
     // AggregateError (undici tries every address a host resolves to).
     if (Array.isArray(node.errors)) stack.push(...node.errors);
   }
-  const joined = text.join("\n");
-  return GONE_HOST_ERROR_MARKERS.some((marker) => joined.includes(marker));
+  return text.join("\n");
+}
+
+/**
+ * The resolver failures that mean the request never got an ADDRESS to dial.
+ *
+ * A deliberate superset of GONE_HOST_ERROR_MARKERS, and the extra entry is the
+ * whole reason this list exists separately: EAI_AGAIN is the resolver declining
+ * to answer, which says nothing about whether the domain exists. It may never
+ * hide a listing, so it is not — and must never be — in the list above.
+ */
+export const UNRESOLVED_HOST_ERROR_MARKERS = [
+  ...GONE_HOST_ERROR_MARKERS,
+  "EAI_AGAIN",
+  "Temporary failure in name resolution",
+];
+
+/**
+ * True when a fetch failed at NAME RESOLUTION — no address, so no request.
+ *
+ * This asks a cheaper question than isGoneHostError, and answers it for a
+ * different purpose. That one asks "is this domain GONE?", which only NXDOMAIN
+ * settles and which is allowed to take a listing off the site. This one asks
+ * "did we get an address?", which NXDOMAIN and a resolver that would not answer
+ * both say no to — and it is allowed to hide nothing whatsoever. It exists so a
+ * run stops paying for the same answer once per LISTING.
+ *
+ * The cost it removes is not hypothetical. A host that does not resolve burns
+ * the price pass's full per-fetch timeout before it fails, and fetchVendorPrice
+ * makes several fetches per row (the Shopify JSON, the page, sometimes the
+ * storefront root). mykeyboard.eu has 206 listings and 196 of them are queued;
+ * probed from a runner on 2026-09-09 its lookups take ~10s and end EAI_AGAIN,
+ * while 42 of its rows already carry a deadSince written when the same resolver
+ * answered NXDOMAIN. The refresh-prices run is time-boxed to twelve minutes at
+ * eight lanes, so one dead domain can spend the better part of a run's budget
+ * learning the same thing two hundred times — and the rows it crowds out are
+ * live listings, which on a RELEASED set are hidden outright while unpriced.
+ * That is link-health's one prohibition ("a block may never hide a listing")
+ * reached from the far end again, by spending the budget that would have
+ * published them.
+ *
+ * Narrow on purpose. Only name resolution counts: a refused or timed-out
+ * CONNECTION is a host that exists and may simply be slow on one page, and a
+ * certificate error is a live site — memoizing either would let one bad page
+ * skip the rest of a healthy store's listings. The caller memoizes the ERROR,
+ * not a verdict, so every row on the host still reaches exactly the answer the
+ * real fetch would have given it.
+ */
+export function isUnresolvedHostError(err) {
+  return UNRESOLVED_HOST_ERROR_MARKERS.some((marker) => errorText(err).includes(marker));
 }
 
 /**

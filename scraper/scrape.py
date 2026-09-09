@@ -904,6 +904,79 @@ def is_gone_host_error(exc) -> bool:
     return any(marker in text for marker in GONE_HOST_ERROR_MARKERS)
 
 
+# The resolver failures that mean the request never got an ADDRESS to dial.
+# A deliberate superset of GONE_HOST_ERROR_MARKERS, and the extra entry is why
+# the list exists separately: EAI_AGAIN is the resolver declining to answer,
+# which says nothing about whether the domain exists, so it may never hide a
+# listing and must never be in the list above. Mirror of
+# UNRESOLVED_HOST_ERROR_MARKERS in scripts/lib/link-health.mjs.
+UNRESOLVED_HOST_ERROR_MARKERS = GONE_HOST_ERROR_MARKERS + (
+    "EAI_AGAIN",
+    "Temporary failure in name resolution",
+)
+
+
+def is_unresolved_host_error(exc) -> bool:
+    """True when a navigation failed at NAME RESOLUTION — no address, no request.
+
+    A cheaper question than is_gone_host_error, asked for a different purpose:
+    that one settles whether the domain is GONE (only NXDOMAIN does, and it may
+    hide a listing), this one only whether we got an address, and it hides
+    nothing at all. It exists so a run stops paying for the same answer once per
+    LISTING. Mirror of isUnresolvedHostError in scripts/lib/link-health.mjs.
+    """
+    if exc is None:
+        return False
+    text = f"{type(exc).__name__}: {exc}"
+    cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
+    if cause is not None:
+        text += f"\n{type(cause).__name__}: {cause}"
+    return any(marker in text for marker in UNRESOLVED_HOST_ERROR_MARKERS)
+
+
+# Hosts whose NAME would not resolve this run, and the error each failed with.
+#
+# Mirrors `unresolvedHosts` in src/lib/import/prices.ts, and sits beside
+# _FRONT_PAGE_CACHE for the same reason: a time-boxed pass can only afford a
+# question that costs one request per SILENT host, never one per row. A host
+# that does not resolve burns the full navigation timeout before it fails, and
+# mykeyboard.eu holds 206 listings whose lookups take ~10s to end in EAI_AGAIN —
+# enough to spend most of a run re-learning it, while the live listings crowded
+# out stay unpriced and, on a released set, hidden.
+#
+# The ERROR is remembered and re-raised unchanged, never a verdict, so every row
+# on the host reaches exactly the answer its own navigation would have produced:
+# is_gone_host_error still sees NXDOMAIN and answers DEAD_LINK, and still does
+# not see EAI_AGAIN. A speed-up with no verdict of its own.
+_UNRESOLVED_HOSTS: dict[str, Exception] = {}
+
+
+def _host_of_url(url: str) -> str:
+    try:
+        return urllib.parse.urlsplit(url).netloc
+    except ValueError:
+        return ""
+
+
+def raise_if_host_unresolved(url: str) -> None:
+    """Re-raise the resolver error another row already hit for this host."""
+    host = _host_of_url(url)
+    if host and host in _UNRESOLVED_HOSTS:
+        raise _UNRESOLVED_HOSTS[host]
+
+
+def remember_unresolved_host(url: str, exc: Exception) -> None:
+    """Record a NAME-resolution failure so the rest of the run skips the wait.
+
+    Only name resolution: a refused or slow CONNECTION is a host that exists and
+    may simply be slow on one page, and one bad page must never skip the rest of
+    a healthy store's listings.
+    """
+    host = _host_of_url(url)
+    if host and is_unresolved_host_error(exc):
+        _UNRESOLVED_HOSTS[host] = exc
+
+
 def next_link_health(link_failures, dead_since, outcome, now=None):
     """Link-health columns after one price attempt. Pure — the caller writes.
 
@@ -1384,9 +1457,17 @@ def shopify_price(
         nonlocal browser_loaded, clean, nav_status, nav_final_url
         if browser_loaded:
             return
-        response = page.goto(
-            product_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS
-        )
+        # Another row on this host already failed to resolve it this run. Raise
+        # that same error rather than paying the navigation timeout again — the
+        # except block below reaches the identical verdict either way.
+        raise_if_host_unresolved(product_url)
+        try:
+            response = page.goto(
+                product_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS
+            )
+        except Exception as exc:  # noqa: BLE001
+            remember_unresolved_host(product_url, exc)
+            raise
         nav_status = response.status if response is not None else None
         nav_final_url = page.url
         final_url = page.url.split("?")[0].split("#")[0].rstrip("/")
@@ -4495,6 +4576,11 @@ def generic_price(
     # browser-rendered DOM against raw markup and could never match.
     html_source: str | None = None
     try:
+        # Another row on this host already failed to resolve it this run — take
+        # that answer instead of paying the navigation timeout again. It is the
+        # same error object, so is_gone_host_error below reaches the same
+        # verdict it would have reached from a fresh navigation.
+        raise_if_host_unresolved(product_url)
         response = page.goto(
             product_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS
         )
@@ -4506,6 +4592,7 @@ def generic_price(
             html_source = "browser"
     except Exception as exc:  # noqa: BLE001
         nav_error = exc
+        remember_unresolved_host(product_url, exc)
         log(f"  generic fetch error ({product_url}): {type(exc).__name__}: {exc}")
 
     if html is None and scrapling is not None and scrapling.available:
@@ -5273,6 +5360,8 @@ def run_prices(
 ) -> dict:
     stats = {"attempted": 0, "updated": 0, "failed": 0, "dead": 0,
              "refused": 0, "unparsed": 0, "throttled_s": 0.0}
+    # Per RUN, never across runs: a domain that comes back must be retried.
+    _UNRESOLVED_HOSTS.clear()
     ensure_link_health_columns(conn)
     candidates = HostThrottle.interleave(fetch_price_candidates(conn))
     log(f"Price pass: {len(candidates)} vendor listing(s) to check.")
