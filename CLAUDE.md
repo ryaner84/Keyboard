@@ -557,6 +557,49 @@ that no longer resolves. The probe reports that twin, and the cause code under
 "fetch failed", so the next dead domain is visible from the tool rather than
 from a hand-run `getent`.
 
+**And that exclusion is right about the verdict and expensive about the
+question.** `EAI_AGAIN` must never hide a listing — but a host that will not
+resolve costs the FULL fetch timeout before it fails, and `fetchVendorPrice`
+makes several fetches per row (the Shopify JSON, the human page, sometimes the
+storefront root). Probed from a runner on 2026-09-09, `mykeyboard.eu` takes
+~10s to answer `EAI_AGAIN`, and it holds 206 listings with 196 of them queued —
+while 42 of its rows already carry a `deadSince` written when the same resolver
+answered NXDOMAIN, so the domain is gone and merely lame about saying so.
+`refresh-prices` is time-boxed to twelve minutes at eight lanes, so ONE dead
+domain can spend most of a run's budget learning the same thing two hundred
+times, and the rows it crowds out are live listings — which on a RELEASED set
+are hidden outright while unpriced. That is `link-health.mjs`'s one prohibition
+reached from the far end again: not by producing a block ourselves (the
+`HostThrottle` failure) but by spending the budget that would have published
+them. `isUnresolvedHostError` (mirrored as `is_unresolved_host_error`) is the
+cheaper question — "did we get an ADDRESS", which NXDOMAIN *and* `EAI_AGAIN`
+both answer no to — and each half memoizes the host's ERROR for the run
+(`hostResolution` / `_UNRESOLVED_HOSTS`, beside `frontPageCache`), re-raising
+that same object rather than re-dialling. It carries no verdict of its own:
+`isGoneHostError` still sees NXDOMAIN and still does not see `EAI_AGAIN`, so
+every row reaches exactly the answer its own fetch would have given it. It is
+narrow for the same reason the marker list is: only NAME resolution is
+memoized, because a refused or timed-out CONNECTION is a host that exists and a
+certificate error is a live site — memoizing either would let one bad page skip
+the rest of a healthy store's listings. Per RUN, never across runs, or a domain
+that comes back stays unreachable for ever.
+
+**And the half that runs could not have seen the answer it was memoizing.**
+`FETCH_TIMEOUT_MS` is 6s and a lame domain takes ~10s to reach `EAI_AGAIN`, so
+in `prices.ts` the abort fires FIRST and all the catch ever receives is an
+`AbortError` — which says nothing whatever about the name. Inferring
+"unresolvable" from a timeout is wrong in the one direction that matters, since
+a slow PAGE on a healthy store is the identical error, so the resolver is asked
+outright instead (`hostResolutionFailure`, once per failing host per run) and
+only its own no-address answer may memoize. `scrape.py` needs none of that: its
+`NAV_TIMEOUT_MS` is 30s, comfortably past the resolver's own retry budget, so
+Chromium surfaces `ERR_NAME_NOT_RESOLVED` before the navigation times out. The
+same constant being shorter than a DNS failure is the general trap here — a
+timeout is the one error that hides every other one behind it.
+`test:link-health` fails if the two marker lists disagree, if either half stops
+consulting or recording the memo, if `prices.ts` starts inferring a dead name
+from a timeout instead of asking, or if either half stops clearing it.
+
 **And a 404 counted as READ, so the commonest cause was hiding inside the
 second-commonest.** Both price passes returned the `NO_BASE_KIT` sentinel for a
 404/410, and its caller stamps `priceSource = 'SCRAPED'` — the same mark a live
