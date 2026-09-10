@@ -936,6 +936,103 @@ assert.match(
   }),
   /are gone/
 );
+// …but a PARTIAL dead count is a fact about some rows, not a diagnosis of the
+// vendor, and returning it as one buried every row that was not dead. This is
+// zfrontier-cn as production reports it: 219 listings, ONE of them gone, 214
+// answering 200 with no product markup. The old message — "1 of 219 listing(s)
+// are gone; the rest are still being read" — told the owner a single link had
+// broken and the other 218 were in hand, about the largest silent vendor on the
+// site, whose actual state is the one message that says the repair is a change
+// HERE. The dead count is now a prefix and the parser reason is the verdict.
+{
+  const mixed = reasonOf({
+    slug: "zfrontier-cn",
+    websiteUrl: "https://www.zfrontier.com",
+    visibleListings: 0,
+    listings: 219,
+    readListings: 214,
+    unparsedListings: 214,
+    deadListings: 1,
+    pricedListings: 0,
+  });
+  assert.match(mixed, /^1 of 219 listing\(s\) are gone/);
+  assert.match(mixed, /214 of 219 listing\(s\) answer 200 with no product markup/);
+  assert.match(mixed, /teach the parser or retire it/);
+  assert.doesNotMatch(mixed, /still being read/);
+}
+// Same shape one order of magnitude down: vala.supply, 4 gone and 15 unreadable.
+assert.match(
+  reasonOf({
+    slug: "vala-supply",
+    websiteUrl: "https://vala.supply",
+    visibleListings: 0,
+    listings: 19,
+    readListings: 19,
+    unparsedListings: 15,
+    deadListings: 4,
+    pricedListings: 0,
+  }),
+  /4 of 19 listing\(s\) are gone.*15 of 19 listing\(s\) answer 200 with no product markup/s
+);
+// A refusal reaches past a partial dead count too — mechaland.id has one gone
+// listing and two whose number KIT_BOUNDS or the Currency table turned away,
+// and only the second of those can be published from here.
+assert.match(
+  reasonOf({
+    slug: "mechaland",
+    websiteUrl: "https://mechaland.id",
+    visibleListings: 0,
+    listings: 3,
+    readListings: 3,
+    refusedListings: 2,
+    deadListings: 1,
+    pricedListings: 0,
+  }),
+  /1 of 3 listing\(s\) are gone.*2 of 3 listing\(s\) read and the price REFUSED/s
+);
+// And the comparison that makes reaching past it safe. `deadSince` is sticky
+// while `priceSource` is never cleared, so ONE row can carry both marks: all 32
+// of drop.com's listings were stamped UNPARSED before isGoneFrontPage learned
+// to recognise a retirement page, and marked gone by it afterwards. unparsed is
+// not GREATER than dead there, so no row is proven reachable by a parser fix,
+// and the store's own answer stands — reading it as "teach the parser" would
+// send the owner after a shop Corsair closed.
+{
+  const stale = reasonOf({
+    slug: "drop",
+    websiteUrl: "https://drop.com",
+    visibleListings: 0,
+    listings: 35,
+    readListings: 32,
+    unparsedListings: 32,
+    deadListings: 32,
+    pricedListings: 0,
+  });
+  assert.match(stale, /32 of 35 listing\(s\) are gone/);
+  assert.doesNotMatch(stale, /no product markup/);
+  // Nor may the pricing backlog follow a dead count: a 404 counts as a read, so
+  // "none priced — unpriced rows are hidden" about a closed store is the very
+  // misdirection the dead reason was introduced to end.
+  assert.doesNotMatch(stale, /none priced/);
+  assert.doesNotMatch(stale, /never read one/);
+}
+// A partial dead count with nothing else measured says only what the store
+// said. keyclack.com: one listing gone, three the pass has never read — the
+// counts are on the audit line either way, and a claim about the other three is
+// exactly what this must not invent.
+{
+  const bare = reasonOf({
+    slug: "keyclackcom",
+    websiteUrl: "https://www.keyclack.com",
+    visibleListings: 0,
+    listings: 4,
+    readListings: 0,
+    deadListings: 1,
+    pricedListings: 0,
+  });
+  assert.match(bare, /^1 of 4 listing\(s\) are gone/);
+  assert.doesNotMatch(bare, /still being read/);
+}
 // …nor may they hide a vendor that IS priced: a priced row that nothing renders
 // is the non-BASE/catalog case, whatever else was refused along the way.
 assert.match(

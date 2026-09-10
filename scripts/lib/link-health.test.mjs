@@ -391,7 +391,17 @@ assert.equal(describeDeadListings(0, 3), null);
 {
   const some = describeDeadListings(44, 12, T0);
   assert.match(some, /12 of 44 listing\(s\) are gone/);
-  assert.match(some, /the rest are still being read/);
+  // A partial count states what the store said about THOSE rows and stops
+  // there. It used to end "; the rest are still being read", which the count
+  // cannot support and which was false about the vendors it mattered most for
+  // — zfrontier-cn has one dead listing and 214 the parser cannot read, and was
+  // reported as one broken link with 218 rows in hand. The caller adds the
+  // diagnosis for the rows that are not dead; see publishingFailureReason.
+  assert.doesNotMatch(some, /still being read/);
+  assert.doesNotMatch(some, /the rest/);
+  // The partial branch keeps the "relink or retire it" advice OUT: it is not
+  // advice about this vendor, only about the dead fraction of it.
+  assert.doesNotMatch(some, /relink or retire/);
 }
 
 // --- isGoneHostError -------------------------------------------------------
