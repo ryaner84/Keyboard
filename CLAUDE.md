@@ -421,6 +421,45 @@ to `listings` instead, because there the zero-default would invent the newest
 diagnosis rather than fall back to the previous one. `test:vendor-urls` asserts
 `db-setup` selects and passes all four.
 
+**And one of those causes was allowed to answer for rows it knew nothing
+about.** The store's own "gone" outranks every reason below it, for the good
+reason `describeDeadListings` was written for — a 404 IS a read as far as
+`priceSource` goes, so without it a closed shop reads as a pricing backlog. But
+it returned on ANY dead row, so a PARTIAL count was reported as the vendor's
+diagnosis, and the sentence it returned ended "; the rest are still being read"
+— an assertion the count cannot support, and false about exactly the vendors it
+mattered most for. `zfrontier-cn` is 219 listings of which ONE is dead and 214
+answer 200 with no product markup: the report said one link had broken and the
+other 218 were in hand, about the LARGEST silent vendor on the site, whose real
+state is the one message that says the repair is a change HERE. vala-supply (4
+gone, 15 unreadable) and mechaland (1 gone, 2 refused) read the same way. A
+partial dead count is now a PREFIX and the verdict is whatever explains the rows
+that are not dead. What makes reaching past it safe is that each own-fix count
+must EXCEED `dead`: `deadSince` is sticky and `priceSource` is never cleared, so
+one row can carry both marks — all 32 of drop.com's listings were stamped
+`UNPARSED` before `isGoneFrontPage` learned to recognise a retirement page and
+were marked gone by it afterwards — and only a count larger than `dead` proves
+there is a row a fix here would reach. The two counts computed from contaminated
+columns, "never read one" and "none priced", still may never follow a dead count
+at all; that is #159's lesson unchanged.
+
+**zFrontier is the parser gap that report now names, and it is not one a
+storefront reader can close.** Every `www.zfrontier.com/app/…` route answers a
+20,939-byte client-rendered shell — no Shopify JSON, no WooCommerce blob, no
+JSON-LD, no OpenGraph — so all 219 rows are `NO_PRODUCT_DATA`, unpriced, and
+hidden on their released sets. The data is behind a POST JSON API the SPA loads
+from a lazily-fetched chunk: `/v2/flow/detail` and `/v2/flow/list` are spelled in
+`main.js` and answer real errors (`{"ok":404,"msg":"帖子无法访问"}`), while every
+route that does not exist answers `{"ok":1,"msg":"system error 1"}`. Probed from
+a runner on 2026-09-10, the merchandise route (`/v2/mch/…`) answers
+`{"ok":20001,"msg":"操作太频繁了"}` — rate-limited — for every body shape
+including an empty one, so the limiter fires ahead of validation and a runner
+cannot confirm a single successful read. `src/lib/import/zfrontier.ts` is what
+guessing at it looks like: a list of candidate endpoints, inferred field names,
+and a logged "all API and SSR attempts failed". Do not write the price half the
+same way — pin the real endpoint from a request the app itself makes before
+teaching either price pass this platform.
+
 **"Never read" is the commonest cause, and it read as the pricing backlog for
 months.** `priceSource` is written (`'SCRAPED'`) whenever the price pass READ the
 page — including when the answer was "no base kit on offer", price NULL. A row

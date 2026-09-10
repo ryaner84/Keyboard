@@ -675,5 +675,14 @@ export function describeDeadListings(listings, deadListings, deadestSince) {
       `(refresh-prices cannot help)`
     );
   }
-  return `${dead} of ${total} listing(s) are gone${since} (${how}); the rest are still being read`;
+  // A PARTIAL dead count is a fact about some rows, never a diagnosis of the
+  // vendor, and this used to end "; the rest are still being read" — an
+  // assertion the count cannot support and which was false about exactly the
+  // vendors it mattered most for. zfrontier-cn carries 219 listings of which
+  // ONE is dead and 214 answer 200 with no product markup: the report said one
+  // link had died and the other 218 were in hand, about the largest silent
+  // vendor on the site, whose real state is the one message that says a change
+  // HERE is the repair. So the clause is gone and the caller says what the rows
+  // that are not dead actually are — see publishingFailureReason.
+  return `${dead} of ${total} listing(s) are gone${since} (${how})`;
 }

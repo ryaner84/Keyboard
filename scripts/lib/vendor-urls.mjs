@@ -867,22 +867,26 @@ export function planPublishingReport(vendors, excludeSlugs = new Set()) {
 function publishingFailureReason(vendor) {
   const listings = Number(vendor.listings ?? 0);
   const priced = Number(vendor.pricedListings ?? 0);
-  // The store itself said the pages are gone (404/410). That outranks every
-  // reason below, including "read but not priced": a 404 IS a read as far as
+  const dead = Number(vendor.deadListings ?? 0);
+  // The store itself said the pages are gone (404/410, a hop to its front door,
+  // its front page served for the URL, or a host that stopped resolving). When
+  // it said that about EVERY row there is nothing else to diagnose, and it
+  // still outranks "read but not priced" below: a 404 IS a read as far as
   // priceSource is concerned, which is exactly how monokei, vala-supply,
   // mechs-co and apex-keyboards were all reported as a pricing backlog while
   // every one of their sampled product pages had in fact been removed.
-  const deadReason = describeDeadListings(
-    listings,
-    vendor.deadListings,
-    vendor.deadestSince
-  );
-  if (deadReason) return deadReason;
+  const deadReason = describeDeadListings(listings, dead, vendor.deadestSince);
+  if (deadReason && dead >= listings) return deadReason;
   // Absent means "not measured", NOT zero. Every other count here defaults to 0
   // and a caller that forgets one gets a confident wrong diagnosis for free —
   // the mistake this reason exists to stop. Defaulting to `listings` degrades to
   // the pre-existing message instead; test:vendor-urls asserts db-setup passes it.
   const read = vendor.readListings == null ? listings : Number(vendor.readListings);
+  // A PARTIAL dead count is a fact about some rows, never the vendor's
+  // diagnosis, and returning it as one buried the state of every row that was
+  // not dead. It is reported as a PREFIX now, and what follows it is whatever
+  // explains the rest.
+  const withDead = (reason) => (deadReason ? `${deadReason}; ${reason}` : reason);
   if (!(listings > 0)) return "no listing linked — discovery has never matched a tracked set";
   // Two reads that produce no price for a reason on THIS side of the
   // connection, checked before the dead-link and backlog messages because both
@@ -890,24 +894,36 @@ function publishingFailureReason(vendor) {
   // readable, and only this site's own rules are keeping it off the page.
   // They default to 0, like every count except `read`: a caller that forgets
   // one degrades to the previous message rather than inventing this one.
+  //
+  // Each is claimed only when it EXCEEDS the dead count, and that comparison is
+  // the whole safety of moving them above a partial dead set. `deadSince` is
+  // sticky — only a successful read withdraws it — while `priceSource` is never
+  // cleared, so one row can carry both marks: drop.com's 32 listings were
+  // stamped UNPARSED before isGoneFrontPage learned to recognise a retirement
+  // page and were marked gone afterwards, and reading that as "teach the parser"
+  // would send the owner after a shop Corsair closed. Only a count larger than
+  // `dead` proves there is a row a change HERE would reach.
   const refused = Number(vendor.refusedListings ?? 0);
   const unparsed = Number(vendor.unparsedListings ?? 0);
-  if (!(priced > 0) && refused > 0) {
-    return (
+  if (!(priced > 0) && refused > dead) {
+    return withDead(
       `${refused} of ${listings} listing(s) read and the price REFUSED by this ` +
-      `site — outside the plausible base-kit window (KIT_BOUNDS) or priced in a ` +
-      `currency the Currency table cannot convert; widen the window or add the ` +
-      `currency (refresh-prices cannot help)`
+        `site — outside the plausible base-kit window (KIT_BOUNDS) or priced in a ` +
+        `currency the Currency table cannot convert; widen the window or add the ` +
+        `currency (refresh-prices cannot help)`
     );
   }
-  if (!(priced > 0) && unparsed > 0) {
-    return (
+  if (!(priced > 0) && unparsed > dead) {
+    return withDead(
       `${unparsed} of ${listings} listing(s) answer 200 with no product markup ` +
-      `any parser path knows — an unreadable platform, a placeholder page, or ` +
-      `a bot check served as 200; teach the parser or retire it ` +
-      `(refresh-prices cannot help)`
+        `any parser path knows — an unreadable platform, a placeholder page, or ` +
+        `a bot check served as 200; teach the parser or retire it ` +
+        `(refresh-prices cannot help)`
     );
   }
+  // Nothing here explains the rows that are not dead, so the store's own answer
+  // about the ones that are is the most this can say.
+  if (deadReason) return deadReason;
   // Never once parsed, however many times it was fetched: the links are dead
   // (store closed, moved domain, password page, plan lapsed). refresh-prices
   // cannot end this — relinking or retiring the store can. Only claimed when a
