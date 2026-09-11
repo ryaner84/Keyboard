@@ -129,12 +129,16 @@ try {
            --
            -- Every diagnosis here is read off columns a price ATTEMPT writes,
            -- so a row the queue is not currently visiting yields the same
-           -- residue as one the store never answered: read=0, priced=0, dead=0,
-           -- and the confident sentence "the store's links are dead; relink or
-           -- retire it". On 2026-09-03 that sentence was being printed about
-           -- nineteen vendors whose rows had all been parked on the 14-day
-           -- back-off four days earlier, eight of which answer a runner
-           -- perfectly well. lastAttempt and failures are what tell the two
+           -- residue as one the store never answered: read=0, priced=0, dead=0.
+           -- That used to be reported as a dead link set — "relink or retire
+           -- it" — and on 2026-09-03 it was being said about nineteen vendors
+           -- whose rows had all been parked on the 14-day back-off four days
+           -- earlier, eight of which answer a runner perfectly well. The
+           -- verdict is the probe's now, and these two counts are what split
+           -- off the rows the queue never reached at all: a row failing the
+           -- queue's filter is never fetched, never priced and never
+           -- dead-marked, by our rule rather than the store's.
+           -- lastAttempt and failures are what tell the two
            -- apart, and queued says whether the queue can select the row at
            -- all (it filters on a non-blank productUrl and a BASE kit, so a row
            -- failing either is never fetched, never priced and never

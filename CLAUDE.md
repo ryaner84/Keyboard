@@ -474,6 +474,36 @@ naming `refresh-prices`, the one pass that cannot end it. Count `priceSource`,
 never `priceUpdatedAt`: the timestamp is written on every attempt, so counting it
 would make every dead link look read.
 
+**And once every way a store says "gone" wrote a column, "never read" stopped
+meaning what that paragraph says it means — but the sentence stayed.** The
+report answered a vendor with `read = 0` and `priced = 0` with "the store's
+links are dead; relink or retire it", which is the one conclusion those counts
+rule OUT: the dead branch returns above it, so `deadSince` is ZERO on every
+vendor that reaches it, and all four of the answers below — a 404/410,
+`isGoneRedirect`, `isGoneFrontPage`, `isGoneHostError` — write that column. The
+sentence is a leftover from when "no verdict" was the only residue a closed shop
+could leave. What is left once those four have had their say is the opposite
+case: the store said nothing at all. Probed from a runner on 2026-09-11, all
+five vendors it was being printed about are alive and none of them 404s —
+`alphakeys.ca` answers 402 (a lapsed Shopify plan), `thicthock.com` 521 and
+`zionstudios.ph` a connect timeout (Cloudflare, blocking), and `auramech.com`
+and `hineybush.com` fail TLS with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` because
+their servers omit the intermediate certificate, which a browser chases via AIA
+and Node does not. 38 listings across five live shops, told to relink or retire.
+A block and a closed shop are indistinguishable from the row — that is the whole
+premise `linkFailures` rests on — so the report stops concluding and names
+`scripts/vendor-link-probe.mjs` (the **Vendor probe** workflow), which reads the
+store's real answer from an IP stores serve. Two sub-cases split off first, and
+both are OURS: `queued = 0` means no row passes the price queue's own filter (a
+BASE kit and a non-blank `productUrl`), so nothing is ever fetched, priced or
+dead-marked; `attempted = 0` means the queue has not reached the store yet.
+Neither is measured by `db-setup`, so both are optional and absent means NOT
+measured — defaulting them to 0 would tell every silent vendor its rows are
+unqueued, which is the same free confident wrong diagnosis `readListings`
+defaults around. `test:vendor-urls` fails if the verdict claims the links are
+dead, if the audit stops selecting or passing the two counts, or if `db-setup`'s
+hand-written legend drifts back.
+
 **And the commonest of those answers is not a status at all — it is a silent
 redirect.** A store that has removed a product usually sends it to the store's
 own FRONT DOOR rather than 404ing it, and an acquired shop redirects its whole

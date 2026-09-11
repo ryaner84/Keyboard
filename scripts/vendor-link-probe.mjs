@@ -31,7 +31,12 @@
 
 import { lookup as dnsLookup } from "node:dns/promises";
 
-import { isClientRenderedShell, isGoneFrontPage, isGoneHostError } from "./lib/link-health.mjs";
+import {
+  isClientRenderedShell,
+  isGoneFrontPage,
+  isGoneHostError,
+  isGoneRedirect,
+} from "./lib/link-health.mjs";
 
 const urls = (process.env.PROBE_URLS ?? process.argv.slice(2).join(" "))
   .split(/[\s,]+/)
@@ -237,6 +242,38 @@ for (const url of urls) {
   if (res.status === 404 || res.status === 410) {
     // The one definitive answer: deadSince is allowed to hide these rows.
     console.log(`  VERDICT   | DEAD_LINK — the store says the page is gone`);
+    continue;
+  }
+
+  // Where a PRODUCTION-shaped fetch lands, which is a different question from
+  // where the hand-followed chain above lands and is the one that decides the
+  // row. Both price passes let the transport follow the hops and then judge the
+  // URL it reports (`res.url` / `page.url`); this probe follows them itself,
+  // with redirect:"manual", so anything fetch() declines to follow — or
+  // rewrites — shows up here as a chain the price pass never walked. Printed
+  // only when there WAS a hop, so a direct 200 costs nothing.
+  if (chain.length > 1) {
+    const { res: followed, error: followError, err: followErr } = await fetchOnce(url, "follow");
+    if (followError) {
+      console.log(`  FOLLOWED  | fetch(redirect:"follow") failed — ${followError}${causeChain(followErr)}`);
+    } else {
+      console.log(`  FOLLOWED  | ${followed.status} ${followed.url}`);
+    }
+  }
+
+  // The question the price pass asks FIRST, before it parses a byte — and the
+  // one shape this probe never reported. A store that removed a product usually
+  // sends it to the front door rather than 404ing it, and an acquired shop
+  // sends its whole domain to the buyer's; isGoneRedirect answers DEAD_LINK for
+  // both. Without this line the probe called those pages "200 but nothing
+  // machine-readable", i.e. contradicted the verdict the price pass reaches on
+  // the identical response, and the report's most actionable answer looked like
+  // its least.
+  if (isGoneRedirect(url, finalUrl)) {
+    console.log(
+      `  VERDICT   | DEAD_LINK — answered by a front door (${finalUrl}), not this page;` +
+        ` the price pass clears the row on this alone (relink or retire it)`
+    );
     continue;
   }
   if (!res.ok) {

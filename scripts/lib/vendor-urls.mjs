@@ -796,8 +796,10 @@ export function planVendorMerges(roster, existing) {
  *                                Signature Plastics specialist read as healthy
  *                                while publishing nothing.
  *   listings > 0, read = 0       the price pass has never once READ one of this
- *                                store's pages — see below. Its links are dead;
- *                                relink or retire the store.
+ *                                store's pages AND the store has never said one
+ *                                is gone — see below. Nothing here says which,
+ *                                so probe a URL from a runner; this is the one
+ *                                case the report must not conclude for you.
  *   listings > 0, priced = 0     read, and the answer was "nothing priced here".
  *                                Unpriced rows are hidden outright on RELEASED
  *                                sets, which is where most listings live — so
@@ -821,7 +823,12 @@ export function planVendorMerges(roster, existing) {
  * writes 'SCRAPED' whenever it READ the page, including when the answer was "no
  * base kit on offer" (price NULL). A row whose `priceUpdatedAt` is set while
  * `priceSource` is still NULL was attempted and never once parsed. A vendor
- * where that is true of EVERY row has a dead link set, not a pricing backlog.
+ * where that is true of EVERY row is not a pricing backlog — but it is not a
+ * dead link set either, and this report said it was for months. `deadSince` is
+ * what "dead" means, all four of the ways a store says so write it, and it is
+ * zero for every vendor that reaches that branch: the rows produced no fact at
+ * all. A block and a closed shop leave exactly that residue, which is why
+ * `linkFailures` is a heuristic, so the verdict belongs to the probe.
  *
  * And "read" hid two more repairs inside it, both of them OURS rather than the
  * store's. A page can be fetched, parsed and understood and still leave the row
@@ -841,10 +848,18 @@ export function planVendorMerges(roster, existing) {
  * `visibleListings` is the narrow site-visible count described above.
  * All are counted in SQL by the caller — this planner has no DB.
  *
+ * `queuedListings` and `attemptedListings` are optional and split the
+ * no-answer case above: a row the QUEUE cannot select (non-BASE kit, blank
+ * productUrl) and a row it has simply not reached yet both leave the same
+ * residue as a store that refused us, and neither is the store's doing. Absent
+ * means not measured — db-setup selects neither, and a caller that omits them
+ * gets the general sentence rather than a queue diagnosis nobody counted.
+ *
  * @param {Array<{ slug: string, websiteUrl?: string | null, visibleListings?: number,
  *                 listings?: number, readListings?: number,
  *                 refusedListings?: number, unparsedListings?: number,
- *                 pricedListings?: number }>} vendors
+ *                 pricedListings?: number, queuedListings?: number,
+ *                 attemptedListings?: number }>} vendors
  * @param {Set<string>} [excludeSlugs]
  */
 export function planPublishingReport(vendors, excludeSlugs = new Set()) {
@@ -924,14 +939,64 @@ function publishingFailureReason(vendor) {
   // Nothing here explains the rows that are not dead, so the store's own answer
   // about the ones that are is the most this can say.
   if (deadReason) return deadReason;
-  // Never once parsed, however many times it was fetched: the links are dead
-  // (store closed, moved domain, password page, plan lapsed). refresh-prices
-  // cannot end this — relinking or retiring the store can. Only claimed when a
-  // price is absent too, so a store that reads fine keeps the priced reasons.
+  // Never once parsed, however many times it was fetched — and, because the
+  // dead branch above already returned, never once answered "gone" either.
+  //
+  // This used to end "the store's links are dead; relink or retire it", and
+  // that is the one conclusion the columns rule OUT. `deadSince` is zero here
+  // by construction, and every way a store says a page is gone now writes it:
+  // a 404/410, a hop to its front door (isGoneRedirect), its front page served
+  // for the URL (isGoneFrontPage) and a host that stopped resolving
+  // (isGoneHostError). The sentence is a leftover from before those four
+  // existed, when "no verdict" was the only shape a closed shop could leave.
+  // What is left once they have all had their say is the opposite case: the
+  // store never said anything at all.
+  //
+  // Probed from a runner on 2026-09-11, the five vendors it was being printed
+  // about are all alive and none of them 404s — alphakeys.ca answers 402 (a
+  // lapsed Shopify plan), thicthock.com 521 and zionstudios.ph a connect
+  // timeout (Cloudflare, blocking), auramech.com and hineybush.com fail TLS
+  // with UNABLE_TO_GET_ISSUER_CERT_LOCALLY because their servers omit the
+  // intermediate certificate, which a browser chases and Node does not. That
+  // is 38 listings across five live shops, told to relink or retire.
+  //
+  // Which of those it is cannot be read off the row: a block and a closed shop
+  // are indistinguishable from here, which is the whole premise `linkFailures`
+  // rests on (see scripts/lib/link-health.mjs). So the report stops guessing
+  // and names the tool that CAN tell them apart, from an IP stores serve.
   if (!(priced > 0) && !(read > 0)) {
+    // Absent means "not measured", exactly as it does for `read`: a caller that
+    // does not select these degrades to the general sentence rather than being
+    // handed a queue diagnosis nobody counted. db-setup selects neither.
+    const queued = vendor.queuedListings == null ? null : Number(vendor.queuedListings);
+    const attempted =
+      vendor.attemptedListings == null ? null : Number(vendor.attemptedListings);
+    // Not the store's doing at all: the price queue filters on a BASE kit and a
+    // non-blank productUrl, so a row failing either is never fetched, never
+    // priced and never dead-marked. It leaves the identical residue as a store
+    // that never answered, and no amount of probing the shop will move it.
+    if (queued === 0) {
+      return (
+        `${listings} listing(s) linked and not one is in the price queue — ` +
+        `every row is a non-BASE kit or carries no productUrl, so the pass ` +
+        `never fetches it, prices it or marks it dead. The repair is the row, ` +
+        `not the store (refresh-prices cannot help)`
+      );
+    }
+    if (attempted === 0) {
+      return (
+        `${listings} listing(s) linked, the price queue has never visited one — ` +
+        `no attempt has been made yet, so there is nothing to diagnose; force a ` +
+        `refresh before acting on this store`
+      );
+    }
     return (
-      `${listings} listing(s) linked, the price pass has never read one — ` +
-      `the store's links are dead; relink or retire it`
+      `${listings} listing(s) linked, the price pass has never read one and the ` +
+      `store has never said a page is gone — every attempt ended with no answer ` +
+      `at all, which is what a BLOCK looks like from here (402/403/423/429/5xx, ` +
+      `a TLS failure, a connection that never answers) and equally what a closed ` +
+      `shop looks like. Probe a URL from a runner (the Vendor probe workflow, ` +
+      `scripts/vendor-link-probe.mjs) before relinking or retiring it`
     );
   }
   if (!(priced > 0)) {
