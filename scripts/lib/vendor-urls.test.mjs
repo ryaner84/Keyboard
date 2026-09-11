@@ -840,14 +840,91 @@ assert.match(
   /7 listing\(s\) linked, none priced/
 );
 // Linked, attempted, and never once READ: priceSource is still NULL on every
-// row. The store closed / moved domain / password-locked its Shopify, none of
-// which is a 404, so nothing ever cleared the link and refresh-prices has been
-// re-fetching it every six hours for months. Naming that pass here is what sent
-// the owner to the one thing that cannot help.
-assert.match(
-  reasonOf({ slug: "dead-links", websiteUrl: "https://kono.store", visibleListings: 0, listings: 44, readListings: 0, pricedListings: 0 }),
-  /44 listing\(s\) linked, the price pass has never read one/
-);
+// row, and refresh-prices has been re-fetching it every six hours for months.
+// Naming that pass here is what sent the owner to the one thing that cannot
+// help, so it still must not be named.
+{
+  const noAnswer = reasonOf({
+    slug: "no-answer",
+    websiteUrl: "https://noanswer.com",
+    visibleListings: 0,
+    listings: 44,
+    readListings: 0,
+    pricedListings: 0,
+  });
+  assert.match(noAnswer, /44 listing\(s\) linked, the price pass has never read one/);
+  assert.doesNotMatch(noAnswer, /none priced/);
+  // …and it must not conclude the opposite either. deadSince is ZERO on every
+  // vendor that reaches this branch — the dead reason returns above it — and all
+  // four ways a store says "gone" write that column, so "the store's links are
+  // dead; relink or retire it" is the one thing these counts rule OUT. Probed
+  // from a runner on 2026-09-11, the five vendors it was printed about are all
+  // alive: alphakeys.ca 402, thicthock.com 521, zionstudios.ph a connect
+  // timeout, auramech.com and hineybush.com a TLS chain Node will not verify.
+  assert.doesNotMatch(noAnswer, /links are dead/);
+  assert.doesNotMatch(noAnswer, /relink or retire it/);
+  // It names the one tool that can tell a block from a closed shop.
+  assert.match(noAnswer, /probe/i);
+}
+// The two sub-cases that are not the store's doing at all, and are only claimed
+// when the caller actually measured them.
+{
+  // No row the queue can even select: it filters on a BASE kit and a non-blank
+  // productUrl, so these are never fetched, never priced and never dead-marked.
+  const unqueued = reasonOf({
+    slug: "unqueued",
+    websiteUrl: "https://unqueued.com",
+    visibleListings: 0,
+    listings: 5,
+    readListings: 0,
+    pricedListings: 0,
+    queuedListings: 0,
+    attemptedListings: 0,
+  });
+  assert.match(unqueued, /not one is in the price queue/);
+  assert.doesNotMatch(unqueued, /relink or retire/);
+  // Queued but never yet visited — nothing has been learned, so there is
+  // nothing to diagnose.
+  const unvisited = reasonOf({
+    slug: "unvisited",
+    websiteUrl: "https://unvisited.com",
+    visibleListings: 0,
+    listings: 5,
+    readListings: 0,
+    pricedListings: 0,
+    queuedListings: 5,
+    attemptedListings: 0,
+  });
+  assert.match(unvisited, /never visited one/);
+  // Absent means NOT MEASURED for both, exactly as it does for readListings:
+  // db-setup selects neither, and defaulting them to 0 would tell every silent
+  // store its rows are unqueued — a confident wrong diagnosis for free, which
+  // is the mistake this whole reason exists to stop.
+  const unmeasuredQueue = reasonOf({
+    slug: "unmeasured-queue",
+    websiteUrl: "https://unmeasuredqueue.com",
+    visibleListings: 0,
+    listings: 5,
+    readListings: 0,
+    pricedListings: 0,
+  });
+  assert.doesNotMatch(unmeasuredQueue, /price queue/);
+  assert.match(unmeasuredQueue, /never read one/);
+  // Strings from the pg driver on the new counts too.
+  assert.match(
+    reasonOf({
+      slug: "stringy-queue",
+      websiteUrl: "https://stringyqueue.com",
+      visibleListings: "0",
+      listings: "5",
+      readListings: "0",
+      pricedListings: "0",
+      queuedListings: "0",
+      attemptedListings: "0",
+    }),
+    /not one is in the price queue/
+  );
+}
 // Partially read still means the pass CAN reach the store — that is the pricing
 // case, not the dead-link one.
 assert.match(
@@ -1178,6 +1255,34 @@ assert.ok(
 assert.ok(
   /\.reason/.test(dbSetup),
   "scripts/db-setup.mjs must print each silent vendor's reason"
+);
+// The audit is the half that has the queue counts, and it must keep handing
+// them over. They are what split "no answer at all" into the two shapes that
+// are OUR doing — a row the queue cannot select, and one it has not reached —
+// from the one that needs the store probed. Selecting them and then not passing
+// them reads as correct and silently collapses all three into the last.
+for (const field of ["queuedListings:", "attemptedListings:"]) {
+  assert.ok(
+    new RegExp(field).test(auditMjs),
+    `scripts/vendor-publishing-audit.mjs must pass ${field} to planPublishingReport`
+  );
+}
+assert.ok(
+  /AS queued_listings/.test(auditMjs) && /AS attempted_listings/.test(auditMjs),
+  "scripts/vendor-publishing-audit.mjs must count the queued and attempted rows in SQL"
+);
+// And the callers' own summaries may not restate the conclusion the counts rule
+// out. `deadSince` is zero for every vendor that reaches the "never read one"
+// branch, and all four ways a store says a page is gone write it, so "relink or
+// retire" on that evidence is advice to delete a live shop's listings — which
+// is what it was, for alphakeys (402), thicthock (521), zionstudios.ph
+// (timeout), auramech and hineybush (a TLS chain Node will not verify): 38
+// listings across five shops that all answer a runner. The planner's own
+// wording is pinned by the noAnswer assertions above; db-setup prints a second,
+// hand-written legend for the same four causes that has to agree with it.
+assert.ok(
+  !/"never read one" is a dead link set/.test(dbSetup),
+  "scripts/db-setup.mjs's legend must not call a vendor with no verdict a dead link set"
 );
 
 // --- the roster outranks a WRONG storefront, not just a missing one --------

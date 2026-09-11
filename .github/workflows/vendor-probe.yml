@@ -47,7 +47,11 @@ jobs:
               *"/products/"*) ;;
               *) echo "SKIPPED | not a Shopify /products/ URL — see the link-health step"; continue ;;
             esac
-            curl -sf -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36" \
+            # --max-time, because a store that accepts the connection and then
+            # never answers hangs this step until the job's own timeout — which
+            # costs the whole probe, including the link-health report above it
+            # that has already finished. Matches the probe script's own 20s.
+            curl -sf --max-time 20 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36" \
               "${base}.js" | node -e "
                 let s='';
                 process.stdin.on('data', d => s += d).on('end', () => {

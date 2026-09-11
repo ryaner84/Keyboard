@@ -986,8 +986,9 @@ async function reportVendorsPublishingNothing(client) {
   console.warn(
     `[db-setup] ${silent.length} vendor(s) have a storefront but publish no ` +
       `listing on any set page. Each is named with the pass to look at — ` +
-      `"no listing linked" is discovery, "never read one" is a dead link set ` +
-      `(relink or retire — refresh-prices cannot help), "price REFUSED" and ` +
+      `"no listing linked" is discovery, "never read one" is a store that has ` +
+      `given no answer at all — a block and a closed shop look identical from ` +
+      `here, so probe it rather than retiring it — "price REFUSED" and ` +
       `"no product markup" are code here (KIT_BOUNDS / the Currency table / ` +
       `the parser), "none priced" is ` +
       `refresh-prices, "none visible" is a non-BASE/catalog row. Removing the ` +
