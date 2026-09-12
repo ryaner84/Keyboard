@@ -160,8 +160,8 @@ function causeChain(err) {
  */
 async function shopCurrency(url) {
   try {
-    const { res, error } = await fetchOnce(`${new URL(url).origin}/meta.json`, "follow");
-    if (error) return { currency: null, note: error };
+    const { res, error, err } = await fetchOnce(`${new URL(url).origin}/meta.json`, "follow");
+    if (error) return { currency: null, note: `${error}${causeChain(err)}` };
     if (!res.ok) return { currency: null, note: `meta.json ${res.status}` };
     const meta = JSON.parse(await res.text());
     return { currency: meta?.currency ?? null, note: meta?.currency ? "" : "meta.json carries no currency" };
@@ -335,8 +335,15 @@ for (const url of urls) {
   const canonical = shopifyProductUrl(finalUrl);
   let shopify = "no /products/ path — not a Shopify product URL";
   if (canonical) {
-    const { res: jsonRes, error: jsonError } = await fetchOnce(`${canonical}.json`, "follow");
-    if (jsonError) shopify = `${canonical}.json — ${jsonError}`;
+    const { res: jsonRes, error: jsonError, err: jsonErr } = await fetchOnce(
+      `${canonical}.json`,
+      "follow"
+    );
+    // The cause chain, for the same reason the transport failure above prints
+    // it: "fetch failed" is the one message fetch() gives for a refused
+    // connection, a broken certificate and a reset alike, and the product page
+    // succeeding while its own .json does not is a difference worth naming.
+    if (jsonError) shopify = `${canonical}.json — ${jsonError}${causeChain(jsonErr)}`;
     else if (!jsonRes.ok) shopify = `${canonical}.json — ${jsonRes.status}`;
     else {
       const text = await jsonRes.text();
@@ -428,4 +435,20 @@ for (const url of urls) {
         : "200 but NOTHING MACHINE-READABLE — the page carries no product markup the parser knows"
     }`
   );
+  // The verdict above splits two repairs that look identical from the row and
+  // need opposite work: "teach the parser this platform" is worth doing for a
+  // real storefront and is wasted on a parked domain or a holding page, which
+  // is what a few kilobytes of HTML with no markup usually is. The rendered
+  // text is the only thing that tells them apart, so print enough of it to
+  // read — cheap, since the body is already in hand.
+  if (!isFrontPage) {
+    const text = body
+      .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    console.log(
+      `  TEXT      | ${text ? `${text.slice(0, 200)}${text.length > 200 ? "…" : ""}` : "(no rendered text at all)"}`
+    );
+  }
 }

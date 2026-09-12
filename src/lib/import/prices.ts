@@ -29,6 +29,12 @@ import {
 } from "../../../scripts/lib/link-health.mjs";
 import { isPlausibleBaseKitPrice as isPlausibleBaseKitPriceImpl } from "../../../scripts/lib/kit-bounds.mjs";
 import {
+  clearChainRepairs,
+  isIncompleteChainError,
+  repairedChainHosts,
+  retryWithRepairedChain,
+} from "../../../scripts/lib/tls-chain.mjs";
+import {
   HostThrottle,
   interleaveByHost,
 } from "../../../scripts/lib/host-throttle.mjs";
@@ -232,6 +238,34 @@ async function fetchWithTimeout(url: string, extraHeaders?: Record<string, strin
       signal: controller.signal,
     });
   } catch (err) {
+    // A server that omits its intermediate certificate is a LIVE store this
+    // half alone cannot talk to: browsers complete the chain from the leaf's
+    // AIA extension, Node does not. Left here, the error is indistinguishable
+    // from a block — priceSource stays NULL, linkFailures climbs on a store
+    // that answers perfectly, and an unpriced row is hidden outright on a
+    // RELEASED set. Complete the chain and ask once more.
+    //
+    // A FRESH timeout, because the repair costs a TLS connection plus an issuer
+    // download and the original signal is already most of the way through its
+    // six seconds. It is paid once per host per run (repairedCaFor memoizes),
+    // not once per listing — the cost isUnresolvedHostError was added to stop
+    // paying for dead domains.
+    if (isIncompleteChainError(err)) {
+      const retry = new AbortController();
+      const retryTimer = setTimeout(() => retry.abort(), FETCH_TIMEOUT_MS);
+      try {
+        return await retryWithRepairedChain(url, err, {
+          headers: { ...BROWSER_HEADERS, ...extraHeaders },
+          signal: retry.signal,
+        });
+      } catch {
+        // Unrepairable — a certificate that is genuinely broken rather than
+        // merely under-sent. Fall through to the original failure so the row
+        // reaches exactly the verdict it did before this existed.
+      } finally {
+        clearTimeout(retryTimer);
+      }
+    }
     if (host !== null) await settleHostResolution(host, err);
     throw err;
   } finally {
@@ -1313,6 +1347,10 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
   // Per RUN, never across runs: a domain that comes back must be retried, and
   // this module outlives one invocation in both CI and the Vercel function.
   hostResolution.clear();
+  // Same rule, same reason: a store that fixes its certificate chain must be
+  // read normally on the next run rather than keeping a repair it no longer
+  // needs.
+  clearChainRepairs();
   const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
   // `maxAgeHours: 0` is FORCE_PRICE_REFRESH — a person saying "check
   // everything now". The back-off is an optimisation, not a quarantine, so it
