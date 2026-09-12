@@ -113,6 +113,15 @@ jobs:
         if: always()
         run: npm run test:host-throttle
 
+      # Reads prices.ts and the probe: completing a storefront's certificate
+      # chain is the one place this codebase touches TLS verification, so the
+      # suite pins that it is never loosened — a fetched intermediate becomes a
+      # trust anchor, and one accepted without checking it against the real root
+      # store would be a far worse bug than the unread listing it repairs.
+      - name: tls-chain
+        if: always()
+        run: npm run test:tls-chain
+
       # Reads scrape.py as well as the TS sources: the manufacturer registry is
       # written in both languages and a divergence is silent at runtime.
       - name: manufacturer-vendors

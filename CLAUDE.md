@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Fifteen suites, all of which should pass before pushing:
+Sixteen suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -45,6 +45,7 @@ npm run test:link-health
 npm run test:catalog-stock
 npm run test:kit-bounds
 npm run test:host-throttle
+npm run test:tls-chain
 npm run test:manufacturer-vendors
 npx tsc --noEmit
 ```
@@ -668,6 +669,49 @@ timeout is the one error that hides every other one behind it.
 `test:link-health` fails if the two marker lists disagree, if either half stops
 consulting or recording the memo, if `prices.ts` starts inferring a dead name
 from a timeout instead of asking, or if either half stops clearing it.
+
+**And one transport failure was never the store's at all: OUR verifier hanging
+up on a live host.** TLS requires the SERVER to send every certificate between
+its own and a trusted root, and a misconfigured one sends only its own. Browsers
+complete the chain themselves — the leaf carries an Authority Information Access
+extension naming its issuer's URL, and Chrome fetches it — while Node answers
+`UNABLE_TO_GET_ISSUER_CERT_LOCALLY`, buried in `cause` under a bare `TypeError:
+fetch failed`. Both price passes filed that under the same `null` a Cloudflare
+block gives: `priceSource` stayed NULL so the row never counted as READ,
+`linkFailures` climbed on a store that answers perfectly, six of those parked it
+on the slow cadence, and an unpriced row is hidden outright on a RELEASED set.
+The publishing report then reached its most confident remaining sentence —
+"every attempt ended with no answer at all, which is what a BLOCK looks like
+from here" — about a host that answers. `scripts/lib/tls-chain.mjs` completes
+the chain the way a browser does and is the only place this codebase touches
+verification. **The repair may never loosen it**: a fetched intermediate handed
+to OpenSSL as `ca` becomes a TRUST ANCHOR, so accepting one on the AIA pointer
+alone would let anyone intercepting the connection serve their own leaf, point
+its AIA at their own "intermediate", and be believed — a downgrade far worse
+than the unread listing. So every fetched certificate is checked against the
+real root store (`issuedByTrustedRoot`) BEFORE use, the leaf must really be
+issued by it, and the repaired request runs with `rejectUnauthorized: true` like
+every other. The marker list is deliberately two spellings of one
+misconfiguration and must stay disjoint from the host-error lists in both
+directions: a domain that no longer resolves has no certificate to repair, and a
+chain that is merely under-sent has said nothing about whether the page exists —
+`deadSince` is the only signal allowed to take a listing off the site.
+Memoized per host per RUN beside `hostResolution` and `frontPageCache`, because
+the probe costs a TLS connection plus a download and a 200-listing vendor would
+otherwise pay it 200 times inside a twelve-minute budget. The retry needs a
+timeout of its OWN — `FETCH_TIMEOUT_MS` is already most spent by the time the
+handshake fails, which is #168's trap from the other end. Only `prices.ts`
+carries it: `scrape.py` navigates with Chromium, which chases AIA itself.
+
+What it revealed is the general lesson rather than a publication. Probed from a
+runner on 2026-09-12, auramech.com and hineybush.com — the two vendors the
+report had been telling the owner to probe — complete their chains fine and then
+serve a 4.8 KB `Redirecting...` holding page on every route, product `.json`
+included. So the three listings move from a diagnosis that could never end
+("a block; probe it") to the true one (`NO_PRODUCT_DATA` — retire the rows), and
+the probe prints the page's rendered TEXT, because "teach the parser this
+platform" is worth doing for a real storefront and wasted on a holding page, and
+nothing else in the report tells them apart.
 
 **And a 404 counted as READ, so the commonest cause was hiding inside the
 second-commonest.** Both price passes returned the `NO_BASE_KIT` sentinel for a
