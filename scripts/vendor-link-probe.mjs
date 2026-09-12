@@ -90,8 +90,16 @@ async function fetchOnce(url, redirect = "manual") {
         });
         repairedHosts.add(hostOf(url));
         return { res, repaired: true };
-      } catch {
-        // Unrepairable — fall through and report the original failure.
+      } catch (retryErr) {
+        // The repair ran and the request STILL failed. That is a different
+        // answer from the handshake we already knew about — a hop onto another
+        // badly-configured host, say — and reporting the original error would
+        // hide it behind a diagnosis that has already been dealt with.
+        // retryWithRepairedChain rethrows the original when the host cannot be
+        // repaired at all, so an unchanged error means exactly that.
+        if (retryErr !== err) {
+          return { error: `after chain repair: ${retryErr.message}`, err: retryErr };
+        }
       }
     }
     return {

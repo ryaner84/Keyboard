@@ -53,4 +53,12 @@ console.log(
     `unparsed=${result.unparsed} throttledS=${(result.throttledMs / 1000).toFixed(1)} ` +
     `stoppedEarly=${result.stoppedEarly}`
 );
+// Printed apart from the counts because it names HOSTS, not a total, and
+// because the repair is otherwise invisible: a store whose server omits its
+// intermediate certificate is unreadable to anything that does not chase AIA,
+// and once tls-chain.mjs completes the chain the row reads like any other. A
+// host listed here is one misconfiguration away from publishing nothing at all.
+if (result.chainRepaired?.length > 0) {
+  console.log(`  TLS chain completed for: ${result.chainRepaired.join(", ")}`);
+}
 process.exit(0);

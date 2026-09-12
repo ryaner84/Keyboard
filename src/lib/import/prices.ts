@@ -1204,6 +1204,12 @@ export interface RefreshResult {
   // to burst a store into rate-limiting us, which would cost the row its price
   // and, on a released set, its place on the page.
   throttledMs: number;
+  // Storefronts whose certificate chain this run had to complete before it
+  // could read them at all (scripts/lib/tls-chain.mjs). Reported because the
+  // repair is silent by design — the row simply reads normally afterwards — and
+  // a host appearing here is a live store one misconfiguration away from being
+  // invisible to anything that does not chase AIA.
+  chainRepaired: string[];
   stoppedEarly: boolean; // true if the time budget was hit before finishing
 }
 
@@ -1496,6 +1502,7 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
     refused: 0,
     unparsed: 0,
     throttledMs: 0,
+    chainRepaired: [],
     stoppedEarly: false,
   };
   const start = Date.now();
@@ -1530,5 +1537,6 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
   const lanes = Math.max(1, Math.min(concurrency, queue.length));
   await Promise.all(Array.from({ length: lanes }, () => worker()));
 
+  result.chainRepaired = repairedChainHosts();
   return result;
 }

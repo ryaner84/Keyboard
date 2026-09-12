@@ -332,6 +332,11 @@ export async function repairedCaFor(host, port = 443) {
  * hand so the FINAL url can be reported: `isGoneRedirect` and `isGoneFrontPage`
  * both judge a row on where the request landed, and a Response built from a
  * hand-followed chain reports `url` as "" unless it is set.
+ *
+ * @param {string} url
+ * @param {{ headers?: Record<string, string>, ca?: string[], signal?: AbortSignal,
+ *           maxHops?: number, follow?: boolean }} [options]
+ * @returns {Promise<Response>}
  */
 export function fetchWithCa(url, { headers = {}, ca, signal, maxHops = 10, follow = true } = {}) {
   return new Promise((resolve, reject) => {
@@ -401,6 +406,11 @@ export function fetchWithCa(url, { headers = {}, ca, signal, maxHops = 10, follo
  * The single entry point a caller needs: it answers only for the incomplete
  * chain, and for everything else it rethrows the original error unchanged, so
  * no other failure mode can reach a different verdict because of this module.
+ *
+ * @param {string} url
+ * @param {unknown} err
+ * @param {{ headers?: Record<string, string>, signal?: AbortSignal, follow?: boolean }} [options]
+ * @returns {Promise<Response>}
  */
 export async function retryWithRepairedChain(url, err, { headers, signal, follow = true } = {}) {
   if (!isIncompleteChainError(err)) throw err;
