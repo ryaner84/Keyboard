@@ -37,6 +37,13 @@ import {
   isGoneHostError,
   isGoneRedirect,
 } from "./lib/link-health.mjs";
+import { isIncompleteChainError, retryWithRepairedChain } from "./lib/tls-chain.mjs";
+
+// Hosts this probe had to complete a certificate chain for, so the report can
+// say that the store was only readable because the AIA repair ran — the
+// difference between "this shop is fine" and "this shop is fine ONLY because of
+// src/lib/import/prices.ts's repair, and the nightly needs it too".
+const repairedHosts = new Set();
 
 const urls = (process.env.PROBE_URLS ?? process.argv.slice(2).join(" "))
   .split(/[\s,]+/)
@@ -68,6 +75,25 @@ async function fetchOnce(url, redirect = "manual") {
     const res = await fetch(url, { headers: BROWSER_HEADERS, redirect, signal: controller.signal });
     return { res };
   } catch (err) {
+    // A server that omits its intermediate certificate is a LIVE store that
+    // Node alone refuses to talk to. Complete the chain the way a browser does
+    // and try once more, so the probe reports what the store actually serves
+    // rather than the handshake we failed to finish — and mirrors the retry
+    // refreshPrices now makes, so the two halves reach the same verdict on the
+    // same response.
+    if (isIncompleteChainError(err)) {
+      try {
+        const res = await retryWithRepairedChain(url, err, {
+          headers: BROWSER_HEADERS,
+          signal: controller.signal,
+          follow: redirect === "follow",
+        });
+        repairedHosts.add(hostOf(url));
+        return { res, repaired: true };
+      } catch {
+        // Unrepairable — fall through and report the original failure.
+      }
+    }
     return {
       error: err.name === "AbortError" ? `timeout after ${TIMEOUT_MS}ms` : err.message,
       err,
@@ -219,6 +245,18 @@ for (const url of urls) {
       console.log(
         `  TWIN      | ${twin} ${twinAddr ? `resolves (${twinAddr}) — probe it before retiring` : "does not resolve either"}`
       );
+    } else if (isIncompleteChainError(err)) {
+      // Reported apart from a block because the repair is the opposite one. The
+      // store is live and serving; its server omits the intermediate
+      // certificate, which every browser fetches via the leaf's AIA extension
+      // and Node does not. When this prints, the repair could not complete the
+      // chain to a trusted root either — a certificate that is genuinely
+      // broken, not merely under-sent.
+      console.log(
+        `  VERDICT   | UNREADABLE (incomplete TLS chain) — the server did not send` +
+          ` its intermediate certificate and the AIA repair could not complete the` +
+          ` chain to a trusted root; a live host, never a 404`
+      );
     } else {
       console.log(
         `  VERDICT   | UNREADABLE — the host exists and would not answer; a block,` +
@@ -226,6 +264,14 @@ for (const url of urls) {
       );
     }
     continue;
+  }
+
+  if (repairedHosts.has(hostOf(url))) {
+    console.log(
+      `  CHAIN FIX | the server omitted its intermediate certificate; completed it` +
+        ` from the leaf's AIA extension (see scripts/lib/tls-chain.mjs). Everything` +
+        ` below is what the store serves once that is done`
+    );
   }
 
   const contentType = res.headers.get("content-type") ?? "(none)";
