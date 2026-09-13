@@ -28,10 +28,11 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Sixteen suites, all of which should pass before pushing:
+Seventeen suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
+npm run test:kit-variants
 npm run test:set-name
 npm run test:csv-import
 npm run test:collection-import
@@ -803,6 +804,34 @@ outlives every non-answer and yields only to a real price or a `DEAD_LINK`.
 The probe reports `SHOP CCY` for the same reason: a price is only ever refused
 or accepted RELATIVE to a currency, so "READABLE" beside an unpriced row is not
 a diagnosis until you know which window the number was measured against.
+
+**And one class of set could not be priced at all, because every guard that
+protects a set from its own subkits also fires ON a set that IS one.** The
+dcs.wiki archive catalogs accessory products as first-class sets — `DCS Bae
+Addon`, `DCS 10U Spacebars`, `DCS After School 1992 40s Kit` — so the only
+product that can ever be such a set's listing is titled exactly like the thing
+the "a subkit product is never the base listing" rules throw away.
+`isSubkitSetName` (mirrored as `_SUBKIT_PRODUCT_RE.search(set_name)`) is the
+exception, and it has to be asked in FOUR places, because a subkit set is
+refused independently at each: discovery, which must link the product; the
+Shopify path's product-TITLE guard; the variant picker under it; and the nightly
+`price-audit`, which recomputes the pick and WRITES the result. `scrape.py`
+reached three of the four — its title guard returned above its own
+`allow_subkits` picker, so on a SHOPIFY store the flag it threads could never
+run at all, including on Saber Keebs, the listing the flag's own docstring is
+about — and `prices.ts`, the half that runs four times a day, had none of them.
+Every such row therefore answered `NO_BASE_KIT` on every read, for ever, and an
+unpriced row is hidden outright on a RELEASED set: saberkeebs.com answers a
+runner 200 with full Shopify JSON and published nothing at all, its one listing
+invisible by our rule rather than anything the store did, named in the audit
+under "1 listing(s) linked, none priced" — the one verdict that points at no
+repair. The flag is a fact about the SET, never about the page, so it rides the
+queue beside the currency and the vendor slug (`gb.name AS set_name` in the
+nightly, `kit.groupBuy.name` in the Prisma select). Forgetting it in ONE place
+is worse than forgetting it everywhere: the audit corrects the stored price to
+its own pick, so a priced row would be silently rewritten back to a $10 add-on
+every night. `test:kit-variants` pins all four call sites, the ordering that
+made the Python flag unreachable, and the two halves of the vocabulary.
 
 `scripts/lib/link-health.mjs` holds the rules and **two columns that mean
 different things on purpose**: `VendorKit.deadSince` is the first time the STORE
