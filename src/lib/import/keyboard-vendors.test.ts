@@ -124,3 +124,81 @@ assert.ok(
 );
 
 console.log("keyboard-vendors tests passed");
+
+// ── The vendor registry is written twice ────────────────────────────────────
+//
+// A shop that sells both keycaps and keyboards is described in TWO registries:
+// KEYBOARD_VENDORS in src/lib/import/keyboard-vendors.ts, and the keycap-side
+// roster in src/data/seed/vendors.json (mirrored in vendor-overrides.ts). They
+// disagreed about five of eleven stores, and the keyboard half was wrong about
+// every one of them:
+//
+//   kt  Ktechs      USD/US    -> ktechs.store       is SG, quotes SGD
+//   pk  PantheonKeys USD/US   -> pantheonkeys.com   is SG, quotes SGD
+//   pt  Prototypist USD/US    -> prototypist.net    is GB, quotes GBP
+//   cc  ClickClack  SGD/SG    -> clickclack.io      is US, quotes USD
+//   klc KLC         SGD/Korea -> klc-playground.com is KR, quotes USD
+//
+// Each store's own /meta.json was probed from a runner on 2026-09-13 and agreed
+// with the roster in all six cases where they could be compared. currency here
+// is not cosmetic: importKeyboardVendor writes it to GroupBuy.priceCurrency,
+// which LABELS basePrice. Labelling a SGD number "USD" overstates a board by
+// ~35% on the page, which is what the 2026-07-21 "wrong_vendor" flag on
+// kt-dyad-tkl ("this vendor Ktech is based in SG") was reporting.
+//
+// Currency is the field this pins, because it is an ISO code with one right
+// answer. Region is deliberately NOT pinned: the two files use different
+// vocabularies for it ("China"/"Korea" here vs "ASIA" in the roster), and a
+// shipping-origin hint has no single canonical spelling to assert.
+
+const rosterRaw = JSON.parse(read("src/data/seed/vendors.json"));
+const roster: Array<{ websiteUrl?: string | null; currency?: string | null; name?: string }> =
+  Array.isArray(rosterRaw) ? rosterRaw : rosterRaw.vendors;
+
+const hostOf = (url: string): string | null => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
+const rosterByHost = new Map<string, { currency?: string | null; name?: string }>();
+for (const v of roster) {
+  const h = v.websiteUrl ? hostOf(v.websiteUrl) : null;
+  if (h) rosterByHost.set(h, v);
+}
+
+const kbBlock = ts.match(/export const KEYBOARD_VENDORS[\s\S]*?\n\]/)?.[0] ?? "";
+assert.ok(kbBlock, "KEYBOARD_VENDORS block found");
+
+const kbEntries: string[] = [];
+const entryRe = /\{\s*id:\s*"([^"]+)"[\s\S]*?\n {2}\}/g;
+for (let m = entryRe.exec(kbBlock); m !== null; m = entryRe.exec(kbBlock)) kbEntries.push(m[0]);
+assert.ok(kbEntries.length >= 10, `parsed the keyboard registry (got ${kbEntries.length})`);
+
+let compared = 0;
+for (const entry of kbEntries) {
+  const id = entry.match(/id:\s*"([^"]+)"/)?.[1] ?? "?";
+  const currency = entry.match(/currency:\s*"([^"]+)"/)?.[1];
+  const collectionUrl = entry.match(/collectionUrl:\s*"([^"]+)"/)?.[1] ?? "";
+  const host = hostOf(collectionUrl);
+  assert.ok(currency, `${id} declares a currency`);
+  assert.ok(host, `${id} has a parseable collectionUrl host`);
+
+  const rosterEntry = rosterByHost.get(host);
+  if (!rosterEntry?.currency) continue; // roster doesn't know this shop — nothing to compare
+  compared++;
+  assert.equal(
+    currency,
+    rosterEntry.currency,
+    `${id} (${host}): keyboard registry says ${currency} but the keycap roster says ` +
+      `${rosterEntry.currency}. One of them mislabels this store's prices — check the ` +
+      `store's own /meta.json (the Vendor probe workflow) and fix whichever is wrong.`
+  );
+}
+
+// A parity test that compares nothing passes for the wrong reason.
+assert.ok(compared >= 8, `compared at least 8 shops against the roster (got ${compared})`);
+
+console.log(`keyboard-vendors: ${compared} shops agree with the keycap roster on currency`);

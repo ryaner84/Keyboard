@@ -78,8 +78,8 @@ export const KEYBOARD_VENDORS: VendorConfig[] = [
     extraCollectionUrls: [
       "https://prototypist.net/collections/pre-orders/products.json",
     ],
-    currency: "USD",
-    region: "US",
+    currency: "GBP",
+    region: "UK",
   },
   {
     id: "klc",
@@ -91,7 +91,7 @@ export const KEYBOARD_VENDORS: VendorConfig[] = [
     extraCollectionUrls: [
       "https://klc-playground.com/collections/on-going-gb/products.json",
     ],
-    currency: "SGD",
+    currency: "USD",
     region: "Korea",
   },
   {
@@ -101,15 +101,15 @@ export const KEYBOARD_VENDORS: VendorConfig[] = [
     extraCollectionUrls: [
       "https://ktechs.store/collections/pre-order/products.json",
     ],
-    currency: "USD",
-    region: "US",
+    currency: "SGD",
+    region: "SG",
   },
   {
     id: "pk",
     displayName: "Pantheon Keys",
     collectionUrl: "https://pantheonkeys.com/collections/ongoing-group-buys/products.json",
-    currency: "USD",
-    region: "US",
+    currency: "SGD",
+    region: "SG",
   },
   {
     id: "kbd",
@@ -126,8 +126,8 @@ export const KEYBOARD_VENDORS: VendorConfig[] = [
     id: "cc",
     displayName: "ClickClack",
     collectionUrl: "https://clickclack.io/collections/groupbuy/products.json",
-    currency: "SGD",
-    region: "SG",
+    currency: "USD",
+    region: "US",
   },
   {
     id: "ilu",
