@@ -357,4 +357,82 @@ const breakEven = unitMoneyLine(
 );
 assert.equal(breakEven.gain?.text, "+USD 0");
 
+// ── The reported case: US$124 in, S$185 out, viewed in SGD ─────────────────
+// formatCurrency pins en-SG, where the LOCAL currency gets the bare symbol and
+// every other one gets a prefix. With one formatter the line read
+//   "Paid US$124 · Sold $185 · +$18"
+// and looked like broken arithmetic: three dollar amounts that do not subtract.
+// They are three different currencies — S$185 − S$167 (US$124 converted) = S$18
+// — so as soon as a line mixes bases every amount on it must name its currency.
+const sgd = (amount: number, currency: string) =>
+  currency === "SGD"
+    ? `$${Math.round(amount)}`
+    : `${currency === "USD" ? "US$" : currency}${Math.round(amount)}`;
+const withCode = (amount: number, currency: string) =>
+  `${currency} ${Math.round(amount)}`;
+
+const reported = unitMoneyLine(
+  { purchasePrice: 124, purchaseCurrency: "USD", isSold: true, soldPrice: 185, soldCurrency: "SGD" },
+  "SGD",
+  { USD: 1, SGD: 1.35 },
+  sgd,
+  withCode
+);
+assert.equal(reported.paid, "USD 124", "the paid figure names its own currency");
+assert.equal(reported.sold, "SGD 185", "a bare $ here would read as USD");
+assert.equal(reported.gain?.text, "+SGD 18", "the gain is in the viewer's currency");
+assert.equal(reported.gain?.positive, true);
+
+// The arithmetic was never wrong — pin it so a future reader does not re-fix it.
+assert.equal(Math.round(185 - 124 * 1.35), 18);
+
+// A line in ONE currency keeps the compact symbol: nothing is ambiguous there.
+const single = unitMoneyLine(
+  { purchasePrice: 200, purchaseCurrency: "SGD", isSold: true, soldPrice: 250, soldCurrency: "SGD" },
+  "SGD",
+  { USD: 1, SGD: 1.35 },
+  sgd,
+  withCode
+);
+assert.deepEqual(
+  [single.paid, single.sold, single.gain?.text],
+  ["$200", "$250", "+$50"],
+  "one currency throughout stays on the symbol"
+);
+
+// Paid and sold agree but the VIEWER's currency differs, so the gain is a third
+// basis — still mixed, even though only two amounts carry a foreign code.
+const viewerDiffers = unitMoneyLine(
+  { purchasePrice: 100, purchaseCurrency: "USD", isSold: true, soldPrice: 150, soldCurrency: "USD" },
+  "SGD",
+  { USD: 1, SGD: 1.35 },
+  sgd,
+  withCode
+);
+assert.deepEqual(
+  [viewerDiffers.paid, viewerDiffers.sold, viewerDiffers.gain?.text],
+  ["USD 100", "USD 150", "+SGD 68"],
+  "a gain in a currency neither figure names must say so"
+);
+
+// An unsold unit shows one amount and no gain — one currency, so no codes.
+const heldOnly = unitMoneyLine(
+  { purchasePrice: 99, purchaseCurrency: "USD", isSold: false, soldPrice: null, soldCurrency: null },
+  "USD",
+  { USD: 1, SGD: 1.35 },
+  sgd,
+  withCode
+);
+assert.equal(heldOnly.paid, "US$99");
+assert.equal(heldOnly.gain, null);
+
+// The formatter is optional: callers passing one still get a working line.
+const legacy = unitMoneyLine(
+  { purchasePrice: 124, purchaseCurrency: "USD", isSold: true, soldPrice: 185, soldCurrency: "SGD" },
+  "SGD",
+  { USD: 1, SGD: 1.35 },
+  withCode
+);
+assert.equal(legacy.paid, "USD 124", "one formatter falls back to itself");
+
 console.log("collection sales P/L checks passed");
