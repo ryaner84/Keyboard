@@ -57,6 +57,13 @@ jobs:
         if: always()
         run: npm run test:csv-import
 
+      # The rate feed decides every converted figure on the site — spend, P/L,
+      # and which vendor is cheapest across currencies. A payload parsed out of
+      # an error page would be written over the only copy we have.
+      - name: currency-rates
+        if: always()
+        run: npm run test:currency-rates
+
       - name: collection-import
         if: always()
         run: npm run test:collection-import

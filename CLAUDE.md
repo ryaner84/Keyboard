@@ -35,6 +35,7 @@ python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
 npm run test:kit-variants
 npm run test:set-name
 npm run test:csv-import
+npm run test:currency-rates
 npm run test:collection-import
 npm run test:keycap-collection
 npm run test:collection-sales
