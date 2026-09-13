@@ -11,7 +11,7 @@ import { useTrackedSets } from "@/hooks/useTrackedSets";
 import { normalizeImageUrl } from "@/lib/utils";
 import { isCustomSlug } from "@/lib/showcase";
 import { collectionSharePath } from "@/lib/collection-share";
-import { convertCurrency, formatCurrency } from "@/lib/currency-utils";
+import { convertCurrency, formatCurrency, formatCurrencyWithCode } from "@/lib/currency-utils";
 import {
   classifyVariant,
   NONBASE_SUBKIT_RE,
@@ -442,7 +442,13 @@ function BuildSummary({
     // raw numbers would be nonsense.
     const gain =
       viewerCurrency && rates
-        ? unitMoneyLine(build, viewerCurrency, rates, formatCurrency).gain
+        ? unitMoneyLine(
+            build,
+            viewerCurrency,
+            rates,
+            formatCurrency,
+            formatCurrencyWithCode
+          ).gain
         : null;
     specs.unshift(
       [soldYear ? `Sold ${soldYear}` : "Sold", amount, gain?.text]
@@ -2854,9 +2860,16 @@ function SalesReturnsCard({
                           year: "numeric",
                         })}`
                       : "date not recorded",
+                    // Both figures are already in the viewer's currency, so
+                    // the symbol is unambiguous WITHIN this line — but a
+                    // converted one is a number the owner never typed. Paying
+                    // US$124 and reading "$167" here is the other half of the
+                    // same confusion the money line above fixes, so say that a
+                    // conversion happened. `converted` has been computed since
+                    // this card was written and nothing had ever read it.
                     result.cost != null
-                      ? `${formatCurrency(result.cost, currency)} → ${formatCurrency(result.recovered, currency)}`
-                      : `recovered ${formatCurrency(result.recovered, currency)}`,
+                      ? `${result.converted ? "≈" : ""}${formatCurrency(result.cost, currency)} → ${formatCurrency(result.recovered, currency)}`
+                      : `recovered ${result.converted ? "≈" : ""}${formatCurrency(result.recovered, currency)}`,
                   ].join(" · ")}
                 </p>
               </div>
@@ -4009,7 +4022,8 @@ function KeycapCollectionCard({
                     },
                     viewerCurrency,
                     rates,
-                    formatCurrency
+                    formatCurrency,
+                    formatCurrencyWithCode
                   );
                   if (!money.paid && !money.sold) return null;
                   return (

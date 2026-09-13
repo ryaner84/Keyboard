@@ -330,18 +330,42 @@ export function unitMoneyLine(
   >,
   viewerCurrency: string,
   rates: Record<string, number>,
-  format: (amount: number, currency: string) => string
+  format: (amount: number, currency: string) => string,
+  // Used for every amount on the line as soon as the line carries more than
+  // one currency. Optional so existing callers and the tests keep working with
+  // a single formatter.
+  formatWithCode: (amount: number, currency: string) => string = format
 ): UnitMoneyLine {
   const paidCurrency = unit.purchaseCurrency || viewerCurrency;
   const saleCurrency = unit.soldCurrency || unit.purchaseCurrency || viewerCurrency;
 
-  // Shown in the currency it was actually paid in — that is the number the
-  // owner recognises from their own receipt.
+  // Each figure keeps the currency it was actually paid or received in — that
+  // is the number the owner recognises from their own receipt — while the gain
+  // is computed in the VIEWER's currency, because subtracting across currencies
+  // is meaningless. So one line can carry up to three different bases.
+  //
+  // When it carries more than one, the symbol alone cannot say which is which:
+  // en-SG renders SGD as a bare "$" and USD as "US$", so "Paid US$124 · Sold
+  // $185 · +$18" reads as three dollar amounts that do not subtract. They do —
+  // US$124 is S$167 — but only the ISO code makes that legible. A single
+  // currency is unambiguous on its own and keeps the compact symbol.
+  const mixed =
+    new Set(
+      [
+        unit.purchasePrice != null ? paidCurrency : null,
+        unit.isSold && unit.soldPrice != null ? saleCurrency : null,
+        unit.isSold && unit.purchasePrice != null && unit.soldPrice != null
+          ? viewerCurrency
+          : null,
+      ].filter(Boolean) as string[]
+    ).size > 1;
+  const money = mixed ? formatWithCode : format;
+
   const paid =
-    unit.purchasePrice != null ? format(unit.purchasePrice, paidCurrency) : null;
+    unit.purchasePrice != null ? money(unit.purchasePrice, paidCurrency) : null;
   const sold =
     unit.isSold && unit.soldPrice != null
-      ? format(unit.soldPrice, saleCurrency)
+      ? money(unit.soldPrice, saleCurrency)
       : null;
 
   let gain: UnitMoneyLine["gain"] = null;
@@ -361,7 +385,7 @@ export function unitMoneyLine(
       // even rather than "+$0.00".
       const rounded = Math.round(delta * 100) / 100;
       gain = {
-        text: `${rounded >= 0 ? "+" : "−"}${format(Math.abs(rounded), viewerCurrency)}`,
+        text: `${rounded >= 0 ? "+" : "−"}${money(Math.abs(rounded), viewerCurrency)}`,
         positive: rounded >= 0,
       };
     }
