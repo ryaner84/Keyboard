@@ -1542,8 +1542,16 @@ def shopify_price(
         # /products/gmk-lavender). Clearing (NO_BASE_KIT) beats keeping: a
         # mislinked row's stale price must heal, not persist. A vendor-pinned
         # ?variant= link is ground truth and bypasses the guard.
+        #
+        # …and so does `allow_subkits`, for the same reason the variant picker
+        # below takes it: when the SET IS the subkit (dcs.wiki catalogs "DCS
+        # After School 1992 40s Kit" as a set), the only product that can ever
+        # be its listing is titled exactly like the thing this rejects. Threaded
+        # into choose_kit_variant alone, allow_subkits could never reach a
+        # SHOPIFY store at all — this returns above it — which is why the
+        # docstring's own example, Saber Keebs, still priced at nothing.
         product_title = str(data["product"].get("title") or "")
-        if not pinned_id and product_title:
+        if not pinned_id and product_title and not allow_subkits:
             title_category = classify_variant(product_title)
             if (
                 title_category in ("NOVELTIES", "SPACEBARS")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import sys
 import unittest
 from datetime import datetime
@@ -1547,6 +1548,29 @@ class SubkitSetPricingTests(unittest.TestCase):
         ]
         self.assertEqual(scrape.choose_kit_variant(variants)["price"], 135.0)
         self.assertIsNone(scrape.choose_kit_variant([variants[1]]))
+
+    def test_the_shopify_title_guard_yields_to_the_flag(self):
+        # The flag reached choose_kit_variant and stopped there. shopify_price
+        # rejects a product whose TITLE names a subkit, and it returns above
+        # the picker — so on a Shopify store the flag could never run at all,
+        # including on Saber Keebs, the listing it was written for. Every dcs
+        # .wiki subkit set answered NO_BASE_KIT on every read instead, and an
+        # unpriced row is hidden outright on a RELEASED set: the vendor's only
+        # listing, invisible, by our rule rather than anything the store did.
+        #
+        # Source-level because the guard sits inside a network fetch. The two
+        # halves are pinned together by npm run test:kit-variants.
+        source = inspect.getsource(scrape.shopify_price)
+        self.assertIn(
+            "if not pinned_id and product_title and not allow_subkits:",
+            source,
+            "shopify_price's product-title subkit guard must yield to allow_subkits",
+        )
+        self.assertLess(
+            source.index("product_title and not allow_subkits"),
+            source.index("_pick_variant(variants, pinned_id, allow_subkits)"),
+            "the guard returns above the picker — that ordering is the bug",
+        )
 
     def test_a_titled_base_still_wins_even_with_the_flag_on(self):
         # Prototypist's listing for the same set names its base explicitly;

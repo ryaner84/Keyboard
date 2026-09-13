@@ -235,8 +235,11 @@ assert.ok(
   /vendor: \{ select: \{ currency: true, slug: true \} \}/.test(prices),
   "the price queue must select the vendor slug fetchVendorPrice decides on"
 );
+// Matched across the argument list rather than on one line: the call carries a
+// fourth argument now (the subkit-set flag), and pinning its FORMATTING would
+// fail on a line break while saying nothing about the slug it exists to check.
 assert.ok(
-  /fetchVendorPrice\(vk\.productUrl, vk\.vendor\.currency, vk\.vendor\.slug\)/.test(prices),
+  /fetchVendorPrice\(\s*vk\.productUrl,\s*vk\.vendor\.currency,\s*vk\.vendor\.slug\b/.test(prices),
   "refreshOne must pass the row's vendor slug to fetchVendorPrice"
 );
 

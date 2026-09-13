@@ -89,6 +89,34 @@ export const PRODUCT_ACCESSORY_RE =
 export const NONBASE_SUBKIT_RE =
   /num(?:ber)?\s*pad|\b40s\b|forties|accents?\b|extension|hiragana|katakana|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b/i;
 
+// A product whose RAW title names a subkit or accessory. Discovery must not
+// link one as a normal set's VendorKit (normalizeSetName strips bracketed
+// qualifiers, so "GMK Foo (Novelties)" collides with the set name), and the
+// price pass must not price one as a normal set's base kit. "alphas" is
+// plural-only so a set legitimately named "… Alpha" still links; "extras" is
+// deliberately absent, because an extras listing sells the base kit.
+//
+// Mirror of _SUBKIT_PRODUCT_RE in scraper/scrape.py — kept here rather than in
+// discovery.ts because the price pass, the price audit and both discovery
+// halves all have to agree about it. test:kit-variants fails if they drift.
+export const SUBKIT_PRODUCT_RE = new RegExp(
+  `novelt|space\\s*bars?|\\balphas\\b|${NONBASE_SUBKIT_RE.source}|${PRODUCT_ACCESSORY_RE.source}`,
+  "i"
+);
+
+/**
+ * Whether the tracked SET is itself a subkit or accessory product.
+ *
+ * The dcs.wiki archive catalogs these as first-class sets — "DCS Bae Addon",
+ * "DCS 10U Spacebars", "DCS After School 1992 40s Kit" — so every rule of the
+ * form "a subkit product is never the base listing" has to know when the subkit
+ * IS the product being tracked. Applied to `GroupBuy.name`, which is what
+ * scrape.py's price queue selects as `set_name`.
+ */
+export function isSubkitSetName(setName: string | null | undefined): boolean {
+  return SUBKIT_PRODUCT_RE.test(String(setName ?? ""));
+}
+
 // THE canonical base-kit pick, used by every consumer that must agree on
 // which variant is the base: the Shopify/Woo price pickers and the nightly
 // price audit. Order: drop accessories; drop labeled subkits (alphas/
@@ -97,8 +125,19 @@ export const NONBASE_SUBKIT_RE =
 // cheaper lines). Returns null when the listing has no base candidate —
 // including when it carries ONLY accessories — so callers clear rather than
 // store a wrong price.
+//
+// `allowSubkits` is for a set that IS a subkit (isSubkitSetName): on such a
+// listing the 40s/spacebar variant is the base kit, not something to exclude.
+// Saber Keebs' "DCS After School 1992 40s Kit" is the case that found it — its
+// variants are "40s Monokit" USD 140, "BAE" 10 and "LAE" 10, so dropping the
+// 40s line leaves the two 10-dollar add-ons as the only candidates and the set
+// would publish at 10. Every caller must pass the SAME flag: the nightly audit
+// recomputes this pick and overwrites the stored price, so a caller that
+// forgets it undoes the one that didn't, every night. Mirror of
+// choose_kit_variant(allow_subkits=…) in scraper/scrape.py.
 export function pickBaseVariant<T extends { title: string; price: number }>(
-  variants: T[]
+  variants: T[],
+  { allowSubkits = false }: { allowSubkits?: boolean } = {}
 ): T | null {
   if (variants.length === 0) return null;
   const nonAddon = variants.filter((v) => !ADDON_VARIANT_RE.test(v.title));
@@ -109,7 +148,7 @@ export function pickBaseVariant<T extends { title: string; price: number }>(
   const basePool = nonAddon.filter((v) => {
     const category = classifyVariant(v.title);
     if (category === "BASE") return true;
-    return category === "OTHERS" && !NONBASE_SUBKIT_RE.test(v.title);
+    return category === "OTHERS" && (allowSubkits || !NONBASE_SUBKIT_RE.test(v.title));
   });
   const titledBase = basePool.find((v) => classifyVariant(v.title) === "BASE");
   if (titledBase) return titledBase;

@@ -45,6 +45,10 @@ jobs:
 
       # Run every suite even if an earlier one fails, so one broken suite
       # doesn't hide the state of the other four.
+      - name: kit-variants
+        if: always()
+        run: npm run test:kit-variants
+
       - name: set-name
         if: always()
         run: npm run test:set-name

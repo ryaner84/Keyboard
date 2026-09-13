@@ -10,20 +10,8 @@ import {
   catalogAvailability,
   catalogStockUpdate,
 } from "../../../scripts/lib/catalog-stock.mjs";
-import { NONBASE_SUBKIT_RE, PRODUCT_ACCESSORY_RE } from "@/lib/kit-variants";
+import { SUBKIT_PRODUCT_RE, isSubkitSetName } from "@/lib/kit-variants";
 import { TRACKED_PROFILE_RE } from "@/lib/set-name";
-
-// A catalog product whose RAW title names a subkit or accessory must never be
-// linked as a set's VendorKit: normalizeSetName strips bracketed qualifiers,
-// so "GMK Foo (Novelties)" would otherwise collide with the set name and the
-// relink branch would overwrite the base product's URL — the price pass then
-// stores the subkit's lone "Default Title" variant as the base price.
-// "alphas" is matched plural-only so a set legitimately named "… Alpha" still
-// links. ("extras" is NOT in this list — extras listings sell the base kit.)
-const SUBKIT_PRODUCT_RE = new RegExp(
-  `novelt|space\\s*bars?|\\balphas\\b|${NONBASE_SUBKIT_RE.source}|${PRODUCT_ACCESSORY_RE.source}`,
-  "i"
-);
 
 // Catalog discovery: instead of trusting the (often stale) per-set product
 // URLs from KeycapLendar, walk each vendor's own Shopify catalog, find every
@@ -251,6 +239,10 @@ interface SetIndexEntry {
   baseKitId: string;
   status: string;
   gbStart: Date | null;
+  // Whether the SET ITSELF is a subkit/accessory product — the dcs.wiki
+  // archive catalogs several that way. The guard below needs it, which is why
+  // it can only run AFTER matching. Mirrors `is_subkit` in scrape.py.
+  isSubkit: boolean;
 }
 
 interface SetIndex {
@@ -281,6 +273,7 @@ async function buildSetIndex(): Promise<SetIndex> {
       baseKitId: baseKit.id,
       status: s.status,
       gbStart: s.gbStart,
+      isSubkit: isSubkitSetName(s.name),
     };
     const full = normalizeSetName(s.name);
     if (full) byFull.set(full, entry);
@@ -436,11 +429,20 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
     const existingByKit = new Map(existing.map((e) => [e.kitId, e]));
 
     for (const product of catalog) {
-      // Subkit/accessory products (novelties, spacebars, deskmats…) are never
-      // the set's base listing — skip before matching.
-      if (SUBKIT_PRODUCT_RE.test(product.title)) continue;
       const match = matchProduct(product.title, index);
       if (!match) continue;
+      // Subkit/accessory products (novelties, spacebars, deskmats…) are never
+      // a normal set's base listing: normalizeSetName strips the qualifier, so
+      // "GMK Foo (Novelties)" collides with the set name and the relink branch
+      // would overwrite the base product's URL.
+      //
+      // But the test has to run AFTER matching, because dcs.wiki catalogs
+      // subkits as sets in their own right — DCS Bae Addon, DCS 10U Spacebars,
+      // DCS After School 1992 40s Kit. Run unconditionally (as this half did)
+      // the guard makes every such set unlinkable by discovery, since the only
+      // products that can match them are exactly the ones being skipped.
+      // Mirrors run_discovery's `not match["is_subkit"]` in scraper/scrape.py.
+      if (SUBKIT_PRODUCT_RE.test(product.title) && !match.isSubkit) continue;
       // Owner removed this vendor for this set — don't re-create/relink it.
       if (isBlockedVendorSet(vendor.slug, match.slug)) continue;
 
