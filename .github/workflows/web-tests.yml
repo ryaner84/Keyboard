@@ -131,3 +131,11 @@ jobs:
       - name: manufacturer-vendors
         if: always()
         run: npm run test:manufacturer-vendors
+
+      # A storefront's own TEST product is shaped exactly like a real listing,
+      # so only a name rule can refuse it — and that rule is written twice (the
+      # import that stops it being written, the db-setup purge that clears what
+      # already was). A divergence is silent at runtime.
+      - name: keyboard-vendors
+        if: always()
+        run: npm run test:keyboard-vendors

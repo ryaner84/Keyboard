@@ -28,6 +28,7 @@
     "test:host-throttle": "node scripts/lib/host-throttle.test.mjs",
     "test:tls-chain": "node scripts/lib/tls-chain.test.mjs",
     "test:manufacturer-vendors": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/import/manufacturer-vendors.test.ts",
+    "test:keyboard-vendors": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/import/keyboard-vendors.test.ts",
     "audit:publishing": "node scripts/vendor-publishing-audit.mjs"
   },
   "prisma": {

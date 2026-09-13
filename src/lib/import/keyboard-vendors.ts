@@ -8,6 +8,7 @@
 // admin it is NOT overwritten (manual curation wins).
 
 import { prisma } from "@/lib/prisma";
+import { isTestProduct } from "@/lib/kit-variants";
 import type { GBStatus } from "@/generated/prisma";
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -29,6 +30,7 @@ const KEYBOARD_MIN_PRICE_USD = 300;
 const BLOCKED_BRANDS = ["keychron"];
 
 function isBlockedProduct(product: ShopifyProduct): boolean {
+  if (isTestProduct(product)) return true;
   const text = `${product.title} ${product.tags} ${product.product_type}`.toLowerCase();
   return BLOCKED_BRANDS.some((brand) => text.includes(brand));
 }

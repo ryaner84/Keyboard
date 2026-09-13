@@ -1028,6 +1028,48 @@ async function purgeCancelledSets(client) {
   }
 }
 
+// A storefront's own TEST product, imported as a real listing. Oblotzky
+// publishes "TEST PRODUCT DO NOT BUY" (handle `test-product-do-not-buy`) priced
+// over the keyboard floor, so it passed both of keyboard-vendors' filters and
+// became `obl-test-product-do-not-buy` on /keyboards/active. Eight LISTING_FLAG
+// reports between 2026-06-23 and 2026-09-13 asked for it to be removed and none
+// could heal: the import UPSERTS by slug, so a row deleted by hand is recreated
+// by the next nightly pass. `isTestProduct` in src/lib/import/keyboard-vendors.ts
+// is the half that stops it being written again; this is the one-time purge of
+// what was already written, and it runs every deploy so it stays idempotent.
+//
+// Mirrors TEST_PRODUCT_MARKERS. Phrases only, never a bare "test" — a board may
+// be called Testudo, Protest or Contest and this DELETES the row. The slug is
+// hyphenated, so it is compared on a spaced form the way the TS half does.
+async function purgeTestProductListings(client) {
+  try {
+    // Passed as a bound parameter, so it needs no SQL quoting — write the
+    // apostrophe literally rather than doubling it.
+    const marker =
+      "(do not buy|donotbuy|don't buy|test product|product test" +
+      "|test listing|test item|dummy product|sample product|placeholder)";
+    const sets = await client.query(
+      `SELECT id FROM public."GroupBuy"
+        WHERE name ~* $1
+           OR replace(slug, '-', ' ') ~* $1
+           OR lower(btrim(name)) = 'test'`,
+      [marker]
+    );
+    if (sets.rowCount === 0) return;
+    const ids = sets.rows.map((r) => r.id);
+    await client.query(
+      `DELETE FROM public."VendorKit"
+        WHERE "kitId" IN (SELECT id FROM public."Kit" WHERE "groupBuyId" = ANY($1))`,
+      [ids]
+    );
+    await client.query(`DELETE FROM public."Kit" WHERE "groupBuyId" = ANY($1)`, [ids]);
+    await client.query(`DELETE FROM public."GroupBuy" WHERE id = ANY($1)`, [ids]);
+    console.log(`[db-setup] Purged ${ids.length} test-product listing(s).`);
+  } catch (err) {
+    console.warn(`[db-setup] test-product purge skipped: ${err.message}`);
+  }
+}
+
 // Per-(vendor, set) listings removed at the owner's request (mirrors
 // BLOCKED_VENDOR_SET_PAIRS in src/lib/import/vendor-overrides.ts). The vendor
 // is legitimate for other sets, so only the named set's VendorKit row is
@@ -1412,6 +1454,7 @@ async function main() {
         await ensureCompareAtPriceColumn(client);
     await purgeBlockedVendors(client);
         await purgeCancelledSets(client);
+        await purgeTestProductListings(client);
         await purgeBlockedVendorSetPairs(client);
         await reclassifyKeycapKeyboards(client);
         await healBlankVendorUrls(client);
@@ -1496,6 +1539,7 @@ async function main() {
     await ensureBuildSpecColumns(client);
     await purgeBlockedVendors(client);
     await purgeCancelledSets(client);
+    await purgeTestProductListings(client);
     await purgeBlockedVendorSetPairs(client);
     await ensureDiscoveryColumn(client);
     await ensureLinkHealthColumns(client);

@@ -15,14 +15,17 @@ ledger tables). Use exactly:
 
 > Run the wrong-price report review for the GMK group-buy tracker exactly as
 > specified in `docs/price-report-review-routine.md`. Read that file first and
-> follow every step, including re-verifying every prior self-healed item
-> against the Self-heal watch and rendering all ledger tables from
-> `price-report-ledger.md` on every run — even when there are zero pending
-> reports. Work on the `main` branch. When a report needs a fix — a fresh
-> "needs fix" report, or a watched item that did not actually self-heal — trace
-> it to its root cause per the doc, implement and commit the fix on `main`
-> yourself, and only pause for me when a fix is genuinely ambiguous or
-> architecturally significant. Do not wait for per-report approval.
+> follow every step, including dispatching BOTH the Price reports feed and the
+> Visitor inbox feed and triaging the inbox's `LISTING_FLAG` items (the flag
+> icon beside a listing) alongside the price reports, re-verifying every prior
+> self-healed item against the Self-heal watch, and rendering the ledger tables
+> from `price-report-ledger.md` on every run — even when there are zero pending
+> reports. Do not render the full client-reported log. Work on the `main`
+> branch. When a report needs a fix — a fresh "needs fix" report, a listing
+> flag, or a watched item that did not actually self-heal — trace it to its root
+> cause per the doc, implement and commit the fix on `main` yourself, and only
+> pause for me when a fix is genuinely ambiguous or architecturally significant.
+> Do not wait for per-report approval.
 
 If the stored prompt ever diverges from the steps below, the prompt is wrong,
 not the doc — repoint it here.
@@ -40,6 +43,32 @@ not the doc — repoint it here.
      fields plus `resolvedAt`), for reconciling the client-reported log so a
      report that self-healed between two runs is never silently dropped. Cross-
      check these against the ledger's full log and append any that are missing.
+
+   **1b. Also dispatch the Visitor inbox feed** (`visitor-inbox.yml`), wait for
+   it, and read its log. **The price feed is not the only way a visitor reports
+   a problem, and it never was.** `/api/price-reports` only ever sees the
+   wrong-price flag on a *vendor row*; the little **flag icon beside a listing**
+   on `/keyboards/active`, `/browse` and the set pages posts to a different
+   endpoint (`/api/listing-reports`) and a different table (`ListingReport`),
+   and the modal promises the reporter "We review these daily". A routine that
+   reads only the price feed silently drops every one of them. The inbox prints
+   all five visitor channels, UNRESOLVED only, one line each:
+   - `LISTING_FLAG | …` — the listing flag (`slug`, `issueType` ∈
+     `wrong_category` / `wrong_price` / `inactive` / `duplicate` /
+     `wrong_vendor` / `other`, `notes`, `id`). **Triage every one of these in
+     the same run**, exactly as a `PRICE_REPORT`: a `wrong_price` flag is a
+     wrong-price report that happens to have arrived through the other button,
+     and `inactive` / `duplicate` / `wrong_category` are catalog-data bugs that
+     no scrape can heal.
+   - `STORE_LINK`, `PRICE_REPORT`, `FEEDBACK`, `PHOTO_REPORT` — the other
+     channels; act on what is actionable and leave the rest for the owner.
+
+   **`LISTING_FLAG` has no auto-resolution** (unlike a price report, nothing
+   about it is derivable), so a flag stays in the inbox for ever until it is
+   cleared by hand. Once an item is dealt with, clear it with the id the line
+   carries: `UPDATE "ListingReport" SET "resolvedAt" = now() WHERE id = '<id>';`
+   — otherwise every later run re-triages the same flag. Record each one in the
+   ledger's client-reported log the same way a price report is recorded.
 2. **Re-verify every prior "self-healed" item first — and fix the ones that did
    not heal.** A `self-healed` verdict is provisional: it only holds once a
    later scrape proves it. A nightly scrape runs between review runs, so by the
@@ -110,7 +139,7 @@ not the doc — repoint it here.
    in the current codebase (the issue no longer exists) are dropped from the
    table. List them in a short "removed / already resolved" note for the audit
    trail instead of leaving them in the main table.
-7. **Always render the ledger as three tables** (from `price-report-ledger.md`).
+7. **Always render the ledger as two tables** (from `price-report-ledger.md`).
    On EVERY run — including when there are zero pending reports — render:
    - **(a) Open wrong-price reports** — ledger rows that are **not yet
      resolved**. **Resolved rows are omitted** from this table; when everything
@@ -118,10 +147,13 @@ not the doc — repoint it here.
    - **(b) Open client-recommended values** — client-suggested corrected
      prices/URLs/vendors **still awaiting verification**. **Verified (resolved)
      recommendations are omitted**; when all are verified, show "none".
-   - **(c) Client-reported items** — the full client's-eye log of every report
-     ever filed (columns: logged date, set, vendor, reported price, client
-     reason, verdict, status). This one **always shows every item**, resolved or
-     not, and is the durable "what has the client complained about" view.
+
+   **Do NOT render the full client-reported log per run.** The ledger's
+   `Client-reported items` table stays in `price-report-ledger.md` as the
+   durable "what has the client complained about" record and is still appended
+   to on every new report — but re-printing all ~41 resolved rows in the run
+   output is noise the owner does not need. Keep it in the file; leave it out
+   of the reply.
 
    Also render **(1b) Self-heal watch** — the items awaiting next-day
    confirmation (step 2). This is the working set the verification loop keys on:
@@ -133,8 +165,10 @@ not the doc — repoint it here.
    detail for the audit trail and is **not** rendered per run. When the current
    run surfaces a NEW report, append its row to the client-reported log **and**
    the resolution audit (and commit on `main`) so the ledger stays complete.
-8. If there are no PENDING reports, still render the three ledger tables
-   (step 7), say "No pending reports", and stop.
+8. If there are no PENDING reports **and the visitor inbox is clear**, still
+   render the two ledger tables (step 7) plus the Self-heal watch, say "No
+   pending reports", and stop. A clear price feed is *not* on its own an empty
+   run: check the inbox's `LISTING_FLAG` block before concluding it.
 9. Check on any new product/vendor a reporter recommends (a corrected base
    price, the correct product URL, or a vendor/currency note in the reason) and
    verify it against the scraper's vendor overrides and plausibility bounds.

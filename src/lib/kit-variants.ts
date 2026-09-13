@@ -196,3 +196,51 @@ export function categoryPrice(raw: unknown, category: VariantCategory): number |
   if (matches.length === 0) return null;
   return Math.min(...matches.map((v) => v.price));
 }
+
+// ── A storefront's own TEST product ─────────────────────────────────────────
+//
+// A test product is a real Shopify product: it has a handle, a title, images
+// and a price, so nothing about its SHAPE says it is not for sale. Oblotzky
+// publishes one ("TEST PRODUCT DO NOT BUY", handle `test-product-do-not-buy`)
+// priced over the keyboard floor, so it cleared both of importKeyboardVendor's
+// filters — a brand blocklist and a price floor — and was imported as
+// `obl-test-product-do-not-buy`, a live listing on /keyboards/active.
+//
+// It became the most-reported item on the site: eight LISTING_FLAG reports
+// between 2026-06-23 and 2026-09-13 ("this is not a real product", "this is a
+// test product removed this from all listing"). Not one of them could heal.
+// Deleting the row is not the repair, because the import UPSERTS by slug: the
+// next nightly pass recreates it from the same catalog entry. Refusing the
+// product HERE is the half that ends it; `purgeTestProductListings` in
+// scripts/db-setup.mjs only clears what was already written, and the two
+// marker lists must agree or a row is refused by one half and kept by the other.
+//
+// Matched on PHRASES, never on a bare "test" substring: a board may legitimately
+// be called Testudo, Protest or Contest, and the consequence here is a DELETED
+// listing rather than a hidden one, so a false positive silently drops a real
+// group buy with nothing to flag it. The one bare-word case is a title or handle
+// that is nothing but "test".
+export const TEST_PRODUCT_MARKERS = [
+  "do not buy",
+  "donotbuy",
+  "don't buy",
+  "test product",
+  "product test",
+  "test listing",
+  "test item",
+  "dummy product",
+  "sample product",
+  "placeholder",
+];
+
+export function isTestProduct(product: { title?: string; handle?: string }): boolean {
+  const title = String(product.title ?? "").toLowerCase().trim();
+  const handle = String(product.handle ?? "").toLowerCase().trim();
+  // Handles are hyphenated ("test-product-do-not-buy"); compare on a spaced
+  // form so one marker list answers for both spellings.
+  const handleText = handle.replace(/-/g, " ");
+  if (title === "test" || handle === "test") return true;
+  return TEST_PRODUCT_MARKERS.some(
+    (marker) => title.includes(marker) || handleText.includes(marker)
+  );
+}
