@@ -186,6 +186,33 @@ between nightly runs; `fetchJsonLdPrice` now falls back to that microdata,
 one-directionally — it can only ever say SOLD OUT, and a page with no
 availability markup still defaults to in stock.
 
+**And after all that it still published nothing, because a DEPLOY wiped it.**
+Every price path was taught to ask `isUnpriceableManufacturerListing` — the
+slug first, then the host — and one was missed, because it is not a scrape:
+`purgeMispricedListings` in `db-setup.mjs` runs on every build, and it read
+`v.slug = 'gmk' OR vk."productUrl" ILIKE '%gmk.net%'`. That is the bare host
+test the registry exists to stop, in SQL, where the TypeScript call-site
+assertions could not see it: it nulled all 9 gmk-direct prices on EVERY deploy,
+and since every set in a warehouse sale is RELEASED, an unpriced row is hidden
+outright. The shop went dark on each deploy and came back only with the next
+nightly `run_gmk_direct` — which is why the vendor kept reappearing in
+`audit:publishing` under "9 listing(s) linked, none priced" hours after a run
+that had priced it. `restorePurgedPricesFromVariants` is its matched half,
+written the same way and wrong the same way (`v.slug <> 'gmk' AND productUrl
+NOT ILIKE '%gmk.net%'`), so the rows the purge emptied were also barred from
+the one pass that could refill them from stored variants. The residue is worth
+recognising: `priceSource` stays `SCRAPED` and `linkFailures` stays 0, because
+no fetch happened — a vendor reading `read=N priced=0 refused=0 unparsed=0
+failures=0` was not answered badly by a store, it was written to by us.
+Both halves now mirror the registry (`_MANUFACTURER_STOREFRONT_SLUGS`,
+`_MANUFACTURER_VENDOR_SLUGS`, `_MANUFACTURER_URL_PATTERNS` beside
+`_NON_PUBLISHING_SLUGS`), which also gave the purge the dcs.wiki and
+sxmdesigns.com it never covered, and the purge finally spares `MANUAL` prices
+the way every sibling purge in that file already did — without which naming the
+other sources would have widened the wipe onto hand-entered numbers.
+`test:manufacturer-vendors` now reads the SQL too: it derives both mirrors from
+the registry and fails on either bare filter by its literal text.
+
 **A Vendor row is not always a shop, and the third kind is a PORTFOLIO.** The
 registry was built for manufacturer catalogs (gmk.net, dcs.wiki);
 `sxm-designs` is a designer's showcase, which is the same shape for a different
