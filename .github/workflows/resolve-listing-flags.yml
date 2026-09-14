@@ -1,0 +1,37 @@
+# Clears specific LISTING_FLAG rows (ListingReport) the daily triage has dealt
+# with, by id. A listing flag has no derivable auto-resolution, so once the
+# triage confirms a flag is resolved it must be marked resolved by id or it
+# re-surfaces in the visitor inbox every run. Sets only ListingReport.resolvedAt
+# for the ids passed in, only where currently NULL — reversible (set back to
+# NULL to reopen). See docs/price-report-review-routine.md step 1b.
+#
+# Requires the repository secret DATABASE_URL (Supabase pooler connection
+# string). If it contains the __PASSWORD__ placeholder, DATABASE_PASSWORD must
+# be set too. Without DATABASE_URL the job exits cleanly doing nothing.
+name: Resolve listing flags
+
+on:
+  workflow_dispatch:
+    inputs:
+      flag_ids:
+        description: "Comma- or space-separated ListingReport ids to mark resolved"
+        required: true
+        type: string
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Resolve listing flags by id
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+          FLAG_IDS: ${{ inputs.flag_ids }}
+        run: node scripts/resolve-listing-flags.mjs
