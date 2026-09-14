@@ -1,0 +1,32 @@
+# On-demand, READ-ONLY inspector for the daily listing-flag triage. For every
+# unresolved LISTING_FLAG the visitor inbox surfaces, prints the current catalog
+# state of its slug — whether the GroupBuy row still exists, its productType /
+# status / link counts, and (for keycap sets) any twin row sharing its merge
+# identity plus what the deploy-time merge would fold. Writes nothing; clearing
+# a flag is a separate explicit step. The scheduled Claude review session reads
+# these log lines via the GitHub API.
+#
+# Requires the repository secret DATABASE_URL (Supabase pooler connection
+# string). If it contains the __PASSWORD__ placeholder, DATABASE_PASSWORD must
+# be set too. Without DATABASE_URL the job exits cleanly doing nothing.
+name: Listing flags inspect
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Inspect unresolved listing flags (read-only)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+        run: node scripts/listing-flags-inspect.mjs
