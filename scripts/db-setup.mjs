@@ -971,7 +971,19 @@ async function reportVendorsPublishingNothing(client) {
                 WHERE vk."vendorId" = v.id AND vk."deadSince" IS NOT NULL)
                 AS dead_listings,
               (SELECT min(vk."deadSince") FROM public."VendorKit" vk
-                WHERE vk."vendorId" = v.id) AS deadest_since
+                WHERE vk."vendorId" = v.id) AS deadest_since,
+              -- What DATES the marks above. linkFailures counts consecutive
+              -- unreadable attempts and is reset to 0 by exactly the reads that
+              -- write 'SCRAPED' and 'REFUSED', so past the threshold those two
+              -- marks describe a page nobody here has seen since. Without it the
+              -- report states a months-old read in the present tense: probed
+              -- from a runner on 2026-09-14, typoworks.tw answers 402 and
+              -- rectangles.store refuses the TLS handshake, and both were being
+              -- reported as a pricing backlog. See
+              -- READ_RESETS_LINK_FAILURES_PRICE_SOURCES in link-health.mjs for
+              -- why 'UNPARSED' may not be read this way.
+              (SELECT max(vk."linkFailures") FROM public."VendorKit" vk
+                WHERE vk."vendorId" = v.id) AS max_link_failures
          FROM public."Vendor" v
         ORDER BY v.slug`
     ));
@@ -992,6 +1004,7 @@ async function reportVendorsPublishingNothing(client) {
       pricedListings: r.priced_listings,
       deadListings: r.dead_listings,
       deadestSince: r.deadest_since,
+      maxLinkFailures: r.max_link_failures,
     })),
     _NON_PUBLISHING_SLUGS
   );
@@ -1004,8 +1017,11 @@ async function reportVendorsPublishingNothing(client) {
       `given no answer at all — a block and a closed shop look identical from ` +
       `here, so probe it rather than retiring it — "price REFUSED" and ` +
       `"no product markup" are code here (KIT_BOUNDS / the Currency table / ` +
-      `the parser), "none priced" is ` +
-      `refresh-prices, "none visible" is a non-BASE/catalog row. Removing the ` +
+      `the parser), "none priced" is a page that was reached and yielded no ` +
+      `base price — the link or the base-kit picker, never another scrape — ` +
+      `and a reason opening with "consecutive unreadable attempt(s)" means the ` +
+      `read it describes is older than the store's current silence, so probe ` +
+      `before acting on it. "none visible" is a non-BASE/catalog row. Removing the ` +
       `Vendor row is the right answer only when the store no longer sells ` +
       `tracked sets. \`npm run audit:publishing\` (or the Vendor publishing ` +
       `audit workflow) prints this on demand, outside a build log.`

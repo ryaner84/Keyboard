@@ -1093,6 +1093,185 @@ assert.match(
   assert.doesNotMatch(stale, /none priced/);
   assert.doesNotMatch(stale, /never read one/);
 }
+// --- a READ mark is dated by linkFailures, and only for two of the three -----
+// `priceSource` is never cleared, so every verdict derived from it is written
+// in the present tense about a page that may have been read months ago — the
+// contaminated-column mistake #159 and #169 fixed from the other side, still
+// live in the two branches below them. `linkFailures` counts CONSECUTIVE
+// unreadable attempts and nextLinkHealth resets it to 0 on exactly the reads
+// that stamp 'SCRAPED' (PRICED / NO_BASE_KIT) and 'REFUSED' (PRICE_REFUSED), so
+// past DEAD_LINK_FAILURE_THRESHOLD the store has stopped answering SINCE the
+// mark was written.
+//
+// Probed from a runner on 2026-09-14, the two vendors this was being printed
+// about are not answering at all: typoworks.tw serves 402 on every route (a
+// lapsed Shopify plan) and rectangles.store refuses the TLS handshake outright.
+// Both were reported as "listing(s) linked, none priced — unpriced rows are
+// hidden on released sets", which names refresh-prices, the one pass that
+// cannot reach a store that is not answering.
+{
+  const quiet = reasonOf({
+    slug: "rectangles",
+    websiteUrl: "https://rectangles.store",
+    visibleListings: 0,
+    listings: 2,
+    readListings: 2,
+    pricedListings: 0,
+    maxLinkFailures: 9,
+  });
+  assert.match(quiet, /^9 consecutive unreadable attempt\(s\)/);
+  assert.match(quiet, /Vendor probe workflow/);
+  // The verdict still follows it — the qualifier dates the read, it does not
+  // replace what the read found.
+  assert.match(quiet, /2 listing\(s\) linked, none priced/);
+  // Below the threshold a couple of bad nights say nothing, so the sentence is
+  // unqualified — a store that comes back clears the counter by itself.
+  assert.doesNotMatch(
+    reasonOf({
+      slug: "blip",
+      websiteUrl: "https://blip.com",
+      visibleListings: 0,
+      listings: 2,
+      readListings: 2,
+      pricedListings: 0,
+      maxLinkFailures: 5,
+    }),
+    /consecutive unreadable attempt/
+  );
+  // Absent means NOT MEASURED, exactly as it does for readListings: a caller
+  // that does not select the counter keeps the unqualified sentence rather than
+  // being told its store is stale on evidence nobody gathered.
+  assert.doesNotMatch(
+    reasonOf({
+      slug: "unmeasured-failures",
+      websiteUrl: "https://unmeasuredfailures.com",
+      visibleListings: 0,
+      listings: 2,
+      readListings: 2,
+      pricedListings: 0,
+    }),
+    /consecutive unreadable attempt/
+  );
+  // Strings from the pg driver, like every other count here.
+  assert.match(
+    reasonOf({
+      slug: "stringy-failures",
+      websiteUrl: "https://stringyfailures.com",
+      visibleListings: "0",
+      listings: "2",
+      readListings: "2",
+      pricedListings: "0",
+      maxLinkFailures: "9",
+    }),
+    /consecutive unreadable attempt/
+  );
+  // A REFUSED mark is reset by its own read too, so it is dated the same way.
+  assert.match(
+    reasonOf({
+      slug: "quiet-refused",
+      websiteUrl: "https://quietrefused.com",
+      visibleListings: 0,
+      listings: 3,
+      readListings: 3,
+      refusedListings: 3,
+      pricedListings: 0,
+      maxLinkFailures: 11,
+    }),
+    /^11 consecutive unreadable attempt\(s\).*read and the price REFUSED/s
+  );
+}
+// …and the omission that carries the safety. NO_PRODUCT_DATA does NOT reset
+// linkFailures — a bot check served as a 200 is indistinguishable from a
+// platform the parser cannot read, which is why the counter is a heuristic at
+// all — so an UNPARSED row's counter climbs on reads that went through
+// perfectly. zfrontier-cn carries 214 of them at 17 failures while answering
+// every one 200 with an app shell. Qualifying that verdict would hedge the most
+// actionable diagnosis on the site using evidence that does not exist.
+{
+  const shell = reasonOf({
+    slug: "zfrontier-cn",
+    websiteUrl: "https://www.zfrontier.com",
+    visibleListings: 0,
+    listings: 219,
+    readListings: 214,
+    unparsedListings: 214,
+    deadListings: 1,
+    pricedListings: 0,
+    maxLinkFailures: 17,
+  });
+  assert.doesNotMatch(shell, /consecutive unreadable attempt/);
+  assert.match(shell, /214 of 219 listing\(s\) answer 200 with no product markup/);
+  assert.match(shell, /teach the parser or retire it/);
+}
+// The store's own answer still outranks the qualifier: a vendor whose pages are
+// all gone is a dead link set, and how long ago we last parsed one changes
+// nothing about a 404.
+{
+  const gone = reasonOf({
+    slug: "kono",
+    websiteUrl: "https://kono.store",
+    visibleListings: 0,
+    listings: 44,
+    readListings: 0,
+    pricedListings: 0,
+    deadListings: 44,
+    maxLinkFailures: 10,
+  });
+  assert.match(gone, /^all 44 listing\(s\) are gone/);
+  assert.doesNotMatch(gone, /consecutive unreadable attempt/);
+}
+// Nor may it reach the branch that already refuses to guess. A vendor the pass
+// has NEVER read carries no mark for the counter to date, and #170's verdict —
+// name the probe — is already the right one; prefixing it would say the same
+// thing twice.
+{
+  const never = reasonOf({
+    slug: "alphakeys",
+    websiteUrl: "https://alphakeys.ca",
+    visibleListings: 0,
+    listings: 4,
+    readListings: 0,
+    pricedListings: 0,
+    queuedListings: 3,
+    attemptedListings: 4,
+    maxLinkFailures: 17,
+  });
+  assert.match(never, /the price pass has never read one/);
+  assert.doesNotMatch(never, /consecutive unreadable attempt/);
+}
+// "none priced" must name a repair rather than restate the symptom. Reached
+// with readListings measured, the rows carry 'SCRAPED' with no price: the page
+// was reached and no base price was stored. Two things leave that residue and
+// both are repairs HERE — no identifiable BASE kit on the page, or a deploy
+// purge that emptied the price without any fetch (priceSource stays SCRAPED,
+// linkFailures stays 0), which is how gmk-direct's warehouse sale went dark on
+// every build. Sending the owner to refresh-prices reaches the same answer.
+{
+  const readNotPriced = reasonOf({
+    slug: "read-not-priced",
+    websiteUrl: "https://readnotpriced.com",
+    visibleListings: 0,
+    listings: 9,
+    readListings: 9,
+    pricedListings: 0,
+    maxLinkFailures: 0,
+  });
+  assert.match(readNotPriced, /9 listing\(s\) linked, none priced/);
+  assert.match(readNotPriced, /no identifiable BASE kit/);
+  assert.match(readNotPriced, /deploy purge/);
+  // Unmeasured `readListings` must NOT gain the claim: it defaults to
+  // `listings`, so asserting a read nobody counted is the confident wrong
+  // diagnosis this whole function exists to avoid.
+  const unmeasuredRead = reasonOf({
+    slug: "unmeasured-read",
+    websiteUrl: "https://unmeasuredread.com",
+    visibleListings: 0,
+    listings: 7,
+    pricedListings: 0,
+  });
+  assert.match(unmeasuredRead, /7 listing\(s\) linked, none priced/);
+  assert.doesNotMatch(unmeasuredRead, /no identifiable BASE kit/);
+}
 // A partial dead count with nothing else measured says only what the store
 // said. keyclack.com: one listing gone, three the pass has never read — the
 // counts are on the audit line either way, and a claim about the other three is
@@ -1241,6 +1420,20 @@ for (const [file, source] of [
   assert.ok(
     /refusedListings:/.test(source) && /unparsedListings:/.test(source),
     `${file} must pass both counts to planPublishingReport`
+  );
+  // And the counter that DATES those marks. `priceSource` is never cleared, so
+  // without it every verdict derived from it is stated in the present tense
+  // about a page that may have been read months ago — which is how typoworks.tw
+  // (402) and rectangles.store (a refused TLS handshake) came to be reported as
+  // a pricing backlog. Selecting it and then not passing it reads as correct and
+  // silently does nothing, so both halves are pinned.
+  assert.ok(
+    /max\(vk\."linkFailures"\)[\s\S]{0,200}AS max_link_failures/.test(source),
+    `${file} must select max(linkFailures) so the read marks can be dated`
+  );
+  assert.ok(
+    /maxLinkFailures:/.test(source),
+    `${file} must pass maxLinkFailures to planPublishingReport`
   );
 }
 // The read count is `priceSource IS NOT NULL`, not `priceUpdatedAt IS NOT NULL`.

@@ -535,6 +535,47 @@ defaults around. `test:vendor-urls` fails if the verdict claims the links are
 dead, if the audit stops selecting or passing the two counts, or if `db-setup`'s
 hand-written legend drifts back.
 
+**And every verdict that reaches PAST that branch is dated by nothing.** The
+"never read one" sentence above is careful because `read = 0` is a fact that
+cannot go stale. Every reason below it rests on the opposite: `priceSource` is
+never cleared, so a mark written once is read back in the present tense for
+ever. `linkFailures` is the column that dates it — and the two are dated
+relative to each other, because `nextLinkHealth` resets the counter to 0 on
+exactly the reads that stamp `SCRAPED` (PRICED / NO_BASE_KIT) and `REFUSED`
+(PRICE_REFUSED). So on a row carrying either mark, a count past
+`DEAD_LINK_FAILURE_THRESHOLD` is not background noise: it is that many attempts
+the store has declined to answer SINCE the page was last read. Probed from a
+runner on 2026-09-14, the two vendors the report was printing "listing(s)
+linked, none priced — unpriced rows are hidden on released sets" about are not
+answering at all — typoworks.tw serves 402 on every route (a lapsed Shopify
+plan) and rectangles.store refuses the TLS handshake outright — and that
+sentence names `refresh-prices`, the one pass that cannot reach a store which is
+not answering. `describeStaleReads` is the prefix and
+`READ_RESETS_LINK_FAILURES_PRICE_SOURCES` is the rule behind it, which is
+`describeDeadListings`'s shape again: a qualifier on the verdict, never a
+replacement for it.
+
+**`UNPARSED` is deliberately outside that rule, and the omission is the whole
+point.** `NO_PRODUCT_DATA` does NOT reset the counter — a bot check served as a
+200 is indistinguishable from a platform the parser cannot read, which is the
+reason `linkFailures` is a heuristic at all — so an unparsed row's counter
+climbs on reads that went through perfectly. zfrontier-cn carries 214 of them at
+17 failures while answering every one of them 200 with an app shell. Hedging
+that verdict to be right about a two-row store would blunt the most actionable
+diagnosis on the site using evidence that does not exist. Naming the probe is
+the safe direction and is what makes the loose `max(linkFailures)` a vendor is
+measured by acceptable: it hides no listing and retires no row, and the counter
+clears itself on the first read that gets through. The report's last resort
+stopped restating the symptom at the same time — `SCRAPED` with no price means
+the page was REACHED and no base price was stored, which is either no
+identifiable BASE kit on it or a deploy purge that emptied the price without any
+fetch (#177's residue: `priceSource` stays `SCRAPED`, `linkFailures` stays 0).
+`test:vendor-urls` pins the prefix, the `UNPARSED` exemption, that `deadSince`
+and "never read one" both still outrank it, and — the half that was missing —
+that BOTH callers select `max(linkFailures)` and pass it: the audit already did,
+`db-setup` never had, which is this file's "written twice" failure reached one
+more time.
+
 **And the commonest of those answers is not a status at all — it is a silent
 redirect.** A store that has removed a product usually sends it to the store's
 own FRONT DOOR rather than 404ing it, and an acquired shop redirects its whole
