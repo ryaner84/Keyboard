@@ -135,6 +135,37 @@ export const UNDIAGNOSED_RECHECK_HOURS = 24;
 export const PRICE_SOURCE_REFUSED = "REFUSED";
 export const PRICE_SOURCE_UNPARSED = "UNPARSED";
 
+/** The mark a read that reached a price — or an answer of "no base kit" — leaves. */
+export const PRICE_SOURCE_SCRAPED = "SCRAPED";
+
+/**
+ * The `priceSource` marks whose row had its `linkFailures` RESET by the very
+ * read that wrote them — and which therefore make a non-zero counter mean
+ * something.
+ *
+ * `nextLinkHealth` zeroes the counter on PRICED, NO_BASE_KIT and PRICE_REFUSED,
+ * the three outcomes where the store answered AND the page parsed. Those are
+ * exactly the outcomes that stamp 'SCRAPED' (PRICED / NO_BASE_KIT) and
+ * 'REFUSED' (PRICE_REFUSED). So on a row carrying one of these two, the mark
+ * says what the page WAS and the counter says how many times the store has
+ * declined to say it since: the two columns are dated relative to each other,
+ * and at DEAD_LINK_FAILURE_THRESHOLD the mark is no longer a description of
+ * anything the store currently serves.
+ *
+ * 'UNPARSED' is deliberately absent, and the omission is the whole point.
+ * NO_PRODUCT_DATA does NOT reset the counter — a bot check served as a 200 is
+ * indistinguishable from a platform the parser cannot read, which is the reason
+ * `linkFailures` is a heuristic at all — so an unparsed row's counter climbs on
+ * reads that went through perfectly. zfrontier-cn carries 214 such rows at 17
+ * failures while answering every one of them 200 with an app shell. Reading
+ * that as silence would hedge the most actionable verdict on the site using
+ * evidence that is not there.
+ */
+export const READ_RESETS_LINK_FAILURES_PRICE_SOURCES = [
+  PRICE_SOURCE_SCRAPED,
+  PRICE_SOURCE_REFUSED,
+];
+
 /**
  * The `priceSource` marks whose repair is a change in THIS repository, never
  * another scrape — and which therefore buy no time on the fortnight.
@@ -685,4 +716,47 @@ export function describeDeadListings(listings, deadListings, deadestSince) {
   // HERE is the repair. So the clause is gone and the caller says what the rows
   // that are not dead actually are — see publishingFailureReason.
   return `${dead} of ${total} listing(s) are gone${since} (${how})`;
+}
+
+/**
+ * How a vendor's READ marks should be qualified when the store has since gone
+ * quiet. Returns null when they are still current, so the caller keeps its
+ * diagnosis unchanged.
+ *
+ * Only ever asked about a verdict derived from a mark in
+ * READ_RESETS_LINK_FAILURES_PRICE_SOURCES — see that list for why 'UNPARSED'
+ * may never be qualified this way.
+ *
+ * `priceSource` is never cleared, so every verdict computed from it is written
+ * in the present tense about a page that may have been read months ago. That
+ * is the same contaminated-column mistake #159 and #169 fixed from the other
+ * side, and it was still live in the two branches below it: probed from a
+ * runner on 2026-09-14, typoworks.tw answers 402 (a lapsed Shopify plan) and
+ * rectangles.store refuses the TLS handshake outright, while the publishing
+ * report called both "listing(s) linked, none priced — unpriced rows are
+ * hidden on released sets" and sent the owner to refresh-prices, the one pass
+ * that cannot reach a store which is not answering.
+ *
+ * Absent means NOT MEASURED, exactly as it does for `readListings`: a caller
+ * that does not select the counter keeps the unqualified sentence rather than
+ * being told its store is stale on evidence nobody gathered.
+ *
+ * Naming the probe is the safe direction, and that asymmetry is what makes the
+ * loose `max(linkFailures)` a vendor is measured by acceptable: it hides no
+ * listing and retires no row, it asks for one more look — and the counter
+ * clears itself on the next read that gets through, so a store that comes back
+ * drops the qualifier without anyone touching it.
+ */
+export function describeStaleReads(maxLinkFailures) {
+  if (maxLinkFailures == null) return null;
+  const failures = Number(maxLinkFailures);
+  if (!Number.isFinite(failures) || failures < DEAD_LINK_FAILURE_THRESHOLD) {
+    return null;
+  }
+  return (
+    `${failures} consecutive unreadable attempt(s) have been made since the ` +
+    `last row was read, so what follows describes a page nobody here has seen ` +
+    `since — probe a URL from a runner (the Vendor probe workflow, ` +
+    `scripts/vendor-link-probe.mjs) before acting on it`
+  );
 }

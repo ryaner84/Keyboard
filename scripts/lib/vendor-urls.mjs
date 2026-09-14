@@ -25,7 +25,7 @@
 // in both halves of it: `_NON_STOREFRONT_HOSTS` in scraper/scrape.py is the
 // Python copy and vendor-urls.test.mjs fails if the two disagree.
 
-import { describeDeadListings } from "./link-health.mjs";
+import { describeDeadListings, describeStaleReads } from "./link-health.mjs";
 
 export const NON_STOREFRONT_HOSTS = [
   // Link shorteners and file/doc hosts (a GB spreadsheet is not a shop)
@@ -920,12 +920,28 @@ function publishingFailureReason(vendor) {
   // `dead` proves there is a row a change HERE would reach.
   const refused = Number(vendor.refusedListings ?? 0);
   const unparsed = Number(vendor.unparsedListings ?? 0);
+  // `priceSource` is never cleared, so every verdict below is written in the
+  // present tense about a page that may have been read months ago — the same
+  // contaminated-column mistake #159 and #169 fixed from the other side.
+  // `linkFailures` is the column that dates it: it counts CONSECUTIVE
+  // unreadable attempts and `nextLinkHealth` resets it to 0 on exactly the
+  // reads that stamp 'SCRAPED' and 'REFUSED', so past the threshold the store
+  // has stopped answering since the mark was written. It may only qualify a
+  // verdict derived from one of those two marks — see
+  // READ_RESETS_LINK_FAILURES_PRICE_SOURCES for why 'UNPARSED' is excluded.
+  // Absent means NOT MEASURED, like `readListings`: the caller keeps the
+  // unqualified sentence rather than being told its store is stale on evidence
+  // nobody gathered.
+  const staleReads = describeStaleReads(vendor.maxLinkFailures);
+  const withStale = (reason) => (staleReads ? `${staleReads}; ${reason}` : reason);
   if (!(priced > 0) && refused > dead) {
     return withDead(
-      `${refused} of ${listings} listing(s) read and the price REFUSED by this ` +
-        `site — outside the plausible base-kit window (KIT_BOUNDS) or priced in a ` +
-        `currency the Currency table cannot convert; widen the window or add the ` +
-        `currency (refresh-prices cannot help)`
+      withStale(
+        `${refused} of ${listings} listing(s) read and the price REFUSED by this ` +
+          `site — outside the plausible base-kit window (KIT_BOUNDS) or priced in a ` +
+          `currency the Currency table cannot convert; widen the window or add the ` +
+          `currency (refresh-prices cannot help)`
+      )
     );
   }
   if (!(priced > 0) && unparsed > dead) {
@@ -1000,7 +1016,27 @@ function publishingFailureReason(vendor) {
     );
   }
   if (!(priced > 0)) {
-    return `${listings} listing(s) linked, none priced — unpriced rows are hidden on released sets`;
+    // Nothing above matched and the rows ARE marked read, so what they carry is
+    // 'SCRAPED' with no price: the pass reached the page and stored no base
+    // price. Two things leave that residue and both are repairs HERE — the page
+    // carried no identifiable BASE kit (an add-on/subkit product, or a link
+    // that is not a product page at all), or a deploy purge emptied the price
+    // without any fetch, which leaves `priceSource` SCRAPED and `linkFailures`
+    // at 0 and is how gmk-direct's warehouse sale went dark on every build.
+    // The old sentence named neither, so it read as a pricing backlog and sent
+    // the owner to refresh-prices, which reaches the same answer every time.
+    //
+    // Only claimed when `readListings` was actually measured: absent defaults
+    // to `listings` above, and asserting a read nobody counted is the confident
+    // wrong diagnosis this function exists to avoid.
+    const diagnosis =
+      vendor.readListings == null
+        ? `unpriced rows are hidden on released sets`
+        : `the page was reached and no base price was stored: no identifiable ` +
+          `BASE kit on it (an add-on/subkit product, or a link that is not a ` +
+          `product page), or a deploy purge emptied it. Unpriced rows are ` +
+          `hidden on released sets, and another scrape reaches the same answer`;
+    return withStale(`${listings} listing(s) linked, none priced — ${diagnosis}`);
   }
   return `${priced} of ${listings} listing(s) priced but none visible — non-BASE kit or catalog URL`;
 }
