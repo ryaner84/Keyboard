@@ -885,6 +885,20 @@ const _NON_PUBLISHING_SLUGS = new Set([
   "fancy-customs",
 ]);
 
+// The manufacturer's own SHOP, mirrored from MANUFACTURER_STOREFRONT_SLUGS in
+// src/lib/import/manufacturer-vendors.ts. It is NOT a catalog marker: GMK sells
+// its old sets from gmk.net under its own Vendor row, so every rule that
+// refuses a manufacturer HOST has to ask the slug first — which is exactly what
+// isUnpriceableManufacturerListing does, and what the two passes below did not.
+const _MANUFACTURER_STOREFRONT_SLUGS = ["gmk-direct"];
+
+// MANUFACTURER_VENDOR_SLUGS / MANUFACTURER_URL_HOSTS from the same file. Both
+// halves are named here because a bare "gmk" / "gmk.net" filter reads as
+// correct and silently lets the other source through — the failure the registry
+// exists to stop, repeated in SQL.
+const _MANUFACTURER_VENDOR_SLUGS = ["gmk", "dcs-wiki", "sxm-designs"];
+const _MANUFACTURER_URL_PATTERNS = ["%gmk.net%", "%dcs.wiki%", "%sxmdesigns.com%"];
+
 async function reportVendorsPublishingNothing(client) {
   let rows;
   try {
@@ -2006,8 +2020,24 @@ async function restorePurgedPricesFromVariants(client) {
          AND vk.variants IS NOT NULL
          -- GMK is the manufacturer, not a vendor: never restore a price onto
          -- its rows (purgeMispricedListings wipes them every deploy).
-         AND v.slug <> 'gmk'
-         AND COALESCE(vk."productUrl", '') NOT ILIKE '%gmk.net%'`
+         --
+         -- Except the manufacturer's own SHOP. This is the purge's matched
+         -- half, written the same way and wrong the same way: gmk-direct was
+         -- wiped by that pass and then barred from the one pass that could
+         -- undo it, so its 9 listings could only come back from a full nightly
+         -- scrape. The slug decides first here too.
+         AND (
+              v.slug = ANY($1::text[])
+              OR NOT (
+                   v.slug = ANY($2::text[])
+                   OR COALESCE(vk."productUrl", '') ILIKE ANY($3::text[])
+              )
+         )`,
+      [
+        _MANUFACTURER_STOREFRONT_SLUGS,
+        _MANUFACTURER_VENDOR_SLUGS,
+        _MANUFACTURER_URL_PATTERNS,
+      ]
     );
     let restored = 0;
     for (const row of rows) {
@@ -2789,6 +2819,11 @@ async function requeueGeoCurrencyPricesV2(client) {
 //     (e.g. a WorkSpace scraper running pre-removal code). priceUpdatedAt is
 //     set to now() — not NULL — so the rows don't jump to the head of the
 //     scrape queue on machines still running old code.
+//     …but NOT the manufacturer's own shop. This clause predates gmk-direct
+//     and judged the row by its URL host, which cannot tell whose row it is,
+//     so it wiped all 9 Warehouse Finds prices on every deploy — see the
+//     query. The slug is asked first now, and the catalog sources the bare
+//     "gmk.net" test never covered (dcs.wiki, sxmdesigns.com) are named.
 //  b) Child-kit sets ('-addon', alphas rounds) linked to the MAIN set's
 //     product page — DELETE the link (a price wipe just gets re-priced).
 //  c) Omnitype's GMK ASCII R1 clearance page linked to the ASCII R2 set.
@@ -2799,8 +2834,24 @@ async function purgeMispricedListings(client) {
        SET price = NULL, "priceUpdatedAt" = now()
        FROM public."Vendor" v
        WHERE vk."vendorId" = v.id
-         AND (v.slug = 'gmk' OR vk."productUrl" ILIKE '%gmk.net%')
-         AND vk.price IS NOT NULL`
+         AND vk.price IS NOT NULL
+         -- The SLUG decides before the host, exactly as
+         -- isUnpriceableManufacturerListing does. gmk-direct is GMK's own
+         -- Warehouse Finds shop: its listings genuinely live on gmk.net, and a
+         -- bare host test cannot tell whose row it is. Without this the one
+         -- real storefront on that host was wiped on EVERY deploy — all 9
+         -- rows, hidden outright because their sets are released, until the
+         -- next nightly run_gmk_direct put the prices back.
+         AND NOT (v.slug = ANY($1::text[]))
+         AND (v.slug = ANY($2::text[]) OR vk."productUrl" ILIKE ANY($3::text[]))
+         -- Every sibling purge in this file says so; this one never did, and
+         -- it is what makes naming the other catalog sources above safe.
+         AND COALESCE(vk."priceSource", '') <> 'MANUAL'`,
+      [
+        _MANUFACTURER_STOREFRONT_SLUGS,
+        _MANUFACTURER_VENDOR_SLUGS,
+        _MANUFACTURER_URL_PATTERNS,
+      ]
     );
     const mislinks = await client.query(
       `DELETE FROM public."VendorKit" vk

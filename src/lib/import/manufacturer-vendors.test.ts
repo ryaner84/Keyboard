@@ -243,4 +243,78 @@ assert.ok(
   "refreshOne must pass the row's vendor slug to fetchVendorPrice"
 );
 
+// ── db-setup's SQL copies of the registry ───────────────────────────────────
+//
+// The deploy purge is a price path too, and it was the last one still judging a
+// row by its URL host alone: `v.slug = 'gmk' OR productUrl ILIKE '%gmk.net%'`
+// wiped gmk-direct's 9 Warehouse Finds prices on EVERY deploy, and its matched
+// half (restorePurgedPricesFromVariants) then barred those same rows from the
+// one pass that could put them back. Their sets are all released, so an
+// unpriced row is hidden outright: the manufacturer's own shop published
+// nothing from every deploy until the next nightly run_gmk_direct. The
+// TypeScript call sites above are pinned against this exact mistake; SQL was
+// not, which is the only reason it survived.
+
+const dbSetup = read("scripts/db-setup.mjs");
+
+const sqlList = (name: string): string[] => {
+  const match = new RegExp(`const ${name} = \\[([^\\]]*)\\]`).exec(dbSetup);
+  assert.ok(match, `db-setup must declare ${name}`);
+  const out: string[] = [];
+  const item = /"([^"]+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = item.exec(match![1])) !== null) out.push(m[1]);
+  return out;
+};
+
+// Derived from the registry, never re-listed: a hardcoded copy here was a fifth
+// place the list was written and went stale the moment a third source landed.
+assert.deepEqual(
+  sqlList("_MANUFACTURER_STOREFRONT_SLUGS"),
+  [...MANUFACTURER_STOREFRONT_SLUGS],
+  "db-setup's storefront mirror must match MANUFACTURER_STOREFRONT_SLUGS"
+);
+assert.deepEqual(
+  sqlList("_MANUFACTURER_VENDOR_SLUGS"),
+  [...MANUFACTURER_VENDOR_SLUGS],
+  "db-setup's catalog-slug mirror must match MANUFACTURER_VENDOR_SLUGS"
+);
+assert.deepEqual(
+  sqlList("_MANUFACTURER_URL_PATTERNS"),
+  MANUFACTURER_URL_HOSTS.map((host) => `%${host}%`),
+  "db-setup's ILIKE patterns must cover every manufacturer host — a bare " +
+    "'%gmk.net%' silently lets dcs.wiki and sxmdesigns.com through"
+);
+
+// The bare filter itself, in either spelling. This is the string that shipped.
+assert.ok(
+  !/v\.slug = 'gmk' OR vk\."productUrl" ILIKE '%gmk\.net%'/.test(dbSetup),
+  "db-setup still hand-writes the bare manufacturer filter — it cannot tell " +
+    "gmk-direct's rows from the gmk catalog marker's"
+);
+assert.ok(
+  !/AND v\.slug <> 'gmk'/.test(dbSetup),
+  "the restore half still hand-writes the bare slug test"
+);
+
+// Both halves must consult the storefront list, and the purge must spare
+// MANUAL prices — without that guard, naming the other catalog sources would
+// widen the wipe onto hand-entered numbers.
+for (const fn of ["purgeMispricedListings", "restorePurgedPricesFromVariants"]) {
+  const start = dbSetup.indexOf(`async function ${fn}(`);
+  assert.ok(start > -1, `db-setup must still define ${fn}`);
+  const body = dbSetup.slice(start, start + 2000);
+  assert.ok(
+    body.includes("_MANUFACTURER_STOREFRONT_SLUGS"),
+    `${fn} must exempt the manufacturer's own storefront`
+  );
+}
+const purgeStart = dbSetup.indexOf("async function purgeMispricedListings(");
+assert.ok(
+  /COALESCE\(vk\."priceSource", ''\) <> 'MANUAL'/.test(
+    dbSetup.slice(purgeStart, purgeStart + 2000)
+  ),
+  "the deploy purge must never wipe a MANUAL price"
+);
+
 console.log("manufacturer-vendors: all assertions passed");
