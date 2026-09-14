@@ -380,6 +380,44 @@ both the client-reported log and the resolution audit in the same run.
 > feed sweep (run 34739546170, 05:08) that preceded this dispatch — which
 > post-dates every submission, confirming nothing reverted.
 
+> **2026-09-14 run.** Price feed run 34859877107 (`?all=1`) returns **41
+> submissions, all resolved, 0 pending** — a 1:1 match with the client-reported
+> log, so **no new price report** has filed since the 2026-08-27 run (most recent
+> submission still **gmk-vamp × Switchmod**, 2026-08-26T17:39;
+> `resolvedAt=2026-09-14T05:15:46.122Z`). The **Self-heal watch was empty**, so
+> no price item needed re-verification and none failed. BRG R3 now reads
+> `139 SGD SCRAPED` (as of 2026-09-13); gmk-bent-r2 `150 USD` and gmk-arctic
+> `145 USD` still show their corrected base-kit prices.
+>
+> **This run also worked the visitor inbox** (feed run 34859880766) for the
+> first full triage since the 2026-09-13 commit that added the inbox step —
+> **31 unresolved `LISTING_FLAG`s + 1 FEEDBACK**. A read-only catalog inspector
+> (`scripts/listing-flags-inspect.mjs`, new this run, dispatched as **Listing
+> flags inspect** run 34860750705) gave ground truth on every flagged slug.
+> **16 flags were confirmed resolved and cleared** (via the new **Resolve
+> listing flags** workflow, run 34861241779):
+> - **`obl-test-product-do-not-buy` ×8** — the `purgeTestProductListings` fix
+>   (#d962ac3, 2026-09-13) actually removed the row; the inspector confirms **NO
+>   GroupBuy row** with that slug. The most-reported item on the site, now gone.
+> - **`gmk-cyl-masterpiece-r2-keycaps`, `gmk-cyl-windbreaker-keycaps`,
+>   `gmk-cyl-hi-viz-r2-keycaps` (the CYL orphans) ×3** — **NO ROW**;
+>   `mergeDuplicateKeycapSets` folded each into its `gmk-*` twin. Their survivors
+>   (`gmk-masterpiece-r2`, `gmk-windbreaker`, `gmk-hi-viz-r2`) each show **no twin
+>   shares their identity** — dedup complete, so their three `duplicate` flags
+>   were cleared too.
+> - **`gmk-cyl-kitsune-keycaps` (wrong_price) ×1** — **NO ROW** (orphan merged /
+>   numpad-drop cleared, per the resolution audit). 
+> - **`gh-110579` (inactive) ×1** — **NO ROW** (already removed).
+>
+> **15 flags remain open and are reported to the owner** (see §4) — all
+> genuinely ambiguous or architecturally significant: two DELETE-level merge
+> judgements the auto-merge deliberately won't make, empty duplicate keyboard
+> rows (keyboards carry no auto-dedup by design), and stale / miscategorised
+> geekhack GB rows. `kt-dyad-tkl`'s `wrong_vendor` cause is already fixed in code
+> (#079b45f, Ktechs → SGD/SG) but its stored row still reads US pending a
+> keyboard re-import, so it is held rather than cleared. The FEEDBACK item
+> (collection display, 2026-06-24) is left for the owner.
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _None — 0 pending reports in the feed; every logged report is resolved._
@@ -454,6 +492,47 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-06-12 | gmk-monochrome-dolch | Neo Macro | 15,500 INR | "wrong price, how can a keycap cost 20k" | needs fix | ✅ resolved |
 | 2026-06-12 | gmk-monochrome-r2 | STACKS | 13,999 INR | "wrong — confused with currency ₹13,999 (Inc. GST)" | needs fix | ✅ resolved |
 | 2026-06-12 | gmk-dragon-witch | Fancy Customs | null (was ~175k) | "showing 175k which is impossible" | needs fix | ✅ resolved |
+
+## 4. Listing-flag triage (visitor inbox — `ListingReport`)
+
+The "report a listing" flag posts to `ListingReport`, a separate channel from
+the wrong-price flag. It has **no derivable auto-resolution**, so each flag is
+triaged against the read-only inspector's catalog state and cleared by id when
+dealt with (`scripts/resolve-listing-flags.mjs`). First full triage: 2026-09-14.
+
+### 4a. Resolved this run (16 flags, cleared 2026-09-14)
+
+| slug | issue | flagged | inspector state | resolution |
+|---|---|---|---|---|
+| obl-test-product-do-not-buy | other/inactive ×8 | 2026-06-23 … 2026-09-13 | NO ROW | `purgeTestProductListings` (#d962ac3) removed it; confirmed gone |
+| gmk-cyl-masterpiece-r2-keycaps | duplicate | 2026-07-21 | NO ROW | CYL orphan folded into `gmk-masterpiece-r2` by `mergeDuplicateKeycapSets` |
+| gmk-masterpiece-r2 | duplicate | 2026-07-21 | exists, no twin | dedup complete — no duplicate remains |
+| gmk-cyl-windbreaker-keycaps | duplicate | 2026-07-21 | NO ROW | CYL orphan folded into `gmk-windbreaker` |
+| gmk-windbreaker | duplicate | 2026-07-21 | exists, no twin | dedup complete |
+| gmk-cyl-hi-viz-r2-keycaps | duplicate | 2026-07-21 | NO ROW | CYL orphan folded into `gmk-hi-viz-r2` |
+| gmk-hi-viz-r2 | duplicate | 2026-07-21 | exists, no twin | dedup complete |
+| gmk-cyl-kitsune-keycaps | wrong_price | 2026-07-06 | NO ROW | orphan merged / numpad-drop cleared (see resolution audit) |
+| gh-110579 | inactive | 2026-06-16 | NO ROW | row already removed |
+
+### 4b. Open — reported to owner (15 flags, awaiting decision)
+
+These are genuinely ambiguous or architecturally significant; the review
+session does not merge/delete catalog rows or demote GB status on its own.
+
+| slug(s) | issue | flagged | inspector state | why open / recommendation |
+|---|---|---|---|---|
+| gmk-ramune-tkl + gmk-cyl-ramune | duplicate ×2 | 2026-07-21 | both live keycap rows; identities `gmk::ramune tkl` vs `gmk::ramune` (auto-merge won't fold — "TKL" differs); designers read Hatoworks / blank (GMK Ramune is biip's) | DELETE-level judgement: is "GMK Ramune TKL" a distinct product or a mis-named/mis-slugged duplicate? If duplicate, needs a manual merge the auto-pass deliberately refuses |
+| kbd-rf-8x + kt-rf-8x | duplicate ×4 | 2026-06-27 … 2026-07-21 | both KEYBOARD "RF-8X"; KBDfans row 1 priced link, Ktechs row 0 links | one keyboard, two vendor rows; keyboards carry no auto-dedup (editions kept separate by design) — owner decide merge / drop the empty Ktechs row |
+| kt-vs06 | inactive + duplicate ×2 | 2026-06-28 … 2026-08-26 | KEYBOARD, ACTIVE_GB, 0 links, no twin found | empty stale Ktechs keyboard row; twin (if any) already gone — owner decide retire/remove |
+| kt-dyad-tkl | wrong_vendor | 2026-07-21 | KEYBOARD, region=US, 0 links | cause fixed in code (#079b45f: Ktechs → SGD/SG); stored row still US pending a keyboard re-import — verify re-import corrects it, then clear |
+| gh-125085 | other + inactive ×2 | 2026-06-16 … 2026-07-18 | "[GB] DIVERSITY" KEYBOARD, ACTIVE_GB, 0 links, GB long over | stale GB status never demoted — owner decide mark ENDED/DEAD or remove |
+| gh-125620 | inactive | 2026-06-16 | "[GB] KAT Retrobytes — Live till Oct 5th 2025" KEYCAPS, ACTIVE_GB, 0 links | GB window past; stale ACTIVE_GB — demote/remove |
+| gh-113443 | inactive | 2026-06-16 | "[GB] KAT Great Wave" KEYCAPS, ACTIVE_GB, 1 priced link | GB likely over but still ACTIVE_GB — verify against source, demote if ended |
+| gh-121033 | wrong_category | 2026-06-23 | "[GB] MKC75 … In-Stock Sale" KEYBOARD, IN_STOCK, 0 links, designer="Limited In-Stock Sale" (garbage parse) | in-stock keyboard sale mis-imported as a GB; designer field is junk — owner decide category/remove |
+| gh-113651 | wrong_category | 2026-06-23 | "[GB]MOBULA80 in-stock buy … TKL" KEYBOARD, IN_STOCK, 0 links | same shape as gh-121033 — in-stock keyboard sale, not a GB |
+
+**FEEDBACK (not a listing flag):** 2026-06-24, collection display ("the person
+uploaded 2 builds but the mai…") — left for the owner.
 
 ## Resolution audit (full detail — audit trail, not rendered per run)
 
