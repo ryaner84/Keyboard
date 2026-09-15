@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Eighteen suites, all of which should pass before pushing:
+Nineteen suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -46,6 +46,7 @@ npm run test:set-merge
 npm run test:link-health
 npm run test:catalog-stock
 npm run test:kit-bounds
+npm run test:currencies
 npm run test:host-throttle
 npm run test:tls-chain
 npm run test:manufacturer-vendors
@@ -874,6 +875,47 @@ outlives every non-answer and yields only to a real price or a `DEAD_LINK`.
 The probe reports `SHOP CCY` for the same reason: a price is only ever refused
 or accepted RELATIVE to a currency, so "READABLE" beside an unpriced row is not
 a diagnosis until you know which window the number was measured against.
+
+**And the window's companion — WHICH currencies the site can price in at all —
+was written five times, so one was missing from every copy.** A price is only
+storable in a currency the `Currency` table can convert: `convertCurrency`
+falls back to a rate of 1 for a code with no row, so both price passes refuse
+one outright (`PRICE_REFUSED`), and an unpriced row is hidden on a RELEASED
+set. That list lived as a hand-written literal in `prices.ts`, a mirror in
+`scrape.py`, a hand-written INSERT in `ensureCurrencies` (the very table the
+literal claims to describe), a fourth copy in `prisma/seed.ts` — already three
+codes behind — and, since a window is only ever a window ON a currency, a fifth
+in `kit-bounds.mjs`. **IDR was in none of them.** Probed from a runner on
+2026-09-15, mechaland.id answers 200 with full Shopify product JSON, a JSON-LD
+`Product`/`Offer`, a base variant titled "Base" that the picker names on the
+first try, and `/meta.json` saying IDR (GMK Black Snail base Rp 1,390,000 ≈ USD
+84; GMK Nerve Rp 2,440,000 ≈ USD 148). Both of its readable listings were
+refused on every six-hourly run — its third is a real dead link — so the vendor
+published NOTHING, by our rule rather than anything the store did, and the
+audit's one honest sentence about it ("widen the window or add the currency")
+named a change HERE that no scrape could substitute for.
+`scripts/lib/currencies.mjs` is now the registry: `prices.ts` imports it,
+`db-setup` GENERATES the Currency insert from it, `scrape.py` mirrors it, and
+`test:currencies` fails if any half drifts, if a registered code has no
+plausibility window or no Shopify home market, or if a VENDOR registry
+(`vendors.json`, `vendor-overrides.ts`, `KEYBOARD_VENDORS`, db-setup's own
+`backfillShipping` corrections) names a currency the price pass would refuse —
+which is the same store-publishes-nothing failure arriving through the vendor
+row instead of the page. Registering one is four facts, not one: a name and
+symbol for the seeded row, a **home market** (Shopify localizes by geo, and a
+code with no pin is asked as if from the US and answers in USD, which is then
+stored under the shop's own code — INR, ARS and CLP had all been on the
+allowlist without one since #162), and a `KIT_BOUNDS` window, because an absent
+window is unbounded above and at 16,500:1 that is no backstop at all. The bar
+for adding one is low on purpose, exactly as the kit ceiling's is: a registered
+currency no store uses costs one unread row, a missing one publishes nothing
+for ever. The refusal now also NAMES the code in the run log (once per code per
+run) — `priceSource` is `REFUSED` either way, so nothing in the database could
+ever say which currency was turned away, which is why the audit had to offer
+two causes and no repair. Mechaland itself needed the vendor row fixed too:
+KeycapLendar filed an Indonesian store as US/USD, and the row's own currency is
+what BOTH passes fall back to when `/meta.json` is unreachable — so the number
+that publishes would have been a rupiah price labelled in dollars.
 
 **And one class of set could not be priced at all, because every guard that
 protects a set from its own subkits also fires ON a set that IS one.** The

@@ -30,6 +30,10 @@ import {
 } from "../../../scripts/lib/link-health.mjs";
 import { isPlausibleBaseKitPrice as isPlausibleBaseKitPriceImpl } from "../../../scripts/lib/kit-bounds.mjs";
 import {
+  SUPPORTED_CURRENCY_CODES,
+  currencyHomeCountry,
+} from "../../../scripts/lib/currencies.mjs";
+import {
   clearChainRepairs,
   isIncompleteChainError,
   repairedChainHosts,
@@ -275,11 +279,16 @@ async function fetchWithTimeout(url: string, extraHeaders?: Record<string, strin
 }
 
 // Home country per currency, for pinning Shopify's localization context.
-const CURRENCY_HOME_COUNTRY: Record<string, string> = {
-  USD: "US", SGD: "SG", EUR: "DE", GBP: "GB", CAD: "CA", AUD: "AU",
-  JPY: "JP", KRW: "KR", CNY: "CN", HKD: "HK", THB: "TH", TWD: "TW",
-  MYR: "MY", NZD: "NZ", SEK: "SE", NOK: "NO", DKK: "DK", CHF: "CH", PLN: "PL",
-};
+//
+// Derived from scripts/lib/currencies.mjs, not restated here. The hand-written
+// map this replaces was missing INR, ARS and CLP — the three codes #162 added
+// to the allowlist below — so every Indian, Argentine and Chilean store was
+// asked as if from the US, answered in USD, and had that number stored under
+// its own currency code.
+//
+// The wrapper exists to type the answer: currencies.mjs is plain JS, so the
+// imported function is untyped, and the cookie must be built from a string.
+const currencyHomeMarket = (currency: string): string => currencyHomeCountry(currency);
 
 // Variant titles that are clearly NOT the keycap kit itself — GB listings
 // often bundle add-ons (deskmats, samples, deposits...) as cheap variants.
@@ -298,11 +307,33 @@ const CURRENCY_HOME_COUNTRY: Record<string, string> = {
 // Currencies the site can actually convert (the Currency table). A price in
 // any other currency renders as garbage (missing rate falls back to 1, so
 // 82,857 ARS displayed as $82,857) — refuse to store those at all.
-const SUPPORTED_CURRENCIES = new Set([
-  "USD", "SGD", "EUR", "GBP", "CAD", "AUD", "JPY", "CNY", "KRW", "MYR",
-  "THB", "NZD", "HKD", "TWD", "SEK", "NOK", "DKK", "CHF", "PLN",
-  "INR", "ARS", "CLP",
-]);
+//
+// Derived from scripts/lib/currencies.mjs, which is also what db-setup's
+// `ensureCurrencies` seeds the Currency table from — so the allowlist and the
+// table it claims to describe can no longer disagree. It used to be a
+// hand-written literal beside a hand-written insert, and IDR was missing from
+// both: mechaland.id answers a runner perfectly, quotes IDR, and had every
+// readable listing refused on every run.
+const SUPPORTED_CURRENCIES = new Set<string>(SUPPORTED_CURRENCY_CODES);
+
+// A refusal on the currency is the one PRICE_REFUSED whose repair is a single
+// line in scripts/lib/currencies.mjs, and nothing in the database records
+// WHICH code was turned away — `priceSource` says 'REFUSED' either way, so the
+// publishing audit can only offer "widen the window or add the currency". Say
+// it out loud in the run log instead, once per code per process — a
+// 200-listing store would otherwise print it 200 times, and on the Vercel cron
+// "per process" outlives a single run, which is if anything quieter.
+const unregisteredCurrenciesSeen = new Set<string>();
+function noteUnregisteredCurrency(currency: string, url: string): void {
+  if (unregisteredCurrenciesSeen.has(currency)) return;
+  unregisteredCurrenciesSeen.add(currency);
+  console.warn(
+    `[prices] REFUSED: ${currency} is not a currency this site can convert — ` +
+      `register it in scripts/lib/currencies.mjs (and give it a window in ` +
+      `kit-bounds.mjs) or every listing priced in it stays unpriced, which ` +
+      `hides it on a released set. First seen at ${url}`
+  );
+}
 
 // Re-exported so price-audit.ts and the rest of this module keep one import
 // site for the rule. The implementation is kit-bounds.mjs's.
@@ -407,7 +438,7 @@ async function fetchShopifyPrice(
     let currency = await fetchShopifyCurrency(clean);
 
     let cookie = currency
-      ? `cart_currency=${currency}; localization=${CURRENCY_HOME_COUNTRY[currency] ?? "US"}`
+      ? `cart_currency=${currency}; localization=${currencyHomeMarket(currency)}`
       : undefined;
 
     let res = await fetchWithTimeout(
@@ -436,7 +467,7 @@ async function fetchShopifyPrice(
           clean = canonical;
           currency = await fetchShopifyCurrency(clean);
           cookie = currency
-            ? `cart_currency=${currency}; localization=${CURRENCY_HOME_COUNTRY[currency] ?? "US"}`
+            ? `cart_currency=${currency}; localization=${currencyHomeMarket(currency)}`
             : undefined;
           res = await fetchWithTimeout(
             `${clean}.json`,
@@ -659,6 +690,7 @@ async function fetchShopifyPrice(
     // four times a day.
     const effectiveCurrency = currency ?? vendorCurrency ?? null;
     if (effectiveCurrency && !SUPPORTED_CURRENCIES.has(effectiveCurrency)) {
+      noteUnregisteredCurrency(effectiveCurrency, productUrl);
       return PRICE_REFUSED;
     }
     if (!isPlausibleBaseKitPrice(chosen.price, effectiveCurrency)) {
@@ -860,7 +892,10 @@ async function fetchJsonLdPrice(
       const currency = vendorCurrency ?? null;
       // Refuse currencies the site can't convert (renders as garbage) — a
       // refusal of a page that was read, so PRICE_REFUSED, not null.
-      if (currency && !SUPPORTED_CURRENCIES.has(currency)) return PRICE_REFUSED;
+      if (currency && !SUPPORTED_CURRENCIES.has(currency)) {
+        noteUnregisteredCurrency(currency, productUrl);
+        return PRICE_REFUSED;
+      }
       // Same canonical pick as the Shopify path and the audit; an
       // accessory-only variation list yields null → NO_BASE_KIT below.
       const chosen = pickBaseVariant(wooVariants, { allowSubkits });
@@ -1030,6 +1065,7 @@ async function fetchJsonLdPrice(
         // Refuse currencies the site can't convert (e.g. geo-localized INR
         // from an Indian WooCommerce store before INR was supported).
         if (currency && !SUPPORTED_CURRENCIES.has(currency)) {
+          noteUnregisteredCurrency(currency, productUrl);
           sawRefusedPrice = true;
           continue;
         }
@@ -1077,7 +1113,10 @@ async function fetchJsonLdPrice(
       sawProductMarkup = true;
       const price = Number(amount[1].replace(/,/g, ""));
       const currency = cur ? cur[1] : null;
-      if (currency && !SUPPORTED_CURRENCIES.has(currency)) return PRICE_REFUSED;
+      if (currency && !SUPPORTED_CURRENCIES.has(currency)) {
+        noteUnregisteredCurrency(currency, productUrl);
+        return PRICE_REFUSED;
+      }
       if (!isNaN(price) && price > 0 && isPlausibleBaseKitPrice(price, currency)) {
         const inStock =
           !availability ||

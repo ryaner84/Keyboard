@@ -26,6 +26,7 @@ import {
 } from "./lib/vendor-urls.mjs";
 import { planSetMerges } from "./lib/set-merge.mjs";
 import { KIT_BOUNDS, kitBoundsPurgeSql } from "./lib/kit-bounds.mjs";
+import { currenciesSeedSql } from "./lib/currencies.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SQL_PATH = join(__dirname, "..", "supabase-setup.sql");
@@ -1355,7 +1356,21 @@ async function backfillShipping(client) {
        ('latamkeys',           'OTHER','AR', 'ARS'),
        ('yushakobo',           'ASIA', 'JP', 'JPY'),
        ('mecha',               'ASIA', 'MY', 'MYR'),
-       ('mecha-my',            'ASIA', 'MY', 'MYR')
+       ('mecha-my',            'ASIA', 'MY', 'MYR'),
+       -- mechaland.id is an Indonesian store KeycapLendar filed as US/USD, and
+       -- its /meta.json says IDR (probed from a runner on 2026-09-15). The
+       -- currency is the half that matters: `currency = currency or
+       -- vendor_currency` is the fallback in BOTH price passes, so whenever the
+       -- shop's /meta.json is unreachable the row's own code is what a rupiah
+       -- number gets stored under — and USD would make a Rp 1,390,000 base kit
+       -- read as $1.39 million.
+       --
+       -- One slug only, and deliberately no near-miss alias beside it:
+       -- `mechland` / `mech-land` is Mech.land, a CANADIAN store on mech.land
+       -- that the roster already pins to CA/CAD, and `mecha-my` above is
+       -- Malaysian. Three shops whose slugs differ by two letters, on three
+       -- continents.
+       ('mechaland',           'ASIA', 'ID', 'IDR')
      ) AS c(slug, region, country, currency)
      WHERE v.slug = c.slug AND (v.region::text <> c.region OR v.currency <> c.currency)
      RETURNING v.id`
@@ -2293,33 +2308,20 @@ async function ensureDataTrustLayer(client) {
 // displaying e.g. a ฿4,000 Thai price as if it were $4,000 (~32x inflation).
 // Static rates are placeholders at the right magnitude; lastUpdated is epoch 0
 // so the next exchange-rate refresh overwrites them immediately.
+//
+// GENERATED from scripts/lib/currencies.mjs, the same table prices.ts derives
+// SUPPORTED_CURRENCIES from — because this insert IS what that allowlist
+// claims to describe, and for as long as the two were written out separately
+// they could disagree. They did: IDR was in neither, so mechaland.id — a live
+// store that answers 200 with clean Shopify JSON and quotes rupiah — had every
+// readable listing answered PRICE_REFUSED on every run, and an unpriced row is
+// hidden outright on a RELEASED set.
 async function ensureCurrencies(client) {
   try {
     const { rowCount } = await client.query(
       `INSERT INTO public."Currency" (code, name, symbol, "exchangeRateToUSD", "lastUpdated")
        VALUES
-         ('USD', 'US Dollar',          '$',   1.0,   to_timestamp(0)),
-         ('SGD', 'Singapore Dollar',   'S$',  1.35,  to_timestamp(0)),
-         ('EUR', 'Euro',               '€',   0.92,  to_timestamp(0)),
-         ('GBP', 'British Pound',      '£',   0.79,  to_timestamp(0)),
-         ('CAD', 'Canadian Dollar',    'CA$', 1.37,  to_timestamp(0)),
-         ('AUD', 'Australian Dollar',  'A$',  1.54,  to_timestamp(0)),
-         ('JPY', 'Japanese Yen',       '¥',   150.5, to_timestamp(0)),
-         ('CNY', 'Chinese Yuan',       '¥',   7.24,  to_timestamp(0)),
-         ('KRW', 'South Korean Won',   '₩',   1340,  to_timestamp(0)),
-         ('MYR', 'Malaysian Ringgit',  'RM',  4.71,  to_timestamp(0)),
-         ('THB', 'Thai Baht',          '฿',   35.8,  to_timestamp(0)),
-         ('NZD', 'New Zealand Dollar', 'NZ$', 1.64,  to_timestamp(0)),
-         ('HKD', 'Hong Kong Dollar',   'HK$', 7.82,  to_timestamp(0)),
-         ('TWD', 'New Taiwan Dollar',  'NT$', 32.1,  to_timestamp(0)),
-         ('SEK', 'Swedish Krona',      'kr',  10.5,  to_timestamp(0)),
-         ('NOK', 'Norwegian Krone',    'kr',  10.8,  to_timestamp(0)),
-         ('DKK', 'Danish Krone',       'kr',  6.89,  to_timestamp(0)),
-         ('CHF', 'Swiss Franc',        'CHF', 0.89,  to_timestamp(0)),
-         ('PLN', 'Polish Zloty',       'zł',  4.02,  to_timestamp(0)),
-         ('INR', 'Indian Rupee',       '₹',   84.0,  to_timestamp(0)),
-         ('ARS', 'Argentine Peso',     'AR$', 1200,  to_timestamp(0)),
-         ('CLP', 'Chilean Peso',       'CL$', 960,   to_timestamp(0))
+         ${currenciesSeedSql()}
        ON CONFLICT (code) DO NOTHING`
     );
     if (rowCount > 0) {
