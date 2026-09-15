@@ -11,6 +11,12 @@ import shippingZonesData from "../src/data/seed/shipping-zones.json";
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
+// Mirrors scripts/lib/currencies.mjs — the registry db-setup's ensureCurrencies
+// generates its insert from and prices.ts derives SUPPORTED_CURRENCIES from.
+// This file is run by ts-node in CommonJS mode and cannot require that ES
+// module, so test:currencies pins the two lists instead. It had already
+// drifted three codes behind (INR, ARS, CLP), which on a locally seeded
+// database means those stores' prices convert at a rate of 1.
 const CURRENCIES = [
   { code: "USD", name: "US Dollar", symbol: "$", exchangeRateToUSD: 1.0 },
   { code: "SGD", name: "Singapore Dollar", symbol: "S$", exchangeRateToUSD: 1.35 },
@@ -31,6 +37,10 @@ const CURRENCIES = [
   { code: "DKK", name: "Danish Krone", symbol: "kr", exchangeRateToUSD: 6.89 },
   { code: "CHF", name: "Swiss Franc", symbol: "CHF", exchangeRateToUSD: 0.89 },
   { code: "PLN", name: "Polish Zloty", symbol: "zł", exchangeRateToUSD: 4.02 },
+  { code: "INR", name: "Indian Rupee", symbol: "₹", exchangeRateToUSD: 84.0 },
+  { code: "ARS", name: "Argentine Peso", symbol: "AR$", exchangeRateToUSD: 1200 },
+  { code: "CLP", name: "Chilean Peso", symbol: "CL$", exchangeRateToUSD: 960 },
+  { code: "IDR", name: "Indonesian Rupiah", symbol: "Rp", exchangeRateToUSD: 16500 },
 ];
 
 async function main() {

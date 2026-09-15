@@ -593,15 +593,36 @@ _KIT_BOUNDS = {
     "ARS": (0, 715_000),
     # Malaysian Ringgit — 1 USD ≈ 4.71 MYR as of 2025.
     "MYR": (0, 1960),
+    # The Nordic/alpine/Polish stores' currencies: on the allowlist with no
+    # window at all, i.e. unbounded above. Each ceiling is USD 400 at the
+    # placeholder rate in scripts/lib/currencies.mjs, rounded UP — too low
+    # publishes nothing, too high shows a number the price feed catches.
+    "SEK": (0, 4200),
+    "NOK": (0, 4350),
+    "DKK": (0, 2800),
+    "CHF": (0, 360),
+    "PLN": (0, 1620),
+    "NZD": (0, 660),
+    # Indonesian Rupiah — used by Mechaland (ID). 1 USD ≈ 16,500 IDR. A window
+    # matters most on a currency this large: absent an entry the price is
+    # unbounded above, and at 16,500:1 that is no backstop at all.
+    "IDR": (0, 6_600_000),
 }
 
 # Currencies the site's Currency table can convert (db-setup ensureCurrencies).
 # Prices in anything else render as garbage (missing rate treated as 1, so
 # 82,857 ARS displayed as $82,857 before ARS was supported) — never store them.
+#
+# MIRRORS scripts/lib/currencies.mjs, which prices.ts imports and db-setup
+# generates the Currency table from; Python cannot import a JS module, so
+# test:currencies fails if this set drifts from it. IDR was the code
+# missing from every copy at once: mechaland.id answers a runner perfectly and
+# quotes rupiah, so both of its readable listings were refused on every run and
+# the store published nothing at all.
 _SUPPORTED_CURRENCIES = {
     "USD", "SGD", "EUR", "GBP", "CAD", "AUD", "JPY", "CNY", "KRW", "MYR",
     "THB", "NZD", "HKD", "TWD", "SEK", "NOK", "DKK", "CHF", "PLN",
-    "INR", "ARS", "CLP",
+    "INR", "ARS", "CLP", "IDR",
 }
 
 
@@ -1142,11 +1163,16 @@ def choose_kit_variant(
 # Home country per currency — pins Shopify Markets' geo-localization to the
 # store's own market so variant prices come back in the store's base currency,
 # not converted to wherever this machine's IP geolocates (mirrors prices.ts).
+# Mirrors the homeCountry column of scripts/lib/currencies.mjs. A code with no
+# entry here is asked as if from the US and answers in USD, which is then
+# stored under the shop's own currency code — so every registered currency must
+# appear, and test:currencies fails if one is missing.
 _CURRENCY_HOME_COUNTRY = {
     "USD": "US", "SGD": "SG", "EUR": "DE", "GBP": "GB", "CAD": "CA",
     "AUD": "AU", "JPY": "JP", "KRW": "KR", "CNY": "CN", "HKD": "HK",
     "THB": "TH", "TWD": "TW", "MYR": "MY", "NZD": "NZ", "SEK": "SE",
-    "NOK": "NO", "DKK": "DK", "CHF": "CH", "PLN": "PL",
+    "NOK": "NO", "DKK": "DK", "CHF": "CH", "PLN": "PL", "INR": "IN",
+    "ARS": "AR", "CLP": "CL", "IDR": "ID",
 }
 
 

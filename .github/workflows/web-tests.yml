@@ -116,6 +116,15 @@ jobs:
         if: always()
         run: npm run test:kit-bounds
 
+      # Reads prices.ts, scrape.py, db-setup.mjs and prisma/seed.ts: the list of
+      # currencies the site can price in was written in all five of them, and a
+      # code missing from it is not a degraded price but NO price — refused,
+      # unpriced, and hidden outright on a released set. IDR was missing from
+      # every copy, so mechaland.id published nothing at all.
+      - name: currencies
+        if: always()
+        run: npm run test:currencies
+
       # Reads scrape.py and prices.ts: the per-host request spacing is written
       # twice, and for a long time only the nightly had it. An unthrottled,
       # host-clustered queue invites the 429 that reads as UNREADABLE — which

@@ -96,6 +96,22 @@ export const KIT_BOUNDS = Object.freeze({
   ARS: Object.freeze({ min: 0, max: 715000 }),
   // Malaysian Ringgit — 1 USD ≈ 4.71 MYR.
   MYR: Object.freeze({ min: 0, max: 1960 }),
+  // The Nordic/alpine/Polish stores' currencies. These had no entry at all
+  // while being on the allowlist, which meant unbounded above: the backstop
+  // did not exist for them. Each ceiling is USD 400 at the placeholder rate in
+  // currencies.mjs, rounded UP — the two errors are not symmetrical, and a
+  // ceiling set a little high shows a number the wrong-price feed catches
+  // while one set a little low publishes nothing at all.
+  SEK: Object.freeze({ min: 0, max: 4200 }),
+  NOK: Object.freeze({ min: 0, max: 4350 }),
+  DKK: Object.freeze({ min: 0, max: 2800 }),
+  CHF: Object.freeze({ min: 0, max: 360 }),
+  PLN: Object.freeze({ min: 0, max: 1620 }),
+  NZD: Object.freeze({ min: 0, max: 660 }),
+  // Indonesian Rupiah — used by Mechaland (ID). 1 USD ≈ 16,500 IDR. A window
+  // matters most on a currency this large: absent an entry the price is
+  // unbounded above, and at 16,500:1 that is no backstop at all.
+  IDR: Object.freeze({ min: 0, max: 6_600_000 }),
 });
 
 /**
