@@ -418,9 +418,65 @@ both the client-reported log and the resolution audit in the same run.
 > keyboard re-import, so it is held rather than cleared. The FEEDBACK item
 > (collection display, 2026-06-24) is left for the owner.
 
+> **2026-09-15 run.** Price feed run 34986060403 (`?all=1`) returns **41
+> submissions, all resolved, 0 pending** — a 1:1 match with the client-reported
+> log, so **no new price report** has filed (most recent submission still
+> **gmk-vamp × Switchmod**, 2026-08-26T17:39; `resolvedAt=2026-09-15T05:07:23.459Z`).
+> The visitor inbox (feed run 34986063552) holds **15 `LISTING_FLAG`s + 1
+> FEEDBACK — the SAME items already triaged and reported to the owner on
+> 2026-09-14** (§4b); no new flags, nothing auto-resolvable, so the open set is
+> unchanged. STORE_LINK / PRICE_REPORT / PHOTO_REPORT channels are all empty.
+> The incoming **Self-heal watch was empty**, so no watched item needed
+> re-verification.
+>
+> **One reversion surfaced and is reclassified `needs fix` (held for owner).**
+> **gmk-bent-r2 × zFrontier** read `150 USD` in every feed from 2026-09-08
+> through the 2026-09-14 run (run 34859877107 confirms `current=150 USD`); this
+> run it reads **`56 USD` — the exact sub-kit value the 2026-07-20 reporter
+> flagged** ("this price is not the price of the revival base kit; revival base
+> kit has no stock"). A value that reverts across a scrape is the *never-heals*
+> case (routine step 2), not a heal.
+>
+> Root cause traced (Vendor probe run 34986483070, `en.zfrontier.com` — an
+> ordinary USD Shopify store, NOT the unreadable `www.zfrontier.com` SPA): the
+> `[In Stock] GMK Bentō R2` listing has 10 variants, **none titled "base"** —
+> `Traditional` 150 (available=**false**), `Revival` 150 (**false**), `Latin`
+> 90, `Sakana` 73, `RAMA-Kanji` 73 (**true**), `Salmon` **56** (**true**),
+> `Seafood` 56, `Chopsticks` 37, … The two real base colourways (150) are now
+> **out of stock**; only cheaper alternate kits are in stock. Both variant
+> pickers (`choose_kit_variant` in `scrape.py`, `pickBaseVariant` in
+> `kit-variants.ts`) correctly return the **dearest base candidate = 150**
+> regardless of stock — so the nightly scrape and every runner-IP price pass
+> store 150. **The 56 comes from the JSON-LD/OpenGraph fallback**
+> (`fetchJsonLdPrice`): when the Shopify `product.json` fetch is blocked or
+> transient, the caller falls through to it, and this page's JSON-LD collapses
+> to a single `ProductGroup` + representative `Offer` = **56** (`OG PRICE |
+> 56.00 USD`, the cheapest in-stock variant). With no base-named sibling offer,
+> the "ambiguous aggregate" guard does not fire, so 56 is stored — **bypassing
+> the base-kit picker.**
+>
+> **Held for owner decision, not fixed in-run:** the repair touches the
+> **shared Shopify→JSON-LD fallback used by the whole vendor roster**
+> (`fetchJsonLdPrice` + the `generic_price` mirror in `scrape.py`), the exact
+> production trigger (which IP/pass writes the 56, and how often) could not be
+> reproduced or pinned from this environment, and the fix carries a genuine
+> design choice (recognise a Shopify `ProductGroup` as a multi-variant marker
+> and then **preserve** the last good picker price vs **clear** to
+> `NO_BASE_KIT`) that interacts with `linkFailures`/back-off and every other
+> Shopify store. Per the routine's genuine-ambiguity / architecturally-significant
+> exception, this is brought to the owner with a recommended patch (below) rather
+> than shipped speculatively. Recommendation: in `fetchJsonLdPrice` (and its
+> `scrape.py` mirror), when the JSON-LD graph carries a `ProductGroup` and no
+> base-named offer is identifiable, treat the lone representative `Offer` as an
+> ambiguous aggregate and **return `null` (preserve the last good 150) rather
+> than store the representative 56** — the Shopify `product.json` path remains
+> the authority and a blocked run should not overwrite it downward.
+
 ## 1. Open wrong-price reports (unresolved only)
 
-_None — 0 pending reports in the feed; every logged report is resolved._
+| logged (UTC) | set | vendor | current price | reason (client) | verdict | recommendation / status |
+|---|---|---|---|---|---|---|
+| 2026-07-20 | gmk-bent-r2 | zFrontier (en.zfrontier.com) | 56 USD (reverted from 150) | "this price is not the price of the revival base kit; revival base kit has no stock" | needs fix (reverted 2026-09-15) | **held for owner** — JSON-LD/OG fallback stores the 56 representative Offer, bypassing the 150 base-kit pick, when Shopify `product.json` blocks. Recommend teaching `fetchJsonLdPrice` (+ `scrape.py` mirror) to treat a `ProductGroup` with no base-named offer as ambiguous and preserve the last good price. Feed still auto-resolves it (priceUpdatedAt post-dates the report), so recurrence/reversion — not the feed — is the signal. |
 
 ## 1b. Self-heal watch (pending next-day confirmation)
 
@@ -470,7 +526,7 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-07-22 | gmk-nord | zFrontier | 110 USD | "this is price of novelty kit" | needs fix | ✅ resolved |
 | 2026-07-22 | gmk-maroon | zFrontier | 170 USD | "wrong item price is this price of kits spacebar" | needs fix | ✅ resolved |
 | 2026-07-21 | gmk-burgundy-r3 | Omnitype | 100 USD | "when clicked buy is directing to a weird website" | needs fix | ✅ resolved |
-| 2026-07-20 | gmk-bent-r2 | zFrontier | 56 USD | "this price is not the price of the revival base kit also revival base kit has no stock" | needs fix | ✅ resolved |
+| 2026-07-20 | gmk-bent-r2 | zFrontier | 56 USD | "this price is not the price of the revival base kit also revival base kit has no stock" | needs fix | ⚠️ reopened — reverted 150→56 on 2026-09-15 (see run note & §1) |
 | 2026-07-20 | gmk-arctic | zFrontier | 46 USD | "this is the price of novelty kit not based kit" | needs fix | ✅ resolved |
 | 2026-07-18 | gmk-masterpiece-r2 | Oblotzky Industries | 119 EUR | "This is a pre order link not actual units" | self-healed (link) | ✅ resolved |
 | 2026-07-18 | gmk-masterpiece-r2 | iLumKB | 159 SGD | "This link is pointing to pre order not actual units" | self-healed (link) | ✅ resolved |
@@ -557,7 +613,7 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-07-22 | gmk-nord | zFrontier | 110 USD | needs fix | Novelty kit priced as base — NOVELTIES excluded | ✅ resolved |
 | 2026-07-22 | gmk-maroon | zFrontier | 170 USD | needs fix | Spacebar kit priced as base — SPACEBARS excluded | ✅ resolved |
 | 2026-07-21 | gmk-burgundy-r3 | Omnitype | 100 USD | needs fix | Buy link redirects to dixiemech.store — Omnitype's row was parked on a sibling brand's storefront (CLAUDE.md "wrong storefront" shape); `planStorefrontOwnership`/roster heal repoints it | ✅ resolved |
-| 2026-07-20 | gmk-bent-r2 | zFrontier | 56 USD | needs fix | Revival base not picked + no stock — subkit drop + availability re-scrape | ✅ resolved |
+| 2026-07-20 | gmk-bent-r2 | zFrontier | 56 USD | needs fix | Revival base not picked + no stock. Picker fix held 150 USD 2026-09-08…-14, then **reverted to 56 on 2026-09-15**. Probe run 34986483070: `en.zfrontier.com` (ordinary USD Shopify) `[In Stock] GMK Bentō R2`, 10 variants, none titled "base"; base colourways Traditional/Revival 150 both `available=false`, cheapest in-stock Salmon 56. Both pickers correctly return 150 (dearest base candidate, stock-independent), so the 56 is written by the JSON-LD/OG fallback (`fetchJsonLdPrice`) when Shopify `product.json` blocks: the page's JSON-LD is a lone `ProductGroup`+`Offer` at 56 (OG price), no base-named offer, so the ambiguous-aggregate guard misses it. **Held for owner** — fix touches the shared Shopify→JSON-LD fallback (all vendors); recommend a `ProductGroup`→preserve-last-good guard | ⚠️ reopened 2026-09-15 (needs fix; owner decision) |
 | 2026-07-20 | gmk-arctic | zFrontier | 46 USD | needs fix | Novelty kit priced as base — NOVELTIES excluded | ✅ resolved |
 | 2026-07-18 | gmk-masterpiece-r2 | Oblotzky Industries | 119 EUR | self-healed | Pre-order link, not in-stock units — availability/link complaint; re-scrape re-verified. (119 EUR is Oblotzky's ex-VAT display; DE-market inc-VAT base ≈ 139 EUR — see recommended-values note) | ✅ resolved (link) |
 | 2026-07-18 | gmk-masterpiece-r2 | iLumKB | 159 SGD | self-healed | Pre-order link complaint — availability/link; re-scrape re-verified | ✅ resolved (link) |
