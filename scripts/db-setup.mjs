@@ -1359,17 +1359,16 @@ async function backfillShipping(client) {
        ('mecha-my',            'ASIA', 'MY', 'MYR'),
        -- mechaland.id is an Indonesian store KeycapLendar filed as US/USD, and
        -- its /meta.json says IDR (probed from a runner on 2026-09-15). The
-       -- currency is the half that matters: `currency = currency or
-       -- vendor_currency` is the fallback in BOTH price passes, so whenever the
-       -- shop's /meta.json is unreachable the row's own code is what a rupiah
-       -- number gets stored under — and USD would make a Rp 1,390,000 base kit
-       -- read as $1.39 million.
+       -- currency is the half that matters: "currency or vendor_currency" is
+       -- the fallback in BOTH price passes, so whenever the shop's /meta.json
+       -- is unreachable the row's own code is what a rupiah number gets stored
+       -- under -- and USD would make a Rp 1,390,000 base kit read as $1.39
+       -- million.
        --
        -- One slug only, and deliberately no near-miss alias beside it:
-       -- `mechland` / `mech-land` is Mech.land, a CANADIAN store on mech.land
-       -- that the roster already pins to CA/CAD, and `mecha-my` above is
-       -- Malaysian. Three shops whose slugs differ by two letters, on three
-       -- continents.
+       -- mechland / mech-land is Mech.land, a CANADIAN store on mech.land that
+       -- the roster already pins to CA/CAD, and mecha-my above is Malaysian.
+       -- Three shops whose slugs differ by two letters, on three continents.
        ('mechaland',           'ASIA', 'ID', 'IDR')
      ) AS c(slug, region, country, currency)
      WHERE v.slug = c.slug AND (v.region::text <> c.region OR v.currency <> c.currency)

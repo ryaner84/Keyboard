@@ -125,6 +125,16 @@ jobs:
         if: always()
         run: npm run test:currencies
 
+      # `npm run build` is `prisma generate && node scripts/db-setup.mjs &&
+      # next build`, so a db-setup.mjs that cannot be PARSED fails the deploy
+      # before next build is reached — and nothing here could see it: a dozen
+      # suites read that file as text, none imports it, tsc only includes
+      # **/*.ts and next lint does not reach scripts/. One shipped on 2026-09-15
+      # with all 19 suites, the typecheck and the lint green.
+      - name: scripts-syntax
+        if: always()
+        run: npm run test:scripts-syntax
+
       # Reads scrape.py and prices.ts: the per-host request spacing is written
       # twice, and for a long time only the nightly had it. An unthrottled,
       # host-clustered queue invites the 429 that reads as UNREADABLE — which

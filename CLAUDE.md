@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Nineteen suites, all of which should pass before pushing:
+Twenty suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -47,6 +47,7 @@ npm run test:link-health
 npm run test:catalog-stock
 npm run test:kit-bounds
 npm run test:currencies
+npm run test:scripts-syntax
 npm run test:host-throttle
 npm run test:tls-chain
 npm run test:manufacturer-vendors
@@ -58,6 +59,20 @@ Two CI workflows gate these. `scraper-tests.yml` runs the Python suite, but only
 when `scraper/**` changes. `web-tests.yml` runs every `npm run test:*` suite plus
 `npx tsc --noEmit` and `npx next lint` on every PR and push to main, each suite
 with `if: always()` so one break doesn't hide the others.
+
+**And the gate could not see a script it never ran.** `npm run build` is
+`prisma generate && node scripts/db-setup.mjs && next build`, so a
+`db-setup.mjs` that cannot be PARSED fails the deploy before `next build` is
+reached — the site stays on its previous deployment and every fix in the commit
+reaches nobody. A dozen suites read that file as TEXT and assert on its literal
+contents; not one imports it, no other module does, `tsc --noEmit` includes only
+`**/*.ts`, and `next lint` does not reach `scripts/`. So one shipped on
+2026-09-15 with all 19 suites, the typecheck and the lint green: a SQL comment
+inside one of db-setup's template literals quoted an expression in BACKTICKS,
+the way prose does everywhere else in this codebase, which ended the template
+string and made the rest of the call JavaScript. `test:scripts-syntax` runs
+`node --check` over every `.mjs` under `scripts/` — it parses without
+executing, so a script with database side effects is safe to check.
 
 **Adding a suite means three edits, not one:** the script in `package.json`, a
 step in `web-tests.yml`, and the list above. A suite that exists but isn't wired
