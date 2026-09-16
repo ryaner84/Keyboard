@@ -472,11 +472,58 @@ both the client-reported log and the resolution audit in the same run.
 > than store the representative 56** — the Shopify `product.json` path remains
 > the authority and a blocked run should not overwrite it downward.
 
+> **2026-09-16 run.** Price feed run 35112937473 (`?all=1`) returns **41
+> submissions, all resolved, 0 pending** — a 1:1 match with the client-reported
+> log, so **no new price report** has filed (most recent submission still
+> **gmk-vamp × Switchmod**, 2026-08-26T17:39; `resolvedAt=2026-09-16T05:03:14.809Z`).
+> Visitor inbox run 35112940830: the SAME **15 `LISTING_FLAG`s + 1 FEEDBACK**
+> already triaged and reported to the owner on 2026-09-14 (§4b); no new flags,
+> nothing auto-resolvable. STORE_LINK / PRICE_REPORT / PHOTO_REPORT channels are
+> all empty.
+>
+> **gmk-bent-r2 × zFrontier — reversion confirmed as an OSCILLATION, root-caused,
+> and FIXED in-run.** The item was reopened `needs fix` and held on 2026-09-15
+> after reverting 150→56. This run the feed reads it back at **`150 USD SCRAPED`**
+> — the value has now moved 150 (2026-09-08…-14) → 56 (2026-09-15) → 150
+> (2026-09-16). A value that reverts across a scrape is the never-heals case
+> (routine step 2), and a second data point confirms the diagnosis: the 56 is
+> written by the JSON-LD/OpenGraph fallback whenever the Shopify `product.json`
+> fetch is transiently blocked, so the row flips between the picker's 150 and the
+> OG representative 56 run to run.
+>
+> The 2026-09-15 note held this as architecturally significant because the
+> "preserve vs clear" design choice was unsettled and the trigger was
+> unconfirmed. Both are now resolved: the oscillation confirms the mechanism, and
+> the correct answer is unambiguously **preserve** (clearing would hide the
+> listing on a released set). The resulting fix is minimal and **one-directional**
+> — it can only make the OG fallback DECLINE to overwrite, never store a new
+> number, clear a good one, or hide a listing — so it is no longer the risky
+> shared-path change the hold was written for. Fixed this run (commit `633581d`):
+> `htmlDeclaresVariantProductGroup` (in the pure, unit-tested `kit-variants`
+> module) detects Shopify's multi-variant ProductGroup marker, and
+> `fetchJsonLdPrice`'s OpenGraph branch preserves the last good base price when it
+> is set. scrape.py needs no mirror (its `run_prices` uses `shopify_price` with a
+> real browser, and `generic_price` has no OG `product:price` fallback for
+> generic products, so the leak is TS-only). `test:kit-variants` extended; 201
+> Python tests, all 20 npm suites, `tsc --noEmit` and `next lint` clean.
+>
+> The feed still auto-resolves the report each sweep (its `priceUpdatedAt`
+> post-dates the 2026-07-20 submission), so **reversion — not the feed — remains
+> the signal**. gmk-bent-r2 is placed on the Self-heal watch (§1b) so the next
+> run confirms 150 holds and 56 does not return.
+>
+> The incoming **Self-heal watch was empty** apart from the held gmk-bent-r2,
+> which this run fixed. gmk-vamp × Switchmod remains resolved
+> (`current=84.99 USD source=SCRAPED`); the two other zFrontier base-kit
+> resolutions still read correctly (gmk-arctic `145 USD`, gmk-tribal `175 USD`);
+> the four #153-corrected Ktechs listings read `139/169 SGD SCRAPED`.
+
 ## 1. Open wrong-price reports (unresolved only)
 
-| logged (UTC) | set | vendor | current price | reason (client) | verdict | recommendation / status |
-|---|---|---|---|---|---|---|
-| 2026-07-20 | gmk-bent-r2 | zFrontier (en.zfrontier.com) | 56 USD (reverted from 150) | "this price is not the price of the revival base kit; revival base kit has no stock" | needs fix (reverted 2026-09-15) | **held for owner** — JSON-LD/OG fallback stores the 56 representative Offer, bypassing the 150 base-kit pick, when Shopify `product.json` blocks. Recommend teaching `fetchJsonLdPrice` (+ `scrape.py` mirror) to treat a `ProductGroup` with no base-named offer as ambiguous and preserve the last good price. Feed still auto-resolves it (priceUpdatedAt post-dates the report), so recurrence/reversion — not the feed — is the signal. |
+_None. The one open item — gmk-bent-r2 × zFrontier (held 2026-09-15) — was
+root-caused and **fixed this run** (commit `633581d`); it moves to the Self-heal
+watch (§1b) for next-run confirmation. All 41 full-history reports are resolved;
+0 pending._
 
 ## 1b. Self-heal watch (pending next-day confirmation)
 
@@ -488,16 +535,15 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-_None. The 2026-09-13 run's incoming watch was empty (the 2026-08-28 run
-confirmed and cleared **gmk-vamp × Switchmod**, and the 2026-08-29/-30/-31 and
-2026-09-01/-02/-03/-04/-05/-06/-07/-08/-09/-10/-11/-12 runs added nothing), so
-there was nothing to re-verify this run and no watched item failed verification —
-no in-run fix was required. gmk-vamp × Switchmod (flagged 2026-08-27,
-probe-confirmed in-run via run 33086317179: Base 84.99 USD `available=true`,
-picker correct; re-confirmed healed 2026-08-28) remains resolved in the
-full-history feed — `current=84.99 USD source=SCRAPED`,
-`resolvedAt=2026-09-13T05:08:11.559Z` — and stays in the resolution audit. All 41
-full-history reports remain resolved; 0 pending._
+| set | vendor | flagged self-healed / fixed | what the next run must confirm |
+|---|---|---|---|
+| gmk-bent-r2 | zFrontier | **fixed** 2026-09-16 (commit `633581d`) | The feed shows `current=150 USD SCRAPED` and it does **not** revert to 56. The fix stops the OG fallback overwriting the base when `product.json` blocks, but a scrape must run against the deployed code before the row is guaranteed stable — so confirm 150 holds across the next nightly and mark resolved, or, if 56 returns, the fix did not take and it is a re-open. |
+
+gmk-vamp × Switchmod (flagged 2026-08-27, probe-confirmed in-run via run
+33086317179: Base 84.99 USD `available=true`, picker correct; re-confirmed
+healed 2026-08-28) remains resolved in the full-history feed —
+`current=84.99 USD source=SCRAPED`, `resolvedAt=2026-09-16T05:03:14.809Z` — and
+stays in the resolution audit.
 
 ## 2. Open client-recommended values (awaiting verification)
 
@@ -526,7 +572,7 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-07-22 | gmk-nord | zFrontier | 110 USD | "this is price of novelty kit" | needs fix | ✅ resolved |
 | 2026-07-22 | gmk-maroon | zFrontier | 170 USD | "wrong item price is this price of kits spacebar" | needs fix | ✅ resolved |
 | 2026-07-21 | gmk-burgundy-r3 | Omnitype | 100 USD | "when clicked buy is directing to a weird website" | needs fix | ✅ resolved |
-| 2026-07-20 | gmk-bent-r2 | zFrontier | 56 USD | "this price is not the price of the revival base kit also revival base kit has no stock" | needs fix | ⚠️ reopened — reverted 150→56 on 2026-09-15 (see run note & §1) |
+| 2026-07-20 | gmk-bent-r2 | zFrontier | 56 USD | "this price is not the price of the revival base kit also revival base kit has no stock" | needs fix | 🔧 fixed 2026-09-16 (`633581d`) — on Self-heal watch to confirm 150 holds |
 | 2026-07-20 | gmk-arctic | zFrontier | 46 USD | "this is the price of novelty kit not based kit" | needs fix | ✅ resolved |
 | 2026-07-18 | gmk-masterpiece-r2 | Oblotzky Industries | 119 EUR | "This is a pre order link not actual units" | self-healed (link) | ✅ resolved |
 | 2026-07-18 | gmk-masterpiece-r2 | iLumKB | 159 SGD | "This link is pointing to pre order not actual units" | self-healed (link) | ✅ resolved |
@@ -613,7 +659,7 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-07-22 | gmk-nord | zFrontier | 110 USD | needs fix | Novelty kit priced as base — NOVELTIES excluded | ✅ resolved |
 | 2026-07-22 | gmk-maroon | zFrontier | 170 USD | needs fix | Spacebar kit priced as base — SPACEBARS excluded | ✅ resolved |
 | 2026-07-21 | gmk-burgundy-r3 | Omnitype | 100 USD | needs fix | Buy link redirects to dixiemech.store — Omnitype's row was parked on a sibling brand's storefront (CLAUDE.md "wrong storefront" shape); `planStorefrontOwnership`/roster heal repoints it | ✅ resolved |
-| 2026-07-20 | gmk-bent-r2 | zFrontier | 56 USD | needs fix | Revival base not picked + no stock. Picker fix held 150 USD 2026-09-08…-14, then **reverted to 56 on 2026-09-15**. Probe run 34986483070: `en.zfrontier.com` (ordinary USD Shopify) `[In Stock] GMK Bentō R2`, 10 variants, none titled "base"; base colourways Traditional/Revival 150 both `available=false`, cheapest in-stock Salmon 56. Both pickers correctly return 150 (dearest base candidate, stock-independent), so the 56 is written by the JSON-LD/OG fallback (`fetchJsonLdPrice`) when Shopify `product.json` blocks: the page's JSON-LD is a lone `ProductGroup`+`Offer` at 56 (OG price), no base-named offer, so the ambiguous-aggregate guard misses it. **Held for owner** — fix touches the shared Shopify→JSON-LD fallback (all vendors); recommend a `ProductGroup`→preserve-last-good guard | ⚠️ reopened 2026-09-15 (needs fix; owner decision) |
+| 2026-07-20 | gmk-bent-r2 | zFrontier | 56 USD | needs fix | Revival base not picked + no stock. Picker fix held 150 USD 2026-09-08…-14, then **reverted to 56 on 2026-09-15**. Probe run 34986483070: `en.zfrontier.com` (ordinary USD Shopify) `[In Stock] GMK Bentō R2`, 10 variants, none titled "base"; base colourways Traditional/Revival 150 both `available=false`, cheapest in-stock Salmon 56. Both pickers correctly return 150 (dearest base candidate, stock-independent), so the 56 is written by the JSON-LD/OG fallback (`fetchJsonLdPrice`) when Shopify `product.json` blocks: the page's JSON-LD is a lone `ProductGroup`+`Offer` at 56 (OG price), no base-named offer, so the ambiguous-aggregate guard misses it. **Fixed 2026-09-16 (`633581d`)**: the 2026-09-16 feed read it back at 150, confirming an OSCILLATION (150→56→150) — which settled both questions the hold rested on. The trigger is real (intermittent `product.json` block) and the answer is unambiguously PRESERVE (clearing hides the listing on a released set), so the fix is one-directional and cannot store, clear or hide: `htmlDeclaresVariantProductGroup` (pure, unit-tested `kit-variants` module) detects Shopify's multi-variant ProductGroup marker and `fetchJsonLdPrice`'s OpenGraph branch declines to store its representative price, preserving the picker's 150. scrape.py needs no mirror (`generic_price` has no OG `product:price` fallback; `run_prices` reads `product.json` via a real browser). `test:kit-variants` extended | 🔧 fixed 2026-09-16 (Self-heal watch) |
 | 2026-07-20 | gmk-arctic | zFrontier | 46 USD | needs fix | Novelty kit priced as base — NOVELTIES excluded | ✅ resolved |
 | 2026-07-18 | gmk-masterpiece-r2 | Oblotzky Industries | 119 EUR | self-healed | Pre-order link, not in-stock units — availability/link complaint; re-scrape re-verified. (119 EUR is Oblotzky's ex-VAT display; DE-market inc-VAT base ≈ 139 EUR — see recommended-values note) | ✅ resolved (link) |
 | 2026-07-18 | gmk-masterpiece-r2 | iLumKB | 159 SGD | self-healed | Pre-order link complaint — availability/link; re-scrape re-verified | ✅ resolved (link) |
