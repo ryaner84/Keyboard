@@ -244,3 +244,53 @@ export function isTestProduct(product: { title?: string; handle?: string }): boo
     (marker) => title.includes(marker) || handleText.includes(marker)
   );
 }
+
+// Does a product page's JSON-LD declare a multi-variant ProductGroup?
+//
+// Shopify marks a product that has several variants with a schema.org
+// `ProductGroup` node (its `hasVariant` array lists the variants); a
+// single-variant product emits a plain `Product`. So a ProductGroup reliably
+// means "this page sells several kits under one listing" — and its OpenGraph
+// `product:price:amount` meta is then a single REPRESENTATIVE variant price
+// (whichever variant Shopify features, typically the cheapest in stock), not
+// the base kit.
+//
+// The price pass reads this so its JSON-LD/OpenGraph fallback (used whenever the
+// richer Shopify product.json fetch is transiently blocked) can decline to store
+// that representative figure over the base-kit price the variant picker already
+// resolved from product.json. gmk-bent-r2 × zFrontier oscillated 150→56→150 for
+// exactly this reason: the two base colourways (150) were out of stock, so the
+// featured/OG price was the cheapest in-stock alternate kit (56), and a blocked
+// product.json let it overwrite the base. Preserving the last good price is the
+// safe direction — this never stores a number, only declines to.
+export function htmlDeclaresVariantProductGroup(html: string): boolean {
+  const blocks = Array.from(
+    String(html ?? "").matchAll(
+      /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+    )
+  );
+  for (const block of blocks) {
+    let data: unknown;
+    try {
+      data = JSON.parse(block[1].trim());
+    } catch {
+      continue; // malformed block — try the next one
+    }
+    const root = data as { "@graph"?: unknown };
+    const nodes: unknown[] = Array.isArray(data)
+      ? data
+      : Array.isArray(root["@graph"])
+        ? (root["@graph"] as unknown[])
+        : [data];
+    for (const node of nodes) {
+      const type = (node as { "@type"?: unknown })?.["@type"];
+      if (
+        type === "ProductGroup" ||
+        (Array.isArray(type) && type.includes("ProductGroup"))
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}

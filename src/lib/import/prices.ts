@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import {
   classifyVariant,
   pickBaseVariant,
+  htmlDeclaresVariantProductGroup,
   ADDON_VARIANT_RE,
   NONBASE_SUBKIT_RE,
   PRODUCT_ACCESSORY_RE,
@@ -868,7 +869,7 @@ export function parseWooCommerceVariations(html: string): WooVariant[] {
 // `offers` node. OpenGraph product:price:* meta tags are the last fallback.
 // vendorCurrency is used for the WooCommerce blob, whose display_price carries
 // no currency of its own.
-async function fetchJsonLdPrice(
+export async function fetchJsonLdPrice(
   productUrl: string,
   vendorCurrency?: string,
   allowSubkits = false
@@ -939,6 +940,19 @@ async function fetchJsonLdPrice(
     // indistinguishable from a blocked one, which is how Drop's 35 listings sat
     // under "the store's links are dead" while every one of them answered 200.
     let sawProductMarkup = false;
+    // The page declares a Shopify multi-variant ProductGroup. Its OpenGraph
+    // product:price is a single REPRESENTATIVE variant price (the cheapest
+    // in-stock one), not the base kit — so when the Shopify product.json path is
+    // transiently blocked and the caller falls through here, that number must
+    // not overwrite the base-kit price the picker already stored. gmk-bent-r2 ×
+    // zFrontier reverted 150→56 exactly this way: both variant pickers correctly
+    // return the dearest base candidate (150, out of stock), but a blocked
+    // product.json left the OG reader to publish the cheapest in-stock alternate
+    // kit (56) over it. A ProductGroup is also real product markup, so the page
+    // is never filed NO_PRODUCT_DATA; the OG branch below preserves the last good
+    // price instead of overwriting it downward.
+    const sawVariantProductGroup = htmlDeclaresVariantProductGroup(html);
+    if (sawVariantProductGroup) sawProductMarkup = true;
 
     const blocks = Array.from(
       html.matchAll(
@@ -1116,7 +1130,14 @@ async function fetchJsonLdPrice(
       // Read-only in one direction — the token can only ever say SOLD OUT, and
       // a page with no availability markup still defaults to in stock.
       html.match(/itemprop=["']availability["'][^>]*(?:href|content)=["'][^"']*schema\.org\/(\w+)["']/i);
-    if (amount) {
+    // A multi-variant ProductGroup makes the single OpenGraph price a
+    // representative (cheapest in-stock) figure, not the base kit — so a blocked
+    // product.json must not let it overwrite the base price the picker stored.
+    // Skipped entirely in that case: sawProductMarkup is already set, so the
+    // page still reads as a real product page and the row PRESERVES its last
+    // good price (falls through to the final `return null`) rather than clearing
+    // or refusing it.
+    if (amount && !sawVariantProductGroup) {
       sawProductMarkup = true;
       const price = Number(amount[1].replace(/,/g, ""));
       const currency = cur ? cur[1] : null;

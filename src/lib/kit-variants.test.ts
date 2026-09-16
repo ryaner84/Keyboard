@@ -6,6 +6,7 @@ import {
   PRODUCT_ACCESSORY_RE,
   SUBKIT_PRODUCT_RE,
   classifyVariant,
+  htmlDeclaresVariantProductGroup,
   isSubkitSetName,
   pickBaseVariant,
 } from "@/lib/kit-variants";
@@ -205,6 +206,62 @@ assert.equal(
   `${pySubkit![1]}${NONBASE_SUBKIT_RE.source}${pySubkit![2]}${PRODUCT_ACCESSORY_RE.source}`,
   SUBKIT_PRODUCT_RE.source,
   "SUBKIT_PRODUCT_RE and _SUBKIT_PRODUCT_RE must describe the same vocabulary"
+);
+
+// ── ProductGroup detection: the price fallback's guard against publishing a
+//    multi-variant page's representative price as the base kit ────────────────
+//
+// gmk-bent-r2 × zFrontier reverted 150→56→150 across scrapes: its two base
+// colourways (150) were out of stock, so the page's OpenGraph price was the
+// cheapest in-stock alternate kit (56), and whenever the Shopify product.json
+// fetch was transiently blocked the JSON-LD/OpenGraph fallback stored 56 over
+// the base. fetchJsonLdPrice keys off this detector to preserve the last good
+// price instead. A ProductGroup is Shopify's marker for a multi-variant
+// product; a single-variant product emits a plain Product.
+
+// A ProductGroup page (bent-r2 shape) is detected.
+assert.ok(
+  htmlDeclaresVariantProductGroup(
+    '<script type="application/ld+json">' +
+      '{"@context":"https://schema.org","@type":"ProductGroup","name":"[In Stock] GMK Bento R2",' +
+      '"hasVariant":[{"@type":"Product","name":"Traditional"},{"@type":"Product","name":"Salmon"}]}' +
+      "</script>"
+  ),
+  "a Shopify ProductGroup page must be recognised as multi-variant"
+);
+
+// @type may be an array.
+assert.ok(
+  htmlDeclaresVariantProductGroup(
+    '<script type="application/ld+json">{"@type":["ProductGroup","Thing"]}</script>'
+  ),
+  "an array @type containing ProductGroup counts"
+);
+
+// It may sit inside an @graph.
+assert.ok(
+  htmlDeclaresVariantProductGroup(
+    '<script type="application/ld+json">{"@graph":[{"@type":"WebPage"},{"@type":"ProductGroup"}]}</script>'
+  ),
+  "a ProductGroup nested in an @graph is found"
+);
+
+// A plain single-variant Product is NOT a ProductGroup — its OG price is the
+// real price and the fallback must still store it.
+assert.ok(
+  !htmlDeclaresVariantProductGroup(
+    '<script type="application/ld+json">{"@type":"Product","name":"GMK Foo Base","offers":{"@type":"Offer","price":"135.00"}}</script>'
+  ),
+  "a single Product page must not be treated as multi-variant"
+);
+
+// No JSON-LD at all, and malformed JSON-LD, are both simply "not a ProductGroup".
+assert.ok(!htmlDeclaresVariantProductGroup("<html><body>no ld+json</body></html>"));
+assert.ok(
+  !htmlDeclaresVariantProductGroup(
+    '<script type="application/ld+json">{ this is not json }</script>'
+  ),
+  "a malformed block must not throw and must not falsely match"
 );
 
 console.log("kit-variants tests passed");
