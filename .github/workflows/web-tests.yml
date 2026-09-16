@@ -64,6 +64,13 @@ jobs:
         if: always()
         run: npm run test:currency-rates
 
+      # Reads both tracker route files: a field the editor can WRITE but the
+      # list endpoint does not RETURN is not merely hidden — the editor seeds
+      # itself from that payload, so the next save writes a blank over it.
+      - name: collection-roundtrip
+        if: always()
+        run: npm run test:collection-roundtrip
+
       - name: collection-import
         if: always()
         run: npm run test:collection-import

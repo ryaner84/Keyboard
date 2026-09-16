@@ -33,6 +33,20 @@ export async function GET() {
         purchasePrice: item.purchasePrice,
         purchaseCurrency: item.purchaseCurrency,
         showPurchasePrice: item.showPurchasePrice,
+        // Build 1's sale record. These are stored on the TOP-LEVEL columns
+        // (builds 2..N carry theirs inside `units`), and this response is the
+        // only way the owner's own collection page ever sees them — the public
+        // page has its own select, which is why the sale showed there and not
+        // here. Leaving them out did not merely hide the sale: the editor
+        // seeds itself from this payload via assembleBuilds, so build 1 opened
+        // unsold, and the next save wrote isSold:false / soldAt:null /
+        // soldPrice:null straight over the record. Every one of them is
+        // OPTIONAL on CollectionItemDetails, so omitting them typechecked.
+        isSold: item.isSold,
+        soldAt: item.soldAt,
+        soldPrice: item.soldPrice,
+        soldCurrency: item.soldCurrency,
+        showSoldStatus: item.showSoldStatus,
         switches: item.switches,
         keycaps: item.keycaps,
         plateType: item.plateType,
