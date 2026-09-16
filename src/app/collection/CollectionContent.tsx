@@ -3836,6 +3836,15 @@ function KeycapCollectionCard({
       isSold: purchase.isSold === true,
     }))
   );
+  // Desaturated only when EVERY purchase is gone — the same rule and the same
+  // treatment the keyboard card uses for its builds. Greying a set because one
+  // of two purchases sold would misrepresent a set the owner still has.
+  //
+  // Applied to the IMAGE rather than the card frame so the badges sitting over
+  // it — Sold, "Keycap set", the kit count — keep their colour, which is how
+  // the keyboard card does it too. `soldState` returns allSold: false for an
+  // empty list, so a tracked-but-unowned set can never grey.
+  const soldImageClass = sold.allSold ? "opacity-70 grayscale" : "";
   const visiblePurchaseCount = acquisitions.filter((purchase) => purchase.isPublic).length;
   // Per-purchase public/hidden state only matters when the whole set is on
   // display and there's more than one purchase (mirrors the keyboard builds).
@@ -3854,7 +3863,7 @@ function KeycapCollectionCard({
         {collageImages ? (
           (() => {
             const collage = (
-              <div className="grid h-full w-full grid-cols-2 gap-0.5 bg-[#e9e7e1] transition duration-500 group-hover:scale-[1.025] dark:bg-gray-900">
+              <div className={`grid h-full w-full grid-cols-2 gap-0.5 bg-[#e9e7e1] transition duration-500 group-hover:scale-[1.025] dark:bg-gray-900 ${soldImageClass}`}>
                 {collageImages.map((src, collageIndex) => (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -3880,11 +3889,11 @@ function KeycapCollectionCard({
         ) : imageUrl ? (
           isCustom ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt={item.name} className={`absolute inset-0 h-full w-full ${isCustomPhoto ? "object-contain" : "object-cover"}`} />
+            <img src={imageUrl} alt={item.name} className={`absolute inset-0 h-full w-full ${isCustomPhoto ? "object-contain" : "object-cover"} ${soldImageClass}`} />
           ) : (
             <Link href={`/sets/${item.slug}?country=${countryCode}`} className="absolute inset-0 block">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={imageUrl} alt={item.name} className={`h-full w-full transition duration-500 group-hover:scale-[1.025] ${isCustomPhoto ? "object-contain" : "object-cover"}`} />
+              <img src={imageUrl} alt={item.name} className={`h-full w-full transition duration-500 group-hover:scale-[1.025] ${isCustomPhoto ? "object-contain" : "object-cover"} ${soldImageClass}`} />
             </Link>
           )
         ) : (
