@@ -681,6 +681,33 @@ failure from the other side. A retirement page that varies per request, and a
 retired single-page app, both stay `NO_PRODUCT_DATA` — merely the previous, safe
 answer, which is the asymmetry this whole chain runs on.
 
+**And the store can be gone from the DOMAIN while the domain answers perfectly.**
+Every check above asks what the store said about this LISTING; none of them can
+see a shop whose registration simply lapsed, because the answers then come from
+whoever holds the domain now. Probed from a runner on 2026-09-16, vala.supply
+answers `/` with a 302 to `http://ww19.vala.supply/` — a parking service — and
+answers its product paths with a 522-byte `Loading...` stub. That gets past all
+four: `isDeadLinkStatus` sees a 200, `isGoneRedirect` sees no hop on the row's
+own request, `isGoneFrontPage` compares a body that can never equal the root's
+(a parking stub carries the requested path, so no two of its pages are
+identical, and `isClientRenderedShell` refuses the verdict for it anyway), and
+`isGoneHostError` sees a host that resolves. Four of the vendor's 19 rows
+happened to be fetched on the hop and were marked gone; the other 16 were filed
+`UNPARSED` — "teach the parser this platform", printed at the owner nightly
+about a domain the shop no longer owns. `isGoneStorefrontRoot` (mirrored as
+`is_gone_storefront_root`) reads the one request `isGoneFrontPage` already
+makes, from the other end: the ORIGIN's front door, which now answers from
+another host. A shop that still exists at this address serves its own front page
+there. Narrow the same way as its siblings — a request that STARTED at the root
+is refused, a root that answers with a page of its OWN is refused (hexkeyboards'
+`/password` is a locked shop, keygem's `/en-au` a locale), and `www.` is not
+another host — and cheap the same way, because the root is fingerprinted once
+per SILENT origin per run and a readable store never pays for it at all. What
+bounds the cost of being wrong is where the verdict can be reached: only on a
+page that produced no price, and `PURCHASABLE_VENDOR_KIT_WHERE` hides a dead row
+only while it is UNPRICED — so a false positive can never take a priced listing
+off a set page, and the first read that gets through clears `deadSince`.
+
 **And a third answer gives no status, no redirect and no page at all: the
 DOMAIN is gone.** Every guard in the vendor chain judges a storefront by the
 SHAPE of its URL — `needsStorefront`, `planStorefrontOwnership`,

@@ -888,6 +888,58 @@ def is_gone_front_page(request_url, final_url, page_body, root_body) -> bool:
     return page == root
 
 
+def is_gone_storefront_root(request_url, root_final_url) -> bool:
+    """True when the STOREFRONT'S OWN FRONT DOOR has left this origin.
+
+    The fifth way a store says "gone", and the first that none of the other four
+    can see, because the store is not answering about the LISTING at all: an
+    expired, parked or sold domain is answered by whoever now holds it. The
+    product URL is a 200 (not is_dead_link_status), it was not redirected
+    anywhere (not is_gone_redirect), its body is not the root's — a parking
+    service stamps the requested path into the stub it serves — and the host
+    resolves fine (not is_gone_host_error). What gives it away is the request
+    is_gone_front_page already makes: the ORIGIN's root, which now answers from
+    another host.
+
+    Measured on 2026-09-16: vala.supply's registration lapsed, its root 302s to
+    http://ww19.vala.supply/, and its product paths answer a 522-byte
+    "Loading..." stub. Four of the vendor's 19 rows were caught on the hop by
+    is_gone_redirect; the other 16 read as "teach the parser this platform",
+    nightly, about a domain that is no longer the shop's.
+
+    Narrow in the same three ways: a request that STARTED at the root is
+    refused, a root that answers with a page of its OWN (/password, a locale
+    path) is refused, and `www.` is not another host. Only asked about a page
+    that yielded no product markup, and an unreadable root hands back no URL at
+    all. Mirror of isGoneStorefrontRoot in scripts/lib/link-health.mjs.
+    """
+
+    def parts(url):
+        try:
+            split = urllib.parse.urlsplit(str(url or ""))
+        except ValueError:
+            return None
+        if not split.scheme or not split.netloc:
+            return None
+        return split
+
+    source = parts(request_url)
+    target = parts(root_final_url)
+    if source is None or target is None:
+        return False
+    if source.path.rstrip("/") == "":
+        return False
+    # The storefront answered its own root with something of its own. Whatever
+    # is wrong with this listing, the shop is still at this address.
+    if target.path.rstrip("/") != "":
+        return False
+    def bare_host(split):
+        """The host, minus a leading `www.` — one shop spelled two ways."""
+        return (split.hostname or "").lower().removeprefix("www.")
+
+    return bare_host(target) != bare_host(source)
+
+
 # The network-level answers that mean the HOST itself is gone — NXDOMAIN, in
 # each spelling this pass can be handed one: Chromium (Playwright's page.goto)
 # says ERR_NAME_NOT_RESOLVED, a Python socket.gaierror carries the libc string,
@@ -4528,15 +4580,18 @@ def run_discovery(
     return stats
 
 
-# A storefront's front page, fetched at most once per origin per run.
+# A storefront's front page, fetched at most once per origin per run — its body
+# and the URL it was finally served FROM.
 #
 # Mirrors frontPageCache in src/lib/import/prices.ts: the comparison that turns
 # a catch-all rewrite into DEAD_LINK is only affordable in a time-boxed pass
-# because it costs one request per SILENT host, never one per row. The empty
-# string is cached for a root that could not be read — is_gone_front_page
-# refuses an empty fingerprint, because a store that will not serve us its root
-# has told us nothing about this URL, and a block may never hide a listing.
-_FRONT_PAGE_CACHE: dict[str, str] = {}
+# because it costs one request per SILENT host, never one per row, and the one
+# fetch answers both questions — is_gone_front_page reads the body,
+# is_gone_storefront_root the URL. Empty strings are cached for a root that
+# could not be read: an empty fingerprint is refused by the first and an empty
+# URL by the second, because a store that will not serve us its root has told us
+# nothing about this URL, and a block may never hide a listing.
+_FRONT_PAGE_CACHE: dict[str, tuple[str, str]] = {}
 
 
 def _front_page_html(
@@ -4544,24 +4599,29 @@ def _front_page_html(
     scrapling: ScraplingClient | None,
     html_source: str | None,
     landed_url: str,
-) -> str:
+) -> tuple[str, str]:
     """The storefront root, fetched the SAME way the product page was.
 
     A browser-rendered DOM and Scrapling's raw markup are different documents
     for the same page, so comparing one against the other could never match —
     and a comparison that can never match is a check that silently does nothing.
+
+    Returns (body, final_url). Scrapling follows redirects without saying where
+    it ended up, so it yields no URL — exactly as it yields none for
+    is_gone_redirect on the product page itself.
     """
     try:
         parts = urllib.parse.urlsplit(landed_url)
     except ValueError:
-        return ""
+        return ("", "")
     if not parts.scheme or not parts.netloc:
-        return ""
+        return ("", "")
     origin = f"{parts.scheme}://{parts.netloc}/"
     if origin in _FRONT_PAGE_CACHE:
         return _FRONT_PAGE_CACHE[origin]
 
     body = ""
+    final_url = ""
     if html_source == "scrapling" and scrapling is not None and scrapling.available:
         body = scrapling.get_html(origin, protected=True) or ""
     elif html_source == "browser":
@@ -4575,10 +4635,12 @@ def _front_page_html(
             if response is not None and response.ok and content:
                 if not response_is_blocked(status, content):
                     body = content
+                    final_url = response.url or page.url or ""
         except Exception:  # noqa: BLE001
             body = ""
-    _FRONT_PAGE_CACHE[origin] = body
-    return body
+            final_url = ""
+    _FRONT_PAGE_CACHE[origin] = (body, final_url)
+    return (body, final_url)
 
 
 def generic_price(
@@ -4713,10 +4775,23 @@ def generic_price(
         # follows redirects without telling us where it ended up — the same
         # reason is_gone_redirect above cannot judge one either.
         if final_url:
-            root_html = _front_page_html(page, scrapling, html_source, final_url)
+            root_html, root_url = _front_page_html(
+                page, scrapling, html_source, final_url
+            )
             if is_gone_front_page(product_url, final_url, html, root_html):
                 log(
                     "  dead link (store answers with its own front page)"
+                    f" — clearing price ({product_url})"
+                )
+                return DEAD_LINK
+            # And the shop may not be at this address any more: a lapsed or sold
+            # domain answers from whoever holds it now, which no test on THIS
+            # page can see — the stub carries the requested path, so it never
+            # equals the root's body, and the host resolves perfectly.
+            if is_gone_storefront_root(final_url, root_url):
+                log(
+                    "  dead link (the storefront's own front door now answers"
+                    f" from {urllib.parse.urlsplit(root_url).netloc})"
                     f" — clearing price ({product_url})"
                 )
                 return DEAD_LINK

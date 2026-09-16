@@ -24,6 +24,7 @@ import {
   isGoneFrontPage,
   isGoneHostError,
   isGoneRedirect,
+  isGoneStorefrontRoot,
   isUnresolvedHostError,
   nextLinkHealth,
   pageFingerprint,
@@ -751,8 +752,10 @@ async function fetchShopifyCurrency(productUrl: string): Promise<string | null> 
   return null;
 }
 
-// A storefront's front page, fingerprinted, so a soft 404 can be recognised as
-// one — see isGoneFrontPage in scripts/lib/link-health.mjs.
+// A storefront's front page — fingerprinted, so a soft 404 can be recognised as
+// one (isGoneFrontPage), and with the URL it was finally served FROM, so a
+// front door that has left the origin can be too (isGoneStorefrontRoot). Both
+// live in scripts/lib/link-health.mjs, and both read the one fetch below.
 //
 // Cached per ORIGIN and fetched at most once per run, exactly like the currency
 // above, and asked for only on the branch where a page produced no product
@@ -760,25 +763,29 @@ async function fetchShopifyCurrency(productUrl: string): Promise<string | null> 
 // request happens once per silent host per run, not once per row, which is what
 // makes a body comparison affordable in a time-boxed pass at all.
 //
-// The empty string is cached for a front page that could not be read, and
-// isGoneFrontPage refuses an empty fingerprint — a store that would not serve us
-// its root tells us nothing about this URL, and a block may never hide a
-// listing.
-const frontPageCache = new Map<string, string>();
-async function frontPageFingerprint(origin: string): Promise<string> {
+// Empty strings are cached for a front page that could not be read: an empty
+// fingerprint is refused by isGoneFrontPage and an empty URL by
+// isGoneStorefrontRoot — a store that would not serve us its root tells us
+// nothing about this URL, and a block may never hide a listing.
+interface FrontPage {
+  fingerprint: string;
+  url: string;
+}
+const frontPageCache = new Map<string, FrontPage>();
+async function frontPage(origin: string): Promise<FrontPage> {
   const cached = frontPageCache.get(origin);
   if (cached !== undefined) return cached;
-  let fingerprint = "";
+  let answer: FrontPage = { fingerprint: "", url: "" };
   try {
     const res = await fetchWithTimeout(`${origin}/`);
     // Only a front page the store actually served counts. A 404 or a block on
     // the root is not evidence about the product URL either way.
-    if (res.ok) fingerprint = pageFingerprint(await res.text());
+    if (res.ok) answer = { fingerprint: pageFingerprint(await res.text()), url: res.url };
   } catch {
     // Unreachable root — no verdict, same as above.
   }
-  frontPageCache.set(origin, fingerprint);
-  return fingerprint;
+  frontPageCache.set(origin, answer);
+  return answer;
 }
 
 // Minimal HTML-entity decoder for the attribute-escaped WooCommerce blob
@@ -1159,8 +1166,17 @@ async function fetchJsonLdPrice(
         origin = null;
       }
       if (origin) {
-        const root = await frontPageFingerprint(origin);
-        if (isGoneFrontPage(productUrl, res.url, html, root)) return DEAD_LINK;
+        const root = await frontPage(origin);
+        if (isGoneFrontPage(productUrl, res.url, html, root.fingerprint)) return DEAD_LINK;
+        // And the store may not be at this address at all any more. A lapsed
+        // registration is answered by whoever now holds the domain, and a
+        // parking service stamps the requested path into the stub it serves —
+        // so the body never equals the root's, no hop is made on the row's own
+        // request, and the host resolves. What gives it away is the one request
+        // already in hand: the ORIGIN'S front door, which now belongs to
+        // another host. vala.supply's 16 unreadable rows were reported as a
+        // platform to teach the parser for as long as that was true.
+        if (isGoneStorefrontRoot(res.url, root.url)) return DEAD_LINK;
       }
       return NO_PRODUCT_DATA;
     }
