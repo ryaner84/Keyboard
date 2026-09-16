@@ -17,6 +17,7 @@
     "test:http-json": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/http-json.test.ts",
     "test:csv-import": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/csv.test.ts",
     "test:currency-rates": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/currency-rates.test.ts",
+    "test:collection-roundtrip": "node scripts/lib/collection-roundtrip.test.mjs",
     "test:collection-import": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/collection-import.test.ts",
     "test:kit-variants": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/kit-variants.test.ts",
     "test:set-name": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/set-name.test.ts",
