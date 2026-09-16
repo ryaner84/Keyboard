@@ -2304,6 +2304,65 @@ class LinkHealthTests(unittest.TestCase):
             )
         )
 
+    def test_a_front_door_that_left_the_domain_is_gone(self):
+        # The fifth answer, and the first that is not about the listing at all:
+        # the domain stopped being the shop's. Probed on 2026-09-16,
+        # vala.supply's registration had lapsed — its root 302s to a parking
+        # host while its product paths answer a 522-byte "Loading..." stub — and
+        # all four checks above pass that through: a 200, no hop on the row's
+        # own request, a body that can never equal the root's (the stub carries
+        # the requested path), and a host that resolves perfectly. Four of the
+        # vendor's 19 rows were fetched on the hop and marked gone by
+        # is_gone_redirect; the other 16 read as "teach the parser this
+        # platform", nightly, about a domain the shop no longer owns.
+        self.assertTrue(
+            scrape.is_gone_storefront_root(
+                "https://vala.supply/collections/current-groupbuys/products/gmk-nimbus",
+                "http://ww19.vala.supply/",
+            )
+        )
+        # An acquired shop's whole domain reads the same way from its root.
+        self.assertTrue(
+            scrape.is_gone_storefront_root(
+                "https://ashkeebs.com/product/gmk-arch-keycaps/",
+                "https://kineticlabs.com/",
+            )
+        )
+        # The rule itself: a shop that still exists at this address serves its
+        # own front page there — and `www.` is not another host, in either
+        # direction.
+        for request, root in (
+            ("https://shop.example/products/x", "https://shop.example/"),
+            ("https://shop.example/products/x", "https://www.shop.example/"),
+            ("https://www.shop.example/products/x", "https://shop.example/"),
+            # A root that answers with a page of its OWN is not a front door
+            # that left: hexkeyboards.com sends its root to /password (a locked
+            # shop, and a block may never hide a listing), and a locale path
+            # (keygem.com → /en-au) reads the same way.
+            (
+                "https://hexkeyboards.com/collections/gb/products/x",
+                "https://hexkeyboards.com/password",
+            ),
+            ("https://shop.example/products/x", "https://other.example/password"),
+            # A bare homepage carried as a listing URL cannot be redirected off
+            # anything, here as in is_gone_redirect and is_gone_front_page.
+            ("https://vala.supply/", "http://ww19.vala.supply/"),
+            # www.zfrontier.com is the store this must never touch: a LIVE
+            # app-rendered shop whose every route answers with one contentless
+            # shell. Its root is its own, so nothing here fires.
+            (
+                "https://www.zfrontier.com/app/mch/1xmjEGd2dQml",
+                "https://www.zfrontier.com/",
+            ),
+            # A root we could not read hands back no URL, exactly as it hands
+            # is_gone_front_page no fingerprint.
+            ("https://shop.example/products/x", ""),
+            ("https://shop.example/products/x", None),
+            (None, None),
+        ):
+            with self.subTest(root=root):
+                self.assertFalse(scrape.is_gone_storefront_root(request, root))
+
     def test_page_fingerprint_normalizes_only_whitespace(self):
         # Whitespace is the whole tolerance: two documents differing by so much
         # as a nonce are not the same page. Idempotent, so a cached front-page

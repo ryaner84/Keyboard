@@ -439,6 +439,71 @@ export function isGoneFrontPage(requestUrl, finalUrl, pageBody, rootBody) {
   return page === root;
 }
 
+/** A host with a leading `www.` dropped — the same shop, spelled two ways. */
+function bareHost(url) {
+  return url.hostname.toLowerCase().replace(/^www\./, "");
+}
+
+/**
+ * True when the STOREFRONT'S OWN FRONT DOOR has left this origin — its root
+ * redirects to another host's front page, which is what an expired, parked or
+ * sold domain answers.
+ *
+ * The fifth way a store says "gone", and the first one none of the other four
+ * can see, because the store is not answering about the LISTING at all:
+ *
+ *   isDeadLinkStatus    the product URL answers 200.
+ *   isGoneRedirect      it was not redirected anywhere — the hop, when there is
+ *                       one, happens on a request the row did not make.
+ *   isGoneFrontPage     the body is not the root's body: a parking service
+ *                       stamps the requested path into the stub it serves, so
+ *                       no two of its pages are ever byte-identical.
+ *   isGoneHostError     the host resolves perfectly — somebody else is now
+ *                       answering for it.
+ *
+ * Measured against production on 2026-09-16: vala.supply's registration lapsed,
+ * and the parking service that now holds it answers `https://vala.supply/` with
+ * a 302 to `http://ww19.vala.supply/` while answering its product paths with a
+ * 522-byte "Loading..." stub. Four of the vendor's 19 rows happened to be
+ * fetched on the hop and were marked gone by isGoneRedirect; the other 16 got
+ * the stub, which carries no product markup, and so were filed UNPARSED — the
+ * "teach the parser this platform" diagnosis, printed at the owner nightly
+ * about a domain that no longer belongs to the shop.
+ *
+ * The rule is isGoneRedirect's, asked about the origin instead of the row: a
+ * shop that still exists at this address serves its own front page there. Its
+ * narrowness is in the caller and in three refusals:
+ *
+ *   • only ever asked about a page that yielded NO product markup, exactly like
+ *     isGoneFrontPage — a page the parser can read is never gone, and a
+ *     readable storefront never pays for the root fetch (which is the fetch
+ *     isGoneFrontPage already makes and caches, once per silent origin per run);
+ *   • a request that STARTED at the root is refused, as it is everywhere else
+ *     here: several vendors carry a bare homepage as a listing URL;
+ *   • a root that answers with a page of its OWN — any non-root URL, /password
+ *     and a locale path included — is refused. Only the front door leaving
+ *     counts;
+ *   • `www.` is not another host. A root that redirects between the two
+ *     spellings of its own name is the commonest redirect on the web.
+ *
+ * A root that could not be read says nothing and reaches none of that: the
+ * caller hands back an empty URL, which parses to nothing, exactly as an
+ * unreadable root yields an empty fingerprint for isGoneFrontPage. And it is
+ * self-healing like the other four — nextLinkHealth clears deadSince on the
+ * first read that gets through, so a store behind a maintenance redirect for a
+ * day costs a fortnight of slow cadence, never a retirement.
+ */
+export function isGoneStorefrontRoot(requestUrl, rootFinalUrl) {
+  const from = parseUrl(requestUrl);
+  const to = parseUrl(rootFinalUrl);
+  if (!from || !to) return false;
+  if (isFrontDoor(from)) return false;
+  // The storefront answered its own root with something of its own. Whatever is
+  // wrong with this listing, the shop is still at this address.
+  if (!isFrontDoor(to)) return false;
+  return bareHost(to) !== bareHost(from);
+}
+
 /**
  * The network-level answers that mean the HOST itself is gone — NXDOMAIN, in
  * each of the three spellings this codebase can be handed one:

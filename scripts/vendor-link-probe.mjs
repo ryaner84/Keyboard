@@ -36,6 +36,7 @@ import {
   isGoneFrontPage,
   isGoneHostError,
   isGoneRedirect,
+  isGoneStorefrontRoot,
 } from "./lib/link-health.mjs";
 import { isIncompleteChainError, retryWithRepairedChain } from "./lib/tls-chain.mjs";
 
@@ -408,16 +409,27 @@ for (const url of urls) {
   // redirect, so only the BODY tells them apart — ask the store for its front
   // page and compare. See isGoneFrontPage in scripts/lib/link-health.mjs.
   let frontPage = "";
+  let frontPageUrl = "";
   try {
     const { res: rootRes, error: rootError } = await fetchOnce(
       `${new URL(finalUrl).origin}/`,
       "follow"
     );
-    if (!rootError && rootRes.ok) frontPage = await rootRes.text();
+    if (!rootError && rootRes.ok) {
+      frontPage = await rootRes.text();
+      frontPageUrl = rootRes.url;
+    }
   } catch {
     frontPage = "";
+    frontPageUrl = "";
   }
   const isFrontPage = isGoneFrontPage(url, finalUrl, body, frontPage);
+  // The same fetch answers a second question, and one no test on THIS page can:
+  // whether the shop is still at this address at all. An expired or sold domain
+  // is answered by whoever holds it now, and the stub it serves carries the
+  // requested path, so the body never matches the root's. See
+  // isGoneStorefrontRoot in scripts/lib/link-health.mjs.
+  const rootMoved = isGoneStorefrontRoot(finalUrl, frontPageUrl);
   // A bootstrap shell is identical to the front page on every route the store
   // serves, so the comparison says nothing about this URL — printed separately
   // because "IDENTICAL to the root" and "not gone" read as a contradiction
@@ -427,12 +439,15 @@ for (const url of urls) {
     `  ROOT PAGE | ${
       !frontPage
         ? "storefront root unreadable — cannot tell a catch-all rewrite from an unknown platform"
-        : shell
-          ? "a client-rendered app SHELL — every route on this store answers with it," +
-            " root included, so a match here is not evidence about this listing"
-          : isFrontPage
-            ? "IDENTICAL to the storefront root — this URL is not a page there"
-            : `differs from the storefront root (${frontPage.length} bytes) — a real page on an unread platform`
+        : rootMoved
+          ? `the storefront's OWN front door now answers from ${new URL(frontPageUrl).host}` +
+            " — a lapsed, parked or sold domain; nothing under it is this shop's page"
+          : shell
+            ? "a client-rendered app SHELL — every route on this store answers with it," +
+              " root included, so a match here is not evidence about this listing"
+            : isFrontPage
+              ? "IDENTICAL to the storefront root — this URL is not a page there"
+              : `differs from the storefront root (${frontPage.length} bytes) — a real page on an unread platform`
     }`
   );
   console.log(
@@ -440,7 +455,10 @@ for (const url of urls) {
       isFrontPage
         ? "DEAD_LINK — the store answers this URL with its own front page (a soft 404);" +
           " relink or retire it, teaching the parser cannot help"
-        : "200 but NOTHING MACHINE-READABLE — the page carries no product markup the parser knows"
+        : rootMoved
+          ? "DEAD_LINK — the storefront's own front door has left this domain;" +
+            " relink or retire it, teaching the parser cannot help"
+          : "200 but NOTHING MACHINE-READABLE — the page carries no product markup the parser knows"
     }`
   );
   // The verdict above splits two repairs that look identical from the row and

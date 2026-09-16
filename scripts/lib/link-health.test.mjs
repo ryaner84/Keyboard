@@ -18,6 +18,7 @@ import {
   APP_SHELL_MAX_TEXT,
   isClientRenderedShell,
   isGoneFrontPage,
+  isGoneStorefrontRoot,
   isGoneHostError,
   isGoneRedirect,
   isUnbuyableDeadLink,
@@ -280,6 +281,76 @@ assert.equal(
   ),
   true,
   "a text-carrying landing page served for a product URL is still gone"
+);
+
+// --- isGoneStorefrontRoot --------------------------------------------------
+// The fifth answer, and the first that is not about the listing at all: the
+// domain stopped being the shop's. Measured on 2026-09-16, vala.supply's
+// registration had lapsed — its root 302s to a parking host while its product
+// paths answer a 522-byte "Loading..." stub — and every one of the other four
+// checks passes that through: 200, no hop on the row's own request, a body that
+// never equals the root's (the stub carries the path), a host that resolves.
+// Four of the vendor's 19 rows happened to be fetched on the hop and were
+// marked gone; the other 16 read as "teach the parser this platform", nightly.
+assert.equal(
+  isGoneStorefrontRoot(
+    "https://vala.supply/collections/current-groupbuys/products/gmk-nimbus",
+    "http://ww19.vala.supply/"
+  ),
+  true,
+  "a storefront whose own front door now answers from another host is gone"
+);
+// The whole rule: a shop that still exists at this address serves its own front
+// page there.
+assert.equal(
+  isGoneStorefrontRoot("https://shop.example/products/x", "https://shop.example/"),
+  false
+);
+// `www.` is not another host, in either direction — a root that redirects
+// between the two spellings of its own name is the commonest hop on the web.
+assert.equal(
+  isGoneStorefrontRoot("https://shop.example/products/x", "https://www.shop.example/"),
+  false,
+  "the www twin of the same name is the same shop"
+);
+assert.equal(
+  isGoneStorefrontRoot("https://www.shop.example/products/x", "https://shop.example/"),
+  false
+);
+// A root that answers with a page of its OWN is not a front door that left.
+// hexkeyboards.com sends its root to /password: a locked shop, and a block may
+// never hide a listing. A locale path (keygem.com → /en-au) reads the same way.
+assert.equal(
+  isGoneStorefrontRoot("https://hexkeyboards.com/products/x", "https://hexkeyboards.com/password"),
+  false,
+  "a storefront password page is a locked shop, not a departed domain"
+);
+assert.equal(
+  isGoneStorefrontRoot("https://shop.example/products/x", "https://other.example/password"),
+  false,
+  "only the front door leaving counts — any other page is somebody else's verdict"
+);
+// Several vendors carry a bare homepage as a listing URL. It cannot be
+// "redirected off" anything, here as in isGoneRedirect and isGoneFrontPage.
+assert.equal(
+  isGoneStorefrontRoot("https://vala.supply/", "http://ww19.vala.supply/"),
+  false,
+  "a row whose own URL is the front door was not redirected off anything"
+);
+// A root that could not be read says nothing: the caller hands back an empty
+// URL, exactly as it hands isGoneFrontPage an empty fingerprint.
+assert.equal(isGoneStorefrontRoot("https://shop.example/products/x", ""), false);
+assert.equal(isGoneStorefrontRoot(null, null), false);
+// www.zfrontier.com is the store this must not touch: a LIVE app-rendered shop
+// whose every route answers with the same contentless shell. Its root is its
+// own, so nothing here fires — the shell is #170's business, not this rule's.
+assert.equal(
+  isGoneStorefrontRoot(
+    "https://www.zfrontier.com/app/mch/1xmjEGd2dQml",
+    "https://www.zfrontier.com/"
+  ),
+  false,
+  "a live single-page storefront still answers its own front door"
 );
 
 // --- nextLinkHealth --------------------------------------------------------
@@ -570,6 +641,10 @@ assert.ok(
   "scrape.py must mirror isGoneFrontPage as is_gone_front_page"
 );
 assert.ok(
+  /def is_gone_storefront_root\(/.test(scrapePy),
+  "scrape.py must mirror isGoneStorefrontRoot as is_gone_storefront_root"
+);
+assert.ok(
   /def page_fingerprint\(/.test(scrapePy),
   "scrape.py must mirror pageFingerprint as page_fingerprint"
 );
@@ -681,11 +756,12 @@ assert.ok(
 // same way for a redirect to the front door, which is why there are four.
 assert.equal(
   (scrapePy.match(/return DEAD_LINK\b/g) ?? []).length,
-  7,
+  8,
   "both of scrape.py's price paths must return DEAD_LINK on 404/410, on a " +
     "redirect to the storefront's front door, AND on a host that no longer " +
-    "resolves — plus the generic reader's fourth answer, a catch-all rewrite " +
-    "that serves the storefront's front page for the URL itself"
+    "resolves — plus the generic reader's two answers read off the storefront " +
+    "ROOT: a catch-all rewrite that serves the front page for the URL itself, " +
+    "and a front door that has left the domain altogether"
 );
 // The front-page comparison lives in the reader that has a PAGE to compare:
 // scrape.py picks one path per URL and the Shopify half reads JSON endpoints,
@@ -696,6 +772,20 @@ assert.equal(
   (scrapePy.match(/(?<!def )is_gone_front_page\(/g) ?? []).length,
   1,
   "scrape.py's generic reader must judge an unreadable 200 for a catch-all rewrite"
+);
+// The same one root fetch answers the second question, so a half that keeps the
+// body comparison and drops this one costs nothing and learns nothing: a parked
+// domain's stub can never equal the root's body, which is why it needed a rule
+// of its own. Both halves must ASK — the failure this file keeps re-finding is
+// a rule that is defined on both paths and consulted on one.
+assert.equal(
+  (scrapePy.match(/(?<!def )is_gone_storefront_root\(/g) ?? []).length,
+  1,
+  "scrape.py's generic reader must judge a front door that has left the domain"
+);
+assert.ok(
+  /root_html, root_url = _front_page_html\(/.test(scrapePy),
+  "scrape.py's root fetch must hand back WHERE it landed, or the check cannot run"
 );
 // The third answer, in both paths. scrape.py picks ONE path per URL, so a half
 // that cannot recognise NXDOMAIN keeps re-fetching a domain that is gone.
@@ -917,6 +1007,33 @@ assert.equal(
   (pricesTs.match(/isGoneHostError\(/g) ?? []).length,
   1,
   "only the human-product-page path may declare a host gone"
+);
+// The two verdicts read off the storefront ROOT, in the half that runs four
+// times a day. They share one cached fetch, so the second costs nothing — and
+// dropping it costs a whole vendor: a parked domain's stub carries the
+// requested path, so its body can never equal the root's and the comparison
+// alone can never see it.
+assert.ok(
+  /if \(isGoneFrontPage\(productUrl, res\.url, html, root\.fingerprint\)\) return DEAD_LINK;/.test(
+    pricesTs
+  ),
+  "fetchJsonLdPrice must compare an unreadable 200 against the storefront root"
+);
+assert.ok(
+  /if \(isGoneStorefrontRoot\(res\.url, root\.url\)\) return DEAD_LINK;/.test(pricesTs),
+  "fetchJsonLdPrice must judge a front door that has left the domain"
+);
+assert.ok(
+  /answer = \{ fingerprint: pageFingerprint\(await res\.text\(\)\), url: res\.url \};/.test(
+    pricesTs
+  ),
+  "the cached front page must carry WHERE it landed, or the check cannot run"
+);
+// Only a root the store actually served may answer either question: a 404 or a
+// block on the root is not evidence about the product URL, in either direction.
+assert.ok(
+  /let answer: FrontPage = \{ fingerprint: "", url: "" \};/.test(pricesTs),
+  "an unreadable root must yield neither a fingerprint nor a URL"
 );
 // The TypeScript half of the memo pair. It lives in fetchWithTimeout, so every
 // fetch a row makes — the Shopify JSON, the page, /meta.json, the storefront
