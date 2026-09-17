@@ -26,6 +26,7 @@
     "test:set-merge": "node scripts/lib/set-merge.test.mjs",
     "test:link-health": "node scripts/lib/link-health.test.mjs",
     "test:catalog-stock": "node scripts/lib/catalog-stock.test.mjs",
+    "test:storefront-catalog": "node scripts/lib/storefront-catalog.test.mjs",
     "test:kit-bounds": "node scripts/lib/kit-bounds.test.mjs",
     "test:currencies": "node scripts/lib/currencies.test.mjs",
     "test:scripts-syntax": "node scripts/lib/scripts-syntax.test.mjs",

@@ -10,6 +10,13 @@ import {
   catalogAvailability,
   catalogStockUpdate,
 } from "../../../scripts/lib/catalog-stock.mjs";
+// And the same for "what does this catalog entry call its title and handle" —
+// Shopify says title/handle, its clones say name/alias, and reading only the
+// first is why a live store's whole catalogue matched nothing.
+import {
+  catalogProductHandle,
+  catalogProductTitle,
+} from "../../../scripts/lib/storefront-catalog.mjs";
 import { SUBKIT_PRODUCT_RE, isSubkitSetName } from "@/lib/kit-variants";
 import { TRACKED_PROFILE_RE } from "@/lib/set-name";
 
@@ -79,9 +86,20 @@ interface CatalogProduct {
 async function fetchGmkCatalogShopify(origin: string): Promise<CatalogProduct[] | null> {
   const found: CatalogProduct[] = [];
   for (let page = 1; page <= MAX_CATALOG_PAGES; page++) {
+    // `title` and `handle` are SHOPIFY's spelling of these two fields, and this
+    // endpoint is not Shopify's alone: a Haravan or Sapo storefront answers the
+    // same /products.json with the same shape and calls them `name` and
+    // `alias`. Reading only Shopify's spelling does not fail loudly — it
+    // returns a full product array in which every title is undefined, matches
+    // nothing, and, because the fetch SUCCEEDED, never falls through to the
+    // HTML crawl below. So the store is not even among the ones that fallback
+    // was written for, and discovery has never linked or relinked one of its
+    // listings. See scripts/lib/storefront-catalog.mjs; mirrored in scrape.py.
     type ShopifyCatalogProduct = {
       title?: string;
+      name?: string;
       handle?: string;
+      alias?: string;
       variants?: Array<{ available?: unknown }>;
     };
     let products: ShopifyCatalogProduct[];
@@ -95,11 +113,16 @@ async function fetchGmkCatalogShopify(origin: string): Promise<CatalogProduct[] 
     }
 
     for (const p of products) {
-      const title = String(p.title ?? "");
-      if (!p.handle || !TRACKED_PROFILE_RE.test(title)) continue;
+      const title = catalogProductTitle(p);
+      const handle = catalogProductHandle(p);
+      if (!handle || !TRACKED_PROFILE_RE.test(title)) continue;
       found.push({
         title,
-        url: `${origin}/products/${p.handle}`,
+        // `/products/<handle>` is the canonical form on BOTH platforms: a
+        // Haravan store links the root-level alias but answers this one too,
+        // and it is the shape the price pass's product-JSON reader recognises
+        // without having to ask the store what platform it is.
+        url: `${origin}/products/${handle}`,
         available: catalogAvailability(p),
       });
     }

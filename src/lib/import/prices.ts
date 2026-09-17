@@ -45,6 +45,12 @@ import {
   HostThrottle,
   interleaveByHost,
 } from "../../../scripts/lib/host-throttle.mjs";
+// "Which URLs could a Shopify-COMPATIBLE product JSON live at" — one
+// definition, mirrored in scrape.py and pinned by test:storefront-catalog.
+import {
+  isRootLevelProductPath,
+  shopifyProductNode,
+} from "../../../scripts/lib/storefront-catalog.mjs";
 
 const BROWSER_HEADERS = {
   "User-Agent":
@@ -420,7 +426,28 @@ async function fetchShopifyPrice(
   vendorCurrency?: string,
   allowSubkits = false
 ): Promise<FetchPriceOutcome> {
-  if (!productUrl.includes("/products/")) return null;
+  // Shopify only ever serves its product JSON under /products/<handle>, which
+  // is why this reader has always keyed off that one substring. Its clones do
+  // not: a Haravan or Sapo storefront serves the identical endpoint under the
+  // product's own ROOT-LEVEL alias, and that is the form the store links
+  // (mokbstore.com/gmk-mv-t3rminal-keycaps). Every such row therefore fell
+  // straight through to the JSON-LD reader — and a Haravan product page
+  // carries only a BreadcrumbList, no Product node and no OpenGraph price — so
+  // it answered NO_PRODUCT_DATA on every run, stayed unpriced, stayed hidden on
+  // its released sets, and the store published nothing at all.
+  //
+  // The root-level door is deliberately narrower than the /products/ one. It
+  // needs a single path segment, so no collection link, WooCommerce product or
+  // catalogue path can reach it; and it needs the origin to answer /meta.json,
+  // which is a Shopify-family signature a WooCommerce or bespoke storefront
+  // does not carry. That answer is cached per ORIGIN, so a store that is not
+  // one of these pays one request per run rather than one per row — the same
+  // cost model as frontPageCache.
+  const rootLevelAlias = !productUrl.includes("/products/");
+  if (rootLevelAlias) {
+    if (!isRootLevelProductPath(productUrl)) return null;
+    if (!(await fetchShopifyCurrency(productUrl))) return null;
+  }
 
   // Strip query/hash, then request the .json variant.
   const pinnedId = pinnedVariantId(productUrl);
@@ -463,8 +490,12 @@ async function fetchShopifyPrice(
           .replace(/\/$/, "");
         if (
           canonicalRes.ok &&
-          canonical.includes("/products/") &&
-          canonical !== clean
+          canonical !== clean &&
+          // A renamed handle on either shape. isRootLevelProductPath is what
+          // keeps a removed product's hop to the storefront ROOT out of this:
+          // "/" has no path segment at all, so it cannot be mistaken for the
+          // product's new address and asked for a nonsensical "<origin>.json".
+          (canonical.includes("/products/") || isRootLevelProductPath(canonical))
         ) {
           clean = canonical;
           currency = await fetchShopifyCurrency(clean);
@@ -481,6 +512,13 @@ async function fetchShopifyPrice(
       }
     }
     if (!res.ok) {
+      // A root-level alias is a GUESS about the platform, never a verdict on
+      // the listing: a 404 here says "this store does not serve that endpoint",
+      // not "the store says this page is gone". `deadSince` is the only signal
+      // allowed to take a listing off the site, so only the HUMAN product page
+      // may write it — and the JSON-LD reader below is what fetches that page.
+      // Same reasoning as the isGoneRedirect fall-through a few lines down.
+      if (rootLevelAlias) return null;
       // Dead-link audit: a removed product (even after canonical-handle retry)
       // returns 404/410. Clear the stale price instead of preserving it AND
       // record that the page is gone; any other failure (403 block, 5xx,
@@ -494,19 +532,27 @@ async function fetchShopifyPrice(
     // listing gone: fall through to the JSON-LD reader, which fetches that page
     // and does (isGoneRedirect there).
     if (isGoneRedirect(`${clean}.json`, res.url)) return null;
-    const data = (await res.json()) as {
-      product?: {
+    interface ShopifyProductNode {
+      title?: string;
+      // Haravan/Sapo's spelling of the same field. Missing it does not fail
+      // loudly — productTitle falls back to "" and the subkit product-title
+      // guard below silently stops running, so a novelty-only product would be
+      // priced as the set's base kit.
+      name?: string;
+      variants?: Array<{
+        id?: number | string;
         title?: string;
-        variants?: Array<{
-          id?: number | string;
-          title?: string;
-          price?: string | number;
-          compare_at_price?: string | number | null;
-          available?: boolean;
-        }>;
-      };
-    };
-    const rawVariants = data.product?.variants ?? [];
+        price?: string | number;
+        compare_at_price?: string | number | null;
+        available?: boolean;
+      }>;
+    }
+    // `{"product": …}` on Shopify, and on a clone's /products/<alias>.json —
+    // but a clone was observed answering its root-level <alias>.json both
+    // wrapped and bare across two probes of the same URL, so the shape is
+    // recognised rather than assumed. See scripts/lib/storefront-catalog.mjs.
+    const product = shopifyProductNode(await res.json()) as ShopifyProductNode | null;
+    const rawVariants = product?.variants ?? [];
     const variants = rawVariants
       .map((v) => {
         // compare_at_price is often populated at the SAME value as price on
@@ -530,7 +576,7 @@ async function fetchShopifyPrice(
     // guard such a product's lone variant classifies OTHERS and gets stored
     // as the set's base price. A vendor-pinned ?variant= link stays ground
     // truth and bypasses the guard. Mirrors the scraper's title guard.
-    const productTitle = String(data.product?.title ?? "");
+    const productTitle = String(product?.title ?? product?.name ?? "");
     // …unless the SET being priced is itself that subkit. dcs.wiki catalogs
     // "DCS After School 1992 40s Kit" as a set, so the only product that can
     // ever be its listing is titled exactly like the thing this guard rejects:

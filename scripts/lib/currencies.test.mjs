@@ -52,6 +52,24 @@ assert.ok(
 // The window is still a window: a whole keyboard in rupiah is what it rejects.
 assert.ok(20_000_000 > KIT_BOUNDS.IDR.max, "an Rp 20m parse error is still refused");
 
+// ── And again, one store later, for a shop that was unreadable twice ───────
+//
+// mokbstore.com (Mokb Store, VN) quotes VND: its GMK MV Expo base kit is
+// 3,060,000 and its MV T3RMINAL base 3,180,000 (≈ USD 116 and 121 at 26,300).
+// Registering the code was necessary and not sufficient — the store is a
+// Haravan shop whose product JSON no parser path was reaching either (see
+// scripts/lib/storefront-catalog.mjs) — which is the general shape of a vendor
+// that publishes nothing: every rule between the store and the set page has to
+// let it through, and each of them is silent on its own.
+assert.ok(isSupportedCurrency("VND"), "VND is a currency the site can price in");
+assert.ok(KIT_BOUNDS.VND, "VND needs a plausibility window — a 26,000:1 currency most of all");
+assert.ok(
+  3_180_000 > KIT_BOUNDS.VND.min && 3_180_000 <= KIT_BOUNDS.VND.max,
+  "mokbstore's ₫3,180,000 base kit (≈ USD 121) must fall inside the window"
+);
+assert.ok(30_000_000 > KIT_BOUNDS.VND.max, "a ₫30m parse error is still refused");
+assert.equal(currencyHomeCountry("VND"), "VN");
+
 // A blank/unknown code is NOT a refusal — the caller's fallback (the vendor
 // row's own currency) answers that, and refusing it here would turn every shop
 // that blocks /meta.json into a silent one.

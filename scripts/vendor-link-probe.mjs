@@ -39,6 +39,12 @@ import {
   isGoneStorefrontRoot,
 } from "./lib/link-health.mjs";
 import { isIncompleteChainError, retryWithRepairedChain } from "./lib/tls-chain.mjs";
+// The price passes' own rules for reading a Shopify-COMPATIBLE product JSON, so
+// the probe cannot report a shape they would not accept.
+import {
+  catalogProductTitle,
+  shopifyProductNode,
+} from "./lib/storefront-catalog.mjs";
 
 // Hosts this probe had to complete a certificate chain for, so the report can
 // say that the store was only readable because the AIA repair ran — the
@@ -254,13 +260,14 @@ function shopifyCompatibleJsonUrls(url) {
 }
 
 /**
- * The product node inside a Shopify-compatible .json response, or null.
+ * What a Shopify-compatible .json response says, reported rather than
+ * normalised away.
  *
- * Two shapes and two vocabularies, reported rather than normalised away:
- * Shopify wraps the product in `{"product": …}` and names it `title`; a
- * Haravan/Sapo root-level alias answers with the bare object and names it
- * `name`. `variants` is the one key both agree on, so it is what identifies a
- * product node at all.
+ * The unwrapping and the field names are the price passes' own rules
+ * (scripts/lib/storefront-catalog.mjs) so the probe cannot disagree with them
+ * — but WHICH shape and WHICH spelling came back is the fact "teach the parser
+ * this platform" needs, and normalising it away is what made a Haravan store
+ * indistinguishable from an unreadable one.
  */
 function productNodeOf(text) {
   let data;
@@ -269,11 +276,20 @@ function productNodeOf(text) {
   } catch {
     return null;
   }
-  const wrapped = !!data && typeof data === "object" && !!data.product;
-  const node = wrapped ? data.product : data;
-  if (!node || typeof node !== "object" || !Array.isArray(node.variants)) return null;
-  const titleKey = typeof node.title === "string" ? "title" : typeof node.name === "string" ? "name" : "(neither)";
-  return { wrapped, titleKey, title: String(node.title ?? node.name ?? ""), variants: node.variants };
+  const node = shopifyProductNode(data);
+  if (!node) return null;
+  const titleKey =
+    typeof node.title === "string"
+      ? "title"
+      : typeof node.name === "string"
+        ? "name"
+        : "(neither)";
+  return {
+    wrapped: node !== data,
+    titleKey,
+    title: catalogProductTitle(node),
+    variants: node.variants,
+  };
 }
 
 for (const url of urls) {

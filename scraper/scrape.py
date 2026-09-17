@@ -607,6 +607,9 @@ _KIT_BOUNDS = {
     # matters most on a currency this large: absent an entry the price is
     # unbounded above, and at 16,500:1 that is no backstop at all.
     "IDR": (0, 6_600_000),
+    # Vietnamese Dong — used by Mokb Store (VN). 1 USD ≈ 26,300 VND; its GMK
+    # base kits are 3,060,000 and 3,180,000 (≈ USD 116 and 121).
+    "VND": (0, 10_600_000),
 }
 
 # Currencies the site's Currency table can convert (db-setup ensureCurrencies).
@@ -622,7 +625,7 @@ _KIT_BOUNDS = {
 _SUPPORTED_CURRENCIES = {
     "USD", "SGD", "EUR", "GBP", "CAD", "AUD", "JPY", "CNY", "KRW", "MYR",
     "THB", "NZD", "HKD", "TWD", "SEK", "NOK", "DKK", "CHF", "PLN",
-    "INR", "ARS", "CLP", "IDR",
+    "INR", "ARS", "CLP", "IDR", "VND",
 }
 
 
@@ -1224,7 +1227,7 @@ _CURRENCY_HOME_COUNTRY = {
     "AUD": "AU", "JPY": "JP", "KRW": "KR", "CNY": "CN", "HKD": "HK",
     "THB": "TH", "TWD": "TW", "MYR": "MY", "NZD": "NZ", "SEK": "SE",
     "NOK": "NO", "DKK": "DK", "CHF": "CH", "PLN": "PL", "INR": "IN",
-    "ARS": "AR", "CLP": "CL", "IDR": "ID",
+    "ARS": "AR", "CLP": "CL", "IDR": "ID", "VND": "VN",
 }
 
 
@@ -1516,7 +1519,14 @@ def shopify_price(
     Playwright browser remains the fallback for stores that require clearance
     cookies or JavaScript execution.
     """
-    if "/products/" not in product_url:
+    # Shopify only ever serves its product JSON under /products/<handle>. Its
+    # clones serve the identical endpoint under the product's own ROOT-LEVEL
+    # alias and link that form (mokbstore.com/gmk-mv-t3rminal-keycaps), so the
+    # caller may route one of those here too — see
+    # shopify_compatible_root_alias, which is what decided it. Mirrors the
+    # `rootLevelAlias` gate in prices.ts.
+    root_level_alias = "/products/" not in product_url
+    if root_level_alias and not is_root_level_product_path(product_url):
         return None
     pinned_id = pinned_variant_id(product_url)
     clean = product_url.split("?")[0].split("#")[0].rstrip("/")
@@ -1549,7 +1559,11 @@ def shopify_price(
         nav_status = response.status if response is not None else None
         nav_final_url = page.url
         final_url = page.url.split("?")[0].split("#")[0].rstrip("/")
-        if "/products/" in final_url:
+        # A renamed handle on either shape. is_root_level_product_path is what
+        # keeps a removed product's hop to the storefront ROOT out of this: "/"
+        # has no path segment at all, so it can never be mistaken for the
+        # product's new address.
+        if "/products/" in final_url or is_root_level_product_path(final_url):
             clean = final_url
         browser_loaded = True
 
@@ -1587,10 +1601,20 @@ def shopify_price(
         # public Shopify APIs. If it fails, Playwright navigates once, follows a
         # renamed handle, and all remaining browser fetches reuse that page.
         data = fetched_json(clean + ".json", browser_fallback=False)
-        if not data or "product" not in data:
+        product = shopify_product_node(data)
+        if product is None:
             ensure_browser()
             data = browser_json(clean + ".json")
-        if not data or "product" not in data:
+            product = shopify_product_node(data)
+        if product is None:
+            # A root-level alias is a GUESS about the platform, never a verdict
+            # on the listing: no product JSON here says "this store does not
+            # serve that endpoint", not "the store says the page is gone".
+            # deadSince is the only signal allowed to take a listing off the
+            # site, and this door is not entitled to write it — the caller falls
+            # back to generic_price, which reads the human page.
+            if root_level_alias:
+                return None
             # Dead-link audit: a removed product page returns 404/410. That's a
             # definitively gone listing, so CLEAR the stale price (DEAD_LINK)
             # instead of preserving it the way we do for a transient block.
@@ -1628,7 +1652,11 @@ def shopify_price(
         # into choose_kit_variant alone, allow_subkits could never reach a
         # SHOPIFY store at all — this returns above it — which is why the
         # docstring's own example, Saber Keebs, still priced at nothing.
-        product_title = str(data["product"].get("title") or "")
+        # title/name: Shopify's spelling and its clones'. Missing the second
+        # does not fail loudly — the title comes back "" and the subkit guard
+        # below silently stops running, so a novelties-only product would be
+        # stored as the set's base price.
+        product_title = catalog_product_title(product)
         if not pinned_id and product_title and not allow_subkits:
             title_category = classify_variant(product_title)
             if (
@@ -1642,7 +1670,7 @@ def shopify_price(
                 log(f"  product is a subkit/accessory — clearing ({product_url})")
                 return NO_BASE_KIT
 
-        variants = _parse_shopify_variants(data["product"].get("variants") or [])
+        variants = _parse_shopify_variants(product.get("variants") or [])
         chosen = _pick_variant(variants, pinned_id, allow_subkits)
         if chosen is None:
             # We read the product fine but it has no base candidate (only
@@ -1654,7 +1682,7 @@ def shopify_price(
         # product.json omits stock on some themes; product.js exposes an
         # explicit `available` flag for the same variant IDs.
         availability_by_id: dict[str, bool] = {}
-        for variant in data["product"].get("variants") or []:
+        for variant in product.get("variants") or []:
             available = variant.get("available")
             if isinstance(available, bool):
                 availability_by_id[str(variant.get("id") or "")] = available
@@ -1863,9 +1891,10 @@ def shopify_price(
         }
     except Exception as e:  # noqa: BLE001
         # A host that no longer resolves is the store saying "gone" with no HTTP
-        # answer at all. This half has no generic fallback to defer to — the
-        # caller picks ONE path per URL — so it reads the verdict off the
-        # navigation it just attempted, which is the human product page.
+        # answer at all. This half has no generic fallback to defer to for a
+        # /products/ URL — the caller picks ONE path for those — so it reads the
+        # verdict off the navigation it just attempted, which is the human
+        # product page.
         if is_gone_host_error(e):
             log(f"  dead link (host does not resolve) — clearing price ({product_url})")
             return DEAD_LINK
@@ -3877,6 +3906,113 @@ TRACKED_PROFILE_RE = re.compile(
 )
 
 
+# ── Shopify-compatible storefront vocabulary ────────────────────────────────
+# Mirror of scripts/lib/storefront-catalog.mjs — keep in sync;
+# `npm run test:storefront-catalog` fails if they drift.
+#
+# /products.json, /products/<handle>.json and /meta.json read as "the Shopify
+# endpoints" because four fifths of the roster is Shopify. They are not.
+# Haravan and Sapo — the clones most Vietnamese storefronts run on — serve all
+# three with the same shape, but spell a product's title `name` and its handle
+# `alias`, and link a canonical product URL with no /products/ segment at all.
+# Both differences are exactly what this codebase keys off, so such a store was
+# invisible twice over and silent about it both times.
+_NON_PRODUCT_ROOT_SEGMENTS = {
+    "account",
+    "apps",
+    "blogs",
+    "cart",
+    "checkout",
+    "collections",
+    "pages",
+    "password",
+    "policies",
+    "products",
+    "search",
+    "tools",
+}
+
+_ROOT_SEGMENT_EXTENSION_RE = re.compile(r"\.[a-z0-9]{2,5}$", re.IGNORECASE)
+
+
+def shopify_product_node(data) -> dict | None:
+    """The product node inside a Shopify-compatible .json response, or None.
+
+    Mirror of shopifyProductNode in scripts/lib/storefront-catalog.mjs.
+
+    Shopify wraps it: {"product": {…}}. A clone does too on the
+    /products/<alias>.json form — and was observed answering the root-level
+    <alias>.json form BOTH ways across two probes of the same URL on the same
+    day, which is reason enough not to bet on either reading. `variants` is the
+    one key every shape agrees on, so it is what identifies a product node at
+    all; a body with neither is not product JSON (a password page answers 200
+    with HTML for .json too).
+
+    Unwrapping is all this does. The FIELDS inside still disagree between
+    platforms — that is what catalog_product_title/_handle are for.
+    """
+    if not isinstance(data, dict):
+        return None
+    wrapped = data.get("product")
+    if isinstance(wrapped, dict) and isinstance(wrapped.get("variants"), list):
+        return wrapped
+    return data if isinstance(data.get("variants"), list) else None
+
+
+def catalog_product_title(product: dict) -> str:
+    """A catalog/product entry's display title, whichever platform wrote it.
+
+    Shopify says `title`, Haravan and Sapo say `name`. Shopify wins when both
+    are present: the platform that owns the endpoint owns the spelling.
+    """
+    if not isinstance(product, dict):
+        return ""
+    title = product.get("title")
+    if not isinstance(title, str):
+        title = product.get("name")
+    return title if isinstance(title, str) else ""
+
+
+def catalog_product_handle(product: dict) -> str:
+    """A catalog/product entry's URL handle: Shopify `handle`, clones `alias`."""
+    if not isinstance(product, dict):
+        return ""
+    handle = product.get("handle")
+    if not isinstance(handle, str):
+        handle = product.get("alias")
+    return handle if isinstance(handle, str) else ""
+
+
+def is_root_level_product_path(url: str) -> bool:
+    """Is this URL a ROOT-LEVEL product alias — the shape a Shopify clone links?
+
+    Exactly one path segment, and not one of the storefront's own reserved
+    roots. The narrowness IS the safety: a collection link
+    (rheset.mx/collections/gmk-frost-witch), a WooCommerce product
+    (sandkeys.me/product/gmk-black-snail/) and a catalogue path
+    (mykeyboard.eu/catalogue/category/group-buys/gmk-8008_173/) all carry more
+    than one segment, so none of them can reach the product-JSON reader by this
+    door and be answered "gone" for a .json the store never served.
+
+    It says nothing on its own about the platform — mokbstore.com/about passes
+    it too. The caller asks /meta.json for that, and treats a miss as "this
+    store does not serve that endpoint", never as a verdict on the listing.
+    """
+    try:
+        path = urllib.parse.urlsplit(url).path
+    except Exception:  # noqa: BLE001
+        return False
+    segments = [seg for seg in path.split("/") if seg]
+    if len(segments) != 1:
+        return False
+    segment = segments[0]
+    # /products.json, /sitemap.xml, /index.php — an endpoint or a script, never
+    # a product alias, and appending ".json" to one is nonsense.
+    if _ROOT_SEGMENT_EXTENSION_RE.search(segment):
+        return False
+    return segment.lower() not in _NON_PRODUCT_ROOT_SEGMENTS
+
+
 def catalog_availability(product: dict) -> bool | None:
     """One catalog entry's availability, or None when the entry does not say.
 
@@ -3938,17 +4074,27 @@ def catalog_stock_update(availability: bool | None) -> bool | None:
 
 def tracked_products_from_catalog(data: dict, origin: str) -> list[dict]:
     """Extract [{title, url, available, price}] for every tracked-profile product
-    (GMK / DCS …) in a Shopify products.json page. Other profiles and
+    (GMK / DCS …) in a Shopify-compatible products.json page. Other profiles and
     handle-less products are dropped.
 
     `available` and `price` are carried so pick_store_listing() can choose
     between a store's several products for the same set; both are best-effort,
     since a feed may omit either.
+
+    Title and handle are read through catalog_product_title/_handle rather than
+    off `title`/`handle` directly: that is SHOPIFY's spelling of the two fields,
+    and a Haravan or Sapo storefront serves the identical endpoint calling them
+    `name` and `alias`. Reading only Shopify's spelling returns a full product
+    array in which every title is empty and nothing matches — and since the
+    fetch SUCCEEDED, html_catalog never runs either, so the store has never had
+    a listing linked or relinked. Mirror of fetchGmkCatalogShopify in
+    src/lib/import/discovery.ts and of scripts/lib/storefront-catalog.mjs;
+    npm run test:storefront-catalog fails if the halves drift.
     """
     out: list[dict] = []
     for p in (data or {}).get("products", []) or []:
-        title = str(p.get("title") or "")
-        handle = p.get("handle")
+        title = catalog_product_title(p)
+        handle = catalog_product_handle(p)
         if not handle or not TRACKED_PROFILE_RE.search(title):
             continue
         variants = p.get("variants") or []
@@ -3961,6 +4107,10 @@ def tracked_products_from_catalog(data: dict, origin: str) -> list[dict]:
                 continue
         out.append({
             "title": title,
+            # /products/<handle> is the canonical form on BOTH platforms: a
+            # Haravan store links the root-level alias but answers this one
+            # too, and it is the shape shopify_price recognises without having
+            # to ask the store what platform it is.
             "url": f"{origin}/products/{handle}",
             "available": available,
             "price": price,
@@ -4641,6 +4791,59 @@ def _front_page_html(
             final_url = ""
     _FRONT_PAGE_CACHE[origin] = (body, final_url)
     return (body, final_url)
+
+
+# Origins that answer /meta.json — the Shopify-family signature, cached per RUN.
+#
+# Mirror of the `rootLevelAlias` gate in refreshPrices (src/lib/import/prices.ts)
+# and of scripts/lib/storefront-catalog.mjs. It exists for one question only:
+# a row whose URL carries no /products/ segment is normally a WooCommerce or
+# bespoke storefront and belongs to generic_price, but it can also be a Haravan
+# or Sapo shop, which serves the whole Shopify product-JSON API under the
+# product's own root-level alias. /meta.json is what tells those apart, and a
+# WooCommerce or bespoke storefront does not answer it.
+#
+# Cached per ORIGIN and per run, exactly like _FRONT_PAGE_CACHE and
+# _UNRESOLVED_HOSTS: one request per store per run, never one per row, which is
+# what makes asking affordable inside a time-boxed pass at all.
+_SHOPIFY_COMPATIBLE_ORIGINS: dict[str, bool] = {}
+
+
+def shopify_compatible_root_alias(
+    product_url: str, scrapling: ScraplingClient | None
+) -> bool:
+    """Is this a root-level product alias on a Shopify-compatible storefront?
+
+    Two questions, cheapest first. The path has to be a single non-reserved
+    segment (is_root_level_product_path), which every collection link,
+    WooCommerce product and catalogue path in the roster already fails — so
+    almost no row reaches the request below. Only then is the origin asked for
+    /meta.json.
+
+    Deliberately answers False when it cannot tell — no browser is opened for
+    this, because the cost of being wrong is only that the row keeps today's
+    behaviour and falls to generic_price.
+    """
+    if not is_root_level_product_path(product_url):
+        return False
+    try:
+        parts = urllib.parse.urlsplit(product_url)
+    except ValueError:
+        return False
+    if not parts.scheme or not parts.netloc:
+        return False
+    origin = f"{parts.scheme}://{parts.netloc}"
+    if origin in _SHOPIFY_COMPATIBLE_ORIGINS:
+        return _SHOPIFY_COMPATIBLE_ORIGINS[origin]
+    compatible = False
+    if scrapling is not None and scrapling.available:
+        meta = scrapling.get_json(
+            origin + "/meta.json", headers={"Accept": "application/json"}
+        )
+        currency = meta.get("currency") if isinstance(meta, dict) else None
+        compatible = isinstance(currency, str) and bool(currency.strip())
+    _SHOPIFY_COMPATIBLE_ORIGINS[origin] = compatible
+    return compatible
 
 
 def generic_price(
@@ -5469,8 +5672,11 @@ def run_prices(
 ) -> dict:
     stats = {"attempted": 0, "updated": 0, "failed": 0, "dead": 0,
              "refused": 0, "unparsed": 0, "throttled_s": 0.0}
-    # Per RUN, never across runs: a domain that comes back must be retried.
+    # Per RUN, never across runs: a domain that comes back must be retried, and
+    # a store that adds (or loses) a Shopify-compatible /meta.json must be seen
+    # to have done so.
     _UNRESOLVED_HOSTS.clear()
+    _SHOPIFY_COMPATIBLE_ORIGINS.clear()
     ensure_link_health_columns(conn)
     candidates = HostThrottle.interleave(fetch_price_candidates(conn))
     log(f"Price pass: {len(candidates)} vendor listing(s) to check.")
@@ -5497,10 +5703,19 @@ def run_prices(
                 conn.commit()
                 stats["failed"] += 1
                 continue
-            # Shopify exposes /products/<handle>.json; everything else (Latamkeys
-            # /productos/, STACKS /store/) is a generic WooCommerce storefront.
+            # Shopify exposes /products/<handle>.json; everything else
+            # (Latamkeys /productos/, STACKS /store/) is a generic WooCommerce
+            # storefront — EXCEPT a Shopify clone, which serves the same product
+            # JSON under the product's own root-level alias and links that form.
+            # shopify_compatible_root_alias is the one question that separates
+            # them, asked once per origin per run.
+            root_alias = "/products/" not in product_url and (
+                shopify_compatible_root_alias(product_url, scrapling)
+            )
             price_fn = (
-                shopify_price if "/products/" in product_url else generic_price
+                shopify_price
+                if "/products/" in product_url or root_alias
+                else generic_price
             )
             stats["throttled_s"] += throttle.wait(product_url)
             # A set that IS a subkit (dcs.wiki catalogs "…40s kit", "10U
@@ -5519,6 +5734,21 @@ def run_prices(
                 scrapling,
                 allow_subkits,
             )
+            # The root-level door is a GUESS about the platform, so a miss there
+            # must not cost the row the diagnosis it had: fall back to the
+            # generic reader, exactly as fetchVendorPrice does in prices.ts.
+            # Without this the nightly would file a page the JSON-LD reader
+            # understands as UNREADABLE — "the store never answered" — instead
+            # of the NO_PRODUCT_DATA that names the real repair. A /products/
+            # URL keeps today's single-path behaviour.
+            if result is None and root_alias:
+                result = generic_price(
+                    page,
+                    product_url,
+                    vk.get("vendor_currency"),
+                    scrapling,
+                    allow_subkits,
+                )
             outcome = (
                 "GONE" if result == DEAD_LINK
                 else "NO_BASE_KIT" if result == NO_BASE_KIT

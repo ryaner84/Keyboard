@@ -105,6 +105,13 @@ export const CURRENCIES = Object.freeze({
   // Mechaland (ID), whose two readable listings were refused on every run
   // until this row existed. See the note at the top of this file.
   IDR: Object.freeze({ name: "Indonesian Rupiah", symbol: "Rp", homeCountry: "ID", placeholderRate: 16500 }),
+  // Mokb Store (VN), a Haravan storefront whose /meta.json says VND. The shop
+  // was unreadable for a second reason as well (see
+  // scripts/lib/storefront-catalog.mjs), so registering the currency alone
+  // would not have published a thing — which is the point: a store publishes
+  // nothing until EVERY rule between it and the set page lets it through, and
+  // each of them is silent on its own.
+  VND: Object.freeze({ name: "Vietnamese Dong", symbol: "₫", homeCountry: "VN", placeholderRate: 26300 }),
 });
 
 /** Every registered code, in registration order. */
