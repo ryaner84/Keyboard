@@ -227,6 +227,55 @@ function ogPriceOf(html) {
   return `${amount[1]}${currency ? ` ${currency[1]}` : ""}`;
 }
 
+/**
+ * Every URL a Shopify-COMPATIBLE product JSON could live at for this page.
+ *
+ * Shopify itself only ever serves it under /products/<handle>, which is why
+ * both price passes gate on that substring. Its clones do not: a Haravan or
+ * Sapo storefront serves the identical endpoint under the product's own
+ * root-level alias (mokbstore.com/gmk-mv-expo-keycaps.json) AND under
+ * /products/<alias>.json, and links the first. Asking only the /products/ form
+ * answers "not a Shopify product URL" about a store that hands over complete
+ * product JSON, so both are tried here.
+ */
+function shopifyCompatibleJsonUrls(url) {
+  const bare = url.split("?")[0].split("#")[0].replace(/\/$/, "");
+  if (/\.json$/i.test(bare)) return []; // already the endpoint — nothing to append
+  const canonical = shopifyProductUrl(bare);
+  if (canonical) return [`${canonical}.json`];
+  const slug = bare.split("/").pop();
+  const candidates = [`${bare}.json`];
+  try {
+    if (slug) candidates.push(`${new URL(bare).origin}/products/${slug}.json`);
+  } catch {
+    // unparseable URL — the bare candidate is all there is
+  }
+  return candidates;
+}
+
+/**
+ * The product node inside a Shopify-compatible .json response, or null.
+ *
+ * Two shapes and two vocabularies, reported rather than normalised away:
+ * Shopify wraps the product in `{"product": …}` and names it `title`; a
+ * Haravan/Sapo root-level alias answers with the bare object and names it
+ * `name`. `variants` is the one key both agree on, so it is what identifies a
+ * product node at all.
+ */
+function productNodeOf(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const wrapped = !!data && typeof data === "object" && !!data.product;
+  const node = wrapped ? data.product : data;
+  if (!node || typeof node !== "object" || !Array.isArray(node.variants)) return null;
+  const titleKey = typeof node.title === "string" ? "title" : typeof node.name === "string" ? "name" : "(neither)";
+  return { wrapped, titleKey, title: String(node.title ?? node.name ?? ""), variants: node.variants };
+}
+
 for (const url of urls) {
   console.log(`\n=== PROBE ${url}`);
   const { chain, res, error, err, finalUrl } = await fetchChain(url);
@@ -341,37 +390,65 @@ for (const url of urls) {
 
   // Shopify: the platform four fifths of the roster runs, and the only one that
   // hands over per-variant data.
-  const canonical = shopifyProductUrl(finalUrl);
-  let shopify = "no /products/ path — not a Shopify product URL";
-  if (canonical) {
-    const { res: jsonRes, error: jsonError, err: jsonErr } = await fetchOnce(
-      `${canonical}.json`,
-      "follow"
-    );
+  //
+  // The ENDPOINT is not Shopify's alone, and reading it as if it were is how a
+  // live store came to be reported as an unreadable platform. Haravan and Sapo
+  // — the Shopify clones most Vietnamese storefronts run on — serve the same
+  // /products.json, /products/<handle>.json and /meta.json, but they spell a
+  // product's title `name` and its handle `alias`, and their canonical product
+  // URL carries no /products/ segment at all
+  // (mokbstore.com/gmk-mv-expo-keycaps). So the probe asks BOTH candidate URLs
+  // and reads BOTH spellings, and prints which shape came back — the one fact
+  // "teach the parser this platform" actually needs.
+  const jsonCandidates = shopifyCompatibleJsonUrls(finalUrl);
+  let shopify =
+    jsonCandidates.length === 0
+      ? "no candidate product JSON URL (this URL is already a .json)"
+      : "";
+  let productNode = null;
+  let productJsonUrl = null;
+  for (const candidate of jsonCandidates) {
+    const { res: jsonRes, error: jsonError, err: jsonErr } = await fetchOnce(candidate, "follow");
     // The cause chain, for the same reason the transport failure above prints
     // it: "fetch failed" is the one message fetch() gives for a refused
     // connection, a broken certificate and a reset alike, and the product page
     // succeeding while its own .json does not is a difference worth naming.
-    if (jsonError) shopify = `${canonical}.json — ${jsonError}${causeChain(jsonErr)}`;
-    else if (!jsonRes.ok) shopify = `${canonical}.json — ${jsonRes.status}`;
-    else {
-      const text = await jsonRes.text();
-      let variants = null;
-      try {
-        variants = JSON.parse(text)?.product?.variants?.length ?? null;
-      } catch {
-        // A storefront password page answers 200 with HTML for .json too.
-        variants = null;
-      }
-      shopify =
-        variants === null
-          ? `${canonical}.json — 200 but not product JSON (password page / proxy?)`
-          : `${canonical}.json — 200, ${variants} variant(s)`;
+    if (jsonError) {
+      shopify = `${candidate} — ${jsonError}${causeChain(jsonErr)}`;
+      continue;
     }
+    if (!jsonRes.ok) {
+      shopify = `${candidate} — ${jsonRes.status}`;
+      continue;
+    }
+    const node = productNodeOf(await jsonRes.text());
+    if (!node) {
+      // A storefront password page answers 200 with HTML for .json too.
+      shopify = `${candidate} — 200 but not product JSON (password page / proxy?)`;
+      continue;
+    }
+    productNode = node;
+    productJsonUrl = candidate;
+    shopify =
+      `${candidate} — 200, ${node.variants.length} variant(s)` +
+      ` | ${node.wrapped ? "{product:{…}}" : "bare product object"}` +
+      ` | title key "${node.titleKey}"`;
+    break;
   }
   console.log(`  SHOPIFY   | ${shopify}`);
-  if (canonical) {
-    const { currency, note } = await shopCurrency(canonical);
+  if (productNode) {
+    console.log(`  PRODUCT   | ${productNode.title || "(untitled)"}`);
+    for (const variant of productNode.variants.slice(0, 12)) {
+      console.log(
+        `  VARIANT   | ${JSON.stringify(String(variant.title ?? variant.name ?? ""))}` +
+          ` | price=${variant.price}` +
+          ` | available=${variant.available}` +
+          ` | qty=${variant.inventory_quantity}`
+      );
+    }
+  }
+  if (productJsonUrl) {
+    const { currency, note } = await shopCurrency(productJsonUrl);
     console.log(
       `  SHOP CCY  | ${
         currency
