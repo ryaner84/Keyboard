@@ -115,6 +115,14 @@ jobs:
         if: always()
         run: npm run test:catalog-stock
 
+      # Also reads scrape.py, discovery.ts and prices.ts: /products.json and
+      # /products/<handle>.json are not Shopify's alone, and reading only
+      # Shopify's field names returns a full catalogue that matches nothing —
+      # silently, and in both halves of discovery and both price passes.
+      - name: storefront-catalog
+        if: always()
+        run: npm run test:storefront-catalog
+
       # Reads scrape.py, prices.ts and db-setup.mjs: the base-kit price window
       # decides what the site is willing to publish, and drift between the
       # producers and the deploy purge is silent both ways — too low a ceiling

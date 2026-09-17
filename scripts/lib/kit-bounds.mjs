@@ -112,6 +112,12 @@ export const KIT_BOUNDS = Object.freeze({
   // matters most on a currency this large: absent an entry the price is
   // unbounded above, and at 16,500:1 that is no backstop at all.
   IDR: Object.freeze({ min: 0, max: 6_600_000 }),
+  // Vietnamese Dong — used by Mokb Store (VN). 1 USD ≈ 26,300 VND, so the
+  // store's GMK base kits (3,060,000 and 3,180,000 ≈ USD 116 and 121) sit well
+  // inside a USD-400 window. Large-denomination currencies are where an absent
+  // entry hurts most: unbounded above at 26,000:1, a whole keyboard reads as a
+  // keycap kit.
+  VND: Object.freeze({ min: 0, max: 10_600_000 }),
 });
 
 /**

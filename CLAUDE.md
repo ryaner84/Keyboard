@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Twenty-one suites, all of which should pass before pushing:
+Twenty-two suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -46,6 +46,7 @@ npm run test:vendor-urls
 npm run test:set-merge
 npm run test:link-health
 npm run test:catalog-stock
+npm run test:storefront-catalog
 npm run test:kit-bounds
 npm run test:currencies
 npm run test:scripts-syntax
@@ -1157,6 +1158,41 @@ boolean test is what separates them (in Python that means excluding `int`, since
 `isinstance(True, int)` is true). Written twice — `scripts/lib/catalog-stock.mjs`
 and `catalog_availability` in `scrape.py` — and `test:catalog-stock` fails if
 they disagree.
+
+**And the endpoint that rule reads is not Shopify's alone.** `/products.json`,
+`/products/<handle>.json` and `/meta.json` are called "the Shopify endpoints"
+throughout this codebase, and with four fifths of the roster on Shopify that
+reads as true. Haravan and Sapo — the clones most Vietnamese storefronts run on
+— serve all three, wrap the product in the same `{"product": …}` and give every
+variant the same `title`/`price`/`available`. They differ in exactly two places,
+and both are the ones this codebase keys off: a product's title is `name` and
+its handle is `alias`, and the canonical product URL carries no `/products/`
+segment at all (`mokbstore.com/gmk-mv-t3rminal-keycaps`). So such a store is
+invisible twice over and silent about it both times. Discovery fetches
+`/products.json`, gets a 200 and a full product array, reads `title` off every
+entry, finds undefined and matches nothing — and because the fetch SUCCEEDED it
+never falls through to `html_catalog`, so the store is not even among the ones
+that fallback was written for and has never had a listing linked OR relinked.
+Both price passes gate their product-JSON reader on the literal substring
+`/products/`, so every row falls to the JSON-LD reader — and a Haravan product
+page carries only a `BreadcrumbList`, no `Product` node and no OpenGraph price.
+`NO_PRODUCT_DATA`, for ever, on a live shop whose `.json` answers 200 with a
+variant the picker names "Base" on the first try. Mokb Store's three listings
+are all it has, so the vendor published NOTHING, and the audit named it under
+"teach the parser or retire it". `scripts/lib/storefront-catalog.mjs` is the one
+place the vocabulary is written (`scrape.py` mirrors it) and
+`test:storefront-catalog` fails if the halves drift or if a caller re-spells
+`p.title` again. The root-level door is deliberately narrower than the
+`/products/` one — ONE path segment, so no collection link, WooCommerce product
+or catalogue path can reach it, and the origin must answer `/meta.json`, cached
+per origin per run like `frontPageCache` — and it may never answer `DEAD_LINK`:
+a miss there means "this store does not serve that endpoint", never "the store
+says the page is gone", and `deadSince` is the only signal allowed to take a
+listing off the site. The currency was the third rule in the same chain: the
+shop quotes **VND**, which was in none of the registries, so even once read
+every price would have been `PRICE_REFUSED`. That is the general shape of a
+vendor that publishes nothing — every rule between the store and the set page
+has to let it through, and each of them is silent on its own.
 
 Stores rate-limit per IP and HTTP 429 counts as "blocked". Any pass that fetches
 many URLs must go through `HostThrottle`, and `HostThrottle.interleave()` should
