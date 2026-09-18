@@ -50,7 +50,7 @@ import psycopg2
 from psycopg2 import OperationalError
 from psycopg2.extras import RealDictCursor
 from playwright.sync_api import sync_playwright, Page, BrowserContext
-from scrapling_client import ScraplingClient, response_is_blocked
+from scrapling_client import ScraplingClient, response_is_readable
 
 # ----------------------------------------------------------------------------
 # Paths & config
@@ -452,9 +452,9 @@ def fetch_page_html(
             page.wait_for_timeout(wait_ms)
         content = page.content()
         status = response.status if response is not None else None
-        if content and not response_is_blocked(status, content):
+        if content and response_is_readable(status, content):
             return content
-        browser_error = RuntimeError(f"blocked response (status={status})")
+        browser_error = RuntimeError(f"unreadable response (status={status})")
     except Exception as exc:  # noqa: BLE001
         browser_error = exc
 
@@ -4329,11 +4329,7 @@ def _fetch_page_html(
         response = page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
         status = response.status if response is not None else None
         content = page.content()
-        if (
-            content
-            and not response_is_blocked(status, content)
-            and (status is None or int(status) < 400)
-        ):
+        if content and response_is_readable(status, content):
             return content
     except Exception as exc:  # noqa: BLE001
         log(f"  html fetch error ({url}): {type(exc).__name__}: {exc}")
@@ -4782,10 +4778,13 @@ def _front_page_html(
             status = response.status if response is not None else None
             content = page.content()
             # A blocked or errored root is not evidence about the product URL.
-            if response is not None and response.ok and content:
-                if not response_is_blocked(status, content):
-                    body = content
-                    final_url = response.url or page.url or ""
+            if (
+                response is not None
+                and content
+                and response_is_readable(status, content)
+            ):
+                body = content
+                final_url = response.url or page.url or ""
         except Exception:  # noqa: BLE001
             body = ""
             final_url = ""
@@ -4886,7 +4885,12 @@ def generic_price(
         status = response.status if response is not None else None
         final_url = page.url
         content = page.content()
-        if content and not response_is_blocked(status, content):
+        # An error status is not a page. page.content() is never empty — Chromium
+        # renders a document for a 404 and for a 423 alike — so without this the
+        # store's own error page was parsed as the product page, and the
+        # DEAD_LINK_STATUSES branch below (which only runs when no transport
+        # produced a page) could never be reached at all.
+        if content and response_is_readable(status, content):
             html = content
             html_source = "browser"
     except Exception as exc:  # noqa: BLE001
@@ -4894,17 +4898,22 @@ def generic_price(
         remember_unresolved_host(product_url, exc)
         log(f"  generic fetch error ({product_url}): {type(exc).__name__}: {exc}")
 
+    # A genuinely removed listing (404/410) clears the stale price. Answered
+    # before the second transport is tried: the store has already said the page
+    # is gone, no stealth fetch can change that, and asking anyway would cost one
+    # slow fetch per dead row on every nightly run.
+    if html is None and status in DEAD_LINK_STATUSES:
+        log(f"  dead link ({status}) — clearing price ({product_url})")
+        return DEAD_LINK
+
     if html is None and scrapling is not None and scrapling.available:
         html = scrapling.get_html(product_url, protected=True)
         if html:
             html_source = "scrapling"
 
     if not html:
-        # A genuinely removed listing (404/410) clears the stale price; a
-        # transient block keeps the last good price (same split as Shopify).
-        if status in DEAD_LINK_STATUSES:
-            log(f"  dead link ({status}) — clearing price ({product_url})")
-            return DEAD_LINK
+        # A transient block keeps the last good price (same split as Shopify);
+        # only the 404/410 above clears it.
         # …and the answer that never produced a status at all: the host has
         # stopped resolving. Claimed only when no transport got a page — if
         # Scrapling reached the site, the domain is alive and the browser was

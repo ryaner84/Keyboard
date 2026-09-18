@@ -982,6 +982,39 @@ assert.ok(
   !/res\.status === 404 \|\| res\.status === 410/.test(pricesTs),
   "prices.ts must test dead statuses with isDeadLinkStatus, not a literal pair"
 );
+// …and reaching that return at all requires refusing the body of a response
+// that is not the page. An ERROR STATUS IS NOT A PAGE: prices.ts has always
+// judged `res.ok` before parsing, while the nightly took whatever Chromium
+// rendered unless the status was one of five hand-listed CHALLENGE codes.
+// page.content() is never empty — a 404 and a 423 both render a document — so
+// the store's error page was parsed as the product page and filed UNPARSED
+// ("teach the parser this platform"), and generic_price's own dead-status
+// branch, which only runs when no transport produced a page, was unreachable.
+// thockeys.com answers 423 on every route including its front door, probed from
+// a runner on 2026-09-18; both of its listings, all it has, were in that state.
+assert.equal(
+  (pricesTs.match(/if \(!res\.ok\) \{/g) ?? []).length,
+  3,
+  "every prices.ts reader must refuse a non-ok response before reading its body"
+);
+for (const fn of [
+  "def fetch_page_html(",
+  "def _fetch_page_html(",
+  "def _front_page_html(",
+  "def generic_price(",
+]) {
+  const start = scrapePy.indexOf(fn);
+  assert.ok(start > 0, `scrape.py must define ${fn.slice(4, -1)}`);
+  const body = scrapePy.slice(start, scrapePy.indexOf("\ndef ", start + 1));
+  assert.ok(
+    body.includes("response_is_readable(status, content)"),
+    `${fn.slice(4, -1)} must judge the response before reading its body`
+  );
+  assert.ok(
+    !body.includes("response_is_blocked"),
+    `${fn.slice(4, -1)} must not re-derive the readable rule`
+  );
+}
 // The redirect verdict is taken on the HUMAN product page, never on the
 // .json endpoint: a store that simply doesn't serve /products/*.json answers
 // that request from its front door too, and it is very much alive. Unlike

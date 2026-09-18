@@ -17,6 +17,7 @@ from scrapling_client import (
     ScraplingStats,
     decode_response_body,
     response_is_blocked,
+    response_is_readable,
 )
 
 
@@ -32,6 +33,70 @@ class ScraplingClientTests(unittest.TestCase):
         self.assertTrue(response_is_blocked(403, "ordinary body"))
         self.assertTrue(response_is_blocked(200, "<title>Just a moment...</title>"))
         self.assertFalse(response_is_blocked(200, "<html><h1>Product</h1></html>"))
+
+    def test_an_error_status_is_never_a_readable_page(self):
+        # The five statuses response_is_blocked knows are a list of CHALLENGES,
+        # not of errors, and every caller that needed the whole question used to
+        # write the rest of it itself — except generic_price, the one that
+        # decides a listing's diagnosis. thockeys.com answers 423 on every
+        # route, probed from a runner on 2026-09-18; its error page was parsed
+        # as the product page and both of its listings recorded UNPARSED, the
+        # "teach the parser this platform" verdict, about a store that is simply
+        # refusing us.
+        for status in (402, 404, 410, 423, 451, 500, 502, 521, 526):
+            self.assertFalse(
+                response_is_readable(status, "<html><h1>Product</h1></html>"),
+                status,
+            )
+        # A 3xx is a hop the client would not follow, so its body is not the
+        # page either — and a challenge served as a 200 is still a challenge.
+        self.assertFalse(response_is_readable(302, "<html>moved</html>"))
+        self.assertFalse(
+            response_is_readable(200, "<title>Just a moment...</title>")
+        )
+        # A 200 that carries the page, and the no-status case Playwright hands
+        # back for a same-document navigation, both stay readable.
+        self.assertTrue(response_is_readable(200, "<html><h1>Product</h1></html>"))
+        self.assertTrue(response_is_readable(None, "<html><h1>Product</h1></html>"))
+
+    def test_every_page_reader_asks_the_one_predicate(self):
+        # Written once, asked everywhere: the rule was previously spelled three
+        # different ways beside response_is_blocked (`int(status) < 400`,
+        # `response.ok`, `200 <= int(status) < 400`) and omitted entirely in the
+        # fourth place, which is how an error page came to be read as a product
+        # page. A call site that re-derives it is the next omission.
+        for fn in (
+            scrape.fetch_page_html,
+            scrape._fetch_page_html,
+            scrape._front_page_html,
+            scrape.generic_price,
+        ):
+            source = inspect.getsource(fn)
+            self.assertIn(
+                "response_is_readable(status, content)",
+                source,
+                f"{fn.__name__} must judge the response before reading its body",
+            )
+            self.assertNotIn(
+                "response_is_blocked",
+                source,
+                f"{fn.__name__} must not re-derive the readable rule",
+            )
+
+    def test_a_dead_status_is_answered_before_the_second_transport(self):
+        # generic_price only consults DEAD_LINK_STATUSES when no transport
+        # produced a page, and page.content() is NEVER empty — Chromium renders
+        # a document for a 404 — so the browser always "succeeded" and the
+        # branch was unreachable. The nightly could not mark a non-Shopify
+        # listing gone by status at all, leaving deadSince (the only signal
+        # allowed to take a listing off the site) to the four-times-a-day pass.
+        source = inspect.getsource(scrape.generic_price)
+        self.assertLess(
+            source.index("status in DEAD_LINK_STATUSES"),
+            source.index("scrapling.get_html(product_url"),
+            "the store's own 'gone' needs no second opinion, and asking for one"
+            " costs a stealth fetch per dead row on every nightly run",
+        )
 
     def test_response_body_decoding_is_tolerant(self):
         response = FakeResponse("café".encode("latin-1"), encoding="latin-1")

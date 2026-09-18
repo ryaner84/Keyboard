@@ -40,6 +40,52 @@ def response_is_blocked(status: int | None, body: str) -> bool:
     return any(marker in lowered for marker in _BLOCK_MARKERS)
 
 
+def response_is_readable(status: int | None, body: str) -> bool:
+    """True when `body` IS the page that was asked for.
+
+    An ERROR STATUS IS NOT A PAGE, and this is the one place that rule is
+    written. `response_is_blocked` above answers a narrower question — does this
+    look like a bot challenge — off a hand-written list of five statuses, and
+    every caller that needed the whole question wrote the rest of it itself:
+    `_fetch_page_html` as `int(status) < 400`, `_front_page_html` as
+    `response.ok`, `get_html`'s plain path as `200 <= int(status) < 400`. The
+    one caller that did NOT is the one that decides a listing's diagnosis.
+
+    `generic_price` (scrape.py) took `page.content()` whenever the status was
+    not one of those five and parsed it as the product page. `page.content()` is
+    never empty — Chromium renders a document for every error — so a store
+    answering 423, 402, 451 or a 5xx had its ERROR PAGE read, found to carry no
+    product markup, and recorded as NO_PRODUCT_DATA: "teach the parser this
+    platform", the one verdict that names a code change here and that no number
+    of re-scrapes can end. Probed from a runner on 2026-09-18, thockeys.com
+    answers 423 on every route, its own front door included, and both of its
+    listings — all it has — were filed that way.
+
+    A 404/410 is refused here like any other error status, and that is what
+    makes the caller's dead-link branch reachable at all: `generic_price` only
+    consults DEAD_LINK_STATUSES when no transport produced a page, and a
+    rendered 404 body meant the browser always "succeeded". So the nightly could
+    never mark a non-Shopify listing gone by status — `deadSince`, the only
+    signal allowed to take a listing off the site, was left to the four-times-a-
+    day pass alone. `prices.ts` has always refused any non-ok status outright
+    (`if (!res.ok) return isDeadLinkStatus(res.status) ? DEAD_LINK : null`);
+    this is the mirror of that `res.ok`, and the verdict still belongs to the
+    caller, never to this predicate.
+
+    `status is None` stays readable: Playwright hands back no response for a
+    same-document navigation, and every call site has always treated that as
+    "no status to judge" rather than as a failure.
+    """
+    if status is not None:
+        try:
+            code = int(status)
+        except (TypeError, ValueError):
+            return False
+        if not 200 <= code < 300:
+            return False
+    return not response_is_blocked(status, body)
+
+
 def decode_response_body(response: Any) -> str:
     body = getattr(response, "body", b"")
     if isinstance(body, str):
@@ -301,7 +347,11 @@ class ScraplingClient:
                 self.stats.blocked += 1
                 self.stats.record_blocked(url)
                 return None
-            if status is not None and not 200 <= int(status) < 300:
+            # Same rule as response_is_readable, kept as its own branch only so
+            # an error status is attributed to `http_failed` rather than to
+            # `blocked` — the two counts are what tell a refusal apart from a
+            # challenge in problem_summary().
+            if not response_is_readable(status, body):
                 self.stats.http_failed += 1
                 self.stats.record_failed(url)
                 return None
@@ -334,9 +384,7 @@ class ScraplingClient:
                 response = self._http.get(url, follow_redirects=True)
                 body = decode_response_body(response)
                 status = getattr(response, "status", None)
-                if not response_is_blocked(status, body) and (
-                    status is None or 200 <= int(status) < 400
-                ):
+                if response_is_readable(status, body):
                     self.stats.http_ok += 1
                     self.stats.record_domain(url)
                     return body
@@ -361,7 +409,15 @@ class ScraplingClient:
             response = self._stealth_call(stealth.fetch, url, **kwargs)
             body = decode_response_body(response)
             status = getattr(response, "status", None)
-            if response_is_blocked(status, body):
+            if not response_is_readable(status, body):
+                if not response_is_blocked(status, body):
+                    # An error STATUS, not a challenge page. There is nothing
+                    # for solve_cloudflare to solve, so the 75s retry below is
+                    # pure cost — and returning the body would hand the caller
+                    # a 404/423 error document to parse as the product page.
+                    self.stats.http_failed += 1
+                    self.stats.record_failed(url)
+                    return None
                 self.stats.blocked += 1
                 self.stats.record_blocked(url)
                 kwargs["solve_cloudflare"] = True
@@ -369,7 +425,7 @@ class ScraplingClient:
                 response = self._stealth_call(stealth.fetch, url, **kwargs)
                 body = decode_response_body(response)
                 status = getattr(response, "status", None)
-                if response_is_blocked(status, body):
+                if not response_is_readable(status, body):
                     # Same URL, already counted as blocked above — counting the
                     # retry again inflated `blocked` by up to 3x for one URL and
                     # made the totals useless for judging severity.
