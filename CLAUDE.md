@@ -840,6 +840,39 @@ reported that way with every sampled product page in fact gone. `DEAD_LINK` is
 now a third answer alongside `NO_BASE_KIT` and null, and the dead branch
 deliberately does NOT write `priceSource`.
 
+**And an ERROR PAGE counted as the page, in the half that runs with a browser.**
+`prices.ts` refuses any non-ok response before it reads a body (`if (!res.ok)
+return isDeadLinkStatus(res.status) ? DEAD_LINK : null`). The nightly asked
+`response_is_blocked` instead — a list of five CHALLENGE statuses (401, 403,
+407, 429, 503) plus the Cloudflare marker strings — and took `page.content()`
+whenever the answer was no. `page.content()` is NEVER empty: Chromium renders a
+document for a 404 and for a 423 alike. So a store refusing us with 423, 402,
+451 or a 5xx had its own error page parsed as the product page, found to carry
+no product markup, and recorded `NO_PRODUCT_DATA` — "teach the parser this
+platform", the one verdict that names a change HERE and that no number of
+re-scrapes can end. Probed from a runner on 2026-09-18, thockeys.com answers 423
+on every route, its own front door included; both of its listings are all it
+has, so the vendor published nothing at all while the audit sent the owner after
+a parser for a shop that is simply not answering. The second consequence is
+worse than the wrong sentence: `generic_price` only consults
+`DEAD_LINK_STATUSES` when NO transport produced a page, so a rendered 404 body
+made that branch unreachable — the nightly could never mark a non-Shopify
+listing gone BY STATUS at all, and `deadSince`, the only signal allowed to take
+a listing off the site, was left to the four-times-a-day pass alone.
+`response_is_readable` in `scrapling_client.py` is the one predicate now (an
+error status is not a page; `status is None` still is one, because Playwright
+returns no response for a same-document navigation), and it replaces the three
+hand-written spellings that had grown up beside `response_is_blocked` —
+`int(status) < 400` in `_fetch_page_html`, `response.ok` in `_front_page_html`,
+`200 <= int(status) < 400` in Scrapling's own HTTP path — plus the fourth place
+that had none, which was the price path. It carries no verdict of its own: a
+404/410 is refused exactly like a 423 so the CALLER can still tell them apart,
+and that caller now answers the dead status BEFORE trying the second transport,
+because the store's "gone" needs no second opinion and asking for one costs a
+stealth fetch per dead row on every nightly run. `test:link-health` and the
+Python suite both fail if a call site re-derives the rule, if `prices.ts` stops
+gating on `res.ok`, or if that ordering is lost.
+
 **And `null` still meant four different things, two of which are OUR fault, not
 the store's.** A page can be fetched, parsed and completely understood and still
 leave the row unpriced because this site refused the number — `KIT_BOUNDS` capped
