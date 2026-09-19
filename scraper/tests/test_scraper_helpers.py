@@ -516,6 +516,36 @@ class BaseKitIdentificationTests(unittest.TestCase):
         )
         self.assertIs(scrape.parse_jsonld_offer(html), scrape.NO_BASE_KIT)
 
+    def test_jsonld_unnamed_multi_offer_keeps_the_stored_price(self):
+        # Every ordinary Shopify product page: one UNNAMED offer per variant.
+        # Nothing here says the base kit is gone — only that this reader cannot
+        # tell the variants apart — and this reader runs only when the product
+        # JSON did not answer. Clearing on it emptied live rows, which on a
+        # released set are then hidden outright (primekb.com's GMK Inukuma,
+        # Base USD 155 in stock, offers 155/50/40/35, probed 2026-09-19).
+        html = self._jsonld(
+            '{"price":"155"},{"price":"50"},{"price":"40"},{"price":"35"}'
+        )
+        self.assertIs(scrape.parse_jsonld_offer(html), scrape.AMBIGUOUS_OFFERS)
+
+    def test_jsonld_partly_named_multi_offer_keeps_the_stored_price(self):
+        # One named kit does not make the unnamed ones legible either.
+        html = self._jsonld('{"name":"Novelties","price":"39"},{"price":"155"}')
+        self.assertIs(scrape.parse_jsonld_offer(html), scrape.AMBIGUOUS_OFFERS)
+
+    def test_ambiguous_offers_is_its_own_answer(self):
+        # Never None (which the caller reads as "no product markup here" and
+        # answers NO_PRODUCT_DATA, sending the owner after a parser) and never
+        # NO_BASE_KIT (which clears).
+        self.assertIsNot(scrape.AMBIGUOUS_OFFERS, None)
+        self.assertNotEqual(scrape.AMBIGUOUS_OFFERS, scrape.NO_BASE_KIT)
+        self.assertTrue(
+            scrape._offers_name_every_kit([{"name": "Base"}, {"name": "Novelties"}])
+        )
+        self.assertFalse(scrape._offers_name_every_kit([{"name": "Base"}, {}]))
+        self.assertFalse(scrape._offers_name_every_kit([{"name": "  "}]))
+        self.assertFalse(scrape._offers_name_every_kit([]))
+
     def test_jsonld_named_base_wins_over_dearer_subkit(self):
         html = self._jsonld(
             '{"name":"Base Kit","price":"120"},{"name":"Novelties","price":"139"}'

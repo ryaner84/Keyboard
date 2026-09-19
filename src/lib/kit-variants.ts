@@ -294,3 +294,32 @@ export function htmlDeclaresVariantProductGroup(html: string): boolean {
   }
   return false;
 }
+
+// Does a multi-offer page NAME every kit it is selling?
+//
+// A product page whose JSON-LD carries several offers and none of them
+// classifies BASE is "several kits, and I cannot tell which is the base" — the
+// readers never guess a price from it, and they never should. But not storing
+// a number and CLEARING the one already stored are different claims, and only
+// the second needs evidence that there is no base kit on offer at all.
+//
+// A page whose offers are NAMED gives that evidence: it says what each kit is,
+// and none of them is a base. A page whose offers are UNNAMED says nothing of
+// the kind — and that is the shape of every ordinary Shopify product page,
+// which emits one unnamed Offer per variant. The JSON-LD reader is only ever
+// reached when the richer /products/<handle>.json did not answer (a block, a
+// 5xx, a timeout), so treating that silence as "no base kit here" wiped a good
+// price off a perfectly readable store every time its product JSON hiccuped.
+// primekb.com is the case in hand: probed from a runner on 2026-09-19 its
+// GMK Inukuma page serves a Base variant at USD 155, in stock, and four
+// unnamed JSON-LD offers (155 / 50 / 40 / 35). The row was cleared to NULL,
+// stamped priceSource='SCRAPED', and — its set being released, where unpriced
+// rows are hidden — the vendor published nothing at all while the audit
+// reported "none priced … another scrape reaches the same answer".
+//
+// Mirrored as _offers_name_every_kit in scraper/scrape.py; test:kit-variants
+// fails if either call site stops asking.
+export function offersNameEveryKit(offers: Array<{ name?: string | null }>): boolean {
+  if (!Array.isArray(offers) || offers.length === 0) return false;
+  return offers.every((offer) => String(offer?.name ?? "").trim() !== "");
+}

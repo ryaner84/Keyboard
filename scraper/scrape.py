@@ -652,6 +652,16 @@ NO_BASE_KIT = "NO_BASE_KIT"
 # refreshPrices in prices.ts) and a fix to one is only half a fix.
 DEAD_LINK = "DEAD_LINK"
 
+# And a sentinel for the answer that is none of the above: the page WAS read,
+# it carries product markup, and this reader could not say which of its offers
+# is the base kit. It is not NO_BASE_KIT (nothing on the page says the base kit
+# is gone) and not NO_PRODUCT_DATA (there is markup here, and calling it
+# unparseable would send the owner after a parser and let the front-page "gone"
+# checks judge a page they were never meant to see). The caller answers it with
+# None — read, nothing new stored, last good price kept. See
+# parse_jsonld_offer and offersNameEveryKit in src/lib/kit-variants.ts.
+AMBIGUOUS_OFFERS = "AMBIGUOUS_OFFERS"
+
 # The fourth and fifth answers, and the two that were still hiding inside None.
 # Both mean the page was FETCHED and the fault is on THIS side of the
 # connection, so filing them as "couldn't read the listing" was a lie: the row
@@ -1418,6 +1428,16 @@ def parse_woocommerce_variations(html: str) -> list[dict]:
     return out
 
 
+def _offers_name_every_kit(offers: list[dict]) -> bool:
+    """Do these JSON-LD offers NAME every kit they sell?
+
+    Mirror of offersNameEveryKit in src/lib/kit-variants.ts — the whole comment
+    lives there. Only a page that names its kits can be evidence that none of
+    them is a base kit, and only that evidence may clear a stored price.
+    """
+    return bool(offers) and all(str(o.get("name") or "").strip() for o in offers)
+
+
 def parse_jsonld_offer(html: str):
     """Simple (non-variable) product price from JSON-LD Product/Offer.
 
@@ -1492,8 +1512,19 @@ def parse_jsonld_offer(html: str):
     if bundles:
         return min(bundles, key=lambda o: o["price"])
     if len(found) > 1:
-        # Multi-kit aggregate with no identifiable base — do not guess.
-        return NO_BASE_KIT
+        # Multi-kit aggregate with no identifiable base — do not guess a price.
+        #
+        # Whether to CLEAR the stored one is a second question, and the answer
+        # is the page's own: offers that are NAMED say what each kit is and
+        # that none is a base; offers that are UNNAMED say only that this
+        # reader cannot tell them apart — which is what every ordinary Shopify
+        # product page looks like, one unnamed Offer per variant. This reader
+        # runs only when the product JSON did not answer, so clearing on it
+        # wiped live listings off released sets. See offersNameEveryKit in
+        # src/lib/kit-variants.ts, the half this mirrors.
+        if _offers_name_every_kit(found):
+            return NO_BASE_KIT
+        return AMBIGUOUS_OFFERS
     only = found[0]
     name = only["name"]
     if name and (
@@ -4968,6 +4999,16 @@ def generic_price(
 
     # Simple product: single JSON-LD offer.
     offer = parse_jsonld_offer(html)
+    if offer is AMBIGUOUS_OFFERS:
+        # Several offers, none of them named — product markup this reader
+        # cannot resolve into a base kit, which is what an ordinary Shopify
+        # page looks like whenever its product JSON did not answer. Read, so
+        # never the NO_PRODUCT_DATA below (that verdict asks the owner for a
+        # parser, and its front-page checks would then judge a page they were
+        # never meant to see); nothing new to store, so the row keeps the price
+        # the variant reader last resolved.
+        log(f"  offers carry no kit names — keeping the stored price ({product_url})")
+        return None
     if offer is None:
         # The page answered and carries no product markup any parser path here
         # knows — an unreadable platform, a placeholder page, or a bot check
