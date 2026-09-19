@@ -1,0 +1,30 @@
+# TEMPORARY diagnostic workflow — dispatched from a working branch while
+# tracing a silent vendor, and removed before the branch is proposed.
+name: Tmp vendor row diagnose
+
+on:
+  workflow_dispatch:
+    inputs:
+      slugs:
+        description: Comma-separated vendor slugs
+        required: false
+        type: string
+        default: "prime-keyboards,rectangles,typoworks,keygem"
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Diagnose (read-only)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+          DIAG_SLUGS: ${{ inputs.slugs }}
+        run: npx tsx scripts/tmp-vendor-row-diagnose.mjs
