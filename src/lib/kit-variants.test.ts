@@ -8,6 +8,7 @@ import {
   classifyVariant,
   htmlDeclaresVariantProductGroup,
   isSubkitSetName,
+  offersNameEveryKit,
   pickBaseVariant,
 } from "@/lib/kit-variants";
 
@@ -262,6 +263,62 @@ assert.ok(
     '<script type="application/ld+json">{ this is not json }</script>'
   ),
   "a malformed block must not throw and must not falsely match"
+);
+
+// ── What may CLEAR a price, and what may only decline to store one ──────────
+//
+// The same fall-through the ProductGroup guard above is about, arriving at a
+// worse answer. A multi-offer page with no base-named offer is not priced by
+// either reader — neither should guess — but clearing the stored price is a
+// second claim, and it needs the page to have SAID there is no base kit.
+// Unnamed offers say only "this reader cannot tell these kits apart", and that
+// is the shape of every ordinary Shopify product page: one unnamed Offer per
+// variant, read only when the richer product.json did not answer. Clearing on
+// it emptied live rows, and an unpriced row is hidden outright on a released
+// set — primekb.com's GMK Inukuma (Base USD 155, in stock; JSON-LD offers
+// 155/50/40/35, all unnamed) left its vendor publishing nothing at all while
+// the audit reported "none priced … another scrape reaches the same answer".
+
+// Named offers ARE evidence: the page says what each kit is and none is a base.
+assert.ok(
+  offersNameEveryKit([{ name: "Novelties" }, { name: "Spacebars" }]),
+  "a page that names its kits can say none of them is a base kit"
+);
+// Unnamed, or only partly named, says nothing of the kind.
+const unnamedShopifyOffers: Array<{ name?: string | null; price: number }> = [
+  { price: 155 },
+  { price: 50 },
+  { price: 40 },
+  { price: 35 },
+];
+assert.ok(
+  !offersNameEveryKit(unnamedShopifyOffers),
+  "unnamed offers (the Shopify shape) are not evidence that the base kit is gone"
+);
+assert.ok(
+  !offersNameEveryKit([{ name: "Novelties" }, {}]),
+  "one named kit does not make the unnamed ones legible"
+);
+assert.ok(!offersNameEveryKit([{ name: "   " }]), "a blank name names nothing");
+assert.ok(!offersNameEveryKit([]), "no offers at all is not evidence either");
+
+// Both price passes must ask it. The rule is written twice — prices.ts imports
+// this module, scrape.py mirrors it — and a fix to one is only half a fix.
+assert.ok(
+  /if \(offersNameEveryKit\(offerList\)\) sawAmbiguousAggregate = true;/.test(prices),
+  "prices.ts must gate the clearing verdict on the offers naming their kits"
+);
+assert.ok(
+  /_offers_name_every_kit\(found\)/.test(scrape),
+  "scrape.py must gate the same verdict the same way"
+);
+// …and the nightly's answer for the ungated case must be its own sentinel:
+// None there means "no product markup", which answers NO_PRODUCT_DATA — the
+// verdict that asks the owner for a parser and lets the front-page "gone"
+// checks judge a page they were never meant to see.
+assert.ok(
+  /return AMBIGUOUS_OFFERS/.test(scrape) && /offer is AMBIGUOUS_OFFERS/.test(scrape),
+  "scrape.py must answer an unnamed aggregate with AMBIGUOUS_OFFERS, not None"
 );
 
 console.log("kit-variants tests passed");

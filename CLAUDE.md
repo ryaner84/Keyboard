@@ -953,6 +953,36 @@ The probe reports `SHOP CCY` for the same reason: a price is only ever refused
 or accepted RELATIVE to a currency, so "READABLE" beside an unpriced row is not
 a diagnosis until you know which window the number was measured against.
 
+**And one of those answers CLEARS a price, so it needed evidence it never
+had.** `NO_BASE_KIT` means the store's page says there is no base kit to buy;
+the caller empties the row on it, and on a RELEASED set an unpriced row is
+hidden outright. The JSON-LD reader reached that verdict for "several offers
+and none of them classifies BASE" — which is not the same claim. An offer list
+that is NAMED does say it: the page names each kit and no name is a base. An
+UNNAMED one says only that this reader cannot tell the kits apart, and unnamed
+offers are what every ordinary Shopify product page carries, one per variant.
+That reader is only ever reached when the richer `/products/<handle>.json` did
+not answer, so ONE blocked `.json` — a 403, a 5xx, a 6s timeout — emptied a
+perfectly readable store's row, stamped it `SCRAPED`, and left the audit saying
+"none priced … another scrape reaches the same answer", the verdict that names
+no repair. Probed from a runner on 2026-09-19, primekb.com's GMK Inukuma serves
+a "Base" variant at USD 155, in stock, beside four unnamed JSON-LD offers
+(155/50/40/35): the full pass prices it at 155, the JSON-LD half alone answered
+`NO_BASE_KIT`, and the vendor — two listings, the other one genuinely gone —
+published nothing at all. It is the fall-through the ProductGroup guard next
+door was written for (`htmlDeclaresVariantProductGroup`, gmk-bent-r2 × zFrontier
+oscillating 150→56), arriving at a worse answer: that one publishes a wrong
+number, this one publishes nothing, and it fires on the far commoner page,
+since an older Shopify theme emits `Product` + unnamed `Offer`s and no
+`ProductGroup` at all. `offersNameEveryKit` in `src/lib/kit-variants.ts` is the
+one place the rule is written (`_offers_name_every_kit` mirrors it in
+`scrape.py`): named offers still clear, unnamed ones preserve the price the
+variant reader last resolved. The nightly needed a sentinel of its own for it —
+`AMBIGUOUS_OFFERS`, because `None` from `parse_jsonld_offer` means "no product
+markup here" and would answer `NO_PRODUCT_DATA`, which asks the owner for a
+parser and lets the front-page "gone" checks judge a page they were never meant
+to see. `test:kit-variants` fails if either call site stops asking.
+
 **And the window's companion — WHICH currencies the site can price in at all —
 was written five times, so one was missing from every copy.** A price is only
 storable in a currency the `Currency` table can convert: `convertCurrency`

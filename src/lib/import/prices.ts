@@ -5,6 +5,7 @@ import {
   classifyVariant,
   pickBaseVariant,
   htmlDeclaresVariantProductGroup,
+  offersNameEveryKit,
   ADDON_VARIANT_RE,
   NONBASE_SUBKIT_RE,
   PRODUCT_ACCESSORY_RE,
@@ -1068,9 +1069,20 @@ export async function fetchJsonLdPrice(
         );
         if (!namedBase && offerList.length > 1) {
           // Multiple named/unnamed offers, none identifiable as the base —
-          // offers[0] would just be the cheapest subkit. Skip, and remember
-          // this so the stale wrong price gets cleared.
-          sawAmbiguousAggregate = true;
+          // offers[0] would just be the cheapest subkit. Skip rather than guess.
+          //
+          // Whether that also CLEARS the stored price is a second question, and
+          // it used to be answered by not asking it. Clearing says "there is no
+          // base kit on this page"; unnamed offers say only "I cannot tell
+          // which of these is the base" — and unnamed offers are what EVERY
+          // ordinary Shopify product page emits, one per variant. This reader
+          // is reached only when the richer product.json did not answer, so a
+          // single blocked .json turned a live listing into an unpriced one,
+          // and on a released set an unpriced row is hidden outright. It is the
+          // same fall-through the ProductGroup guard below covers for the
+          // OpenGraph price, arriving at a worse answer: that one publishes a
+          // wrong number, this one publishes nothing.
+          if (offersNameEveryKit(offerList)) sawAmbiguousAggregate = true;
           continue;
         }
         if (!namedBase && offerList.length === 1) {
@@ -1118,8 +1130,11 @@ export async function fetchJsonLdPrice(
           aggSpansMultipleKits
         ) {
           // A bare AggregateOffer spanning a price range with no single base
-          // price — same story: skip, and mark for clearing the stale value.
-          sawAmbiguousAggregate = true;
+          // price — same story, and the same answer as the unnamed offer list
+          // above: never store a number from it, never clear one either. The
+          // aggregate names no kit at all, so it cannot be evidence that this
+          // listing has no base kit; it is a page this reader cannot resolve,
+          // and the row keeps whatever the variant reader last resolved.
           continue;
         }
 
