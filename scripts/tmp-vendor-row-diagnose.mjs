@@ -1,73 +1,70 @@
 // TEMPORARY read-only diagnostic (not part of the shipped tree).
-// Prints the per-row VendorKit state for a few silent vendors so the publishing
-// audit's per-vendor aggregate can be traced to the rows it came from.
-import pg from "pg";
+//
+// Asks the two halves of the price pass separately for the same URL:
+//   * fetchShopifyPrice  — the rich product-JSON reader (via fetchVendorPrice)
+//   * fetchJsonLdPrice   — the fallback used whenever that JSON does not answer
+// plus whether the page declares a multi-variant ProductGroup and what its
+// JSON-LD offers actually look like. Writes nothing.
+import { htmlDeclaresVariantProductGroup } from "../src/lib/kit-variants.ts";
+import { fetchVendorPrice, fetchJsonLdPrice } from "../src/lib/import/prices.ts";
 
-let connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  console.log("DATABASE_URL not set — nothing to do.");
-  process.exit(0);
-}
-if (connectionString.includes("__PASSWORD__")) {
-  connectionString = connectionString.replace(
-    "__PASSWORD__",
-    encodeURIComponent(process.env.DATABASE_PASSWORD ?? "")
-  );
-}
-if (!/localhost|127\.0\.0\.1/.test(connectionString)) {
-  connectionString = connectionString.replace(/:5432(\/|$|\?)/, ":6543$1");
-}
-
-const SLUGS = (process.env.DIAG_SLUGS ?? "prime-keyboards,rectangles,typoworks,keygem")
-  .split(",")
-  .map((s) => s.trim())
+const URLS = (process.env.DIAG_URLS ?? "")
+  .split(/[\s,]+/)
+  .map((u) => u.trim())
   .filter(Boolean);
 
-const client = new pg.Client({
-  connectionString,
-  ssl: { rejectUnauthorized: false },
-  connectionTimeoutMillis: 15000,
-});
-await client.connect();
+const label = (out) =>
+  out === null
+    ? "UNREADABLE(null)"
+    : typeof out === "string"
+      ? out
+      : `PRICED ${out.price} ${out.currency ?? "(null)"} inStock=${out.inStock}`;
 
-const { rows } = await client.query(
-  `SELECT v.slug AS vendor, v.currency AS vendor_currency,
-          vk.id, vk."productUrl", vk.price, vk.currency, vk."priceSource",
-          vk."priceUpdatedAt", vk."deadSince", vk."linkFailures", vk."inStock",
-          k.type AS kit_type, k.name AS kit_name,
-          gb.slug AS set_slug, gb.name AS set_name, gb.status AS set_status,
-          gb."productType" AS product_type
-     FROM public."VendorKit" vk
-     JOIN public."Vendor" v ON v.id = vk."vendorId"
-     JOIN public."Kit" k ON k.id = vk."kitId"
-     JOIN public."GroupBuy" gb ON gb.id = k."groupBuyId"
-    WHERE v.slug = ANY($1::text[])
-    ORDER BY v.slug, vk."productUrl"`,
-  [SLUGS]
-);
+const HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  Accept: "application/json,text/html;q=0.9,*/*;q=0.8",
+};
 
-for (const r of rows) {
-  console.log(
-    `ROW | ${r.vendor} | id=${r.id} | kit=${r.kit_type}/${r.kit_name} | set=${r.set_slug} (${r.set_status}, ${r.product_type}) | ` +
-      `price=${r.price} ${r.currency ?? "(null)"} | src=${r.priceSource ?? "(null)"} | ` +
-      `updated=${r.priceUpdatedAt ? new Date(r.priceUpdatedAt).toISOString().slice(0, 10) : "never"} | ` +
-      `dead=${r.deadSince ? new Date(r.deadSince).toISOString().slice(0, 10) : "-"} | ` +
-      `failures=${r.linkFailures} | inStock=${r.inStock} | ${r.productUrl}`
-  );
-}
-console.log(`ROWS ${rows.length}`);
-await client.end();
-
-// What the price pass itself makes of each URL, right now, from this runner.
-const { fetchVendorPrice } = await import("../src/lib/import/prices.ts");
-for (const r of rows) {
-  if (!r.productUrl) continue;
-  const out = await fetchVendorPrice(r.productUrl, r.vendor_currency, r.vendor, false);
-  const label =
-    out === null
-      ? "UNREADABLE(null)"
-      : typeof out === "string"
-        ? out
-        : `PRICED ${out.price} ${out.currency ?? "(null)"} inStock=${out.inStock} variants=${JSON.stringify((out.variants ?? []).map((v) => [v.title, v.price, v.available]))}`;
-  console.log(`FETCH | ${r.vendor} | ${r.productUrl} -> ${label}`);
+for (const url of URLS) {
+  console.log(`\n=== ${url}`);
+  console.log(`  FULL PASS   | ${label(await fetchVendorPrice(url, "USD", "diag", false))}`);
+  console.log(`  JSON-LD ONLY| ${label(await fetchJsonLdPrice(url, "USD", false))}`);
+  try {
+    const res = await fetch(url, { headers: HEADERS });
+    const html = await res.text();
+    console.log(`  PRODUCTGROUP| ${htmlDeclaresVariantProductGroup(html)}`);
+    const blocks = Array.from(
+      html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)
+    ).map((m) => m[1]);
+    for (const block of blocks) {
+      let data;
+      try {
+        data = JSON.parse(block.trim());
+      } catch {
+        continue;
+      }
+      const nodes = Array.isArray(data) ? data : data["@graph"] ? data["@graph"] : [data];
+      for (const node of nodes) {
+        const type = node?.["@type"];
+        const isProduct = type === "Product" || (Array.isArray(type) && type.includes("Product"));
+        if (!isProduct || !node.offers) continue;
+        const raw = node.offers;
+        const list = Array.isArray(raw) ? raw : Array.isArray(raw.offers) ? raw.offers : [];
+        console.log(
+          `  LD PRODUCT  | offers=${list.length} | ` +
+            JSON.stringify(
+              (list.length ? list : [raw]).map((o) => ({
+                type: o?.["@type"],
+                name: o?.name ?? null,
+                price: o?.price ?? o?.lowPrice ?? null,
+                cur: o?.priceCurrency ?? null,
+              }))
+            )
+        );
+      }
+    }
+  } catch (err) {
+    console.log(`  HTML        | fetch failed: ${err?.message}`);
+  }
 }

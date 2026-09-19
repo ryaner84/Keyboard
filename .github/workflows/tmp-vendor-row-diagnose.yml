@@ -25,7 +25,6 @@ jobs:
         run: npm ci
       - name: Diagnose vendor rows (read-only)
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
-          DIAG_SLUGS: prime-keyboards,rectangles,typoworks,keygem,kbdlab
+          DATABASE_URL: postgresql://diag:diag@127.0.0.1:5432/diag
+          DIAG_URLS: "https://www.primekb.com/products/gmk-inukuma https://keygem.com/products/gmk-delta-r2-group-buy https://cannonkeys.com/products/gmk-dolch"
         run: npx tsx scripts/tmp-vendor-row-diagnose.mjs
