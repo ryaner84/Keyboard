@@ -1,15 +1,16 @@
-# TEMPORARY diagnostic workflow — dispatched from a working branch while
-# tracing a silent vendor, and removed before the branch is proposed.
+# TEMPORARY diagnostic — runs only on this working branch while tracing a
+# silent vendor, and is removed before the branch is proposed. Read-only: it
+# SELECTs VendorKit rows for the named vendors and asks fetchVendorPrice what
+# each URL answers from a runner IP. Writes nothing.
 name: Tmp vendor row diagnose
 
 on:
-  workflow_dispatch:
-    inputs:
-      slugs:
-        description: Comma-separated vendor slugs
-        required: false
-        type: string
-        default: "prime-keyboards,rectangles,typoworks,keygem"
+  push:
+    branches:
+      - claude/compassionate-dijkstra-4bhv1p
+    paths:
+      - "scripts/tmp-vendor-row-diagnose.mjs"
+      - ".github/workflows/tmp-vendor-row-diagnose.yml"
 
 jobs:
   diagnose:
@@ -22,9 +23,9 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Diagnose (read-only)
+      - name: Diagnose vendor rows (read-only)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
-          DIAG_SLUGS: ${{ inputs.slugs }}
+          DIAG_SLUGS: prime-keyboards,rectangles,typoworks,keygem,kbdlab
         run: npx tsx scripts/tmp-vendor-row-diagnose.mjs
