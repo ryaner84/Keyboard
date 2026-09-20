@@ -115,6 +115,14 @@ try {
            (SELECT count(*)::int FROM public."VendorKit" vk
              WHERE vk."vendorId" = v.id AND vk."priceSource" = 'UNPARSED')
              AS unparsed_listings,
+           -- …and the third of those reads, whose repair is in neither place:
+           -- LOCKED is the store answering with its own password gate, so the
+           -- shop is shut and only its owner reopens it. Without this count
+           -- those rows read as UNPARSED — "teach the parser this platform",
+           -- about an "Opening Soon" form.
+           (SELECT count(*)::int FROM public."VendorKit" vk
+             WHERE vk."vendorId" = v.id AND vk."priceSource" = 'LOCKED')
+             AS locked_listings,
            -- The store answered 404/410 for these. A 404 IS a read as far as
            -- priceSource goes, so without this count a closed store reads as a
            -- pricing backlog. See scripts/lib/link-health.mjs.
@@ -203,6 +211,7 @@ try {
     readListings: r.read_listings,
     refusedListings: r.refused_listings,
     unparsedListings: r.unparsed_listings,
+    lockedListings: r.locked_listings,
     pricedListings: r.priced_listings,
     deadListings: r.dead_listings,
     deadestSince: r.deadest_since,
@@ -293,7 +302,7 @@ try {
         ` | ${v.websiteUrl} | listings=${row.listings}` +
         ` read=${row.readListings} priced=${row.pricedListings}` +
         ` dead=${row.deadListings} refused=${row.refusedListings}` +
-        ` unparsed=${row.unparsedListings}` +
+        ` unparsed=${row.unparsedListings} locked=${row.lockedListings}` +
         ` queued=${row.queuedListings} attempted=${row.attemptedListings}` +
         ` failures=${row.maxLinkFailures ?? 0}` +
         ` lastAttempt=${row.lastAttempt ? new Date(row.lastAttempt).toISOString().slice(0, 10) : "never"}` +

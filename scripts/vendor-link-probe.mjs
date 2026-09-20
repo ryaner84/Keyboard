@@ -37,6 +37,7 @@ import {
   isGoneHostError,
   isGoneRedirect,
   isGoneStorefrontRoot,
+  isStorefrontPasswordGate,
 } from "./lib/link-health.mjs";
 import { isIncompleteChainError, retryWithRepairedChain } from "./lib/tls-chain.mjs";
 // The price passes' own rules for reading a Shopify-COMPATIBLE product JSON, so
@@ -492,6 +493,21 @@ for (const url of urls) {
   if (readable) {
     console.log(
       `  VERDICT   | READABLE — a price parser path exists; if the row is unpriced the picker is at fault`
+    );
+    continue;
+  }
+
+  // Before either of those: the store may have answered with its own password
+  // gate, which is neither. Asked here, on the no-markup path and ahead of the
+  // root fetch, exactly as both price passes ask it — the gate is a real page,
+  // so comparing it against a root that serves the same gate could only ever
+  // say "not identical" and reach the wrong verdict for the price of a fetch.
+  if (isStorefrontPasswordGate(url, finalUrl)) {
+    console.log(
+      `  VERDICT   | STORE LOCKED — the storefront's own password gate answered` +
+        ` (${finalUrl}); the shop is closed to the public, so nothing here can` +
+        ` publish until its owner reopens it. Not gone: deadSince is never` +
+        ` written for this, and no parser would help`
     );
     continue;
   }

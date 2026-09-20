@@ -8,7 +8,9 @@ import {
   DEAD_LINK_RECHECK_HOURS,
   DEAD_LINK_STATUSES,
   UNDIAGNOSED_RECHECK_HOURS,
+  PRICE_SOURCE_LOCKED,
   PRICE_SOURCE_REFUSED,
+  READ_RESETS_LINK_FAILURES_PRICE_SOURCES,
   PRICE_SOURCE_UNPARSED,
   describeDeadListings,
   isAwaitingOwnFix,
@@ -21,6 +23,7 @@ import {
   isGoneStorefrontRoot,
   isGoneHostError,
   isGoneRedirect,
+  isStorefrontPasswordGate,
   isUnbuyableDeadLink,
   isUnresolvedHostError,
   UNRESOLVED_HOST_ERROR_MARKERS,
@@ -592,6 +595,120 @@ for (const [label, err] of [
 }
 
 // --- the Python mirror -----------------------------------------------------
+// --- isStorefrontPasswordGate ---------------------------------------------
+// The sixth answer a store can give, and the one that was being read as two
+// different failures of ours. Probed from a runner on 2026-09-20,
+// hexkeyboards.com answers every tracked listing with a 302 to its own
+// /password page: the six-hourly pass filed it NO_PRODUCT_DATA ("teach the
+// parser this platform") and the nightly filed it as no answer at all, about a
+// Shopify "Opening Soon" form that no parser could ever turn into a price.
+assert.equal(
+  isStorefrontPasswordGate(
+    "https://hexkeyboards.com/collections/group-buys/products/gb-gmk-blot",
+    "https://hexkeyboards.com/password"
+  ),
+  true,
+  "a hop onto the storefront's own /password is the shop closed to the public"
+);
+assert.equal(
+  isStorefrontPasswordGate(
+    "https://hexkeyboards.com/products/x",
+    "https://hexkeyboards.com/password/"
+  ),
+  true,
+  "a trailing slash is the same gate"
+);
+// A row pointed AT the gate was not redirected off anything — the same refusal
+// every rule in this module makes about a request that started where it ended.
+assert.equal(
+  isStorefrontPasswordGate(
+    "https://hexkeyboards.com/password",
+    "https://hexkeyboards.com/password"
+  ),
+  false,
+  "a request that started at the gate says nothing about a listing"
+);
+// Another host's gate is another shop answering, which is isGoneRedirect's and
+// isGoneStorefrontRoot's business. Claiming it here would let one store's lock
+// speak for a second store's rows.
+assert.equal(
+  isStorefrontPasswordGate("https://a.example/products/x", "https://b.example/password"),
+  false,
+  "a gate on another host is not this store's answer"
+);
+// Exactly /password, or the rule reaches pages that are not the gate: a product
+// genuinely called "password" lives at /products/password.
+assert.equal(
+  isStorefrontPasswordGate("https://a.example/collections/x", "https://a.example/products/password"),
+  false,
+  "a product whose handle is 'password' is a product page"
+);
+assert.equal(
+  isStorefrontPasswordGate("https://a.example/products/x", "https://a.example/"),
+  false,
+  "a hop to the root is isGoneRedirect's verdict, not this one"
+);
+assert.equal(isStorefrontPasswordGate("", "https://a.example/password"), false);
+assert.equal(isStorefrontPasswordGate("https://a.example/products/x", "not a url"), false);
+
+// A locked shop is NOT a gone one, and the three checks that CAN hide a listing
+// must keep saying so — hexkeyboards is pinned as their control precisely
+// because a false positive there takes a live shop's rows off the site the day
+// it reopens.
+assert.equal(
+  isGoneRedirect(
+    "https://hexkeyboards.com/products/x",
+    "https://hexkeyboards.com/password"
+  ),
+  false,
+  "the gate is not the front door"
+);
+assert.equal(
+  isGoneStorefrontRoot(
+    "https://hexkeyboards.com/products/x",
+    "https://hexkeyboards.com/password"
+  ),
+  false,
+  "a root that answers with its own gate has not left this origin"
+);
+
+// The mark it leaves is its own, and its cadence follows from whose repair it
+// is. LOCKED records something about the STORE, so it buys the fortnight like
+// 'SCRAPED' — nothing in this repository opens a shop its owner has closed, and
+// the daily cadence would spend a fetch a day on a password page.
+assert.equal(PRICE_SOURCE_LOCKED, "LOCKED");
+assert.ok(
+  !AWAITING_OWN_FIX_PRICE_SOURCES.includes(PRICE_SOURCE_LOCKED),
+  "a locked shop is not waiting on a fix here — it must not take the daily cadence"
+);
+assert.equal(
+  isAwaitingOwnFix({ priceSource: PRICE_SOURCE_LOCKED }),
+  false,
+  "a locked row is not awaiting our own fix"
+);
+assert.equal(
+  isUndiagnosed({ priceSource: PRICE_SOURCE_LOCKED }),
+  false,
+  "a locked row carries a verdict"
+);
+assert.equal(
+  recheckHoursFor({ priceSource: PRICE_SOURCE_LOCKED, linkFailures: 99 }),
+  DEAD_LINK_RECHECK_HOURS,
+  "a backed-off locked row waits the fortnight, not the day"
+);
+// …and it does not reset link health: the gate is a page the store served
+// INSTEAD of the listing, so nothing readable came back. Same omission, same
+// reason, as 'UNPARSED'.
+assert.ok(
+  !READ_RESETS_LINK_FAILURES_PRICE_SOURCES.includes(PRICE_SOURCE_LOCKED),
+  "a password gate is not a read, so it may not clear linkFailures"
+);
+assert.deepEqual(
+  nextLinkHealth({ linkFailures: 3, deadSince: null }, "STORE_LOCKED"),
+  { linkFailures: 4, deadSince: null },
+  "a locked shop climbs the failure counter and is never marked gone"
+);
+
 // The price pass is written twice — run_prices in scraper/scrape.py (the
 // nightly that actually crawls, with a real browser) and refreshPrices in
 // src/lib/import/prices.ts (the Vercel cron and refresh-prices-ci). prices.ts
@@ -809,7 +926,7 @@ assert.equal(
 {
   const branch = scrapePy.slice(
     scrapePy.indexOf('if result == DEAD_LINK:'),
-    scrapePy.indexOf('elif result in (PRICE_REFUSED, NO_PRODUCT_DATA):')
+    scrapePy.indexOf('elif result in (PRICE_REFUSED, NO_PRODUCT_DATA, STORE_LOCKED):')
   );
   assert.ok(branch.length > 0, "run_prices must have a DEAD_LINK branch");
   // The comment in that branch explains the stamp, so match the SQL itself.
@@ -1113,9 +1230,14 @@ assert.ok(
   );
 }
 {
+  // Sliced to the NEXT branch rather than to a spelling of its condition: the
+  // read-verdict branch grows an arm every time a read learns a new answer
+  // (PRICE_REFUSED, NO_PRODUCT_DATA, STORE_LOCKED), and an anchor that pins its
+  // wording makes this assertion fail for a reformat and pass for a regression.
+  const deadBranchStart = pricesTs.indexOf("if (priceData === DEAD_LINK) {");
   const branch = pricesTs.slice(
-    pricesTs.indexOf("if (priceData === DEAD_LINK) {"),
-    pricesTs.indexOf("} else if (priceData === PRICE_REFUSED")
+    deadBranchStart,
+    pricesTs.indexOf("} else if (", deadBranchStart)
   );
   assert.ok(branch.length > 0, "refreshOne must have a DEAD_LINK branch");
   assert.ok(
@@ -1157,7 +1279,7 @@ assert.ok(
 // read, and a page with no markup says nothing about the last good one.
 {
   const branch = pricesTs.slice(
-    pricesTs.indexOf("} else if (priceData === PRICE_REFUSED"),
+    pricesTs.indexOf("priceData === PRICE_REFUSED ||"),
     pricesTs.indexOf("} else if (priceData === NO_BASE_KIT) {")
   );
   assert.ok(branch.length > 0, "refreshOne must have a refused/unparsed branch");
@@ -1167,9 +1289,17 @@ assert.ok(
   );
   assert.match(branch, /priceSource:/);
   assert.match(branch, /\.\.\.health/);
+  // The store's own "closed" shares this branch for the same reason: it is a
+  // fact to record, never a price to clear. A locked shop that reopens must
+  // find its listings where it left them.
+  assert.match(
+    branch,
+    /priceData === STORE_LOCKED\s*\n?\s*\?\s*PRICE_SOURCE_LOCKED/,
+    "refreshOne must stamp a password gate as LOCKED, not as UNPARSED"
+  );
 }
-// scrape.py mirrors both sentinels and both priceSource marks.
-for (const name of ["PRICE_REFUSED", "NO_PRODUCT_DATA"]) {
+// scrape.py mirrors all three sentinels and all three priceSource marks.
+for (const name of ["PRICE_REFUSED", "NO_PRODUCT_DATA", "STORE_LOCKED"]) {
   assert.ok(
     new RegExp(`^${name} = "${name}"$`, "m").test(scrapePy),
     `scrape.py must mirror the ${name} sentinel`
@@ -1184,6 +1314,49 @@ assert.equal(
   pyConst("PRICE_SOURCE_UNPARSED"),
   `"${PRICE_SOURCE_UNPARSED}"`,
   "scrape.py's UNPARSED priceSource mark must match link-health.mjs"
+);
+assert.equal(
+  pyConst("PRICE_SOURCE_LOCKED"),
+  `"${PRICE_SOURCE_LOCKED}"`,
+  "scrape.py's LOCKED priceSource mark must match link-health.mjs"
+);
+// Mirrored, and ASKED on both of the paths a URL can take — scrape.py picks one
+// per URL with no fallback between them, so a rule added to one half reaches
+// only half the roster. hexkeyboards is a /products/ store, which is the path
+// the generic reader never sees.
+assert.ok(
+  /def is_storefront_password_gate\(/.test(scrapePy),
+  "scrape.py must mirror isStorefrontPasswordGate as is_storefront_password_gate"
+);
+assert.equal(
+  (scrapePy.match(/(?<!def )is_storefront_password_gate\(/g) ?? []).length,
+  2,
+  "both of scrape.py's price paths must recognise a storefront password gate"
+);
+assert.ok(
+  (scrapePy.match(/return STORE_LOCKED\b/g) ?? []).length === 2,
+  "both of scrape.py's price paths must answer STORE_LOCKED for a gate"
+);
+// The gate is a page of the store's own, so comparing it with the root could
+// only ever say "not identical" — asked FIRST, the root fetch is never paid for.
+assert.ok(
+  scrapePy.indexOf("if is_storefront_password_gate(product_url, final_url):") <
+    scrapePy.indexOf("if is_gone_front_page(product_url, final_url, html, root_html):"),
+  "scrape.py's generic path must ask about the gate before fetching the root"
+);
+// prices.ts asks it on the one path that reads the human page, and before the
+// body is parsed: the gate is a 200 carrying a form, and parsing it can only
+// produce "no product markup" — the verdict that asks the owner for a parser.
+assert.ok(
+  /if \(isStorefrontPasswordGate\(productUrl, res\.url\)\) return STORE_LOCKED;/.test(
+    pricesTs
+  ),
+  "prices.ts must answer STORE_LOCKED when the store serves its password gate"
+);
+assert.ok(
+  pricesTs.indexOf("isStorefrontPasswordGate(productUrl, res.url)") <
+    pricesTs.indexOf("const html = await res.text();"),
+  "prices.ts must recognise the gate before it reads the body"
 );
 // Both of scrape.py's price paths refuse rather than go quiet: the Shopify
 // path (unsupported currency + implausible price) and the generic path

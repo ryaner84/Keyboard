@@ -20,6 +20,7 @@ import {
   DEAD_LINK_FAILURE_THRESHOLD,
   DEAD_LINK_RECHECK_HOURS,
   UNDIAGNOSED_RECHECK_HOURS,
+  PRICE_SOURCE_LOCKED,
   PRICE_SOURCE_REFUSED,
   PRICE_SOURCE_UNPARSED,
   isDeadLinkStatus,
@@ -27,6 +28,7 @@ import {
   isGoneHostError,
   isGoneRedirect,
   isGoneStorefrontRoot,
+  isStorefrontPasswordGate,
   isUnresolvedHostError,
   nextLinkHealth,
   pageFingerprint,
@@ -145,12 +147,26 @@ export const DEAD_LINK = "DEAD_LINK" as const;
 // exact failure `deadSince` is kept narrow to avoid.
 export const PRICE_REFUSED = "PRICE_REFUSED" as const;
 export const NO_PRODUCT_DATA = "NO_PRODUCT_DATA" as const;
+
+// The sixth answer, and the one NO_PRODUCT_DATA was absorbing. STORE_LOCKED
+// means the store answered with its own password gate: it has closed itself to
+// the public, so there is no page to parse and no number to read — and, unlike
+// the two above, the repair is not here at all. Teaching a parser an "Opening
+// Soon" form is the one thing that could never work, which is what the
+// publishing audit was asking for about every one of hexkeyboards.com's six
+// listings. See isStorefrontPasswordGate in scripts/lib/link-health.mjs.
+//
+// It does not clear the price and it never writes `deadSince`: a locked shop
+// still exists and reopens with a switch, so hiding its listings would be the
+// false positive the gone-checks are kept narrow to avoid.
+export const STORE_LOCKED = "STORE_LOCKED" as const;
 export type FetchPriceOutcome =
   | PriceResult
   | typeof NO_BASE_KIT
   | typeof DEAD_LINK
   | typeof PRICE_REFUSED
   | typeof NO_PRODUCT_DATA
+  | typeof STORE_LOCKED
   | null;
 
 /**
@@ -937,6 +953,12 @@ export async function fetchJsonLdPrice(
     // parsed, because a home page that carries Product markup of its own would
     // otherwise be read and published as this set's price at this vendor.
     if (isGoneRedirect(productUrl, res.url)) return DEAD_LINK;
+    // …and the store may have answered with its own PASSWORD GATE, which is not
+    // a front door and not a 404: the shop is there and shut. Asked here for the
+    // same reason as the line above — the gate is a real 200 page and parsing it
+    // could only ever produce "no product markup", which asks the owner to teach
+    // the parser a form nobody can buy through.
+    if (isStorefrontPasswordGate(productUrl, res.url)) return STORE_LOCKED;
     const html = await res.text();
 
     // WooCommerce variable product: pick the base kit from the variation blob,
@@ -1356,6 +1378,10 @@ export interface RefreshResult {
   // want of a wider price window or a parser, not for want of another scrape.
   refused: number;
   unparsed: number;
+  // Reads whose answer was the store's own password gate. Neither a failure nor
+  // an update, like the two above, but unlike them it names no repair HERE: the
+  // shop is shut and only its owner reopens it.
+  locked: number;
   // Milliseconds spent waiting on the per-host throttle. Mirrors the nightly's
   // `throttled_s`. A large number here is not waste — it is the run declining
   // to burst a store into rate-limiting us, which would cost the row its price
@@ -1405,9 +1431,11 @@ async function refreshOne(
           ? "PRICE_REFUSED"
           : priceData === NO_PRODUCT_DATA
             ? "NO_PRODUCT_DATA"
-            : priceData
-              ? "PRICED"
-              : "UNREADABLE";
+            : priceData === STORE_LOCKED
+              ? "STORE_LOCKED"
+              : priceData
+                ? "PRICED"
+                : "UNREADABLE";
   const health = nextLinkHealth(vk, outcome);
   if (priceData === DEAD_LINK) {
     // The store answered "gone". Clear the price like NO_BASE_KIT does — a
@@ -1427,14 +1455,24 @@ async function refreshOne(
     });
     result.dead++;
     result.failed++;
-  } else if (priceData === PRICE_REFUSED || priceData === NO_PRODUCT_DATA) {
+  } else if (
+    priceData === PRICE_REFUSED ||
+    priceData === NO_PRODUCT_DATA ||
+    priceData === STORE_LOCKED
+  ) {
     // The page was fetched. Record WHAT was learned — priceSource is the only
     // column that carries it, and leaving it NULL is what made a live store
     // read as a dead link set — but do NOT touch the price: the refusal is
     // about the number just read, and a page with no markup says nothing at
     // all about the last good one. Link health follows nextLinkHealth: a
     // refusal is a read (counters reset), an unparseable 200 is not, because a
-    // bot check served as 200 is indistinguishable from one.
+    // bot check served as 200 is indistinguishable from one — and neither is a
+    // password gate, which is a page the store served INSTEAD of the listing.
+    //
+    // STORE_LOCKED belongs here rather than beside DEAD_LINK for one reason: the
+    // shop is shut, not gone. Clearing the price or writing `deadSince` would
+    // take its listings off the site on evidence that reverses the moment the
+    // owner unlocks the storefront.
     await prisma.vendorKit.update({
       where: { id: vk.id },
       data: {
@@ -1442,11 +1480,14 @@ async function refreshOne(
         priceSource:
           priceData === PRICE_REFUSED
             ? PRICE_SOURCE_REFUSED
-            : PRICE_SOURCE_UNPARSED,
+            : priceData === STORE_LOCKED
+              ? PRICE_SOURCE_LOCKED
+              : PRICE_SOURCE_UNPARSED,
         ...health,
       },
     });
     if (priceData === PRICE_REFUSED) result.refused++;
+    else if (priceData === STORE_LOCKED) result.locked++;
     else result.unparsed++;
   } else if (priceData === NO_BASE_KIT) {
     // Listing has no base kit (only subkits / ambiguous aggregate) — clear the
@@ -1671,6 +1712,7 @@ export async function refreshPrices(opts: RefreshOptions = {}): Promise<RefreshR
     dead: 0,
     refused: 0,
     unparsed: 0,
+    locked: 0,
     throttledMs: 0,
     chainRepaired: [],
     stoppedEarly: false,

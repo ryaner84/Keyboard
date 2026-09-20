@@ -965,6 +965,14 @@ async function reportVendorsPublishingNothing(client) {
               (SELECT count(*)::int FROM public."VendorKit" vk
                 WHERE vk."vendorId" = v.id AND vk."priceSource" = 'UNPARSED')
                 AS unparsed_listings,
+              -- The third such read, and the one whose repair is in neither
+              -- place: LOCKED is the store's own password gate, so the shop is
+              -- shut until its owner reopens it. Selected here as well as in
+              -- the audit because a count only one caller passes is a verdict
+              -- only one caller can reach.
+              (SELECT count(*)::int FROM public."VendorKit" vk
+                WHERE vk."vendorId" = v.id AND vk."priceSource" = 'LOCKED')
+                AS locked_listings,
               -- The store answered 404/410 for these. Counted separately from
               -- read_listings because a 404 IS a read to priceSource, which is
               -- how a closed store read as a pricing backlog for months.
@@ -1002,6 +1010,7 @@ async function reportVendorsPublishingNothing(client) {
       readListings: r.read_listings,
       refusedListings: r.refused_listings,
       unparsedListings: r.unparsed_listings,
+      lockedListings: r.locked_listings,
       pricedListings: r.priced_listings,
       deadListings: r.dead_listings,
       deadestSince: r.deadest_since,
@@ -1018,7 +1027,9 @@ async function reportVendorsPublishingNothing(client) {
       `given no answer at all — a block and a closed shop look identical from ` +
       `here, so probe it rather than retiring it — "price REFUSED" and ` +
       `"no product markup" are code here (KIT_BOUNDS / the Currency table / ` +
-      `the parser), "none priced" is a page that was reached and yielded no ` +
+      `the parser), "PASSWORD GATE" is the shop closed to the public and is ` +
+      `nobody's to repair but its owner's, "none priced" is a page that was ` +
+      `reached and yielded no ` +
       `base price — the link or the base-kit picker, never another scrape — ` +
       `and a reason opening with "consecutive unreadable attempt(s)" means the ` +
       `read it describes is older than the store's current silence, so probe ` +

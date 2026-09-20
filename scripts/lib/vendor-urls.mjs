@@ -920,6 +920,12 @@ function publishingFailureReason(vendor) {
   // `dead` proves there is a row a change HERE would reach.
   const refused = Number(vendor.refusedListings ?? 0);
   const unparsed = Number(vendor.unparsedListings ?? 0);
+  // The store's own statement that it is not selling to anybody, which outranks
+  // both of those: they say this codebase could not turn a page into a price,
+  // and a password gate says there was no page to turn. Defaults to 0 like its
+  // two siblings — a caller that does not select it keeps the previous message
+  // rather than being handed a verdict nobody counted.
+  const locked = Number(vendor.lockedListings ?? 0);
   // `priceSource` is never cleared, so every verdict below is written in the
   // present tense about a page that may have been read months ago — the same
   // contaminated-column mistake #159 and #169 fixed from the other side.
@@ -934,6 +940,26 @@ function publishingFailureReason(vendor) {
   // nobody gathered.
   const staleReads = describeStaleReads(vendor.maxLinkFailures);
   const withStale = (reason) => (staleReads ? `${staleReads}; ${reason}` : reason);
+  // Read before the two below it because it explains their rows better than
+  // they do, and because it is the one verdict here that names NO repair: a
+  // shop behind its password gate reopens when its owner says so, and until
+  // then no parser, no wider window and no further scrape publishes a listing
+  // of it. Measured against production on 2026-09-20, all six of
+  // hexkeyboards.com's rows were being reported as a platform to teach the
+  // parser — a Shopify "Opening Soon" form. Guarded by `> dead` exactly like
+  // its siblings: priceSource is never cleared and deadSince is sticky, so only
+  // a count larger than `dead` proves there is a row this sentence is about.
+  // Never qualified by describeStaleReads — 'LOCKED' does not reset
+  // linkFailures, for the same reason 'UNPARSED' does not.
+  if (!(priced > 0) && locked > dead) {
+    return withDead(
+      `${locked} of ${listings} listing(s) are answered by the storefront's own ` +
+        `PASSWORD GATE — the shop has closed itself to the public (Shopify's ` +
+        `"Opening Soon" page), so it is selling nothing to anyone and there is ` +
+        `nothing here to repair; it publishes again when its owner reopens it ` +
+        `(neither refresh-prices nor a parser can help)`
+    );
+  }
   if (!(priced > 0) && refused > dead) {
     return withDead(
       withStale(

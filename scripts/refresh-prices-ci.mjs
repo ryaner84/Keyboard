@@ -40,7 +40,10 @@ const result = await refreshPrices({
 // KIT_BOUNDS / an unconvertible currency) or could not read the page's platform
 // at all. Both used to be counted as failures, which is how a live shop read as
 // a blocked one — and neither is fixed by running this workflow again, so a run
-// that reports them is pointing at code, not at the vendor.
+// that reports them is pointing at code, not at the vendor. `locked` is the
+// third of those answers and the one that points at neither: the store served
+// its own password gate, so the shop is shut and nothing here — no parser, no
+// wider window, no further scrape — publishes it until its owner reopens it.
 // `throttledS` is what the per-host spacing cost this run. It is reported for
 // the same reason the nightly reports `throttled_s`: the only alternative to
 // paying it is bursting a store into rate-limiting us, and a 429 is UNREADABLE,
@@ -50,7 +53,7 @@ const result = await refreshPrices({
 console.log(
   `Price refresh: attempted=${result.attempted} updated=${result.updated} ` +
     `failed=${result.failed} dead=${result.dead} refused=${result.refused} ` +
-    `unparsed=${result.unparsed} throttledS=${(result.throttledMs / 1000).toFixed(1)} ` +
+    `unparsed=${result.unparsed} locked=${result.locked} throttledS=${(result.throttledMs / 1000).toFixed(1)} ` +
     `stoppedEarly=${result.stoppedEarly}`
 );
 // Printed apart from the counts because it names HOSTS, not a total, and

@@ -873,6 +873,48 @@ stealth fetch per dead row on every nightly run. `test:link-health` and the
 Python suite both fail if a call site re-derives the rule, if `prices.ts` stops
 gating on `res.ok`, or if that ordering is lost.
 
+**And a store can answer perfectly and still not be a shop that day: it is
+LOCKED.** A Shopify storefront that is not open to the public — pre-launch,
+paused, between group buys — is not taken down. Shopify keeps serving it and
+redirects every request to `/password`, a real 200 page carrying an "Opening
+Soon" form, and every verdict in the chain above looks straight past that:
+`isDeadLinkStatus` sees a 200, `isGoneRedirect` sees a hop onto `/password`
+rather than the site root, `isGoneFrontPage` sees a final path that is not the
+requested one, `isGoneStorefrontRoot` sees a root that serves the same gate and
+so has not left the origin, and `isGoneHostError` sees a host that resolves. So
+the page fell through to the bottom of each half — and the two halves disagreed
+about what that meant, which is the tell. `prices.ts` called it
+`NO_PRODUCT_DATA` ("teach the parser this platform"), `run_prices` returned the
+bare `None` that means the store never answered at all, and the publishing audit
+printed the first of those: **teach the parser an "Opening Soon" form**, the one
+repair that could never work, nightly, about all six of hexkeyboards.com's
+listings (probed from a runner on 2026-09-20: every product URL 302s to
+`/password`, and `/products/<handle>.json` answers 401). `UNPARSED` also buys the
+24-hour `AWAITING_OWN_FIX` cadence, so the queue spent a fetch a day on a login
+form — budget taken from live listings, which on a released set are hidden while
+unpriced. `isStorefrontPasswordGate` (mirrored as `is_storefront_password_gate`)
+is the answer, and it is NOT `deadSince`: a locked shop still exists and reopens
+with a switch, so hexkeyboards' `/password` stays pinned in both suites as the
+control that the three hiding checks must keep passing through. What changes is
+only what the row RECORDS — `priceSource = 'LOCKED'`, which is knowledge about
+the STORE, so it keeps the fortnight and is deliberately absent from both
+`AWAITING_OWN_FIX_PRICE_SOURCES` (nothing here opens a shop its owner closed)
+and `READ_RESETS_LINK_FAILURES_PRICE_SOURCES` (the gate is a page served
+INSTEAD of the listing, so nothing readable came back). It is asked on the
+no-markup path, BEFORE the storefront root is fetched: the root serves the same
+gate, so that comparison could only ever answer "not identical" and pay a fetch
+to reach the wrong verdict. Narrow like its siblings — a request that STARTED at
+`/password` was not redirected off anything, the gate must be on the SAME host,
+and the path must be exactly `/password` (a product whose handle is "password"
+lives at `/products/password`). And it is FOUR edits, not one: the rule, both
+price paths in each half (`scrape.py` picks one path per URL with no fallback
+between them, and hexkeyboards is a `/products/` store, which the generic reader
+never sees), the count in BOTH report callers, and the verdict itself —
+`test:link-health`, `test:vendor-urls` and the Python suite fail if either half
+stops asking, if the ordering is lost, if a caller stops selecting
+`locked_listings`, or if the verdict starts telling the owner to relink or
+retire a shop that is merely shut.
+
 **And `null` still meant four different things, two of which are OUR fault, not
 the store's.** A page can be fetched, parsed and completely understood and still
 leave the row unpriced because this site refused the number — `KIT_BOUNDS` capped
