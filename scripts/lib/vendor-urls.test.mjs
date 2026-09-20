@@ -982,6 +982,60 @@ assert.match(
   assert.match(unparsed, /35 of 35 listing\(s\) answer 200 with no product markup/);
   assert.match(unparsed, /teach the parser or retire it/);
 }
+// The store's own PASSWORD GATE, which outranks both of those: they say this
+// codebase could not turn a page into a price, and a gate says there was no
+// page. Probed from a runner on 2026-09-20, hexkeyboards.com answers all six of
+// its listings that way and the report was asking the owner to teach the parser
+// a Shopify "Opening Soon" form — the one repair that could never work.
+{
+  const locked = reasonOf({
+    slug: "hex-keyboards",
+    websiteUrl: "https://hexkeyboards.com",
+    visibleListings: 0,
+    listings: 6,
+    readListings: 6,
+    lockedListings: 6,
+    pricedListings: 0,
+  });
+  assert.match(locked, /6 of 6 listing\(s\) are answered by the storefront's own/);
+  assert.match(locked, /PASSWORD GATE/);
+  assert.match(locked, /closed itself to the public/);
+  assert.match(locked, /neither refresh-prices nor a parser can help/);
+  // It must not read as a store that is gone: nothing here writes deadSince for
+  // a locked shop, and telling the owner to retire it would take a live
+  // storefront's rows off the site the day it reopens.
+  assert.doesNotMatch(locked, /relink or retire/);
+}
+// A gate outranks the two verdicts that name a repair HERE, because it is the
+// reason those rows carry no price at all.
+assert.match(
+  reasonOf({
+    slug: "locked-and-unparsed",
+    websiteUrl: "https://shut.example",
+    visibleListings: 0,
+    listings: 6,
+    readListings: 6,
+    lockedListings: 4,
+    unparsedListings: 2,
+    pricedListings: 0,
+  }),
+  /PASSWORD GATE/
+);
+// …and a caller that does not COUNT it keeps the previous message rather than
+// being handed a verdict nobody measured — the same defaulting rule every count
+// here follows.
+assert.match(
+  reasonOf({
+    slug: "unmeasured",
+    websiteUrl: "https://shut.example",
+    visibleListings: 0,
+    listings: 6,
+    readListings: 6,
+    unparsedListings: 6,
+    pricedListings: 0,
+  }),
+  /no product markup/
+);
 // The refusal outranks the unreadable page when a vendor has both: it names a
 // number the site could publish today, which the other never does.
 assert.match(
@@ -1385,6 +1439,7 @@ for (const field of [
   "readListings",
   "refusedListings",
   "unparsedListings",
+  "lockedListings",
   "pricedListings",
   "visibleListings",
 ]) {
@@ -1418,8 +1473,14 @@ for (const [file, source] of [
     `${file} must count the unparsed rows off priceSource`
   );
   assert.ok(
-    /refusedListings:/.test(source) && /unparsedListings:/.test(source),
-    `${file} must pass both counts to planPublishingReport`
+    /"priceSource" = 'LOCKED'[\s\S]{0,120}AS locked_listings/.test(source),
+    `${file} must count the password-gated rows off priceSource`
+  );
+  assert.ok(
+    /refusedListings:/.test(source) &&
+      /unparsedListings:/.test(source) &&
+      /lockedListings:/.test(source),
+    `${file} must pass all three counts to planPublishingReport`
   );
   // And the counter that DATES those marks. `priceSource` is never cleared, so
   // without it every verdict derived from it is stated in the present tense

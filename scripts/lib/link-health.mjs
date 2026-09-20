@@ -135,6 +135,32 @@ export const UNDIAGNOSED_RECHECK_HOURS = 24;
 export const PRICE_SOURCE_REFUSED = "REFUSED";
 export const PRICE_SOURCE_UNPARSED = "UNPARSED";
 
+/**
+ * The store answered with its own PASSWORD GATE — it has closed itself to the
+ * public and is not selling to anyone, us included.
+ *
+ * The third thing a read can learn, and the one that was being filed as the
+ * other two. A Shopify storefront put behind the gate answers every product URL
+ * with a 302 to its own `/password` page: 200, same host, a real document, and
+ * no product markup on it. That is not a platform anyone can teach a parser
+ * (UNPARSED, which is what the six-hourly pass stamped) and not a store that
+ * never answered (which is what the nightly recorded, having no mark for it at
+ * all) — it is the store stating that nothing here is for sale yet.
+ *
+ * Measured against production on 2026-09-20, hexkeyboards.com answers all six
+ * of its tracked listings that way (`/products/<handle>.json` → 401, the page →
+ * `/password`, "Opening Soon"), and the publishing audit had been printing
+ * "teach the parser or retire it" about it — the one verdict that names a
+ * change HERE and that no number of scrapes, and no parser, can ever end.
+ *
+ * It is NOT `deadSince`. A locked shop still exists and reopens by someone
+ * clicking a switch; taking its listings off the site would be the exact
+ * false positive the front-page checks are kept narrow to avoid, and
+ * hexkeyboards' `/password` is pinned as a control in both test suites for
+ * precisely that reason.
+ */
+export const PRICE_SOURCE_LOCKED = "LOCKED";
+
 /** The mark a read that reached a price — or an answer of "no base kit" — leaves. */
 export const PRICE_SOURCE_SCRAPED = "SCRAPED";
 
@@ -160,6 +186,11 @@ export const PRICE_SOURCE_SCRAPED = "SCRAPED";
  * failures while answering every one of them 200 with an app shell. Reading
  * that as silence would hedge the most actionable verdict on the site using
  * evidence that is not there.
+ *
+ * 'LOCKED' is absent for the same reason as 'UNPARSED': the gate is a page, not
+ * the listing, so nothing readable came back and the counter should keep
+ * climbing — which is also what puts a locked shop on the fortnight instead of
+ * costing the queue a daily visit to a door nobody here can open.
  */
 export const READ_RESETS_LINK_FAILURES_PRICE_SOURCES = [
   PRICE_SOURCE_SCRAPED,
@@ -201,6 +232,13 @@ export const READ_RESETS_LINK_FAILURES_PRICE_SOURCES = [
  * `deadSince` still outranks both: the store answering "gone" IS knowledge about
  * the store, whatever a later unparseable fetch stamped on top of it, so a row
  * carrying it keeps the fortnight.
+ *
+ * 'LOCKED' is deliberately NOT in this list, and the decision is the same one
+ * every addition to it makes: whose repair is it? Nothing in this repository
+ * opens a shop its owner has closed, so a locked row is knowledge about the
+ * STORE — the fortnight's own case — and putting it here would spend a daily
+ * fetch on a password page for as long as the shop stays shut, which is the
+ * queue budget an unpriced live listing needed.
  */
 export const AWAITING_OWN_FIX_PRICE_SOURCES = [
   PRICE_SOURCE_REFUSED,
@@ -503,6 +541,68 @@ export function isGoneStorefrontRoot(requestUrl, rootFinalUrl) {
   if (!isFrontDoor(to)) return false;
   return bareHost(to) !== bareHost(from);
 }
+
+/**
+ * Shopify's storefront password gate, which every locked shop answers with and
+ * which no other check here can see.
+ *
+ * A shop that is not open to the public — pre-launch, paused, between group
+ * buys — is not taken down: Shopify keeps serving it and redirects every
+ * request to `/password`, a real 200 page carrying an "Opening Soon" form. The
+ * row's own request therefore ends at a page that is not the listing, and every
+ * verdict above it looks straight past that:
+ *
+ *   isDeadLinkStatus       the gate answers 200.
+ *   isGoneRedirect         the hop lands on `/password`, not the site root.
+ *   isGoneFrontPage        the final path is not the requested one.
+ *   isGoneStorefrontRoot   the root serves the gate too, so it has not left
+ *                          this origin.
+ *   isGoneHostError        the host resolves perfectly.
+ *
+ * So the page fell through to "200 with no product markup" — `NO_PRODUCT_DATA`
+ * in the six-hourly pass, no verdict at all in the nightly — and the publishing
+ * report asked the owner to teach the parser a form. Probed from a runner on
+ * 2026-09-20, hexkeyboards.com does exactly this on all six of its tracked
+ * listings (`/collections/group-buys/products/gb-gmk-blot` → 302 →
+ * `/password`, and `/products/<handle>.json` → 401): the vendor published
+ * nothing, and the only sentence printed about it named a repair that does not
+ * exist.
+ *
+ * The verdict this earns is its own, and it is NOT "gone". A locked shop is
+ * still there and reopens with a switch, so `deadSince` — the only signal
+ * allowed to take a listing off the site — must never be written from here;
+ * hexkeyboards' `/password` is pinned as a NOT-gone control in both test
+ * suites, and it stays one. What changes is only what the row RECORDS: the
+ * store said it is closed, which is knowledge about the store rather than a
+ * parser this codebase is missing (PRICE_SOURCE_LOCKED).
+ *
+ * Narrow the same way as its siblings:
+ *
+ *   • the request may not have STARTED at the gate — several vendors carry a
+ *     bare storefront URL as a listing, and a row pointed at `/password` was
+ *     not redirected off anything;
+ *   • the gate must be on the SAME host. A hop onto another host's `/password`
+ *     is a different shop answering, which is isGoneRedirect's and
+ *     isGoneStorefrontRoot's business, not this rule's;
+ *   • the path must be exactly `/password` (trailing slashes aside). A product
+ *     called "password" lives at `/products/password`, and a locale-prefixed
+ *     or query-bearing path is somebody else's page until measured.
+ *
+ * Self-healing like everything else here: the first read that gets through
+ * stamps its own mark over this one, so a shop that reopens needs no help.
+ */
+export function isStorefrontPasswordGate(requestUrl, finalUrl) {
+  const from = parseUrl(requestUrl);
+  const to = parseUrl(finalUrl);
+  if (!from || !to) return false;
+  if (from.host !== to.host) return false;
+  const path = (url) => url.pathname.replace(/\/+$/, "").toLowerCase();
+  if (path(to) !== STOREFRONT_PASSWORD_GATE_PATH) return false;
+  return path(from) !== STOREFRONT_PASSWORD_GATE_PATH;
+}
+
+/** The one path Shopify serves its storefront password gate from. */
+const STOREFRONT_PASSWORD_GATE_PATH = "/password";
 
 /**
  * The network-level answers that mean the HOST itself is gone — NXDOMAIN, in

@@ -686,10 +686,23 @@ AMBIGUOUS_OFFERS = "AMBIGUOUS_OFFERS"
 PRICE_REFUSED = "PRICE_REFUSED"
 NO_PRODUCT_DATA = "NO_PRODUCT_DATA"
 
+# The sixth answer, and the one the two above were absorbing between them.
+# STORE_LOCKED means the store answered with its own password gate: it has
+# closed itself to the public, so there is no page to parse and no number to
+# read — and the repair is not in this repository at all. This half filed such a
+# row as UNREADABLE ("the store never answered") and the six-hourly pass as
+# NO_PRODUCT_DATA ("teach the parser this platform"); both were wrong about the
+# same six hexkeyboards.com listings, in opposite directions.
+#
+# It never clears the price and never writes deadSince: a locked shop still
+# exists and reopens with a switch. See is_storefront_password_gate.
+STORE_LOCKED = "STORE_LOCKED"
+
 # What priceSource records once a page has been READ. Mirror of
 # PRICE_SOURCE_REFUSED / PRICE_SOURCE_UNPARSED in scripts/lib/link-health.mjs.
 PRICE_SOURCE_REFUSED = "REFUSED"
 PRICE_SOURCE_UNPARSED = "UNPARSED"
+PRICE_SOURCE_LOCKED = "LOCKED"
 
 # The priceSource marks whose repair is a change in THIS repository rather than
 # another scrape, so they buy no time on the fortnight below. REFUSED means the
@@ -700,6 +713,10 @@ PRICE_SOURCE_UNPARSED = "UNPARSED"
 # how #164's front-page check shipped parked until 2026-09-18 against all 34 of
 # the listings it was written for. Mirror of AWAITING_OWN_FIX_PRICE_SOURCES in
 # scripts/lib/link-health.mjs.
+# LOCKED is deliberately not here: nothing in this repository opens a shop its
+# owner has closed, so a locked row is knowledge about the STORE and keeps the
+# fortnight — the daily cadence would spend a fetch on a password page for as
+# long as the shop stays shut.
 AWAITING_OWN_FIX_PRICE_SOURCES = (PRICE_SOURCE_REFUSED, PRICE_SOURCE_UNPARSED)
 
 # HTTP statuses that mean the listing is gone rather than blocked.
@@ -951,6 +968,63 @@ def is_gone_storefront_root(request_url, root_final_url) -> bool:
         return (split.hostname or "").lower().removeprefix("www.")
 
     return bare_host(target) != bare_host(source)
+
+
+# The one path Shopify serves its storefront password gate from. Mirror of
+# STOREFRONT_PASSWORD_GATE_PATH in scripts/lib/link-health.mjs.
+_STOREFRONT_PASSWORD_GATE_PATH = "/password"
+
+
+def is_storefront_password_gate(request_url, final_url) -> bool:
+    """True when the store answered with its own PASSWORD GATE.
+
+    A shop that is not open to the public — pre-launch, paused, between group
+    buys — is not taken down: Shopify keeps serving it and redirects every
+    request to /password, a real 200 page carrying an "Opening Soon" form. Every
+    other verdict here looks straight past that. The status is 200, the hop
+    lands on /password rather than the site root (not is_gone_redirect), the
+    final path is not the requested one (not is_gone_front_page), the root
+    serves the gate too so it has not left this origin (not
+    is_gone_storefront_root), and the host resolves (not is_gone_host_error).
+
+    So the page fell through to "200 with no product markup" — and in this half
+    not even that: shopify_price answered None, the mark that means the store
+    never answered at all. Probed from a runner on 2026-09-20, hexkeyboards.com
+    does exactly this on all six of its tracked listings
+    (/collections/group-buys/products/gb-gmk-blot → 302 → /password,
+    /products/<handle>.json → 401): the vendor published nothing and the audit
+    asked the owner to teach the parser a login form.
+
+    The verdict is NOT "gone". A locked shop is still there and reopens with a
+    switch, so deadSince — the only signal allowed to take a listing off the
+    site — is never written from here; hexkeyboards' /password stays pinned as a
+    NOT-gone control in both test suites. What changes is what the row RECORDS.
+
+    Narrow the same way as its siblings: a request that STARTED at the gate was
+    not redirected off anything, the gate must be on the SAME host (another
+    host's /password is a different shop answering), and the path must be
+    exactly /password. Mirror of isStorefrontPasswordGate in
+    scripts/lib/link-health.mjs.
+    """
+
+    def parts(url):
+        try:
+            split = urllib.parse.urlsplit(str(url or ""))
+        except ValueError:
+            return None
+        if not split.scheme or not split.netloc:
+            return None
+        return split
+
+    source = parts(request_url)
+    target = parts(final_url)
+    if source is None or target is None:
+        return False
+    if (source.netloc or "").lower() != (target.netloc or "").lower():
+        return False
+    if target.path.rstrip("/").lower() != _STOREFRONT_PASSWORD_GATE_PATH:
+        return False
+    return source.path.rstrip("/").lower() != _STOREFRONT_PASSWORD_GATE_PATH
 
 
 # The network-level answers that mean the HOST itself is gone — NXDOMAIN, in
@@ -1661,6 +1735,18 @@ def shopify_price(
                     f"price ({product_url})"
                 )
                 return DEAD_LINK
+            # …and the third thing that hop can be: the store's own PASSWORD
+            # GATE. The shop is there and shut, which is neither "gone" (the
+            # branch above) nor the None below, whose meaning — "no answer at
+            # all" — is what left hexkeyboards' six listings with no verdict on
+            # every nightly run while the six-hourly pass called them a platform
+            # to teach the parser.
+            if is_storefront_password_gate(product_url, nav_final_url):
+                log(
+                    f"  storefront password gate ({nav_final_url}) — the shop is"
+                    f" closed to the public ({product_url})"
+                )
+                return STORE_LOCKED
             return None
 
         origin = urllib.parse.urlsplit(clean)
@@ -5028,6 +5114,17 @@ def generic_price(
         # follows redirects without telling us where it ended up — the same
         # reason is_gone_redirect above cannot judge one either.
         if final_url:
+            # Asked before the front-page fetch: a password gate is the store
+            # answering with a page of its own, so comparing it against the root
+            # (which serves the same gate) could only ever say "not identical" —
+            # and paying for that fetch to reach the wrong verdict is the cost
+            # this ordering saves.
+            if is_storefront_password_gate(product_url, final_url):
+                log(
+                    f"  storefront password gate ({final_url}) — the shop is"
+                    f" closed to the public ({product_url})"
+                )
+                return STORE_LOCKED
             root_html, root_url = _front_page_html(
                 page, scrapling, html_source, final_url
             )
@@ -5721,7 +5818,7 @@ def run_prices(
     scrapling: ScraplingClient | None = None,
 ) -> dict:
     stats = {"attempted": 0, "updated": 0, "failed": 0, "dead": 0,
-             "refused": 0, "unparsed": 0, "throttled_s": 0.0}
+             "refused": 0, "unparsed": 0, "locked": 0, "throttled_s": 0.0}
     # Per RUN, never across runs: a domain that comes back must be retried, and
     # a store that adds (or loses) a Shopify-compatible /meta.json must be seen
     # to have done so.
@@ -5804,6 +5901,7 @@ def run_prices(
                 else "NO_BASE_KIT" if result == NO_BASE_KIT
                 else "PRICE_REFUSED" if result == PRICE_REFUSED
                 else "NO_PRODUCT_DATA" if result == NO_PRODUCT_DATA
+                else "STORE_LOCKED" if result == STORE_LOCKED
                 else "PRICED" if result
                 else "UNREADABLE"
             )
@@ -5827,7 +5925,7 @@ def run_prices(
                 conn.commit()
                 stats["dead"] += 1
                 stats["failed"] += 1
-            elif result in (PRICE_REFUSED, NO_PRODUCT_DATA):
+            elif result in (PRICE_REFUSED, NO_PRODUCT_DATA, STORE_LOCKED):
                 # The page was fetched. Record WHAT was learned — priceSource is
                 # the only column that carries it, and leaving it NULL is what
                 # made a live store read as a dead link set — but do NOT touch
@@ -5841,6 +5939,8 @@ def run_prices(
                         (
                             PRICE_SOURCE_REFUSED
                             if result == PRICE_REFUSED
+                            else PRICE_SOURCE_LOCKED
+                            if result == STORE_LOCKED
                             else PRICE_SOURCE_UNPARSED,
                             failures,
                             dead_since,
@@ -5850,6 +5950,8 @@ def run_prices(
                 conn.commit()
                 if result == PRICE_REFUSED:
                     stats["refused"] += 1
+                elif result == STORE_LOCKED:
+                    stats["locked"] += 1
                 else:
                     stats["unparsed"] += 1
             elif result == NO_BASE_KIT:
@@ -7834,10 +7936,12 @@ def main() -> int:
     # `refused` and `unparsed` are neither failures nor updates — the store
     # answered and the row stays unpriced because this side refused the number
     # or could not read the page's platform, neither of which another run fixes.
+    # `locked` is the store answering with its own password gate: the shop is
+    # shut, so nothing here publishes it until its owner reopens it.
     log(f"Prices  -> attempted={price_stats['attempted']} "
         f"updated={price_stats['updated']} failed={price_stats['failed']} "
         f"dead={price_stats['dead']} refused={price_stats['refused']} "
-        f"unparsed={price_stats['unparsed']}")
+        f"unparsed={price_stats['unparsed']} locked={price_stats['locked']}")
     log("Done.")
     return 0
 

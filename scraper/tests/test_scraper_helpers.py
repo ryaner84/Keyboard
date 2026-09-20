@@ -2458,6 +2458,65 @@ class LinkHealthTests(unittest.TestCase):
             with self.subTest(root=root):
                 self.assertFalse(scrape.is_gone_storefront_root(request, root))
 
+    def test_storefront_password_gate_is_recognised_and_is_not_gone(self):
+        # The sixth answer a store can give, and the one both halves were
+        # reading as a failure of ours. A Shopify shop that is not open to the
+        # public answers every product URL with a 302 to its own /password page:
+        # 200, same host, a real document, no product markup. Probed from a
+        # runner on 2026-09-20, hexkeyboards.com does that on all six of its
+        # tracked listings — this half filed them as "no answer at all" and the
+        # six-hourly pass as a platform to teach the parser, about an "Opening
+        # Soon" form.
+        self.assertTrue(
+            scrape.is_storefront_password_gate(
+                "https://hexkeyboards.com/collections/group-buys/products/gb-gmk-blot",
+                "https://hexkeyboards.com/password",
+            )
+        )
+        self.assertTrue(
+            scrape.is_storefront_password_gate(
+                "https://hexkeyboards.com/products/x",
+                "https://hexkeyboards.com/password/",
+            )
+        )
+        for request, final in (
+            # A row pointed AT the gate was not redirected off anything.
+            ("https://hexkeyboards.com/password", "https://hexkeyboards.com/password"),
+            # Another host's gate is another shop answering — isGoneRedirect's
+            # and is_gone_storefront_root's business, never this rule's.
+            ("https://shop.example/products/x", "https://other.example/password"),
+            # Exactly /password: a product whose handle is "password" is a
+            # product page, and a hop to the root is is_gone_redirect's verdict.
+            ("https://shop.example/collections/x", "https://shop.example/products/password"),
+            ("https://shop.example/products/x", "https://shop.example/"),
+            ("https://shop.example/products/x", ""),
+            (None, None),
+        ):
+            with self.subTest(final=final):
+                self.assertFalse(scrape.is_storefront_password_gate(request, final))
+        # And it is NOT "gone". A locked shop is still there and reopens with a
+        # switch, so every check that can hide a listing must keep passing it
+        # through — hexkeyboards is their control for exactly this reason.
+        self.assertFalse(
+            scrape.is_gone_redirect(
+                "https://hexkeyboards.com/products/x",
+                "https://hexkeyboards.com/password",
+            )
+        )
+        self.assertFalse(
+            scrape.is_gone_storefront_root(
+                "https://hexkeyboards.com/products/x",
+                "https://hexkeyboards.com/password",
+            )
+        )
+        # The mark it leaves is its own, and it buys the fortnight rather than
+        # the daily "awaiting our own fix" cadence: nothing in this repository
+        # opens a shop its owner closed.
+        self.assertEqual(scrape.PRICE_SOURCE_LOCKED, "LOCKED")
+        self.assertNotIn(
+            scrape.PRICE_SOURCE_LOCKED, scrape.AWAITING_OWN_FIX_PRICE_SOURCES
+        )
+
     def test_page_fingerprint_normalizes_only_whitespace(self):
         # Whitespace is the whole tolerance: two documents differing by so much
         # as a nonce are not the same page. Idempotent, so a cached front-page
