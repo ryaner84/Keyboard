@@ -592,6 +592,29 @@ both the client-reported log and the resolution audit in the same run.
 > Ktechs listings BRG R3 `139 SGD SCRAPED` and Thunder God `169 SGD SCRAPED`. No
 > fresh report needs a fix, so no code change was required this run.
 
+> **2026-09-20 run.** Price feed run 35518742559 (`?all=1`) returns **41
+> submissions, all resolved, 0 pending** — a 1:1 match with the client-reported
+> log, so **no new price report** has filed (most recent submission still
+> **gmk-vamp × Switchmod**, 2026-08-26T17:39). Every one of the 41 carries
+> `resolvedAt=2026-09-20T05:09:46.581Z` — the nightly 00:30 UTC scheduled sweep
+> (run 35490963760, 05:09) that preceded this dispatch — which post-dates every
+> submission, confirming nothing reverted. Visitor inbox run 35518744142: the
+> SAME **15 `LISTING_FLAG`s + 1 FEEDBACK** already triaged and reported to the
+> owner on 2026-09-14 (§4b); no new flags, nothing auto-resolvable. STORE_LINK /
+> PRICE_REPORT / PHOTO_REPORT channels are all empty.
+>
+> The incoming **Self-heal watch was empty** (gmk-bent-r2 × zFrontier was
+> confirmed healed and cleared on 2026-09-17), so there was nothing to re-verify
+> this run and no watched item failed verification. gmk-bent-r2 × zFrontier still
+> reads **`current=150 USD source=SCRAPED`**: the picker's 150 held and **56 did
+> not return**, so the 2026-09-16 oscillation fix (`633581d`), hardened by #186
+> (`b3f7076`, the unnamed-offer-list guard), continues to hold. The other prior
+> resolutions all still read correctly: gmk-vamp × Switchmod `84.99 USD SCRAPED`
+> (correct CYL base); gmk-arctic `145 USD`, gmk-tribal `175 USD` (zFrontier
+> base-kit picks); the #153-corrected Ktechs listings BRG R3 `139 SGD SCRAPED`
+> and Thunder God `169 SGD SCRAPED`. No fresh report needs a fix, so no code
+> change was required this run.
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _None. All 41 full-history reports are resolved; 0 pending. The last open item —
