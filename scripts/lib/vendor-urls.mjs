@@ -942,22 +942,27 @@ function publishingFailureReason(vendor) {
   const withStale = (reason) => (staleReads ? `${staleReads}; ${reason}` : reason);
   // Read before the two below it because it explains their rows better than
   // they do, and because it is the one verdict here that names NO repair: a
-  // shop behind its password gate reopens when its owner says so, and until
-  // then no parser, no wider window and no further scrape publishes a listing
-  // of it. Measured against production on 2026-09-20, all six of
-  // hexkeyboards.com's rows were being reported as a platform to teach the
-  // parser — a Shopify "Opening Soon" form. Guarded by `> dead` exactly like
-  // its siblings: priceSource is never cleared and deadSince is sticky, so only
-  // a count larger than `dead` proves there is a row this sentence is about.
+  // shop that has closed itself reopens when its owner says so, and until then
+  // no parser, no wider window and no further scrape publishes a listing of it.
+  // Two shapes reach it and both are the store's own doing — the password gate
+  // (measured 2026-09-20: all six of hexkeyboards.com's rows were being
+  // reported as a platform to teach the parser, for a Shopify "Opening Soon"
+  // form) and a storefront frozen for non-payment (measured 2026-09-21:
+  // alphakeys.ca and typoworks.tw answer 402 on every path, and were being
+  // reported as a block to go and probe, which is what the owner had already
+  // done). Guarded by `> dead` exactly like its siblings: priceSource is never
+  // cleared and deadSince is sticky, so only a count larger than `dead` proves
+  // there is a row this sentence is about.
   // Never qualified by describeStaleReads — 'LOCKED' does not reset
   // linkFailures, for the same reason 'UNPARSED' does not.
   if (!(priced > 0) && locked > dead) {
     return withDead(
-      `${locked} of ${listings} listing(s) are answered by the storefront's own ` +
-        `PASSWORD GATE — the shop has closed itself to the public (Shopify's ` +
-        `"Opening Soon" page), so it is selling nothing to anyone and there is ` +
-        `nothing here to repair; it publishes again when its owner reopens it ` +
-        `(neither refresh-prices nor a parser can help)`
+      `${locked} of ${listings} listing(s) are answered by a CLOSED STOREFRONT ` +
+        `— the shop has shut itself to the public, either behind its password ` +
+        `gate (Shopify's "Opening Soon" form) or frozen for non-payment (402 ` +
+        `on every path it serves) — so it is selling nothing to anyone and ` +
+        `there is nothing here to repair; it publishes again when its owner ` +
+        `reopens it (neither refresh-prices nor a parser can help)`
     );
   }
   if (!(priced > 0) && refused > dead) {

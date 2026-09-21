@@ -34,6 +34,7 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import {
   isClientRenderedShell,
   isGoneFrontPage,
+  isFrozenStorefrontStatus,
   isGoneHostError,
   isGoneRedirect,
   isGoneStorefrontRoot,
@@ -394,6 +395,23 @@ for (const url of urls) {
     console.log(
       `  VERDICT   | DEAD_LINK — answered by a front door (${finalUrl}), not this page;` +
         ` the price pass clears the row on this alone (relink or retire it)`
+    );
+    continue;
+  }
+  // One non-ok status is not a block at all: the storefront is shut for
+  // billing, which every path under it answers alike. Reported apart from the
+  // line below because the two send the owner opposite ways — "blocked or
+  // broken" invites another probe, and this one cannot be probed into opening.
+  // It is also the loop this whole verdict exists to end: the publishing report
+  // names THIS tool for a row it cannot read, so answering a frozen shop with
+  // "blocked or broken" sent the owner back to the report that sent them here.
+  if (isFrozenStorefrontStatus(res.status)) {
+    console.log(
+      `  VERDICT   | STORE LOCKED — the storefront is FROZEN (${res.status}` +
+        ` Payment Required on every path, the platform's lapsed-plan page);` +
+        ` the shop is selling nothing to anyone until its owner settles the` +
+        ` bill. Not gone: deadSince is never written for this, and neither a` +
+        ` parser nor another scrape would help`
     );
     continue;
   }

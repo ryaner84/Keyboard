@@ -722,6 +722,35 @@ AWAITING_OWN_FIX_PRICE_SOURCES = (PRICE_SOURCE_REFUSED, PRICE_SOURCE_UNPARSED)
 # HTTP statuses that mean the listing is gone rather than blocked.
 DEAD_LINK_STATUSES = (404, 410)
 
+# The statuses that mean the STOREFRONT is shut for billing rather than this
+# page being missing or us being blocked. Mirror of STOREFRONT_FROZEN_STATUSES
+# in scripts/lib/link-health.mjs, where the reasoning lives in full.
+#
+# 402 Payment Required is served by the hosting platform once a merchant's plan
+# lapses, ahead of any routing, so every path under the origin answers with the
+# same billing page — probed from a runner on 2026-09-21, alphakeys.ca returned
+# it for its front door, for a live product handle AND for a handle that never
+# existed, all six URLs across it and typoworks.tw the same 10,312 bytes. A
+# challenge never looks like that: bot checks answer 403/429/503, never 402.
+#
+# Disjoint from DEAD_LINK_STATUSES on purpose, and the Python suite fails if the
+# two ever overlap: a frozen shop has not said this page is gone.
+STOREFRONT_FROZEN_STATUSES = (402,)
+
+
+def is_frozen_storefront_status(status) -> bool:
+    """True when the whole storefront is shut for billing (STORE_LOCKED).
+
+    Not "gone": the shop reopens the moment its owner settles the bill, so this
+    never writes deadSince — exactly like is_storefront_password_gate, whose
+    verdict it shares.
+    """
+    try:
+        return int(status) in STOREFRONT_FROZEN_STATUSES
+    except (TypeError, ValueError):
+        return False
+
+
 # Consecutive unreadable attempts before a link is backed off. One attempt per
 # row per nightly run, so six is about a week of "this never once answered" —
 # out of reach of a Cloudflare block or a bad night, short enough that a closed
@@ -1720,6 +1749,16 @@ def shopify_price(
             # back to generic_price, which reads the human page.
             if root_level_alias:
                 return None
+            # The shop is shut for billing. Answered before the dead-link
+            # branch because it is a statement about the STORE, so it holds
+            # even for a root-level alias, where a missing product JSON says
+            # only "this store does not serve that endpoint".
+            if is_frozen_storefront_status(nav_status):
+                log(
+                    f"  storefront frozen ({nav_status}) — the shop is shut for"
+                    f" billing ({product_url})"
+                )
+                return STORE_LOCKED
             # Dead-link audit: a removed product page returns 404/410. That's a
             # definitively gone listing, so CLEAR the stale price (DEAD_LINK)
             # instead of preserving it the way we do for a transient block.
@@ -4974,8 +5013,9 @@ def generic_price(
     Mirrors shopify_price's contract — returns a price dict, DEAD_LINK (the
     store says the page is gone), NO_BASE_KIT (read fine, nothing to price, so
     clear it), PRICE_REFUSED (read fine, and this site refused the number),
-    NO_PRODUCT_DATA (200 with no product markup any parser knows) or None
-    (transient, keep the last good price). Prefers the
+    NO_PRODUCT_DATA (200 with no product markup any parser knows), STORE_LOCKED
+    (the shop has closed itself — its password gate, or frozen for non-payment)
+    or None (transient, keep the last good price). Prefers the
     WooCommerce variation blob so the base kit is picked over a cheaper subkit;
     falls back to a single JSON-LD offer for simple products."""
     status: int | None = None
@@ -5014,6 +5054,17 @@ def generic_price(
         nav_error = exc
         remember_unresolved_host(product_url, exc)
         log(f"  generic fetch error ({product_url}): {type(exc).__name__}: {exc}")
+
+    # The storefront is shut for billing — every path under it answers this, so
+    # no second transport can produce a page and asking for one costs a stealth
+    # fetch per row per run. Answered beside the dead status and for the same
+    # reason: the store has already told us, and it is not a block.
+    if html is None and is_frozen_storefront_status(status):
+        log(
+            f"  storefront frozen ({status}) — the shop is shut for billing"
+            f" ({product_url})"
+        )
+        return STORE_LOCKED
 
     # A genuinely removed listing (404/410) clears the stale price. Answered
     # before the second transport is tried: the store has already said the page

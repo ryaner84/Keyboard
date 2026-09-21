@@ -16,6 +16,8 @@ import {
   isAwaitingOwnFix,
   isBackedOff,
   isDeadLinkStatus,
+  isFrozenStorefrontStatus,
+  STOREFRONT_FROZEN_STATUSES,
   GONE_HOST_ERROR_MARKERS,
   APP_SHELL_MAX_TEXT,
   isClientRenderedShell,
@@ -1333,9 +1335,12 @@ assert.equal(
   2,
   "both of scrape.py's price paths must recognise a storefront password gate"
 );
+// Four now, not two: each of scrape.py's two price paths answers STORE_LOCKED
+// for the password gate AND for a storefront frozen for non-payment. Both are
+// the store saying it is shut; see STOREFRONT_FROZEN_STATUSES.
 assert.ok(
-  (scrapePy.match(/return STORE_LOCKED\b/g) ?? []).length === 2,
-  "both of scrape.py's price paths must answer STORE_LOCKED for a gate"
+  (scrapePy.match(/return STORE_LOCKED\b/g) ?? []).length === 4,
+  "both of scrape.py's price paths must answer STORE_LOCKED for a gate and a freeze"
 );
 // The gate is a page of the store's own, so comparing it with the root could
 // only ever say "not identical" — asked FIRST, the root fetch is never paid for.
@@ -1423,6 +1428,133 @@ for (const [file, source] of [
     source,
     /AND NOT \(vk\."deadSince" IS NOT NULL AND vk\.price IS NULL\)/,
     `${file}'s visible-listing count must apply the site's dead-link rule`
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// A storefront FROZEN for non-payment (#188)
+//
+// The fifth way a store says "I am shut", and the first that says it with a
+// status rather than a page. 402 is served by the hosting platform once the
+// merchant's plan lapses, ahead of any routing, so it is the whole ORIGIN's
+// answer — which is what separates it from every block and makes it safe to
+// act on. Probed from a runner on 2026-09-21: alphakeys.ca answered 402 on
+// `/`, on a live product handle and on a handle that never existed, and
+// typoworks.tw on `/` and `/collections/all` — six URLs, two unrelated shops,
+// one 10,312-byte document.
+//
+// Both price passes had filed it under the same `null` a Cloudflare block
+// gives, so the report reached "every attempt ended with no answer at
+// all … probe a URL from a runner" and the probe answered "blocked or broken".
+// Neither names a repair, and the owner had already run the probe.
+assert.ok(
+  isFrozenStorefrontStatus(402),
+  "402 Payment Required is a storefront frozen for billing"
+);
+assert.ok(
+  isFrozenStorefrontStatus("402"),
+  "the status may arrive as a string, as it does from a probe's own report"
+);
+// The blocks. Every one of these is a live host refusing us, and a block may
+// never decide anything about a listing — the premise linkFailures rests on.
+for (const status of [200, 401, 403, 404, 410, 423, 429, 500, 503, 521, 526]) {
+  assert.ok(
+    !isFrozenStorefrontStatus(status),
+    `${status} is not a frozen storefront`
+  );
+}
+assert.ok(
+  !isFrozenStorefrontStatus(undefined) && !isFrozenStorefrontStatus(null),
+  "a missing status decides nothing"
+);
+// Disjoint from the dead-link list in BOTH directions, which is the safety of
+// having two lists at all: a frozen shop has not said this page is gone, and a
+// 404 has not said the shop is shut. Collapsing them would let a billing page
+// write deadSince — the only signal allowed to take a listing off the site —
+// for a shop that reopens the moment someone settles an invoice.
+for (const status of DEAD_LINK_STATUSES) {
+  assert.ok(
+    !isFrozenStorefrontStatus(status),
+    `${status} is a dead link, never a frozen storefront`
+  );
+}
+for (const status of STOREFRONT_FROZEN_STATUSES) {
+  assert.ok(
+    !isDeadLinkStatus(status),
+    `${status} is a frozen storefront, never a dead link`
+  );
+}
+// It shares the password gate's verdict, so it inherits the whole cadence
+// argument: nothing here opens a shop its owner closed, so the row keeps the
+// fortnight rather than spending a daily fetch on a billing page, and the
+// counter keeps climbing because nothing readable came back.
+assert.deepEqual(
+  nextLinkHealth({ linkFailures: 5, deadSince: null }, "STORE_LOCKED"),
+  { linkFailures: 6, deadSince: null },
+  "a frozen storefront is never marked gone — it reopens when the bill is paid"
+);
+
+// Written twice, like every rule in this module.
+assert.equal(
+  pyConst("STOREFRONT_FROZEN_STATUSES"),
+  `(${STOREFRONT_FROZEN_STATUSES.join(", ")},)`,
+  "scrape.py's STOREFRONT_FROZEN_STATUSES must match link-health.mjs"
+);
+assert.ok(
+  /def is_frozen_storefront_status\(/.test(scrapePy),
+  "scrape.py must mirror isFrozenStorefrontStatus as is_frozen_storefront_status"
+);
+// Asked on BOTH of scrape.py's price paths. It picks one per URL with no
+// fallback between them, so a rule added to one half reaches only half the
+// roster — alphakeys is a /products/ store (the Shopify path) and the generic
+// reader never sees it, which is exactly how the password gate was nearly
+// missed.
+assert.equal(
+  (scrapePy.match(/(?<!def )is_frozen_storefront_status\(/g) ?? []).length,
+  2,
+  "both of scrape.py's price paths must recognise a frozen storefront"
+);
+// …and it must be answered BEFORE the dead-link branch on the Shopify path.
+// That path returns early for a root-level alias, on the grounds that a missing
+// product JSON says only "this store does not serve that endpoint" — true of a
+// 404, false of a 402, which is the platform refusing the entire origin.
+assert.ok(
+  scrapePy.indexOf("if is_frozen_storefront_status(nav_status):") <
+    scrapePy.indexOf("if nav_status in DEAD_LINK_STATUSES:"),
+  "scrape.py's Shopify path must answer a frozen storefront before a dead link"
+);
+// Both of prices.ts's readers, and in the Shopify one BEFORE the canonical
+// handle retry: a frozen origin serves the same billing page everywhere, so
+// resolving a renamed handle can only fetch it twice more — budget taken from
+// live listings in a time-boxed pass.
+assert.equal(
+  (pricesTs.match(/isFrozenStorefrontStatus\(res\.status\)/g) ?? []).length,
+  2,
+  "both of prices.ts's readers must recognise a frozen storefront"
+);
+assert.ok(
+  pricesTs.indexOf("if (isFrozenStorefrontStatus(res.status)) return STORE_LOCKED;") <
+    pricesTs.indexOf("// Shopify product handles can change."),
+  "prices.ts must answer a frozen storefront before retrying the canonical handle"
+);
+// The probe is the tool the publishing report NAMES for a row it cannot read,
+// so a frozen shop reported there as "blocked or broken" sent the owner back to
+// the report that had sent them to the probe. That loop is the bug.
+{
+  const probe = readFileSync(
+    join(REPO_ROOT, "scripts", "vendor-link-probe.mjs"),
+    "utf8"
+  );
+  assert.match(
+    probe,
+    /isFrozenStorefrontStatus\(res\.status\)/,
+    "the probe must recognise a frozen storefront"
+  );
+  assert.ok(
+    probe.indexOf("isFrozenStorefrontStatus(res.status)") <
+      probe.indexOf("VERDICT   | UNREADABLE (${res.status})"),
+    "the probe must report a freeze before falling back to 'blocked or broken'"
   );
 }
 

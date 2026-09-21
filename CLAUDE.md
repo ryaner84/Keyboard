@@ -915,6 +915,51 @@ stops asking, if the ordering is lost, if a caller stops selecting
 `locked_listings`, or if the verdict starts telling the owner to relink or
 retire a shop that is merely shut.
 
+**And a shop can close itself with a STATUS instead of a page — the storefront
+is FROZEN.** Every "closed" above is read off a document: the password gate is a
+200 carrying a form, the front-page checks compare bodies. A hosted storefront
+whose plan lapses says it differently — the platform freezes the shop at its
+edge and answers **402 Payment Required**, *before any routing*, so the whole
+ORIGIN gives that one reply. Probed from a runner on 2026-09-21, alphakeys.ca
+answered 402 on `/`, on the live handle `/products/gmk-electric-1` **and on a
+handle that never existed**, and www.typoworks.tw on `/` and `/collections/all`
+— six URLs across two unrelated shops, every one the same 10,312-byte document.
+A store that still serves a catalogue cannot produce that, and neither can a bot
+check: challenges answer 403, 429, 503 or a 5xx, never 402.
+
+Both price passes filed it under the same `null` a Cloudflare block gives, which
+is the one answer that names no repair. `priceSource` stayed NULL so the row
+never counted as READ, `linkFailures` climbed past 24 on a store answering every
+request, and the report reached its most confident remaining sentence — "every
+attempt ended with no answer at all … probe a URL from a runner". So the owner
+probed, and `vendor-link-probe` answered `UNREADABLE (402) — blocked or broken`,
+which sent them back to the report that had sent them to the probe. That LOOP is
+the bug; alphakeys (4 listings) and typoworks (1) had been going round it
+nightly, publishing nothing, with no diagnosis either tool could end.
+
+`isFrozenStorefrontStatus` / `STOREFRONT_FROZEN_STATUSES` (mirrored as
+`is_frozen_storefront_status`) answer `STORE_LOCKED` — the password gate's own
+verdict, because it is the password gate's own case: the shop exists, it is
+shut, it reopens the moment its owner settles the bill, and nothing here hurries
+that. So `deadSince` is never written from it, and `PRICE_SOURCE_LOCKED` keeps
+the row on the fortnight instead of spending a daily fetch on a billing page.
+The two status lists are **disjoint in both directions** and both suites fail if
+they ever overlap: a frozen shop has not said this page is gone, and a 404 has
+not said the shop is shut — collapsing them would let a billing page write the
+one column allowed to take a listing off the site. It is asked on all four price
+paths, and in `prices.ts`'s Shopify reader *before* the canonical-handle retry:
+a frozen origin serves the same page everywhere, so resolving a renamed handle
+only fetches it twice more, in a pass that is time-boxed and whose budget live
+listings are competing for.
+
+Two things had to move with it. The probe is the tool the report NAMES, so a
+verdict it cannot express is a dead end by construction — it prints the freeze
+now. And the LOCKED verdict stopped naming only the gate: it reads "CLOSED
+STOREFRONT … either behind its password gate … or frozen for non-payment", and
+`test:vendor-urls` pins that `db-setup`'s hand-written legend quotes the phrase
+the report actually prints, which is the drift that left the deploy log glossing
+a "PASSWORD GATE" string the planner had stopped emitting.
+
 **And `null` still meant four different things, two of which are OUR fault, not
 the store's.** A page can be fetched, parsed and completely understood and still
 leave the row unpriced because this site refused the number — `KIT_BOUNDS` capped

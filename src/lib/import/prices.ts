@@ -24,6 +24,7 @@ import {
   PRICE_SOURCE_REFUSED,
   PRICE_SOURCE_UNPARSED,
   isDeadLinkStatus,
+  isFrozenStorefrontStatus,
   isGoneFrontPage,
   isGoneHostError,
   isGoneRedirect,
@@ -492,6 +493,14 @@ async function fetchShopifyPrice(
       cookie ? { Cookie: cookie } : undefined
     );
     if (!res.ok) {
+      // …unless the whole shop is shut for billing, which is the one non-ok
+      // status that says something about the STORE rather than this endpoint.
+      // Answered before the retry below, not after it: a frozen storefront
+      // serves the same billing page on every path it has, so resolving a
+      // canonical handle can only ever fetch that page twice more — two wasted
+      // requests per row per run, in a pass that is time-boxed and whose budget
+      // live listings are competing for.
+      if (isFrozenStorefrontStatus(res.status)) return STORE_LOCKED;
       // Shopify product handles can change. The human product URL redirects to
       // the current handle, while the old .json/.js endpoints return 404.
       // Resolve that canonical product URL before giving up so old database
@@ -940,6 +949,11 @@ export async function fetchJsonLdPrice(
   try {
     const res = await fetchWithTimeout(productUrl);
     if (!res.ok) {
+      // The shop is shut for billing — every path under it answers this, so it
+      // is the store's own statement that it is selling nothing to anybody.
+      // Asked before the dead-link test only for readability; the two status
+      // lists are disjoint by construction.
+      if (isFrozenStorefrontStatus(res.status)) return STORE_LOCKED;
       // Dead-link audit: a removed page returns 404/410 → clear the stale price
       // and record the page as gone; any other failure is transient → keep the
       // last good price.
