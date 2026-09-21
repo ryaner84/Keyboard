@@ -61,6 +61,59 @@
 export const DEAD_LINK_STATUSES = [404, 410];
 
 /**
+ * The HTTP statuses that mean the STOREFRONT is shut — not this page missing,
+ * and not us being blocked.
+ *
+ * 402 Payment Required is a status nothing on the public web uses for content:
+ * it is what a hosted storefront platform serves once the merchant's plan
+ * lapses. Shopify freezes such a shop at the platform edge, so the number
+ * arrives before any routing happens and EVERY path under the origin answers
+ * with the same billing page — the front door, a real product, and a handle
+ * that never existed alike.
+ *
+ * That last part is what makes it definitive rather than a guess. Probed from a
+ * runner on 2026-09-21, `alphakeys.ca` answered 402 on `/`, on
+ * `/products/gmk-electric-1` and on `/products/this-handle-does-not-exist-xyz`,
+ * and `www.typoworks.tw` answered 402 on `/` and `/collections/all` — six URLs
+ * across two unrelated shops, every one of them the same 10,312-byte
+ * `text/html` document. A store that still serves its catalogue cannot produce
+ * that, and neither can a bot check: Cloudflare and friends challenge with 403,
+ * 429, 503 or a 5xx, never with 402.
+ *
+ * Both price passes filed it under the same `null` a block gives, which is the
+ * one answer that names no repair. `priceSource` stayed NULL so the row never
+ * counted as READ, `linkFailures` climbed for ever on a store that answers
+ * every request, and the publishing report reached its "every attempt ended
+ * with no answer at all … probe a URL from a runner" sentence — so the owner
+ * probed, was told `UNREADABLE (402) — blocked or broken`, and had nothing to
+ * do about it. alphakeys (4 listings) and typoworks (1) had been in that loop
+ * for 24 consecutive failures each.
+ *
+ * The verdict is STORE_LOCKED, exactly as the password gate's is, and for the
+ * same reason: the shop exists and is shut, it reopens the moment its owner
+ * settles the bill, and nothing in this repository can hurry that. So
+ * `deadSince` — the only signal allowed to take a listing off the site — is
+ * never written from here, and PRICE_SOURCE_LOCKED keeps the row on the
+ * fortnight instead of spending a daily fetch on a billing page. Self-healing
+ * like its siblings: the first read that gets through stamps its own mark over
+ * this one.
+ *
+ * Deliberately disjoint from DEAD_LINK_STATUSES in both directions — a frozen
+ * shop has not said this page is gone, and a 404 has not said the shop is shut
+ * — and `test:link-health` fails if the two lists ever overlap.
+ */
+export const STOREFRONT_FROZEN_STATUSES = [402];
+
+/**
+ * True for a status that means the whole storefront is shut for billing.
+ *
+ * Mirrored as `is_frozen_storefront_status` in scraper/scrape.py.
+ */
+export function isFrozenStorefrontStatus(status) {
+  return STOREFRONT_FROZEN_STATUSES.includes(Number(status));
+}
+
+/**
  * Consecutive unreadable attempts before a link is treated as dead enough to
  * back off. The nightly pass gets one attempt per row per run, so six is about
  * a week of "this never once answered" — long enough that a Cloudflare block or

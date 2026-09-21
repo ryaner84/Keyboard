@@ -2517,6 +2517,43 @@ class LinkHealthTests(unittest.TestCase):
             scrape.PRICE_SOURCE_LOCKED, scrape.AWAITING_OWN_FIX_PRICE_SOURCES
         )
 
+    def test_frozen_storefront_status_is_locked_and_is_not_gone(self):
+        # The other way a shop closes itself, and the first that says so with a
+        # status rather than a page: the hosting platform freezes a storefront
+        # whose plan has lapsed and answers 402 ahead of any routing, so the
+        # whole ORIGIN gives that one reply. Probed from a runner on 2026-09-21,
+        # alphakeys.ca returned 402 for its front door, for a live product
+        # handle AND for a handle that never existed, and typoworks.tw for `/`
+        # and `/collections/all` — six URLs, two unrelated shops, one
+        # 10,312-byte document. Both halves had filed it under the same None a
+        # Cloudflare block gives, so the audit told the owner to go and probe a
+        # store they had already probed.
+        self.assertTrue(scrape.is_frozen_storefront_status(402))
+        self.assertTrue(scrape.is_frozen_storefront_status("402"))
+        # Every one of these is a live host refusing us, and a block may never
+        # decide anything about a listing.
+        for status in (200, 401, 403, 404, 410, 423, 429, 500, 503, 521, 526):
+            with self.subTest(status=status):
+                self.assertFalse(scrape.is_frozen_storefront_status(status))
+        # A navigation that produced no response at all says nothing.
+        self.assertFalse(scrape.is_frozen_storefront_status(None))
+        self.assertFalse(scrape.is_frozen_storefront_status("nonsense"))
+        # Disjoint from the dead-link statuses in BOTH directions. Collapsing
+        # the two would let a billing page write deadSince — the only signal
+        # allowed to take a listing off the site — for a shop that reopens as
+        # soon as someone settles an invoice.
+        for status in scrape.DEAD_LINK_STATUSES:
+            with self.subTest(status=status):
+                self.assertFalse(scrape.is_frozen_storefront_status(status))
+        for status in scrape.STOREFRONT_FROZEN_STATUSES:
+            with self.subTest(status=status):
+                self.assertNotIn(status, scrape.DEAD_LINK_STATUSES)
+        # Same mark, same cadence argument as the password gate above: the
+        # repair is the merchant's, not this repository's.
+        self.assertNotIn(
+            scrape.PRICE_SOURCE_LOCKED, scrape.AWAITING_OWN_FIX_PRICE_SOURCES
+        )
+
     def test_page_fingerprint_normalizes_only_whitespace(self):
         # Whitespace is the whole tolerance: two documents differing by so much
         # as a nonce are not the same page. Idempotent, so a cached front-page

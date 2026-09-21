@@ -982,9 +982,10 @@ assert.match(
   assert.match(unparsed, /35 of 35 listing\(s\) answer 200 with no product markup/);
   assert.match(unparsed, /teach the parser or retire it/);
 }
-// The store's own PASSWORD GATE, which outranks both of those: they say this
-// codebase could not turn a page into a price, and a gate says there was no
-// page. Probed from a runner on 2026-09-20, hexkeyboards.com answers all six of
+// The store's own statement that it is CLOSED, which outranks both of those:
+// they say this codebase could not turn a page into a price, and a shut shop
+// says there was no page to turn. Two shapes reach it — the password gate and a
+// storefront frozen for non-payment (402 on every path). Probed from a runner on 2026-09-20, hexkeyboards.com answers all six of
 // its listings that way and the report was asking the owner to teach the parser
 // a Shopify "Opening Soon" form — the one repair that could never work.
 {
@@ -997,10 +998,15 @@ assert.match(
     lockedListings: 6,
     pricedListings: 0,
   });
-  assert.match(locked, /6 of 6 listing\(s\) are answered by the storefront's own/);
-  assert.match(locked, /PASSWORD GATE/);
-  assert.match(locked, /closed itself to the public/);
+  assert.match(locked, /6 of 6 listing\(s\) are answered by a CLOSED STOREFRONT/);
+  assert.match(locked, /password gate/);
+  assert.match(locked, /shut itself to the public/);
   assert.match(locked, /neither refresh-prices nor a parser can help/);
+  // The verdict covers BOTH shapes of a shop that has closed itself, so it may
+  // not name only the gate: alphakeys.ca and typoworks.tw reach it with a 402
+  // on every path they serve, and an owner told their shop is behind an
+  // "Opening Soon" form would go looking for a switch that is not there.
+  assert.match(locked, /frozen for non-payment/);
   // It must not read as a store that is gone: nothing here writes deadSince for
   // a locked shop, and telling the owner to retire it would take a live
   // storefront's rows off the site the day it reopens.
@@ -1019,7 +1025,7 @@ assert.match(
     unparsedListings: 2,
     pricedListings: 0,
   }),
-  /PASSWORD GATE/
+  /CLOSED STOREFRONT/
 );
 // …and a caller that does not COUNT it keeps the previous message rather than
 // being handed a verdict nobody measured — the same defaulting rule every count
@@ -1538,6 +1544,32 @@ assert.ok(
   !/"never read one" is a dead link set/.test(dbSetup),
   "scripts/db-setup.mjs's legend must not call a vendor with no verdict a dead link set"
 );
+// The legend QUOTES the planner's own phrases, so a verdict that is reworded
+// and a legend that is not leaves the deploy log explaining a sentence it never
+// prints. That is what happened when the locked verdict grew to cover a
+// storefront frozen for non-payment as well as a password gate: the legend went
+// on glossing "PASSWORD GATE", a string the report had stopped emitting.
+{
+  const closedVerdict = reasonOf({
+    slug: "shut",
+    websiteUrl: "https://shut.example",
+    visibleListings: 0,
+    listings: 3,
+    readListings: 3,
+    lockedListings: 3,
+    pricedListings: 0,
+  });
+  const quoted = closedVerdict.match(/CLOSED STOREFRONT/)?.[0];
+  assert.ok(quoted, "the closed-shop verdict must name itself in caps for the legend");
+  assert.ok(
+    dbSetup.includes(`"${quoted}"`),
+    "scripts/db-setup.mjs's legend must quote the phrase the closed-shop verdict prints"
+  );
+  assert.ok(
+    !/"PASSWORD GATE"/.test(dbSetup),
+    "the legend must not gloss a phrase the report no longer prints"
+  );
+}
 
 // --- the roster outranks a WRONG storefront, not just a missing one --------
 // `novelkeys` shipped as https://novelkeys.xyz — NovelKeys' retired domain —
