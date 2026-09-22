@@ -610,6 +610,9 @@ _KIT_BOUNDS = {
     # Vietnamese Dong — used by Mokb Store (VN). 1 USD ≈ 26,300 VND; its GMK
     # base kits are 3,060,000 and 3,180,000 (≈ USD 116 and 121).
     "VND": (0, 10_600_000),
+    # Ukrainian Hryvnia — used by FunKeys (UA). 1 USD ≈ 41.5 UAH, so USD 400
+    # is 16,600; rounded UP like every other ceiling here.
+    "UAH": (0, 17_000),
 }
 
 # Currencies the site's Currency table can convert (db-setup ensureCurrencies).
@@ -625,7 +628,7 @@ _KIT_BOUNDS = {
 _SUPPORTED_CURRENCIES = {
     "USD", "SGD", "EUR", "GBP", "CAD", "AUD", "JPY", "CNY", "KRW", "MYR",
     "THB", "NZD", "HKD", "TWD", "SEK", "NOK", "DKK", "CHF", "PLN",
-    "INR", "ARS", "CLP", "IDR", "VND",
+    "INR", "ARS", "CLP", "IDR", "VND", "UAH",
 }
 
 
@@ -1340,7 +1343,7 @@ _CURRENCY_HOME_COUNTRY = {
     "AUD": "AU", "JPY": "JP", "KRW": "KR", "CNY": "CN", "HKD": "HK",
     "THB": "TH", "TWD": "TW", "MYR": "MY", "NZD": "NZ", "SEK": "SE",
     "NOK": "NO", "DKK": "DK", "CHF": "CH", "PLN": "PL", "INR": "IN",
-    "ARS": "AR", "CLP": "CL", "IDR": "ID", "VND": "VN",
+    "ARS": "AR", "CLP": "CL", "IDR": "ID", "VND": "VN", "UAH": "UA",
 }
 
 
