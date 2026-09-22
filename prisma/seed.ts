@@ -42,6 +42,7 @@ const CURRENCIES = [
   { code: "CLP", name: "Chilean Peso", symbol: "CL$", exchangeRateToUSD: 960 },
   { code: "IDR", name: "Indonesian Rupiah", symbol: "Rp", exchangeRateToUSD: 16500 },
   { code: "VND", name: "Vietnamese Dong", symbol: "₫", exchangeRateToUSD: 26300 },
+  { code: "UAH", name: "Ukrainian Hryvnia", symbol: "₴", exchangeRateToUSD: 41.5 },
 ];
 
 async function main() {

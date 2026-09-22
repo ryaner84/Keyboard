@@ -118,6 +118,9 @@ export const KIT_BOUNDS = Object.freeze({
   // entry hurts most: unbounded above at 26,000:1, a whole keyboard reads as a
   // keycap kit.
   VND: Object.freeze({ min: 0, max: 10_600_000 }),
+  // Ukrainian Hryvnia — used by FunKeys (UA). 1 USD ≈ 41.5 UAH, so USD 400 is
+  // 16,600; rounded UP, for the reason every ceiling here is rounded up.
+  UAH: Object.freeze({ min: 0, max: 17_000 }),
 });
 
 /**

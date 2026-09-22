@@ -509,6 +509,22 @@ and a logged "all API and SSR attempts failed". Do not write the price half the
 same way — pin the real endpoint from a request the app itself makes before
 teaching either price pass this platform.
 
+Probed again from a runner on 2026-09-22, two facts move that along and one
+confirms the wall. The shell hands out its own API base and CSRF token —
+`window.SERVICE_API = '//api.zfrontier.com'` and `window.csrf_token`, beside
+`SERVICE_M` / `SERVICE_WWW` — so the earlier attempt was asking the WRONG HOST,
+which is why every guess read as "route does not exist". The two answers tell
+host from route apart and are worth keeping: on `www`, `POST /v2/flow/list`
+returns `{"ok":1,"msg":"token mismatch"}` (the route is there and wants the
+page's token), while on `api.zfrontier.com` the same route returns
+`{"ok":1,"msg":"system error 1"}` (no such route on that host). The wall is
+unchanged: the four eagerly-loaded chunks spell only 16 `/v2/…` routes and none
+of them is the merchandise detail one, the lazy chunk that owns `/app/mch/` is
+behind a webpack hash map this probe could not reconstruct, and `www`'s limiter
+still answers `{"ok":20001,"msg":"操作太频繁了"}` after a couple of requests from
+one runner IP. So the endpoint is still NOT pinned and the instruction above
+stands.
+
 **"Never read" is the commonest cause, and it read as the pricing backlog for
 months.** `priceSource` is written (`'SCRAPED'`) whenever the price pass READ the
 page — including when the answer was "no base kit on offer", price NULL. A row
@@ -1343,6 +1359,46 @@ shop quotes **VND**, which was in none of the registries, so even once read
 every price would have been `PRICE_REFUSED`. That is the general shape of a
 vendor that publishes nothing — every rule between the store and the set page
 has to let it through, and each of them is silent on its own.
+
+**And the endpoint can be absent altogether, because the catalogue is drawn in
+the BROWSER.** Haravan serves the same three endpoints under different key
+names; a **Tilda Store** serves none of them, and what it does serve is a page
+whose product grid is an empty `<div class="js-store-grid-cont">` plus a
+`t_store_init('<recid>', options)` call. Probed from a runner on 2026-09-22,
+`groupbuy.funkeys.com.ua/gmk_colorchrome` answers 200 with 307,495 bytes of real
+page — the set's own name in the title, the shop's news, its menu — and not one
+price, not one `data-product-*` attribute, no JSON-LD, no OpenGraph price and no
+`itemprop="price"` anywhere in it. So every parser path here is correct to find
+nothing, `NO_PRODUCT_DATA` is the honest answer, and FunKeys' 6 rows have been
+unpriced — therefore hidden, their sets being released — for as long as the
+vendor has existed. It is the fifth "publishes nothing" shape with a real
+storefront behind it, and the audit names it correctly: teach the parser.
+
+Three facts that probe established, so the next attempt starts from them rather
+than from the page again. The block's own parameters are in the `options`
+literal that precedes the init call, and the key is **`storepart`**, not the
+`storepartuid` the request spells it as (`storepart:'244437147371'`,
+`recid=287540641` on that page; a second page carries a different pair, so they
+are per-BLOCK, not per-site). The API is real and is
+`https://store.tildaapi.com/api/getproductslist/?storepartuid=<storepart>&recid=<recid>&…`
+— it answers `Wrong storepartuid` to a wrong one and `ERROR: Category is not
+found` to a valid-looking one, which is how those parameters were pinned. And
+the remaining step, unfinished: with both parameters right it answers a 20-byte
+`{"redirectto":"…"}`, a pointer to the project's real store host that has to be
+followed before any product list comes back. Do not write the reader against a
+guess at that hop — the rule this file already states for zFrontier applies
+here exactly.
+
+**UAH is registered ahead of that reader, deliberately.** The shop quotes
+hryvnia and says so in its own markup (`data-project-currency-code="UAH"`), and
+the code was in none of the five registries — so even a finished Tilda reader
+would have had every price `PRICE_REFUSED` and published nothing, which is the
+Mokb Store / VND sequence repeated. The two walls are independent and each is
+silent on its own, so the cheap one is not worth leaving standing behind the
+expensive one: `scripts/lib/currencies.mjs`, `scripts/lib/kit-bounds.mjs`,
+`prisma/seed.ts` and `scrape.py`'s three mirrors all carry it now. Registering a
+currency no reader yet feeds costs one seeded row nobody reads — the asymmetry
+that paragraph is built on.
 
 Stores rate-limit per IP and HTTP 429 counts as "blocked". Any pass that fetches
 many URLs must go through `HostThrottle`, and `HostThrottle.interleave()` should

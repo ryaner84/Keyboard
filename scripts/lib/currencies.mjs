@@ -112,6 +112,17 @@ export const CURRENCIES = Object.freeze({
   // nothing until EVERY rule between it and the set page lets it through, and
   // each of them is silent on its own.
   VND: Object.freeze({ name: "Vietnamese Dong", symbol: "₫", homeCountry: "VN", placeholderRate: 26300 }),
+  // FunKeys (UA), whose storefront quotes hryvnia and says so in its own
+  // markup (`data-project-currency-code="UAH"`, measured from a runner on
+  // 2026-09-22). Registered ahead of the reader that will need it: the store
+  // is a Tilda Store, whose catalogue is drawn client-side, so no parser path
+  // here reads a price off it yet and the vendor's rows are `UNPARSED` rather
+  // than `REFUSED` today. That is the same two-wall shape Mokb Store had —
+  // see the VND note above — and it is why the currency is registered
+  // separately: a store publishes nothing until EVERY rule between it and the
+  // set page lets it through, the walls are silent one at a time, and the
+  // cheap one should not be left standing behind the expensive one.
+  UAH: Object.freeze({ name: "Ukrainian Hryvnia", symbol: "₴", homeCountry: "UA", placeholderRate: 41.5 }),
 });
 
 /** Every registered code, in registration order. */
