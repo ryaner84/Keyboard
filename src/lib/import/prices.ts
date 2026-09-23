@@ -55,6 +55,17 @@ import {
   isRootLevelProductPath,
   shopifyProductNode,
 } from "../../../scripts/lib/storefront-catalog.mjs";
+// A storefront whose catalogue is drawn in the BROWSER — one definition of the
+// block parameters, the root-zone hop and the product shape, mirrored in
+// scrape.py and pinned by test:tilda-store.
+import {
+  TILDA_STORE_API_HOST,
+  tildaProductListUrl,
+  tildaProjectCurrency,
+  tildaRootZoneEndpoint,
+  tildaStoreBlocks,
+  tildaStoreVariants,
+} from "../../../scripts/lib/tilda-store.mjs";
 
 const BROWSER_HEADERS = {
   "User-Agent":
@@ -933,6 +944,95 @@ export function parseWooCommerceVariations(html: string): WooVariant[] {
   return out;
 }
 
+/**
+ * The base-kit price a **Tilda Store** reports for this page, or undefined when
+ * the page is not one.
+ *
+ * A Tilda storefront serves no product JSON, no variation blob, no JSON-LD and
+ * no OpenGraph price — the grid is an empty div plus the catalogue block's
+ * own setup call, and the browser fetches the products afterwards. So every
+ * path here was right to find nothing and `NO_PRODUCT_DATA` was the honest
+ * verdict, which is the one that names a change HERE and that no number of
+ * re-scrapes can end.
+ * This is that change. See scripts/lib/tilda-store.mjs for the block
+ * parameters, the root-zone hop and why the hop may not be guessed at.
+ *
+ * Only the FIRST block on the page is read. A Tilda page can carry more than
+ * one catalogue block (a "relevant products" strip beside the set's own kits),
+ * and merging them would price this set from another set's variants — the
+ * failure the ProductGroup guard next door exists to stop, arriving through a
+ * different platform.
+ *
+ * Every answer short of a price is `null`, never DEAD_LINK: a 404 here is
+ * Tilda's API declining, not the STORE saying the listing is gone, and
+ * `deadSince` is the only signal allowed to take a listing off the site. The
+ * caller returning this outcome also means the page never reaches the
+ * NO_PRODUCT_DATA branch below — a page that declares a catalogue IS a product
+ * page, so the front-page "gone" checks must not be let near it.
+ *
+ * The extra request is paid inside the ROW's own queue slot, so it is paced by
+ * the throttle the row's storefront already waits on — one catalogue fetch per
+ * listing, at the rate that listing's page was fetched.
+ */
+async function fetchTildaStorePrice(
+  html: string,
+  productUrl: string,
+  vendorCurrency?: string,
+  allowSubkits = false
+): Promise<FetchPriceOutcome | undefined> {
+  const [block] = tildaStoreBlocks(html);
+  if (!block) return undefined;
+
+  let host = TILDA_STORE_API_HOST;
+  let payload: unknown = null;
+  // The app re-issues the request exactly once, on the zone the API names.
+  // Bounded for the same reason: a server answering with a root-zone hop for
+  // ever would otherwise be an unbounded loop inside a time-boxed pass.
+  for (let attempt = 0; attempt < 2 && payload === null; attempt++) {
+    const res = await fetchWithTimeout(tildaProductListUrl(host, block, Date.now()), {
+      Accept: "application/json",
+    });
+    if (!res.ok) return null;
+    const body = await res.text();
+    const nextHost = tildaRootZoneEndpoint(body, host);
+    if (nextHost) {
+      host = nextHost;
+      continue;
+    }
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      return null;
+    }
+  }
+  if (!payload) return null;
+
+  const variants = tildaStoreVariants(payload);
+  // The block answered with nothing this reader can price. Keep the stored
+  // price rather than clearing it: an empty list is as consistent with a
+  // catalogue that has been emptied for the season as with one we mis-read,
+  // and only a NAMED offer list may clear a price.
+  if (variants.length === 0) return null;
+
+  // The shop's own statement of its money outranks the vendor row's guess —
+  // Tilda writes it on the page wrapper, and a price is only ever refused or
+  // accepted RELATIVE to a currency.
+  const currency = tildaProjectCurrency(html) ?? vendorCurrency ?? null;
+  if (currency && !SUPPORTED_CURRENCIES.has(currency)) {
+    noteUnregisteredCurrency(currency, productUrl);
+    return PRICE_REFUSED;
+  }
+  const chosen = pickBaseVariant(variants, { allowSubkits });
+  if (!chosen) return NO_BASE_KIT;
+  if (!isPlausibleBaseKitPrice(chosen.price, currency)) return PRICE_REFUSED;
+  return {
+    price: chosen.price,
+    currency,
+    inStock: chosen.available,
+    variants: variants.map((v) => ({ title: v.title, price: v.price, available: v.available })),
+  };
+}
+
 // Non-Shopify stores (custom platforms, WooCommerce, Magento, BigCommerce…)
 // don't expose a product JSON API. WooCommerce variable products carry a full
 // per-variant blob (parsed first, so the base kit is picked over a cheaper
@@ -974,6 +1074,14 @@ export async function fetchJsonLdPrice(
     // the parser a form nobody can buy through.
     if (isStorefrontPasswordGate(productUrl, res.url)) return STORE_LOCKED;
     const html = await res.text();
+
+    // A storefront that draws its catalogue in the BROWSER carries none of the
+    // markup the rest of this function looks for, so asking it here — before
+    // any of that — is what turns a page the parser was right to find empty
+    // into a priced listing. Cheap to ask: the page has already been fetched,
+    // and a store that is not Tilda answers `undefined` from the HTML alone.
+    const tilda = await fetchTildaStorePrice(html, productUrl, vendorCurrency, allowSubkits);
+    if (tilda !== undefined) return tilda;
 
     // WooCommerce variable product: pick the base kit from the variation blob,
     // not the cheapest subkit (mirrors generic_price() + choose_kit_variant() in

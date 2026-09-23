@@ -123,6 +123,15 @@ jobs:
         if: always()
         run: npm run test:storefront-catalog
 
+      # Reads scrape.py and prices.ts: a Tilda Store draws its catalogue in the
+      # browser, so the page carries no markup either price pass can read and
+      # the shared rules — the block parameters, the root-zone hop, the
+      # three-answer stock field — are the only thing standing between a live
+      # shop and an unpriced (therefore hidden) listing.
+      - name: tilda-store
+        if: always()
+        run: npm run test:tilda-store
+
       # Reads scrape.py, prices.ts and db-setup.mjs: the base-kit price window
       # decides what the site is willing to publish, and drift between the
       # producers and the deploy purge is silent both ways — too low a ceiling
