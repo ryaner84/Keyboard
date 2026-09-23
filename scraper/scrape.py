@@ -701,6 +701,13 @@ NO_PRODUCT_DATA = "NO_PRODUCT_DATA"
 # exists and reopens with a switch. See is_storefront_password_gate.
 STORE_LOCKED = "STORE_LOCKED"
 
+# "This page is not a Tilda Store" — an internal sentinel, never a verdict, so
+# the caller can tell it from the None that means "a Tilda Store answered
+# nothing this run". Returning None for both would let the readers below run on
+# a Tilda page whose API was merely blocked, and the NO_PRODUCT_DATA at the
+# bottom would then hand the page to the front-page "gone" checks.
+_TILDA_NOT_A_STORE = "_TILDA_NOT_A_STORE"
+
 # What priceSource records once a page has been READ. Mirror of
 # PRICE_SOURCE_REFUSED / PRICE_SOURCE_UNPARSED in scripts/lib/link-health.mjs.
 PRICE_SOURCE_REFUSED = "REFUSED"
@@ -4172,6 +4179,260 @@ def is_root_level_product_path(url: str) -> bool:
     return segment.lower() not in _NON_PRODUCT_ROOT_SEGMENTS
 
 
+# ----------------------------------------------------------------------------
+# Tilda Store — a storefront whose catalogue is drawn in the BROWSER.
+#
+# Mirror of scripts/lib/tilda-store.mjs (Python cannot import a JS module);
+# `npm run test:tilda-store` fails if the two halves drift. Read that file for
+# the whole diagnosis — in short: a Tilda page serves no product JSON, no
+# variation blob, no JSON-LD and no OpenGraph price, only an empty grid div and
+# a `t_store_init('<recid>', options)` call, so every parser path here was right
+# to find nothing and NO_PRODUCT_DATA was the honest verdict. FunKeys' 6 rows
+# were unpriced — therefore hidden, their sets being released — for as long as
+# the vendor existed.
+#
+# The options key is `storepart`, NOT the `storepartuid` the request spells it
+# as, and the pair is per-BLOCK. The catalogue answers at
+# store.tildaapi.com/api/getproductslist/ — which replies `{"redirectto":"one"}`.
+# That is not a URL and must not be followed as one: it names Tilda's root ZONE,
+# and the app's own t_store__handleRootzoneRedirect swaps the endpoint host's
+# LAST LABEL for it (store.tildaapi.com -> store.tildaapi.one), then re-issues
+# the same request.
+
+TILDA_STORE_API_HOST = "store.tildaapi.com"
+TILDA_PRODUCT_LIST_PATH = "/api/getproductslist/"
+
+_TILDA_STORE_INIT_RE = re.compile(r"t_store_init\(\s*['\"](\d+)['\"]")
+_TILDA_STORE_PART_RE = re.compile(r"storepart\s*:\s*['\"](\d+)['\"]")
+_TILDA_PROJECT_CURRENCY_RE = re.compile(
+    r"data-project-currency-code=[\"']([A-Za-z]{3})[\"']"
+)
+_TILDA_ROOT_ZONE_RE = re.compile(r"^[a-z]{2,10}$", re.IGNORECASE)
+
+
+def tilda_store_blocks(html: str) -> list[dict]:
+    """Every catalogue block on the page as {"recid", "storepart"}, in order.
+
+    Paired by POSITION: a block's options literal is emitted immediately before
+    its own init call. An init call with no storepart ahead of it is dropped
+    rather than paired with a later one — a mis-paired uid reads as another
+    block's catalogue, and this reader's whole job is to answer for THIS page.
+    """
+    if not isinstance(html, str) or not html:
+        return []
+    parts = [(m.start(), m.group(1)) for m in _TILDA_STORE_PART_RE.finditer(html)]
+    if not parts:
+        return []
+    blocks: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for init in _TILDA_STORE_INIT_RE.finditer(html):
+        at = init.start()
+        paired = None
+        for index, storepart in parts:
+            if index < at:
+                paired = storepart
+            else:
+                break
+        if paired is None:
+            continue
+        key = (paired, init.group(1))
+        if key in seen:
+            continue
+        seen.add(key)
+        blocks.append({"recid": init.group(1), "storepart": paired})
+    return blocks
+
+
+def is_tilda_store_page(html: str) -> bool:
+    """Does this page declare a Tilda Store block at all?"""
+    return bool(tilda_store_blocks(html))
+
+
+def tilda_project_currency(html: str) -> str | None:
+    """The currency the shop says its own numbers are in, or None."""
+    if not isinstance(html, str):
+        return None
+    match = _TILDA_PROJECT_CURRENCY_RE.search(html)
+    return match.group(1).upper() if match else None
+
+
+def tilda_product_list_url(host: str, block: dict, cache_buster: int) -> str:
+    """The catalogue URL for one block on one API host."""
+    params = urllib.parse.urlencode(
+        {
+            "storepartuid": str(block.get("storepart", "")),
+            "recid": str(block.get("recid", "")),
+            "c": str(cache_buster),
+            "size": "100",
+            "slice": "1",
+        }
+    )
+    return f"https://{host}{TILDA_PRODUCT_LIST_PATH}?{params}"
+
+
+def tilda_rootzone_endpoint(body, current_host: str) -> str | None:
+    """The host to re-ask when the API answers a root-zone redirect, or None.
+
+    Deliberately narrow about what it will accept, because the value comes from
+    the STORE: letters only, no dot, no slash, at most ten of them, and only
+    the last label of a host this module wrote itself is replaced. A price pass
+    may follow a shop's pointer to another TLD of a host IT chose; it may never
+    be sent to a host the shop names. None when the body is not that answer or
+    names the zone already in use — the app treats "same zone" as no redirect,
+    and so must this, or a caller that retries on it never terminates.
+    """
+    payload = body
+    if isinstance(payload, (str, bytes)):
+        try:
+            payload = json.loads(payload)
+        except Exception:  # noqa: BLE001
+            return None
+    zone = payload.get("redirectto") if isinstance(payload, dict) else None
+    if not isinstance(zone, str) or not _TILDA_ROOT_ZONE_RE.match(zone):
+        return None
+    labels = str(current_host or "").split(".")
+    if len(labels) < 2:
+        return None
+    if labels[-1].lower() == zone.lower():
+        return None
+    return ".".join(labels[:-1] + [zone.lower()])
+
+
+def _tilda_product_available(product: dict) -> bool:
+    """Is this product purchasable, as far as the catalogue says?
+
+    Tilda's `quantity` is a STRING and its empty value is the meaningful one:
+    "0" is a tracked product that has sold out, "" is one whose stock is not
+    tracked at all (the deskmats on FunKeys' own pages). Reading "" as zero
+    would mark a whole untracked catalogue sold out — catalog_availability's
+    three-answer rule arriving through another platform.
+    """
+    quantity = product.get("quantity")
+    if isinstance(quantity, bool):
+        return quantity
+    if isinstance(quantity, (int, float)):
+        return quantity > 0
+    if not isinstance(quantity, str) or not quantity.strip():
+        return True
+    try:
+        return float(quantity) > 0
+    except ValueError:
+        return True
+
+
+def tilda_store_variants(payload) -> list[dict]:
+    """The block's products as the kit picker wants them.
+
+    Tilda NAMES every kit ("Base", "40s kit", "Accent"), which is what makes
+    this list safe for choose_kit_variant to clear a price from: a named offer
+    list that contains no base really does say there is no base kit here.
+    """
+    products = payload.get("products") if isinstance(payload, dict) else None
+    if not isinstance(products, list):
+        return []
+    variants: list[dict] = []
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+        title = product.get("title")
+        title = title.strip() if isinstance(title, str) else ""
+        if not title:
+            continue
+        try:
+            price = float(str(product.get("price", "")).strip())
+        except (TypeError, ValueError):
+            continue
+        if price <= 0:
+            continue
+        variants.append(
+            {
+                "title": title,
+                "price": price,
+                "available": _tilda_product_available(product),
+            }
+        )
+    return variants
+
+
+def tilda_store_price(
+    html: str,
+    product_url: str,
+    vendor_currency: str | None,
+    scrapling: ScraplingClient | None,
+    allow_subkits: bool = False,
+):
+    """The base-kit price a Tilda Store reports for this page.
+
+    Returns the same vocabulary generic_price does, plus the sentinel
+    _TILDA_NOT_A_STORE for "this page is not a Tilda Store" so the caller can
+    carry on with the readers below it.
+
+    Every answer short of a price is None, and none of them ever marks the
+    listing gone: a miss here is Tilda's API declining, not the STORE saying
+    the page is gone, and deadSince is the only signal allowed to take a
+    listing off the site. The caller returning this outcome also keeps the page
+    away from the NO_PRODUCT_DATA branch and its front-page "gone" checks — a
+    page that declares a catalogue IS a product page.
+
+    Only the FIRST block is read. A page can carry a second catalogue block (a
+    "relevant products" strip), and merging them would price this set from
+    another set's variants.
+    """
+    blocks = tilda_store_blocks(html)
+    if not blocks:
+        return _TILDA_NOT_A_STORE
+    if scrapling is None or not scrapling.available:
+        return None
+
+    host = TILDA_STORE_API_HOST
+    payload = None
+    # The app re-issues the request exactly once, on the zone the API names.
+    # Bounded for the same reason: a server answering `redirectto` for ever
+    # would otherwise be an unbounded loop inside a time-boxed pass.
+    for _ in range(2):
+        body = scrapling.get_json(
+            tilda_product_list_url(host, blocks[0], int(time.time() * 1000)),
+            headers={"Accept": "application/json"},
+        )
+        if body is None:
+            return None
+        next_host = tilda_rootzone_endpoint(body, host)
+        if next_host:
+            host = next_host
+            continue
+        payload = body
+        break
+    if payload is None:
+        return None
+
+    variants = tilda_store_variants(payload)
+    # Nothing this reader can price. Keep the stored price rather than clearing
+    # it: only a NAMED offer list may clear one.
+    if not variants:
+        return None
+
+    # The shop's own statement of its money outranks the vendor row's guess.
+    currency = tilda_project_currency(html) or vendor_currency
+    if currency and currency not in _SUPPORTED_CURRENCIES:
+        log(f"  unsupported currency {currency} — refused ({product_url})")
+        return PRICE_REFUSED
+    chosen = choose_kit_variant(variants, allow_subkits=allow_subkits)
+    if chosen is None:
+        return NO_BASE_KIT
+    if not is_plausible_base_price(chosen["price"], currency):
+        log(
+            f"  implausible kit price {chosen['price']} {currency}"
+            f" — refused ({product_url})"
+        )
+        return PRICE_REFUSED
+    return {
+        "price": chosen["price"],
+        "currency": currency,
+        "variants": variants,
+        "inStock": bool(chosen.get("available", True)),
+    }
+
+
 def catalog_availability(product: dict) -> bool | None:
     """One catalog entry's availability, or None when the entry does not say.
 
@@ -5109,6 +5370,17 @@ def generic_price(
         # spent a year reported as "the price pass has never read one".
         log(f"  unsupported currency {vendor_currency} — refused ({product_url})")
         return PRICE_REFUSED
+
+    # A storefront that draws its catalogue in the BROWSER carries none of the
+    # markup the readers below look for, so asking it here — before any of them
+    # — is what turns a page the parser was right to find empty into a priced
+    # listing. Cheap to ask: the page is already fetched, and a store that is
+    # not Tilda is answered from the HTML alone.
+    tilda = tilda_store_price(
+        html, product_url, vendor_currency, scrapling, allow_subkits=allow_subkits
+    )
+    if tilda is not _TILDA_NOT_A_STORE:
+        return tilda
 
     # WooCommerce variable product: pick the base kit, not the cheapest subkit.
     variants = parse_woocommerce_variations(html)

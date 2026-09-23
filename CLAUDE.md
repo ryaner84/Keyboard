@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Twenty-two suites, all of which should pass before pushing:
+Twenty-three suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -47,6 +47,7 @@ npm run test:set-merge
 npm run test:link-health
 npm run test:catalog-stock
 npm run test:storefront-catalog
+npm run test:tilda-store
 npm run test:kit-bounds
 npm run test:currencies
 npm run test:scripts-syntax
@@ -1368,26 +1369,59 @@ whose product grid is an empty `<div class="js-store-grid-cont">` plus a
 `groupbuy.funkeys.com.ua/gmk_colorchrome` answers 200 with 307,495 bytes of real
 page — the set's own name in the title, the shop's news, its menu — and not one
 price, not one `data-product-*` attribute, no JSON-LD, no OpenGraph price and no
-`itemprop="price"` anywhere in it. So every parser path here is correct to find
-nothing, `NO_PRODUCT_DATA` is the honest answer, and FunKeys' 6 rows have been
-unpriced — therefore hidden, their sets being released — for as long as the
-vendor has existed. It is the fifth "publishes nothing" shape with a real
-storefront behind it, and the audit names it correctly: teach the parser.
+`itemprop="price"` anywhere in it. So every parser path there was correct to
+find nothing, `NO_PRODUCT_DATA` was the honest answer, and FunKeys' 6 rows had
+been unpriced — therefore hidden, their sets being released — for as long as
+the vendor had existed. It is the fifth "publishes nothing" shape with a real
+storefront behind it, and the one verdict that names a change HERE: the audit
+said teach the parser, and the rest of this section is that parser.
 
-Three facts that probe established, so the next attempt starts from them rather
-than from the page again. The block's own parameters are in the `options`
-literal that precedes the init call, and the key is **`storepart`**, not the
-`storepartuid` the request spells it as (`storepart:'244437147371'`,
-`recid=287540641` on that page; a second page carries a different pair, so they
-are per-BLOCK, not per-site). The API is real and is
+The block's own parameters are in the `options` literal that precedes the init
+call, and the key is **`storepart`**, not the `storepartuid` the request spells
+it as (`storepart:'244437147371'`, `recid=287540641` on that page; a second page
+carries a different pair, so they are per-BLOCK, not per-site). The API is
 `https://store.tildaapi.com/api/getproductslist/?storepartuid=<storepart>&recid=<recid>&…`
 — it answers `Wrong storepartuid` to a wrong one and `ERROR: Category is not
-found` to a valid-looking one, which is how those parameters were pinned. And
-the remaining step, unfinished: with both parameters right it answers a 20-byte
-`{"redirectto":"…"}`, a pointer to the project's real store host that has to be
-followed before any product list comes back. Do not write the reader against a
-guess at that hop — the rule this file already states for zFrontier applies
-here exactly.
+found` to a valid-looking one, which is how those parameters were pinned.
+
+**And the last step is exactly why that rule says not to guess.** With both
+parameters right the API answers a 20-byte `{"redirectto":"one"}`, which #189
+read as "a pointer to the project's real store host". It is not a pointer and
+not a host: `"one"` is Tilda's root **ZONE**, and following it as a path gives
+`…/api/getproductslist/one` — a 404 "Object not found in Storecdn", which is
+what a guess at the hop looks like. The app's own
+`t_store__handleRootzoneRedirect`, read off `tilda-catalog-1.1.min.js` from a
+runner on 2026-09-23, swaps the endpoint host's LAST LABEL for it
+(`window.t_store_endpoint.split(".").slice(0,-1).join(".") + "." + n`) and
+re-issues the same request. So the catalogue is `store.tildaapi.one` — the
+SAME host on Tilda's other TLD — and it answers 200 with `total: 8` and the
+set's kits NAMED: `Base` 3600, `White Modifiers` 2900, `40s kit` 2100, `Accent`
+1600, `NorDeUK` 1800, plus deskmats. Named offers are what make the list safe
+for `pickBaseVariant` to clear a price from, and 3600 UAH is inside the window
+#189 registered ahead of it.
+
+`scripts/lib/tilda-store.mjs` is that reader's rules (`scrape.py` mirrors it)
+and `test:tilda-store` fails if the halves drift. Three of them carry the
+safety. The zone replaces ONE label of a host this module writes itself and
+only when it is two to ten letters — a store's answer may point a price pass at
+another TLD of a host WE chose, never at a host the shop names. The hop is
+followed at most ONCE in each half, because a server answering it for ever is
+an unbounded loop inside a time-boxed pass. And no answer short of a price may
+mark the listing gone: a miss here is Tilda's API declining, not the store
+saying the page is gone. Two more shapes come straight from rules this file
+already states — Tilda's `quantity` is a STRING whose EMPTY value means "stock
+not tracked" while `"0"` means sold out (`catalogAvailability`'s three answers,
+one platform over), and the page's own `data-project-currency-code` outranks
+the Vendor row's currency (Mechaland's rupiah filed as USD). Only the FIRST
+catalogue block on a page is read: a "relevant products" strip is a second
+block, and merging them prices this set from another set's variants.
+
+Both halves need their OWN way to say "this page is not a Tilda Store" apart
+from "a Tilda Store answered nothing this run" (`undefined` in `prices.ts`,
+`_TILDA_NOT_A_STORE` in `scrape.py`). Collapsing the two lets the readers below
+run on a Tilda page whose API was merely blocked, and the `NO_PRODUCT_DATA` at
+the bottom then hands it to the front-page "gone" checks and asks the owner for
+a parser that already exists.
 
 **UAH is registered ahead of that reader, deliberately.** The shop quotes
 hryvnia and says so in its own markup (`data-project-currency-code="UAH"`), and
