@@ -29,6 +29,8 @@ import {
   isGoneHostError,
   isGoneRedirect,
   isGoneStorefrontRoot,
+  clientRedirectTarget,
+  CLIENT_REDIRECT_MAX_HOPS,
   isStorefrontPasswordGate,
   isUnresolvedHostError,
   nextLinkHealth,
@@ -1047,33 +1049,55 @@ export async function fetchJsonLdPrice(
   allowSubkits = false
 ): Promise<FetchPriceOutcome> {
   try {
-    const res = await fetchWithTimeout(productUrl);
-    if (!res.ok) {
-      // The shop is shut for billing — every path under it answers this, so it
-      // is the store's own statement that it is selling nothing to anybody.
-      // Asked before the dead-link test only for readability; the two status
-      // lists are disjoint by construction.
-      if (isFrozenStorefrontStatus(res.status)) return STORE_LOCKED;
-      // Dead-link audit: a removed page returns 404/410 → clear the stale price
-      // and record the page as gone; any other failure is transient → keep the
-      // last good price.
-      return isDeadLinkStatus(res.status) ? DEAD_LINK : null;
+    // The store's answer, after at most one hop it declared in the BODY rather
+    // than in a Location header. fetch() follows the header kind silently and
+    // has always done so; the other kind needs a browser, which this pass does
+    // not have — so a shop sitting behind a `location.replace()` shim answered
+    // every reader here with a document that is not a page, and the row was
+    // filed "teach the parser this platform" for ever. See clientRedirectTarget.
+    //
+    // Every question below is asked again about whatever the hop lands on, and
+    // against the ORIGINAL productUrl: "was the request for this listing
+    // answered by a front door" is the same question wherever the store routed
+    // it. vala.supply's shim leads to a 302 onto ww547.vala.supply, which
+    // isGoneRedirect has always called gone.
+    let res = await fetchWithTimeout(productUrl);
+    let html = "";
+    for (let hops = 0; ; hops++) {
+      if (!res.ok) {
+        // The shop is shut for billing — every path under it answers this, so it
+        // is the store's own statement that it is selling nothing to anybody.
+        // Asked before the dead-link test only for readability; the two status
+        // lists are disjoint by construction.
+        if (isFrozenStorefrontStatus(res.status)) return STORE_LOCKED;
+        // Dead-link audit: a removed page returns 404/410 → clear the stale price
+        // and record the page as gone; any other failure is transient → keep the
+        // last good price.
+        return isDeadLinkStatus(res.status) ? DEAD_LINK : null;
+      }
+      // The store answered, but not with this page — the request ended at a front
+      // door. Shopify sends a deleted product to `/` instead of 404ing it, and an
+      // acquired shop sends its whole domain to the buyer's home page; fetch()
+      // follows both silently, so a row in that state looked merely blocked and
+      // was re-fetched every six hours for ever. Tested BEFORE the body is
+      // parsed, because a home page that carries Product markup of its own would
+      // otherwise be read and published as this set's price at this vendor.
+      if (isGoneRedirect(productUrl, res.url)) return DEAD_LINK;
+      // …and the store may have answered with its own PASSWORD GATE, which is not
+      // a front door and not a 404: the shop is there and shut. Asked here for the
+      // same reason as the line above — the gate is a real 200 page and parsing it
+      // could only ever produce "no product markup", which asks the owner to teach
+      // the parser a form nobody can buy through.
+      if (isStorefrontPasswordGate(productUrl, res.url)) return STORE_LOCKED;
+      html = await res.text();
+      // One hop, never two. A server that answers its own shim with the shim
+      // again is an unbounded loop inside a time-boxed pass, and the budget it
+      // would spend belongs to live listings.
+      if (hops >= CLIENT_REDIRECT_MAX_HOPS) break;
+      const hop = clientRedirectTarget(html, res.url);
+      if (!hop) break;
+      res = await fetchWithTimeout(hop);
     }
-    // The store answered, but not with this page — the request ended at a front
-    // door. Shopify sends a deleted product to `/` instead of 404ing it, and an
-    // acquired shop sends its whole domain to the buyer's home page; fetch()
-    // follows both silently, so a row in that state looked merely blocked and
-    // was re-fetched every six hours for ever. Tested BEFORE the body is
-    // parsed, because a home page that carries Product markup of its own would
-    // otherwise be read and published as this set's price at this vendor.
-    if (isGoneRedirect(productUrl, res.url)) return DEAD_LINK;
-    // …and the store may have answered with its own PASSWORD GATE, which is not
-    // a front door and not a 404: the shop is there and shut. Asked here for the
-    // same reason as the line above — the gate is a real 200 page and parsing it
-    // could only ever produce "no product markup", which asks the owner to teach
-    // the parser a form nobody can buy through.
-    if (isStorefrontPasswordGate(productUrl, res.url)) return STORE_LOCKED;
-    const html = await res.text();
 
     // A storefront that draws its catalogue in the BROWSER carries none of the
     // markup the rest of this function looks for, so asking it here — before

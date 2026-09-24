@@ -347,6 +347,109 @@ export function isGoneRedirect(requestUrl, finalUrl) {
 }
 
 /**
+ * The URL a document navigates to on its own, with no user action — or null.
+ *
+ * A redirect declared in the BODY is still a redirect. `isGoneFrontPage` is
+ * that observation applied to a store's "gone"; this is it applied to the hop
+ * itself, and it is the one shape every reader here was blind to, because a
+ * `Location` header is followed by the transport and a `location.replace()` is
+ * followed by a BROWSER — which the six-hourly pass does not have.
+ *
+ * Probed from a runner on 2026-09-24, vala.supply answers a first request for
+ * any of its listings with 524 bytes:
+ *
+ *   <html><head><title>Loading...</title></head><body><script
+ *   type='text/javascript'>window.location.replace(
+ *   'https://vala.supply/collections/current-groupbuys/products/gmk-universe?ch=1&js=…'
+ *   );</script></body></html>
+ *
+ * — the same URL again, carrying a token that proves the client ran JavaScript.
+ * Ask for THAT and the store gives its real answer: a 302 onto
+ * `http://ww547.vala.supply/?tkn=…`, a front door on another host, which
+ * isGoneRedirect has always called gone. Which of the two a row got was a coin
+ * flip, so 5 of the vendor's 19 listings were marked and the other 14 were
+ * filed `NO_PRODUCT_DATA` — "teach the parser this platform", printed at the
+ * owner nightly about a document that is not a page and says nothing at all.
+ *
+ * It carries no verdict of its own, deliberately: it answers WHERE the store
+ * sent us, never what the store meant. The caller re-asks the ordinary
+ * questions about the answer, so a shim in front of a live shop prices it, one
+ * in front of a retired domain reaches the retirement, and one in front of a
+ * platform we cannot read is still `NO_PRODUCT_DATA`.
+ *
+ * Narrow in three ways, each of which is the safety:
+ *
+ *   • the document must carry NO PAGE OF ITS OWN (APP_SHELL_MAX_TEXT, the same
+ *     bound isClientRenderedShell uses). Every storefront on the roster has a
+ *     `location.href =` somewhere in its analytics; a real page that happens to
+ *     contain one must never be re-fetched as though it were a shim;
+ *   • only a STRING LITERAL assigned to `location` counts, and only a
+ *     `<meta http-equiv="refresh">` beside it. A computed destination is not
+ *     something this reader may guess at;
+ *   • a target that resolves to the request itself is refused. A server that
+ *     answers its own shim with the shim again is an unbounded loop inside a
+ *     time-boxed pass, and the caller bounds the hops at one on top of that.
+ */
+/**
+ * How many body-declared redirects a price path may follow for one row.
+ *
+ * One. The hop exists to reach the store's real answer, not to crawl: a server
+ * that answers its own shim with the shim again is an unbounded loop inside a
+ * time-boxed pass, and every second spent in it is taken from live listings —
+ * which on a released set are hidden while unpriced. Same discipline as the
+ * Tilda zone hop, and for the same reason.
+ */
+export const CLIENT_REDIRECT_MAX_HOPS = 1;
+
+export function clientRedirectTarget(html, baseUrl) {
+  const body = String(html ?? "");
+  // A document with content of its own is a page, whatever its scripts say.
+  if (renderedText(body).length > APP_SHELL_MAX_TEXT) return null;
+  const raw = metaRefreshTarget(body) ?? scriptLocationTarget(body);
+  if (!raw) return null;
+  const base = parseUrl(baseUrl);
+  if (!base) return null;
+  let target;
+  try {
+    target = new URL(raw, base);
+  } catch {
+    return null;
+  }
+  // Only the web. A `javascript:` or `data:` destination is not a page to ask
+  // for, and neither is an app link.
+  if (target.protocol !== "http:" && target.protocol !== "https:") return null;
+  if (target.href === base.href) return null;
+  return target.href;
+}
+
+/** `<meta http-equiv="refresh" content="0; url=…">`, in any of its spellings. */
+function metaRefreshTarget(html) {
+  const tag = html.match(/<meta\b[^>]*http-equiv\s*=\s*["']?refresh["']?[^>]*>/i);
+  if (!tag) return null;
+  const content = tag[0].match(/content\s*=\s*["']([^"']*)["']/i);
+  if (!content) return null;
+  const url = content[1].match(/url\s*=\s*['"]?([^'"\s;]+)/i);
+  return url ? url[1] : null;
+}
+
+/**
+ * `location.replace('…')`, `location.assign('…')` or `location(.href) = '…'`.
+ *
+ * A string literal only — see the rule above. `window.`/`document.`/`top.`
+ * prefixes are optional because every shim spells it differently.
+ */
+function scriptLocationTarget(html) {
+  const call = html.match(
+    /\b(?:window|document|top|self|parent)?\.?location\s*\.\s*(?:replace|assign)\s*\(\s*["']([^"']+)["']/i
+  );
+  if (call) return call[1];
+  const assign = html.match(
+    /\b(?:window|document|top|self|parent)?\.?location(?:\s*\.\s*href)?\s*=\s*["']([^"']+)["']/i
+  );
+  return assign ? assign[1] : null;
+}
+
+/**
  * The whitespace-normalized body of a page, for front-page comparison.
  *
  * Idempotent, so a caller may cache the fingerprint of a storefront's front

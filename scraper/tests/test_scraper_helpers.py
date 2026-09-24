@@ -2517,6 +2517,92 @@ class LinkHealthTests(unittest.TestCase):
             scrape.PRICE_SOURCE_LOCKED, scrape.AWAITING_OWN_FIX_PRICE_SOURCES
         )
 
+    def test_a_body_declared_redirect_is_followed_to_its_target(self):
+        # A redirect declared in the BODY is still a redirect, and it is the one
+        # kind no reader here could follow: the transport follows a Location
+        # header, and only a BROWSER follows location.replace() — which the
+        # six-hourly pass does not have and which this half loses the moment it
+        # falls back to its stealth transport.
+        #
+        # Probed from a runner on 2026-09-24, vala.supply answers a first
+        # request for any of its 19 listings with exactly this document: the
+        # same URL again, plus a token proving the client ran JavaScript. Ask
+        # for THAT and the store 302s onto http://ww547.vala.supply/, a front
+        # door on another host, which is_gone_redirect has always called gone.
+        # Which leg a row happened to get was a coin flip, so 5 were marked and
+        # the other 14 were filed "teach the parser this platform", nightly.
+        shim = (
+            "<html><head><title>Loading...</title></head><body>"
+            "<script type='text/javascript'>window.location.replace("
+            "'https://vala.supply/collections/current-groupbuys/products/"
+            "gmk-universe?ch=1&js=8f2c');</script></body></html>"
+        )
+        self.assertEqual(
+            scrape.client_redirect_target(
+                shim,
+                "https://vala.supply/collections/current-groupbuys/products/gmk-universe",
+            ),
+            "https://vala.supply/collections/current-groupbuys/products/"
+            "gmk-universe?ch=1&js=8f2c",
+        )
+        # The older spelling of the same thing, and a relative destination,
+        # which resolves against the page it was served on like any other link.
+        self.assertEqual(
+            scrape.client_redirect_target(
+                '<html><head><meta http-equiv="refresh" content="0; url=/products/renamed">'
+                "</head><body></body></html>",
+                "https://shop.example/products/old",
+            ),
+            "https://shop.example/products/renamed",
+        )
+        self.assertEqual(
+            scrape.client_redirect_target(
+                "<script>location.href = '/hello'</script>",
+                "https://shop.example/a",
+            ),
+            "https://shop.example/hello",
+        )
+        # THE safety property: a real page is a page, whatever its scripts say.
+        # Every storefront on the roster has a location.href somewhere in its
+        # analytics, and re-fetching one of those as though it were a shim would
+        # spend a second fetch per row and then judge the wrong document.
+        self.assertIsNone(
+            scrape.client_redirect_target(
+                "<html><body>"
+                + "Real storefront copy about this keycap set. " * 20
+                + "<script>if (soldOut) { location.href = '/cart' }</script>"
+                "</body></html>",
+                "https://shop.example/products/x",
+            )
+        )
+        # A shim pointing at the request itself is a loop; the caller's hop
+        # bound is a second guard, never the only one. And there is no page to
+        # ask for behind a javascript: or data: destination.
+        for body, base in (
+            (
+                "<script>location.replace('https://shop.example/a')</script>",
+                "https://shop.example/a",
+            ),
+            ("<script>location.href='javascript:void(0)'</script>", "https://shop.example/a"),
+            ("<script>location.href='data:text/html,x'</script>", "https://shop.example/a"),
+            ("", "https://shop.example/a"),
+        ):
+            self.assertIsNone(scrape.client_redirect_target(body, base))
+        # A client-rendered SPA shell declares no destination, so this reader
+        # must leave it exactly where is_client_rendered_shell found it — the
+        # zFrontier shape, which a re-fetch would learn nothing about.
+        self.assertIsNone(
+            scrape.client_redirect_target(
+                '<html><head><title>zFrontier</title></head><body><div id="app"></div>'
+                '<script src="/main.js"></script></body></html>',
+                "https://www.zfrontier.com/app/mch/x",
+            )
+        )
+        # One hop, never two: a server that answers its own shim with the shim
+        # again is an unbounded loop inside a time-boxed pass, and the budget it
+        # would spend belongs to live listings.
+        self.assertEqual(scrape.CLIENT_REDIRECT_MAX_HOPS, 1)
+
     def test_frozen_storefront_status_is_locked_and_is_not_gone(self):
         # The other way a shop closes itself, and the first that says so with a
         # status rather than a page: the hosting platform freezes a storefront

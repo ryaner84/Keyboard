@@ -23,6 +23,8 @@ import {
   isClientRenderedShell,
   isGoneFrontPage,
   isGoneStorefrontRoot,
+  clientRedirectTarget,
+  CLIENT_REDIRECT_MAX_HOPS,
   isGoneHostError,
   isGoneRedirect,
   isStorefrontPasswordGate,
@@ -287,6 +289,94 @@ assert.equal(
   true,
   "a text-carrying landing page served for a product URL is still gone"
 );
+
+// --- clientRedirectTarget --------------------------------------------------
+// A redirect declared in the BODY is still a redirect, and it is the one kind
+// no reader here could follow: the transport follows a Location header and a
+// BROWSER follows location.replace(), which the six-hourly pass does not have.
+// Probed from a runner on 2026-09-24, vala.supply answers a first request for
+// any of its 19 listings with this exact document — the same URL again, plus a
+// token proving the client ran JavaScript. Ask for THAT and the store 302s onto
+// http://ww547.vala.supply/, a front door on another host, which isGoneRedirect
+// has always called gone. Which leg a row got was a coin flip: 5 were marked
+// and the other 14 were filed "teach the parser this platform", nightly.
+const VALA_SHIM =
+  "<html><head><title>Loading...</title></head><body><script type='text/javascript'>" +
+  "window.location.replace('https://vala.supply/collections/current-groupbuys/products/gmk-universe?ch=1&js=8f2c');" +
+  "</script></body></html>";
+assert.equal(
+  clientRedirectTarget(
+    VALA_SHIM,
+    "https://vala.supply/collections/current-groupbuys/products/gmk-universe"
+  ),
+  "https://vala.supply/collections/current-groupbuys/products/gmk-universe?ch=1&js=8f2c",
+  "the shim vala.supply serves every listing must be followed to its own target"
+);
+// The other spelling of the same thing, and the older one.
+assert.equal(
+  clientRedirectTarget(
+    '<html><head><meta http-equiv="refresh" content="0; url=/products/renamed"></head><body></body></html>',
+    "https://shop.example/products/old"
+  ),
+  "https://shop.example/products/renamed",
+  "a meta refresh is a body-declared redirect too"
+);
+// Resolved against the page it was served on, like any other link.
+assert.equal(
+  clientRedirectTarget("<script>location.href = '/hello'</script>", "https://shop.example/a"),
+  "https://shop.example/hello",
+  "a relative destination resolves against the request"
+);
+// THE safety property: a real page is a page, whatever its scripts say. Every
+// storefront on the roster has a location.href somewhere in its analytics, and
+// re-fetching one of those as though it were a shim would spend a second fetch
+// per row and judge the wrong document.
+assert.equal(
+  clientRedirectTarget(
+    `<html><body>${"Real storefront copy about this keycap set. ".repeat(20)}` +
+      `<script>if (soldOut) { location.href = '/cart' }</script></body></html>`,
+    "https://shop.example/products/x"
+  ),
+  null,
+  "a document with a page of its own is never a redirect shim"
+);
+// A shim that points at the request itself is a loop, and the caller's hop
+// bound is the second guard rather than the only one.
+assert.equal(
+  clientRedirectTarget(
+    "<script>location.replace('https://shop.example/a')</script>",
+    "https://shop.example/a"
+  ),
+  null,
+  "a target that resolves to the request itself is refused"
+);
+// Only the web: there is no page to ask for behind either of these.
+assert.equal(
+  clientRedirectTarget("<script>location.href='javascript:void(0)'</script>", "https://shop.example/a"),
+  null,
+  "a javascript: destination is not a page"
+);
+assert.equal(
+  clientRedirectTarget("<script>location.href='data:text/html,x'</script>", "https://shop.example/a"),
+  null,
+  "a data: destination is not a page"
+);
+// A client-rendered SPA shell is NOT a shim: it carries no literal destination,
+// so this reader must leave it exactly where isClientRenderedShell found it.
+assert.equal(
+  clientRedirectTarget(
+    '<html><head><title>zFrontier</title></head><body><div id="app"></div><script src="/main.js"></script></body></html>',
+    "https://www.zfrontier.com/app/mch/x"
+  ),
+  null,
+  "an app shell declares no destination and must not be re-fetched as one"
+);
+assert.equal(clientRedirectTarget("", "https://shop.example/a"), null);
+assert.equal(clientRedirectTarget(VALA_SHIM, ""), null, "no base URL, no target");
+// One hop, never two: a server that answers its own shim with the shim again is
+// an unbounded loop inside a time-boxed pass, and the budget belongs to live
+// listings.
+assert.equal(CLIENT_REDIRECT_MAX_HOPS, 1);
 
 // --- isGoneStorefrontRoot --------------------------------------------------
 // The fifth answer, and the first that is not about the listing at all: the
@@ -764,6 +854,22 @@ assert.ok(
   "scrape.py must mirror isGoneStorefrontRoot as is_gone_storefront_root"
 );
 assert.ok(
+  /def client_redirect_target\(/.test(scrapePy),
+  "scrape.py must mirror clientRedirectTarget as client_redirect_target"
+);
+assert.ok(
+  new RegExp(`CLIENT_REDIRECT_MAX_HOPS = ${CLIENT_REDIRECT_MAX_HOPS}\\b`).test(scrapePy),
+  "scrape.py's hop bound must match CLIENT_REDIRECT_MAX_HOPS"
+);
+// Defined on both paths and consulted on one is the failure this file keeps
+// re-finding. The nightly has a browser, which follows a shim by itself — but
+// only on the browser transport: its stealth fallback is a plain fetch, and a
+// shop behind a shim is exactly the shop most likely to need the fallback.
+assert.ok(
+  /hop_url = client_redirect_target\(html, final_url or product_url\)/.test(scrapePy),
+  "scrape.py's generic reader must follow a body-declared redirect"
+);
+assert.ok(
   /def page_fingerprint\(/.test(scrapePy),
   "scrape.py must mirror pageFingerprint as page_fingerprint"
 );
@@ -875,12 +981,14 @@ assert.ok(
 // same way for a redirect to the front door, which is why there are four.
 assert.equal(
   (scrapePy.match(/return DEAD_LINK\b/g) ?? []).length,
-  8,
+  10,
   "both of scrape.py's price paths must return DEAD_LINK on 404/410, on a " +
     "redirect to the storefront's front door, AND on a host that no longer " +
     "resolves — plus the generic reader's two answers read off the storefront " +
-    "ROOT: a catch-all rewrite that serves the front page for the URL itself, " +
-    "and a front door that has left the domain altogether"
+    "ROOT (a catch-all rewrite that serves the front page for the URL itself, " +
+    "and a front door that has left the domain altogether) and the two it " +
+    "reaches again on the far side of a body-declared redirect, which is a " +
+    "second response and needs the same questions asked of it"
 );
 // The front-page comparison lives in the reader that has a PAGE to compare:
 // scrape.py picks one path per URL and the Shopify half reads JSON endpoints,
@@ -920,8 +1028,10 @@ assert.equal(
 // product page — the only URL whose front door means anything.
 assert.equal(
   (scrapePy.match(/is_gone_redirect\(product_url,/g) ?? []).length,
-  2,
-  "both of scrape.py's price paths must judge the redirect on the product URL"
+  3,
+  "both of scrape.py's price paths must judge the redirect on the product URL" +
+    " — and the generic one must ask again on the far side of a body-declared" +
+    " redirect, which is where vala.supply's shim finally answers"
 );
 // The dead branch must NOT stamp priceSource: that stamp is what made a store
 // whose pages were all removed read as "read, just not priced".
@@ -1175,6 +1285,25 @@ assert.ok(
   /if \(isGoneStorefrontRoot\(res\.url, root\.url\)\) return DEAD_LINK;/.test(pricesTs),
   "fetchJsonLdPrice must judge a front door that has left the domain"
 );
+// The half that RUNS four times a day is the half with no browser at all, so
+// the hop is not an optimisation here — it is the only way the store's real
+// answer is ever seen.
+assert.ok(
+  /const hop = clientRedirectTarget\(html, res\.url\);/.test(pricesTs),
+  "fetchJsonLdPrice must follow a redirect the store declared in the body"
+);
+assert.ok(
+  /if \(hops >= CLIENT_REDIRECT_MAX_HOPS\) break;/.test(pricesTs),
+  "the hop must be bounded by CLIENT_REDIRECT_MAX_HOPS, never open-ended"
+);
+// And every verdict above it must be re-asked about what the hop landed on:
+// judging the shim instead of the answer is the bug this whole rule replaces.
+assert.ok(
+  /if \(isGoneRedirect\(productUrl, res\.url\)\) return DEAD_LINK;[\s\S]{0,1200}const hop = clientRedirectTarget\(/.test(
+    pricesTs
+  ),
+  "the gone checks must sit INSIDE the hop loop, so the hop's answer is judged too"
+);
 assert.ok(
   /answer = \{ fingerprint: pageFingerprint\(await res\.text\(\)\), url: res\.url \};/.test(
     pricesTs
@@ -1335,11 +1464,14 @@ assert.equal(
   2,
   "both of scrape.py's price paths must recognise a storefront password gate"
 );
-// Four now, not two: each of scrape.py's two price paths answers STORE_LOCKED
-// for the password gate AND for a storefront frozen for non-payment. Both are
-// the store saying it is shut; see STOREFRONT_FROZEN_STATUSES.
+// Five now: each of scrape.py's two price paths answers STORE_LOCKED for the
+// password gate AND for a storefront frozen for non-payment (both are the store
+// saying it is shut; see STOREFRONT_FROZEN_STATUSES), and the generic reader
+// answers it once more for a freeze met on the far side of a body-declared
+// redirect — a shop can put its shim in front of its billing page as readily as
+// in front of anything else.
 assert.ok(
-  (scrapePy.match(/return STORE_LOCKED\b/g) ?? []).length === 4,
+  (scrapePy.match(/return STORE_LOCKED\b/g) ?? []).length === 5,
   "both of scrape.py's price paths must answer STORE_LOCKED for a gate and a freeze"
 );
 // The gate is a page of the store's own, so comparing it with the root could
@@ -1360,7 +1492,7 @@ assert.ok(
 );
 assert.ok(
   pricesTs.indexOf("isStorefrontPasswordGate(productUrl, res.url)") <
-    pricesTs.indexOf("const html = await res.text();"),
+    pricesTs.indexOf("html = await res.text();"),
   "prices.ts must recognise the gate before it reads the body"
 );
 // Both of scrape.py's price paths refuse rather than go quiet: the Shopify
@@ -1512,8 +1644,10 @@ assert.ok(
 // missed.
 assert.equal(
   (scrapePy.match(/(?<!def )is_frozen_storefront_status\(/g) ?? []).length,
-  2,
-  "both of scrape.py's price paths must recognise a frozen storefront"
+  3,
+  "both of scrape.py's price paths must recognise a frozen storefront — and the" +
+    " generic one must recognise it again on the far side of a body-declared" +
+    " redirect, since a shop can serve its shim in front of a billing page too"
 );
 // …and it must be answered BEFORE the dead-link branch on the Shopify path.
 // That path returns early for a root-level alias, on the grounds that a missing

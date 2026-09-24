@@ -727,6 +727,44 @@ page that produced no price, and `PURCHASABLE_VENDOR_KIT_WHERE` hides a dead row
 only while it is UNPRICED — so a false positive can never take a priced listing
 off a set page, and the first read that gets through clears `deadSince`.
 
+**And that rule only ever saw half of vala.supply, because the store's redirect
+was in the BODY.** Every check above reads where the TRANSPORT landed, and
+`fetch()` follows a `Location` header silently — which is the whole reason
+`isGoneRedirect` works. A redirect written as `window.location.replace(…)` is
+followed by a BROWSER, and the six-hourly pass has none; the nightly loses one
+too the moment it falls back to its stealth transport. Probed from a runner on
+2026-09-24, vala.supply answers a first request for any listing with 524 bytes
+whose entire body is `window.location.replace('<the same URL>?ch=1&js=…')` — a
+token proving the client ran JavaScript. Ask for THAT and the store gives its
+real answer: a 302 onto `http://ww547.vala.supply/`, a front door on another
+host, which `isGoneRedirect` has always called gone. So which verdict a row got
+was a COIN FLIP — whether that run's fetch was served the shim or the leg after
+it — and 5 of the vendor's 19 listings were marked while the other 14 answered
+`NO_PRODUCT_DATA`, the "teach the parser this platform" verdict, printed at the
+owner nightly about a document that is not a page and makes no claim about
+anything. `clientRedirectTarget` (mirrored as `client_redirect_target`) is that
+hop, and it carries NO verdict of its own on purpose: it answers only where the
+store sent us, and the caller re-asks the ordinary questions about what is
+there — so a shim in front of a live shop prices it, one in front of a retired
+domain reaches the retirement, and one in front of a platform we cannot read is
+still `NO_PRODUCT_DATA`. Its narrowness is three refusals. The document must
+carry NO PAGE OF ITS OWN (`APP_SHELL_MAX_TEXT`, the bound
+`isClientRenderedShell` already uses) — every storefront on the roster has a
+`location.href =` somewhere in its analytics, and re-fetching one of those
+spends a second fetch per row and then judges the wrong document. Only a STRING
+LITERAL counts, beside a `<meta http-equiv="refresh">`; a computed destination
+is not something this reader may guess at. And a target that resolves to the
+request itself is refused, with `CLIENT_REDIRECT_MAX_HOPS` (one) as the second
+guard rather than the only one — a server that answers its own shim with the
+shim again is an unbounded loop inside a time-boxed pass, and that budget
+belongs to live listings. The gone checks move INSIDE the hop in both halves:
+judging the shim instead of the answer is the whole bug, and the questions are
+asked against the ORIGINAL product URL, because "was the request for this
+listing answered by a front door" is the same question wherever the store
+routed it. `test:link-health` and the Python suite fail if either half stops
+asking, if the hop loses its bound, or if a caller stops re-judging what it
+landed on.
+
 **And a third answer gives no status, no redirect and no page at all: the
 DOMAIN is gone.** Every guard in the vendor chain judges a storefront by the
 SHAPE of its URL — `needsStorefront`, `planStorefrontOwnership`,

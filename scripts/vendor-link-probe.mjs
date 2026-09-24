@@ -32,6 +32,7 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 
 import {
+  clientRedirectTarget,
   isClientRenderedShell,
   isGoneFrontPage,
   isFrozenStorefrontStatus,
@@ -497,6 +498,22 @@ for (const url of urls) {
           : `unknown — ${note}; the price pass falls back to the vendor row's own currency` +
             ` for the supported-currency test, and to USD for the KIT_BOUNDS window`
       }`
+    );
+  }
+
+  // Before any of the readers below: the store may not have answered with a
+  // page at all, but with a redirect it declared in the BODY. The transport
+  // follows a Location header and a BROWSER follows location.replace(), so a
+  // shop behind a shim reads as "200, nothing machine-readable" to every price
+  // path — the verdict that names a parser as the repair, about a document that
+  // is not a page. Printed rather than followed: the probe's job is to say what
+  // the store answered, and the next line is where to look.
+  const clientHop = clientRedirectTarget(body, finalUrl);
+  if (clientHop) {
+    console.log(
+      `  JS REDIR  | the page is a redirect SHIM, not a page — it navigates to` +
+        ` ${clientHop}. Both price passes follow this once now; probe that URL` +
+        ` to see the store's real answer`
     );
   }
 
