@@ -1009,6 +1009,95 @@ def is_gone_storefront_root(request_url, root_final_url) -> bool:
     return bare_host(target) != bare_host(source)
 
 
+# How many body-declared redirects a price path may follow for one row. Mirror
+# of CLIENT_REDIRECT_MAX_HOPS in scripts/lib/link-health.mjs: one, because a
+# server that answers its own shim with the shim again is an unbounded loop
+# inside a time-boxed pass.
+CLIENT_REDIRECT_MAX_HOPS = 1
+
+# `<meta http-equiv="refresh" content="0; url=…">` and the three spellings of a
+# client-side navigation, as literal string destinations only. Mirrors
+# metaRefreshTarget / scriptLocationTarget in scripts/lib/link-health.mjs.
+_META_REFRESH_TAG_RE = re.compile(
+    r"""<meta\b[^>]*http-equiv\s*=\s*["']?refresh["']?[^>]*>""", re.I
+)
+_META_REFRESH_CONTENT_RE = re.compile(r"""content\s*=\s*["']([^"']*)["']""", re.I)
+_META_REFRESH_URL_RE = re.compile(r"""url\s*=\s*['"]?([^'"\s;]+)""", re.I)
+_SCRIPT_LOCATION_CALL_RE = re.compile(
+    r"""\b(?:window|document|top|self|parent)?\.?location\s*\.\s*"""
+    r"""(?:replace|assign)\s*\(\s*["']([^"']+)["']""",
+    re.I,
+)
+_SCRIPT_LOCATION_ASSIGN_RE = re.compile(
+    r"""\b(?:window|document|top|self|parent)?\.?location(?:\s*\.\s*href)?"""
+    r"""\s*=\s*["']([^"']+)["']""",
+    re.I,
+)
+
+
+def client_redirect_target(html, base_url) -> str | None:
+    """The URL a document navigates to on its own, or None.
+
+    A redirect declared in the BODY is still a redirect. The transport follows
+    a Location header; only a BROWSER follows `location.replace()`, so a store
+    sitting behind a JavaScript shim answered every reader with a document that
+    is not a page — 200, no product markup, filed "teach the parser this
+    platform" for ever.
+
+    Probed from a runner on 2026-09-24, vala.supply answers a first request for
+    any listing with 524 bytes whose whole body is
+    `window.location.replace('<the same URL>?ch=1&js=…')` — a token proving the
+    client ran JavaScript. Ask for that and the store gives its real answer: a
+    302 onto http://ww547.vala.supply/, a front door on another host, which
+    is_gone_redirect has always called gone. Which of the two a row happened to
+    get was a coin flip: 5 of the vendor's 19 listings were marked and 14 were
+    not.
+
+    It carries no verdict of its own — it answers WHERE the store sent us, and
+    the caller re-asks the ordinary questions about whatever is there. Narrow in
+    three ways, each of them the safety: the document must carry no page of its
+    own (APP_SHELL_MAX_TEXT, the bound is_client_rendered_shell uses, since
+    every storefront has a `location.href =` somewhere in its analytics), only a
+    string literal counts, and a target that resolves to the request itself is
+    refused. Mirror of clientRedirectTarget in scripts/lib/link-health.mjs.
+    """
+    body = str(html or "")
+    # A document with content of its own is a page, whatever its scripts say.
+    if len(rendered_text(body)) > APP_SHELL_MAX_TEXT:
+        return None
+    raw = None
+    tag = _META_REFRESH_TAG_RE.search(body)
+    if tag:
+        content = _META_REFRESH_CONTENT_RE.search(tag.group(0))
+        if content:
+            url = _META_REFRESH_URL_RE.search(content.group(1))
+            if url:
+                raw = url.group(1)
+    if raw is None:
+        call = _SCRIPT_LOCATION_CALL_RE.search(body)
+        raw = call.group(1) if call else None
+    if raw is None:
+        assign = _SCRIPT_LOCATION_ASSIGN_RE.search(body)
+        raw = assign.group(1) if assign else None
+    if not raw:
+        return None
+    try:
+        base = urllib.parse.urlsplit(str(base_url or ""))
+        if not base.scheme or not base.netloc:
+            return None
+        target = urllib.parse.urljoin(str(base_url), raw)
+        split = urllib.parse.urlsplit(target)
+    except ValueError:
+        return None
+    # Only the web: a `javascript:` or `data:` destination is not a page to ask
+    # for, and neither is an app link.
+    if split.scheme not in ("http", "https") or not split.netloc:
+        return None
+    if target == str(base_url):
+        return None
+    return target
+
+
 # The one path Shopify serves its storefront password gate from. Mirror of
 # STOREFRONT_PASSWORD_GATE_PATH in scripts/lib/link-health.mjs.
 _STOREFRONT_PASSWORD_GATE_PATH = "/password"
@@ -5160,6 +5249,41 @@ def run_discovery(
 _FRONT_PAGE_CACHE: dict[str, tuple[str, str]] = {}
 
 
+def _client_redirect_html(
+    page: Page,
+    scrapling: ScraplingClient | None,
+    html_source: str | None,
+    hop_url: str,
+) -> tuple[str, int | None, str]:
+    """The destination of a body-declared redirect, fetched the SAME way.
+
+    The transport matters for the same reason it does in _front_page_html: a
+    browser-rendered DOM and Scrapling's raw markup are different documents, and
+    the caller judges what comes back exactly as it judged the first response.
+
+    Returns (body, status, final_url). Scrapling follows redirects without
+    saying where it ended up, so it yields no URL and no status — the same
+    silence it yields for is_gone_redirect on the product page itself, which is
+    why the caller falls back to the requested hop URL.
+    """
+    if html_source == "browser":
+        try:
+            response = page.goto(
+                hop_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS
+            )
+            status = response.status if response is not None else None
+            content = page.content()
+            if content and response_is_readable(status, content):
+                return (content, status, page.url)
+            return ("", status, page.url)
+        except Exception as exc:  # noqa: BLE001
+            log(f"  client-redirect fetch error ({hop_url}): {type(exc).__name__}: {exc}")
+            return ("", None, "")
+    if scrapling is not None and scrapling.available:
+        return (scrapling.get_html(hop_url, protected=True) or "", None, "")
+    return ("", None, "")
+
+
 def _front_page_html(
     page: Page,
     scrapling: ScraplingClient | None,
@@ -5363,6 +5487,47 @@ def generic_price(
     if is_gone_redirect(product_url, final_url):
         log(f"  dead link (redirected to {final_url}) — clearing price ({product_url})")
         return DEAD_LINK
+
+    # …and the store may have declared its redirect in the BODY rather than in a
+    # Location header. Chromium follows one of those by itself, but the stealth
+    # transport below it does not and neither does the six-hourly pass, so a
+    # shop behind a `location.replace()` shim answered with a document that is
+    # not a page — and the NO_PRODUCT_DATA at the bottom then asks the owner for
+    # a parser and lets the front-page "gone" checks judge a page they were
+    # never meant to see. Ask for what the shim points at, once, and put the
+    # answer through the same questions. See client_redirect_target.
+    for _hop in range(CLIENT_REDIRECT_MAX_HOPS):
+        hop_url = client_redirect_target(html, final_url or product_url)
+        if not hop_url:
+            break
+        hop_html, hop_status, hop_final = _client_redirect_html(
+            page, scrapling, html_source, hop_url
+        )
+        if not hop_html:
+            # The shim's own destination did not answer. Nothing was learned
+            # about the listing, and the document in hand is still not a page —
+            # so keep the last good price rather than reach a verdict about it.
+            if is_frozen_storefront_status(hop_status):
+                log(
+                    f"  storefront frozen ({hop_status}) — the shop is shut for"
+                    f" billing ({product_url})"
+                )
+                return STORE_LOCKED
+            if hop_status in DEAD_LINK_STATUSES:
+                log(f"  dead link ({hop_status}) — clearing price ({product_url})")
+                return DEAD_LINK
+            return None
+        html, final_url = hop_html, hop_final or hop_url
+        # Asked again about the ORIGINAL url: "was the request for this listing
+        # answered by a front door" is the same question wherever the store
+        # routed it. vala.supply's shim leads to ww547.vala.supply, which
+        # is_gone_redirect has always called gone.
+        if is_gone_redirect(product_url, final_url):
+            log(
+                f"  dead link (redirected to {final_url}) — clearing price"
+                f" ({product_url})"
+            )
+            return DEAD_LINK
 
     if vendor_currency and vendor_currency not in _SUPPORTED_CURRENCIES:
         # Read fine; this site cannot convert the money. A refusal by us, not a

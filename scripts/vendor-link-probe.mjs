@@ -32,6 +32,7 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 
 import {
+  clientRedirectTarget,
   isClientRenderedShell,
   isGoneFrontPage,
   isFrozenStorefrontStatus,
@@ -76,6 +77,12 @@ const BROWSER_HEADERS = {
 // Generous next to the price pass's 6s: a slow answer here is still evidence,
 // and a probe of a dozen URLs has no run budget to protect.
 const TIMEOUT_MS = 20_000;
+
+// A body at or under this size is printed verbatim beside its rendered text.
+// Small enough that a placeholder, a parking stub or a holding page fits whole,
+// large enough to be worth nothing on a real page — which never reaches the
+// branch that prints it anyway, since only a page with no product markup does.
+const RAW_BODY_PRINT_LIMIT = 1_500;
 
 async function fetchOnce(url, redirect = "manual") {
   const controller = new AbortController();
@@ -494,6 +501,22 @@ for (const url of urls) {
     );
   }
 
+  // Before any of the readers below: the store may not have answered with a
+  // page at all, but with a redirect it declared in the BODY. The transport
+  // follows a Location header and a BROWSER follows location.replace(), so a
+  // shop behind a shim reads as "200, nothing machine-readable" to every price
+  // path — the verdict that names a parser as the repair, about a document that
+  // is not a page. Printed rather than followed: the probe's job is to say what
+  // the store answered, and the next line is where to look.
+  const clientHop = clientRedirectTarget(body, finalUrl);
+  if (clientHop) {
+    console.log(
+      `  JS REDIR  | the page is a redirect SHIM, not a page — it navigates to` +
+        ` ${clientHop}. Both price passes follow this once now; probe that URL` +
+        ` to see the store's real answer`
+    );
+  }
+
   const woo = /data-product_variations\s*=/.test(body);
   const types = ldTypes(body);
   const ogTag = /property=["']product:price:amount["']/.test(body);
@@ -603,5 +626,14 @@ for (const url of urls) {
     console.log(
       `  TEXT      | ${text ? `${text.slice(0, 200)}${text.length > 200 ? "…" : ""}` : "(no rendered text at all)"}`
     );
+    // And for a document small enough that the rendered text IS the whole of
+    // it, print the markup as well. A parking stub, a holding page and a
+    // platform we have never read are all "200, no markup, a few words of
+    // text"; at this size the few hundred bytes around those words are the
+    // only thing that tells them apart, and every rule in link-health.mjs that
+    // recognises one of these shapes was written from exactly that document.
+    if (body.length > 0 && body.length <= RAW_BODY_PRINT_LIMIT) {
+      console.log(`  RAW       | ${JSON.stringify(body)}`);
+    }
   }
 }
