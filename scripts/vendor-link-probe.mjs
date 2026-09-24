@@ -77,6 +77,12 @@ const BROWSER_HEADERS = {
 // and a probe of a dozen URLs has no run budget to protect.
 const TIMEOUT_MS = 20_000;
 
+// A body at or under this size is printed verbatim beside its rendered text.
+// Small enough that a placeholder, a parking stub or a holding page fits whole,
+// large enough to be worth nothing on a real page — which never reaches the
+// branch that prints it anyway, since only a page with no product markup does.
+const RAW_BODY_PRINT_LIMIT = 1_500;
+
 async function fetchOnce(url, redirect = "manual") {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -603,5 +609,14 @@ for (const url of urls) {
     console.log(
       `  TEXT      | ${text ? `${text.slice(0, 200)}${text.length > 200 ? "…" : ""}` : "(no rendered text at all)"}`
     );
+    // And for a document small enough that the rendered text IS the whole of
+    // it, print the markup as well. A parking stub, a holding page and a
+    // platform we have never read are all "200, no markup, a few words of
+    // text"; at this size the few hundred bytes around those words are the
+    // only thing that tells them apart, and every rule in link-health.mjs that
+    // recognises one of these shapes was written from exactly that document.
+    if (body.length > 0 && body.length <= RAW_BODY_PRINT_LIMIT) {
+      console.log(`  RAW       | ${JSON.stringify(body)}`);
+    }
   }
 }
