@@ -3,6 +3,11 @@ import { prisma } from "@/lib/prisma";
 import { cleanDisplayName, notHiddenWhere, notShowcaseWhere } from "@/lib/showcase";
 import { isKeycapMaker, makerWhereOr } from "@/lib/set-name";
 import { classifyVariant, parseVariants } from "@/lib/kit-variants";
+import {
+  groupBuyHasKit,
+  normalizeKitFilter,
+  type KitFilter,
+} from "@/lib/kit-filters";
 import { bestDiscount } from "@/lib/pricing";
 
 const RELEASED_STATUSES = ["SHIPPING", "DELIVERED", "IN_STOCK"] as const;
@@ -118,6 +123,64 @@ async function bundleSetIds(): Promise<string[] | null> {
   return Array.from(ids);
 }
 
+// The database normally has one native BASE Kit per set; the rest of the kit
+// families live inside VendorKit.variants. Use Postgres only for a coarse,
+// indexed-down candidate scan, then run the shared classifier on those rows so
+// names such as NorDeUK and localized spacebar labels resolve consistently.
+const KIT_SCAN_CONFIG: Record<
+  KitFilter,
+  { nativeType: string; variantPattern: string }
+> = {
+  base: { nativeType: "BASE", variantPattern: "(base|ベース)" },
+  novelties: { nativeType: "NOVELTIES", variantPattern: "(novelt|ノベルティ)" },
+  spacebars: { nativeType: "SPACEBARS", variantPattern: "(space ?bar|スペースバー)" },
+  numpad: { nativeType: "NUMPAD", variantPattern: "num(ber)? ?(pad|kit)" },
+  alpha: { nativeType: "", variantPattern: "(alpha|アルファ)" },
+  iso: {
+    nativeType: "ISO",
+    variantPattern: "(iso|international|norde(uk)?|nordic|uk ?kit)",
+  },
+  mac: { nativeType: "MAC", variantPattern: "mac(os)?" },
+  other: { nativeType: "ADDON", variantPattern: '"title"' },
+};
+
+async function kitSetIds(filter: KitFilter): Promise<string[] | null> {
+  const { nativeType, variantPattern } = KIT_SCAN_CONFIG[filter];
+  let rows: Array<{ id: string; type: string; variants: unknown }>;
+  try {
+    rows = await prisma.$queryRaw<
+      Array<{ id: string; type: string; variants: unknown }>
+    >`
+      SELECT k."groupBuyId" AS id, k.type::text AS type, NULL::jsonb AS variants
+      FROM "Kit" k
+      WHERE k.type::text = ${nativeType}
+      UNION ALL
+      SELECT k."groupBuyId" AS id, k.type::text AS type, vk.variants
+      FROM "Kit" k
+      JOIN "VendorKit" vk ON vk."kitId" = k.id
+      WHERE vk.variants IS NOT NULL
+        AND vk.variants::text ~* ${variantPattern}
+    `;
+  } catch (err) {
+    console.error("released: kit scan failed", err);
+    return null;
+  }
+
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const probe = {
+      kits: [
+        {
+          type: row.type,
+          vendorKits: row.variants == null ? [] : [{ variants: row.variants }],
+        },
+      ],
+    };
+    if (groupBuyHasKit(probe, filter)) ids.add(row.id);
+  }
+  return Array.from(ids);
+}
+
 interface PricedSet {
   set: { id: string; kits: Array<{ type: string; vendorKits: Array<{ price: number | null; currency: string | null; inStock: boolean }> }> };
   minUsd: number;
@@ -156,6 +219,7 @@ export async function GET(req: NextRequest) {
   // Maker filter (GMK / Signature Plastics). Keycaps only — a maker pill
   // is meaningless on the keyboards tab.
   const makers = searchParams.getAll("maker").filter(isKeycapMaker);
+  const kit = normalizeKitFilter(searchParams.get("kit"));
   const onSale = searchParams.get("deals") === "1";
   const bundlesOnly = searchParams.get("bundles") === "1";
   const sortBy = searchParams.get("sort") ?? "released-desc";
@@ -202,9 +266,11 @@ export async function GET(req: NextRequest) {
   // rows out of an already-paged result. Also computed on an unfiltered page 1
   // so the UI can label (and hide) the pill with a real number.
   const bundleIds = bundlesOnly || (page === 1 && !isKeyboard) ? await bundleSetIds() : null;
+  const kitIds = kit && !isKeyboard ? await kitSetIds(kit) : null;
 
   const setConditions: Record<string, unknown>[] = [PRICED_FILTER];
   if (bundlesOnly) setConditions.push({ id: { in: bundleIds ?? [] } });
+  if (kit) setConditions.push({ id: { in: kitIds ?? [] } });
   if (effectiveAvailability === "available") setConditions.push(AVAILABLE_FILTER);
   if (effectiveAvailability === "soldout") setConditions.push({ NOT: AVAILABLE_FILTER });
   if (onSale) setConditions.push(ON_SALE_FILTER);
@@ -377,7 +443,7 @@ export async function GET(req: NextRequest) {
   // vendors: a markdown is one shop cutting its own price, which is what a
   // shopper recognises as a sale, so it leads.
   let markdowns: unknown[] = [];
-  if (!isKeyboard && page === 1 && !search && !year && !designer && !vendor && !bundlesOnly && !onSale && availability !== "soldout") {
+  if (!isKeyboard && page === 1 && !search && !year && !designer && !vendor && !kit && !bundlesOnly && !onSale && availability !== "soldout") {
     const onSaleSets = await prisma.groupBuy.findMany({
       where: { ...releasedWhere, ...ON_SALE_FILTER },
       include: PRICING_INCLUDE,
@@ -393,7 +459,7 @@ export async function GET(req: NextRequest) {
 
   // "Biggest savings" deals rail (keycap-only — needs multi-vendor pricing)
   let deals: unknown[] = [];
-  if (!isKeyboard && page === 1 && !search && !year && !designer && !vendor && availability !== "soldout") {
+  if (!isKeyboard && page === 1 && !search && !year && !designer && !vendor && !kit && availability !== "soldout") {
     const available = await prisma.groupBuy.findMany({
       where: { ...releasedWhere, ...AVAILABLE_FILTER },
       include: PRICING_INCLUDE,

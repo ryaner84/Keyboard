@@ -20,6 +20,7 @@
     "test:collection-roundtrip": "node scripts/lib/collection-roundtrip.test.mjs",
     "test:collection-import": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/collection-import.test.ts",
     "test:kit-variants": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/kit-variants.test.ts",
+    "test:kit-filters": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/kit-filters.test.ts",
     "test:set-name": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/set-name.test.ts",
     "test:home-cache": "ts-node --project tsconfig.test.json -r tsconfig-paths/register src/lib/home-cache.test.ts",
     "test:vendor-urls": "node scripts/lib/vendor-urls.test.mjs",

@@ -3,6 +3,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { SetCard } from "@/components/browse/SetCard";
+import {
+  KIT_FILTER_OPTIONS,
+  kitFilterLabel,
+  normalizeKitFilter,
+} from "@/lib/kit-filters";
 import { KEYCAP_MAKER_LABELS, type KeycapMaker } from "@/lib/set-name";
 import type { GroupBuyWithPricing } from "@/types";
 
@@ -40,6 +45,7 @@ export default function ReleasedContent() {
   // Keycaps-only: a maker means nothing on the keyboards tab. A single-select
   // dropdown like designer/vendor/year, not pills — same row, same affordance.
   const maker = searchParams.get("maker") ?? "";
+  const kit = normalizeKitFilter(searchParams.get("kit"));
   // The two bargain-hunter toggles. Kept as separate params rather than folded
   // into `availability` because they compose: "on sale" AND "sold as a bundle"
   // is a legitimate, and interesting, combination.
@@ -119,6 +125,7 @@ export default function ReleasedContent() {
       if (designer) params.set("designer", designer);
       if (vendor) params.set("vendor", vendor);
       if (maker) params.set("maker", maker);
+      if (kit) params.set("kit", kit);
       if (onSale) params.set("deals", "1");
       if (bundlesOnly) params.set("bundles", "1");
       params.set("sort", sortBy);
@@ -156,7 +163,7 @@ export default function ReleasedContent() {
         }
       }
     },
-    [search, availability, year, designer, vendor, sortBy, maker, onSale, bundlesOnly]
+    [search, availability, year, designer, vendor, sortBy, maker, kit, onSale, bundlesOnly]
   );
 
   useEffect(() => {
@@ -165,7 +172,7 @@ export default function ReleasedContent() {
 
   const hasMore = sets.length < total;
   const hasFilters = !!(
-    search || year || designer || vendor || availability || maker || onSale || bundlesOnly
+    search || year || designer || vendor || availability || maker || kit || onSale || bundlesOnly
   );
 
   return (
@@ -325,7 +332,7 @@ export default function ReleasedContent() {
         </span>
       </div>
 
-      {/* Row 2: designer + year + sort + clear */}
+      {/* Row 2: designer + vendor + year + maker + kit + clear */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <select
           value={designer}
@@ -384,6 +391,19 @@ export default function ReleasedContent() {
             ))}
           </select>
         )}
+
+        <select
+          aria-label="Kit"
+          value={kit}
+          onChange={(e) => updateParams({ kit: e.target.value })}
+          className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-700 dark:text-gray-200 focus:outline-none focus:border-indigo-400"
+        >
+          {KIT_FILTER_OPTIONS.map((option) => (
+            <option key={option.value || "any"} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
 
         {hasFilters && (
           <button
@@ -485,7 +505,7 @@ export default function ReleasedContent() {
       )}
 
       {/* ── Deals rail (keycaps only) ────────────────────────────────────── */}
-      {!loading && deals.length > 0 && !search && !year && !designer && !vendor && !onSale && !bundlesOnly && availability !== "soldout" && (
+      {!loading && deals.length > 0 && !search && !year && !designer && !vendor && !kit && !onSale && !bundlesOnly && availability !== "soldout" && (
         <div className="mb-10 rounded-2xl border-2 border-amber-200 dark:border-amber-900 bg-gradient-to-br from-amber-50 via-orange-50 to-amber-50 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-amber-950/40 p-5 sm:p-6">
           <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -521,6 +541,8 @@ export default function ReleasedContent() {
           ? "Loading…"
           : `${total} ${onSale ? "discounted " : ""}${bundlesOnly ? "bundled " : ""}set${total !== 1 ? "s" : ""}${designer ? ` by ${designer}` : ""}${
               vendor ? ` at ${topVendors.find((v) => v.slug === vendor)?.name ?? vendor}` : ""
+            }${
+              kit ? ` offering ${kitFilterLabel(kit) ?? kit} kits` : ""
             }${
               availability === "available"
                 ? " you can buy right now"

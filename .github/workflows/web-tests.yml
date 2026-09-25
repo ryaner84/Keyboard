@@ -49,6 +49,10 @@ jobs:
         if: always()
         run: npm run test:kit-variants
 
+      - name: kit-filters
+        if: always()
+        run: npm run test:kit-filters
+
       - name: set-name
         if: always()
         run: npm run test:set-name
