@@ -737,6 +737,51 @@ both the client-reported log and the resolution audit in the same run.
 > **resolved, not pending, and not on the watch** — nothing to act on. No fresh
 > report needs a fix, so no code change was required this run.
 
+> **2026-09-25 run.** Price feed run 36152515909 (`?all=1`) returns **41
+> submissions, all resolved, 0 pending** — a 1:1 match with the client-reported
+> log, so **no new price report** has filed (most recent submission still
+> **gmk-vamp × Switchmod**, 2026-08-26T17:39). Every one of the 41 carries
+> `resolvedAt=2026-09-25T05:11:00.983Z` — the nightly 00:30 UTC scheduled sweep
+> that preceded this dispatch — which post-dates every submission, confirming
+> nothing reverted.
+>
+> The incoming **Self-heal watch was empty** (gmk-bent-r2 × zFrontier was
+> confirmed healed and cleared on 2026-09-17), so there was nothing to re-verify
+> this run and no watched item failed verification. gmk-bent-r2 × zFrontier still
+> reads **`current=150 USD source=SCRAPED`**: the picker's 150 held and **56 did
+> not return**, so the 2026-09-16 oscillation fix (`633581d`), hardened by #186
+> (`b3f7076`, the unnamed-offer-list guard), continues to hold. The other prior
+> resolutions all still read correctly: gmk-vamp × Switchmod `84.99 USD SCRAPED`
+> (correct CYL base); gmk-arctic `145 USD`, gmk-tribal `175 USD` (zFrontier
+> base-kit picks); the #153-corrected Ktechs listings BRG R3 `139 SGD SCRAPED`
+> and Thunder God `169 SGD SCRAPED`. The **gmk-monochrome-dolch × Neo Macro**
+> change of record continues to flip: this run it reads `source=LOCKED` (it had
+> shown `15500 INR SCRAPED` on 2026-09-24). neomacro.in flips between a live
+> SCRAPED price and the closed/frozen-storefront verdict (#187 password gate /
+> #188 402 freeze) run to run; either way the stored 15,500 INR ≈ 186 USD is a
+> plausible GMK base within `KIT_BOUNDS`. The report is **resolved, not pending,
+> and not on the watch** — nothing to act on.
+>
+> **Visitor inbox run 36152519119: one NEW `LISTING_FLAG`, triaged and cleared
+> in-run — the other 15 are the known open set unchanged.** The feed returned
+> **16 `LISTING_FLAG`s + 1 FEEDBACK**; STORE_LINK / PRICE_REPORT / PHOTO_REPORT
+> all empty. The new flag is **`obl-test-product-do-not-buy` (issue=other,
+> flagged 2026-09-25**, note "this is a test product why you even list it",
+> id=cmugqgpw9000004jtiko7npy4) — a **re-report of the item this ledger already
+> closed on 2026-09-14** (`purgeTestProductListings` + `isTestProduct`, #d962ac3,
+> cleared ×8). Routine step 2 treats a re-report of a closed item as a "did NOT
+> heal → investigate now", so it was inspected rather than assumed: the read-only
+> inspector (run 36152737146) confirms **NO GroupBuy row with this slug** — the
+> fix is **holding**, the row is genuinely gone, and this is a stale re-report
+> filed against the memory of the old listing, **not a regression**. No scraper
+> fix is warranted (both dedup halves are correct and in place). The flag was
+> cleared by id via the **Resolve listing flags** workflow (run 36152863577,
+> "Resolved 1 flag(s)") and recorded in §4a. The remaining **15 flags are
+> byte-for-byte the same open set triaged and reported to the owner on 2026-09-14**
+> (§4b) — no new flags among them, nothing auto-resolvable, inspector states
+> unchanged. The FEEDBACK item (collection display, 2026-06-24) remains for the
+> owner. No price/scraper code change was required this run.
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _None. All 41 full-history reports are resolved; 0 pending. The last open item —
@@ -821,11 +866,12 @@ the wrong-price flag. It has **no derivable auto-resolution**, so each flag is
 triaged against the read-only inspector's catalog state and cleared by id when
 dealt with (`scripts/resolve-listing-flags.mjs`). First full triage: 2026-09-14.
 
-### 4a. Resolved this run (16 flags, cleared 2026-09-14)
+### 4a. Resolved flags (cleared by id)
 
 | slug | issue | flagged | inspector state | resolution |
 |---|---|---|---|---|
-| obl-test-product-do-not-buy | other/inactive ×8 | 2026-06-23 … 2026-09-13 | NO ROW | `purgeTestProductListings` (#d962ac3) removed it; confirmed gone |
+| obl-test-product-do-not-buy | other | 2026-09-25 | NO ROW (run 36152737146) | **re-report of the 2026-09-14-closed item; fix holding.** Cleared 2026-09-25 (run 36152863577). The row stays purged by `purgeTestProductListings`/`isTestProduct` — a stale flag against the old listing, no regression |
+| obl-test-product-do-not-buy | other/inactive ×8 | 2026-06-23 … 2026-09-13 | NO ROW | `purgeTestProductListings` (#d962ac3) removed it; confirmed gone (cleared 2026-09-14) |
 | gmk-cyl-masterpiece-r2-keycaps | duplicate | 2026-07-21 | NO ROW | CYL orphan folded into `gmk-masterpiece-r2` by `mergeDuplicateKeycapSets` |
 | gmk-masterpiece-r2 | duplicate | 2026-07-21 | exists, no twin | dedup complete — no duplicate remains |
 | gmk-cyl-windbreaker-keycaps | duplicate | 2026-07-21 | NO ROW | CYL orphan folded into `gmk-windbreaker` |
