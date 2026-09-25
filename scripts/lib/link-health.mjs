@@ -761,6 +761,78 @@ export function isStorefrontPasswordGate(requestUrl, finalUrl) {
 const STOREFRONT_PASSWORD_GATE_PATH = "/password";
 
 /**
+ * The monetisation routers a PARKED domain hands its visitors to.
+ *
+ * Matched as a HOST inside a URL the document itself carries, never as a loose
+ * substring: `ILIKE '%parklogic%'` would also match a shop blogging about it,
+ * which is the same mistake the vendor registry exists to stop being made in
+ * SQL.
+ *
+ * One entry, because one is what has been probed. Adding another needs the same
+ * evidence this one has — the router endpoint read out of a document the parked
+ * domain actually served, not a provider name recognised from the outside.
+ */
+export const PARKED_DOMAIN_ROUTER_HOSTS = ["router.parklogic.com"];
+
+/**
+ * True when a document is a parked domain's interstitial rather than a page.
+ *
+ * The SIXTH way a store says "gone", and the second one where the domain itself
+ * has left the shop rather than the page leaving the domain. isGoneStorefrontRoot
+ * reads the first: a lapsed registration whose parking service answers the ORIGIN
+ * from another host (vala.supply → ww19.vala.supply), so the front door gives it
+ * away. A parking service that answers IN PLACE gives nothing away at all, and
+ * every check in the chain looks straight past it:
+ *
+ *   isDeadLinkStatus        sees a 200
+ *   isGoneRedirect          sees no hop — the destination is decided by an XHR
+ *                           at RUNTIME, so there is no Location header
+ *   isGoneFrontPage         compares bodies that can never be equal: the stub
+ *                           embeds the requested path in its payload, so the
+ *                           product page and the root differ by exactly the
+ *                           length of the path
+ *   isGoneStorefrontRoot    sees a root that answers from the SAME host
+ *   isGoneHostError         sees a host that resolves
+ *   clientRedirectTarget    finds no literal to read, and may not guess at a
+ *                           computed one — the destination comes back from the
+ *                           POST, not from the source
+ *   isClientRenderedShell   sees no `<script src=…>`, so it refuses to call
+ *                           this an app shell — correctly; it is not one
+ *
+ * So the row fell to the bottom as NO_PRODUCT_DATA — "teach the parser this
+ * platform", the one verdict that names a change HERE and that no parser could
+ * ever satisfy, printed at the owner nightly about a domain the shop no longer
+ * owns. Probed from a runner on 2026-09-25, auramech.com and hineybush.com
+ * answer every route with the same ~5.6 KB document: rendered text
+ * "Redirecting... Loading . . .", one inline script, and inside it a POST of the
+ * visitor's geo and `"domainApex":"hineybush.com"` to https://router.parklogic.com/,
+ * whose reply is either navigated to or injected as the body. Both stores had
+ * been carrying that verdict since 2026-09-12, when the probe correctly reported
+ * their TLS chains complete and read the stub as a holding page.
+ *
+ * DEAD_LINK is the honest answer and the consistent one: a parked domain is
+ * #156's NXDOMAIN with a server still answering — there is no shop left to ask.
+ *
+ * The safety is where it is asked and what it is asked about, exactly as for its
+ * siblings: only ever on a page that yielded NO product markup, so a readable
+ * store never reaches it; only on a document carrying no page of its own
+ * (APP_SHELL_MAX_TEXT), so a real storefront that merely mentions a parking host
+ * in its copy cannot trip it; and only on a router host spelled as a host. And
+ * `deadSince` is self-healing — nextLinkHealth clears it on the first read that
+ * gets through — so a domain pointed back at a real shop recovers by itself,
+ * while PURCHASABLE_VENDOR_KIT_WHERE hides a dead row only while it is UNPRICED,
+ * so no false positive here can take a priced listing off a set page.
+ */
+export function isParkedDomainPage(html) {
+  const body = String(html ?? "");
+  // A document with content of its own is a page, whatever its scripts do.
+  if (renderedText(body).length > APP_SHELL_MAX_TEXT) return false;
+  return PARKED_DOMAIN_ROUTER_HOSTS.some((host) =>
+    new RegExp(`https?://${host.replace(/\./g, "\\.")}[/:?"'\\s]`, "i").test(body)
+  );
+}
+
+/**
  * The network-level answers that mean the HOST itself is gone — NXDOMAIN, in
  * each of the three spellings this codebase can be handed one:
  *

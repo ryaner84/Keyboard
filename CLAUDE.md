@@ -765,6 +765,66 @@ routed it. `test:link-health` and the Python suite fail if either half stops
 asking, if the hop loses its bound, or if a caller stops re-judging what it
 landed on.
 
+**And the domain can be gone while it answers every request perfectly, because
+somebody else is monetising it.** `isGoneStorefrontRoot` reads the half where a
+lapsed registration's parking service hops the ORIGIN onto another host
+(vala.supply → ww19.vala.supply), so the front door gives it away. A parking
+service that answers IN PLACE gives nothing away, and the entire chain looks
+straight past it: the status is 200; there is no hop, because the destination
+comes back from an XHR at RUNTIME and no `Location` header ever exists;
+`isGoneFrontPage` compares bodies that can never be equal, since the stub embeds
+the requested path in its payload (auramech's product page is 5,654 bytes
+against its root's 5,599); `isGoneStorefrontRoot` sees a root on the SAME host;
+`isGoneHostError` sees a host that resolves; `clientRedirectTarget` finds no
+string literal and is rightly forbidden from guessing at a computed one; and
+`isClientRenderedShell` sees no `<script src=…>`, so it correctly refuses to
+call it an app shell. So the row fell to the bottom as `NO_PRODUCT_DATA` —
+"teach the parser this platform", the one verdict that names a change HERE and
+that no parser could ever satisfy — printed at the owner nightly about a domain
+the shop no longer owns. Probed from a runner on 2026-09-25, **auramech.com**
+and **hineybush.com** answer every route with the same ~5.6 KB document:
+rendered text `Redirecting... Loading . . .`, one inline script, and inside it a
+POST of the visitor's geo and `"domainApex":"hineybush.com"` to
+`https://router.parklogic.com/`, whose reply is either navigated to or injected
+as the body. Both had carried that verdict since 2026-09-12, when the probe
+correctly reported their TLS chains complete (#175) and read the stub as a
+holding page; `linkFailures` had climbed to 28 on a store answering 200 every
+time, because `UNPARSED` deliberately does not reset link health.
+
+`isParkedDomainPage` (mirrored as `is_parked_domain_page`) answers `DEAD_LINK`,
+which is the consistent answer as well as the honest one: a parked domain is
+#156's NXDOMAIN with a server still answering — there is no shop left to ask.
+The safety is where it is asked and what about, exactly as for its siblings: only
+ever on a page that produced NO product markup, so a readable store never
+reaches it; only on a document carrying no page of its own (`APP_SHELL_MAX_TEXT`,
+the bound `isClientRenderedShell` and `clientRedirectTarget` already share), so a
+live storefront that merely writes about a parking service cannot be retired by
+it; and only on a router host spelled as a HOST inside a URL, never as a loose
+substring — `%parklogic%` would also match `router.parklogic.com.evil.test`,
+which is the bare-host filter the vendor registry exists to stop being written.
+`PARKED_DOMAIN_ROUTER_HOSTS` is deliberately ONE entry, because one is what has
+been probed; adding another needs the same evidence, read out of a document a
+parked domain actually served rather than a provider name recognised from
+outside. It is asked BEFORE the storefront root is fetched — a parking service
+answering in place serves the same stub there, so that comparison could only ever
+say "not identical" and pay a fetch to reach the wrong verdict, which is
+`isStorefrontPasswordGate`'s ordering for its own reason.
+
+**And it is FOUR edits, not three, for a reason peculiar to this one.** Every
+other body-read verdict here lives in the generic reader alone, because
+`scrape.py`'s Shopify path never has a document — it reads parsed JSON. But in
+that half a `/products/` URL never falls through to the generic reader at all
+(the fallback is for a root-level alias alone), so a parked *Shopify* store's
+only nightly answer was the bare `None` that means "the store never answered",
+and `deadSince` — the only signal allowed to take a listing off the site — was
+left to the six-hourly pass. The rule is therefore asked in `shopify_price` too,
+off `page.content()` once the browser has loaded one: at `domcontentloaded` that
+is still the stub, before the router's reply replaces or navigates away from it.
+`test:link-health` fails if the marker lists disagree, if either half stops
+asking, if either stops asking before the root fetch, or if the probe — the tool
+the publishing report NAMES — loses the verdict, which would send the owner back
+to the report that sent them to the probe.
+
 **And a third answer gives no status, no redirect and no page at all: the
 DOMAIN is gone.** Every guard in the vendor chain judges a storefront by the
 SHAPE of its URL — `needsStorefront`, `planStorefrontOwnership`,

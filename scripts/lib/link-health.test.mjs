@@ -23,6 +23,8 @@ import {
   isClientRenderedShell,
   isGoneFrontPage,
   isGoneStorefrontRoot,
+  isParkedDomainPage,
+  PARKED_DOMAIN_ROUTER_HOSTS,
   clientRedirectTarget,
   CLIENT_REDIRECT_MAX_HOPS,
   isGoneHostError,
@@ -981,14 +983,17 @@ assert.ok(
 // same way for a redirect to the front door, which is why there are four.
 assert.equal(
   (scrapePy.match(/return DEAD_LINK\b/g) ?? []).length,
-  10,
+  12,
   "both of scrape.py's price paths must return DEAD_LINK on 404/410, on a " +
     "redirect to the storefront's front door, AND on a host that no longer " +
     "resolves — plus the generic reader's two answers read off the storefront " +
     "ROOT (a catch-all rewrite that serves the front page for the URL itself, " +
-    "and a front door that has left the domain altogether) and the two it " +
+    "and a front door that has left the domain altogether), the two it " +
     "reaches again on the far side of a body-declared redirect, which is a " +
-    "second response and needs the same questions asked of it"
+    "second response and needs the same questions asked of it, and the PARKED " +
+    "domain — which, unlike every other body-read verdict here, has to be " +
+    "answered in the Shopify path too, because a /products/ URL never reaches " +
+    "the generic reader in this half"
 );
 // The front-page comparison lives in the reader that has a PAGE to compare:
 // scrape.py picks one path per URL and the Shopify half reads JSON endpoints,
@@ -1689,6 +1694,153 @@ assert.ok(
     probe.indexOf("isFrozenStorefrontStatus(res.status)") <
       probe.indexOf("VERDICT   | UNREADABLE (${res.status})"),
     "the probe must report a freeze before falling back to 'blocked or broken'"
+  );
+}
+
+// --- isParkedDomainPage ----------------------------------------------------
+//
+// The sixth "gone": the shop no longer owns the DOMAIN, and the parking service
+// answers IN PLACE rather than hopping to another host the way vala.supply's
+// did. Probed from a runner on 2026-09-25 — auramech.com and hineybush.com both
+// answer every route with the same ~5.6 KB stub.
+const PARKED_STUB =
+  '<!doctype html><html><head><meta charset="utf-8">' +
+  '<meta name="viewport" content="width=device-width,initial-scale=1"></head>' +
+  "<body><div>Redirecting...</div><div>Loading . . .</div><script>" +
+  '(()=>{"use strict";const t="eyJkb21haW5BcGV4IjoiaGluZXlidXNoLmNvbSJ9";' +
+  "(async function(e,t){const o=new XMLHttpRequest;o.open(\"POST\",e,!0)," +
+  'o.send(t)})("https://router.parklogic.com/",t).then()})();' +
+  "</script></body></html>";
+
+assert.ok(isParkedDomainPage(PARKED_STUB), "the parked interstitial must be recognised");
+
+// It is the BODY that decides, so it holds wherever the store routed us and
+// whatever the request URL was — there is no URL test to get wrong here.
+assert.equal(isParkedDomainPage(""), false);
+assert.equal(isParkedDomainPage(null), false);
+assert.equal(isParkedDomainPage(undefined), false);
+
+// A page of its OWN is a page, whatever its scripts do. APP_SHELL_MAX_TEXT is
+// the same bound isClientRenderedShell and clientRedirectTarget use, and it is
+// what stops a live storefront that merely writes about a parking service —
+// or embeds one host's name in its copy — from being retired by this rule.
+assert.equal(
+  isParkedDomainPage(
+    `<html><body><p>${"We moved our old domain off a parker. ".repeat(20)}` +
+      `https://router.parklogic.com/ was where it pointed.</p></body></html>`
+  ),
+  false,
+  "a document with a page of its own is never parked"
+);
+
+// A HOST inside a URL, never a loose substring: `%parklogic%` would also match
+// a look-alike registered under it, which is the bare-host filter this codebase
+// keeps having to un-write.
+assert.equal(
+  isParkedDomainPage(
+    '<html><body><script>fetch("https://router.parklogic.com.evil.test/")</script></body></html>'
+  ),
+  false,
+  "a look-alike host must not read as the parking router"
+);
+assert.equal(
+  isParkedDomainPage("<html><body><script>var s=\"router.parklogic.com\";</script></body></html>"),
+  false,
+  "a bare mention with no scheme is not a router endpoint"
+);
+
+// The controls every hiding rule here shares. A false positive takes a listing
+// off the site, so each of these must keep falling through.
+assert.equal(
+  isParkedDomainPage(
+    '<html><head><title>zFrontier</title></head><body><div id="app"></div>' +
+      '<script src="/main.js"></script></body></html>'
+  ),
+  false,
+  "a live client-rendered shop is not parked"
+);
+assert.equal(
+  isParkedDomainPage(
+    '<html><body><h1>Opening Soon</h1><form action="/password"></form></body></html>'
+  ),
+  false,
+  "a Shopify password gate is a locked shop, not a parked domain"
+);
+assert.equal(
+  isParkedDomainPage('<html><body><div class="placeholder"></div></body></html>'),
+  false,
+  "a bare placeholder says nothing about who holds the domain"
+);
+
+// One entry, and it is the one that was probed. Adding another is a decision
+// that needs the same evidence, so the list is pinned rather than described.
+assert.deepEqual(PARKED_DOMAIN_ROUTER_HOSTS, ["router.parklogic.com"]);
+
+// --- the parked domain, in both halves and the probe -----------------------
+//
+// Written twice like everything else here, and the marker lists must not drift:
+// a host in one half and not the other means the six-hourly pass retires a row
+// the nightly keeps re-filing as a platform to teach the parser.
+{
+  const pyHosts = scrapePy.match(
+    /_PARKED_DOMAIN_ROUTER_HOSTS = \[([\s\S]*?)\]/
+  );
+  assert.ok(pyHosts, "scrape.py must mirror PARKED_DOMAIN_ROUTER_HOSTS");
+  const mirrored = [...pyHosts[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(
+    mirrored,
+    PARKED_DOMAIN_ROUTER_HOSTS,
+    "scrape.py's parking-router hosts must match link-health.mjs"
+  );
+  assert.ok(
+    /def is_parked_domain_page\(/.test(scrapePy),
+    "scrape.py must mirror isParkedDomainPage as is_parked_domain_page"
+  );
+  // BOTH of scrape.py's price paths. The generic reader is the obvious one; the
+  // Shopify one is the half that matters, because in this pass a /products/ URL
+  // never falls through to the generic reader (the fallback there is for a
+  // root-level alias alone) — which is why the nightly's only answer for a
+  // parked Shopify store was the bare None that means "the store never
+  // answered at all".
+  assert.equal(
+    (scrapePy.match(/is_parked_domain_page\(/g) ?? []).length,
+    3,
+    "both of scrape.py's price paths must ask whether the domain is parked"
+  );
+  // Asked BEFORE the storefront root is fetched, in the half that fetches one:
+  // a parking service answering in place serves the same stub from the root, so
+  // that comparison could only ever say "not identical" and pay a fetch to
+  // reach the wrong verdict.
+  assert.ok(
+    scrapePy.indexOf("if is_parked_domain_page(html):") <
+      scrapePy.indexOf("root_html, root_url = _front_page_html("),
+    "scrape.py must answer a parked domain before fetching the storefront root"
+  );
+  assert.match(
+    pricesTs,
+    /if \(isParkedDomainPage\(html\)\) return DEAD_LINK;/,
+    "prices.ts must answer a parked domain"
+  );
+  assert.ok(
+    pricesTs.indexOf("if (isParkedDomainPage(html)) return DEAD_LINK;") <
+      pricesTs.indexOf("const root = await frontPage(origin);"),
+    "prices.ts must answer a parked domain before fetching the storefront root"
+  );
+  // And the probe, which is the tool the publishing report NAMES: a verdict it
+  // cannot express sends the owner back to the report that sent them here.
+  const probeSrc = readFileSync(
+    join(REPO_ROOT, "scripts", "vendor-link-probe.mjs"),
+    "utf8"
+  );
+  assert.match(
+    probeSrc,
+    /isParkedDomainPage\(body\)/,
+    "the probe must recognise a parked domain"
+  );
+  assert.ok(
+    probeSrc.indexOf("isParkedDomainPage(body)") <
+      probeSrc.indexOf("NOTHING MACHINE-READABLE"),
+    "the probe must report a parked domain before 'teach the parser'"
   );
 }
 

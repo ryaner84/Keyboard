@@ -39,6 +39,7 @@ import {
   isGoneHostError,
   isGoneRedirect,
   isGoneStorefrontRoot,
+  isParkedDomainPage,
   isStorefrontPasswordGate,
 } from "./lib/link-health.mjs";
 import { isIncompleteChainError, retryWithRepairedChain } from "./lib/tls-chain.mjs";
@@ -549,6 +550,22 @@ for (const url of urls) {
         ` (${finalUrl}); the shop is closed to the public, so nothing here can` +
         ` publish until its owner reopens it. Not gone: deadSince is never` +
         ` written for this, and no parser would help`
+    );
+    continue;
+  }
+
+  // Before the extra fetch: the shop may no longer own the DOMAIN. A parking
+  // service that answers IN PLACE serves the same interstitial from the root,
+  // so the comparison below could only ever say "not identical" — and the
+  // report names THIS tool, so a verdict it cannot express is a dead end by
+  // construction. See isParkedDomainPage in scripts/lib/link-health.mjs.
+  if (isParkedDomainPage(body)) {
+    console.log(
+      `  VERDICT   | DEAD_LINK — the DOMAIN is PARKED: this is a monetisation` +
+        ` service's interstitial (it posts the visitor to a parking router and` +
+        ` navigates to whatever comes back), not a page of this shop's. The` +
+        ` registration has left the store; relink or retire the rows, teaching` +
+        ` the parser cannot help`
     );
     continue;
   }
