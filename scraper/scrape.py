@@ -1155,6 +1155,59 @@ def is_storefront_password_gate(request_url, final_url) -> bool:
     return source.path.rstrip("/").lower() != _STOREFRONT_PASSWORD_GATE_PATH
 
 
+# The monetisation routers a PARKED domain hands its visitors to. Matched as a
+# HOST inside a URL the document carries, never as a loose substring — a shop
+# blogging about one is not parked on it. One entry, because one is what has
+# been probed; adding another needs the same evidence, read out of a document a
+# parked domain actually served. Mirror of PARKED_DOMAIN_ROUTER_HOSTS in
+# scripts/lib/link-health.mjs.
+_PARKED_DOMAIN_ROUTER_HOSTS = ["router.parklogic.com"]
+
+_PARKED_DOMAIN_ROUTER_RES = [
+    re.compile(r"""https?://%s[/:?"'\s]""" % re.escape(host), re.I)
+    for host in _PARKED_DOMAIN_ROUTER_HOSTS
+]
+
+
+def is_parked_domain_page(html) -> bool:
+    """True when a document is a parked domain's interstitial, not a page.
+
+    The sixth way a store says "gone", and the second where the DOMAIN has left
+    the shop rather than the page leaving the domain. is_gone_storefront_root
+    reads the first — a lapsed registration whose parking service answers the
+    ORIGIN from another host (vala.supply → ww19.vala.supply). A parking service
+    that answers IN PLACE gives nothing away, and the whole chain looks past it:
+    the status is 200, there is no hop (the destination comes back from an XHR
+    at runtime, so no Location header exists), the stub embeds the requested
+    path so its body can never equal the root's, the root answers from the same
+    host, the host resolves, client_redirect_target finds no literal and may not
+    guess at a computed one, and is_client_rendered_shell sees no
+    `<script src=…>` so it rightly refuses to call this an app shell.
+
+    So the row fell to NO_PRODUCT_DATA — "teach the parser this platform", the
+    one verdict naming a change HERE that no parser could ever satisfy, printed
+    at the owner nightly about a domain the shop no longer owns. Probed from a
+    runner on 2026-09-25, auramech.com and hineybush.com answer every route with
+    the same ~5.6 KB document: rendered text "Redirecting... Loading . . .", one
+    inline script, and in it a POST of the visitor's geo and
+    `"domainApex":"hineybush.com"` to https://router.parklogic.com/, whose reply
+    is either navigated to or injected as the body.
+
+    DEAD_LINK is the honest and the consistent answer: a parked domain is
+    NXDOMAIN with a server still answering — there is no shop left to ask. The
+    safety is where it is asked and what about, as for its siblings: only on a
+    page that produced NO product markup, only on a document carrying no page of
+    its own (APP_SHELL_MAX_TEXT), and only on a router host spelled as a host.
+    dead_since self-heals on the first read that gets through. Mirror of
+    isParkedDomainPage in scripts/lib/link-health.mjs.
+    """
+    body = str(html or "")
+    # A document with content of its own is a page, whatever its scripts do.
+    if len(rendered_text(body)) > APP_SHELL_MAX_TEXT:
+        return False
+    return any(pattern.search(body) for pattern in _PARKED_DOMAIN_ROUTER_RES)
+
+
 # The network-level answers that mean the HOST itself is gone — NXDOMAIN, in
 # each spelling this pass can be handed one: Chromium (Playwright's page.goto)
 # says ERR_NAME_NOT_RESOLVED, a Python socket.gaierror carries the libc string,
@@ -1885,6 +1938,28 @@ def shopify_price(
                     f" closed to the public ({product_url})"
                 )
                 return STORE_LOCKED
+            # …and the fourth: the shop no longer owns the DOMAIN, which now
+            # answers with a parking service's interstitial. Asked HERE and not
+            # only in generic_price, because a /products/ URL never reaches the
+            # generic reader in this half (the fallback above is for a root-level
+            # alias alone) — so without this the nightly's only answer for a
+            # parked Shopify store is the bare None that means "no answer at
+            # all", which is what auramech.com and hineybush.com got on every
+            # run while the six-hourly pass filed them "teach the parser".
+            # Needs the document, so only once the browser has actually loaded
+            # one; page.content() at domcontentloaded is still the stub, before
+            # the router's reply replaces or navigates away from it.
+            if browser_loaded:
+                try:
+                    nav_html = page.content()
+                except Exception:  # noqa: BLE001
+                    nav_html = ""
+                if is_parked_domain_page(nav_html):
+                    log(
+                        "  dead link (the domain is PARKED — a monetisation"
+                        f" interstitial, not this shop) ({product_url})"
+                    )
+                    return DEAD_LINK
             return None
 
         origin = urllib.parse.urlsplit(clean)
@@ -5604,6 +5679,18 @@ def generic_price(
         # rests on the store having answered THIS page, and a Scrapling fetch
         # follows redirects without telling us where it ended up — the same
         # reason is_gone_redirect above cannot judge one either.
+        # Asked before anything that costs a fetch, and without needing
+        # final_url at all: this verdict is read off the DOCUMENT. A parking
+        # service that answers in place serves the same stub from the root, so
+        # the front-page comparison below could only ever say "not identical"
+        # and pay a fetch to reach the wrong verdict — the same reason the
+        # password gate is answered above that fetch rather than below it.
+        if is_parked_domain_page(html):
+            log(
+                "  dead link (the domain is PARKED — a monetisation"
+                f" interstitial, not this shop) ({product_url})"
+            )
+            return DEAD_LINK
         if final_url:
             # Asked before the front-page fetch: a password gate is the store
             # answering with a page of its own, so comparing it against the root

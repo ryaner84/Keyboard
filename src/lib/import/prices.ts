@@ -29,6 +29,7 @@ import {
   isGoneHostError,
   isGoneRedirect,
   isGoneStorefrontRoot,
+  isParkedDomainPage,
   clientRedirectTarget,
   CLIENT_REDIRECT_MAX_HOPS,
   isStorefrontPasswordGate,
@@ -1409,6 +1410,13 @@ export async function fetchJsonLdPrice(
       // Asked only here, on the branch that already knows the page yielded
       // nothing: a page the parser CAN read is never gone, and a healthy
       // storefront never pays for the extra fetch.
+      // Before any of that, the cheapest question and the one the extra fetch
+      // cannot answer: is this document a PARKED domain's interstitial? A
+      // parking service that answers in place serves the same stub from the
+      // root, so comparing the two could only ever say "not identical" and pay
+      // a fetch to reach the wrong verdict — the same reason the password gate
+      // is asked above the root fetch rather than below it.
+      if (isParkedDomainPage(html)) return DEAD_LINK;
       let origin: string | null = null;
       try {
         origin = new URL(res.url).origin;

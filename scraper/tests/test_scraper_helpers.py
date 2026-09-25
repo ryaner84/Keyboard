@@ -2517,6 +2517,72 @@ class LinkHealthTests(unittest.TestCase):
             scrape.PRICE_SOURCE_LOCKED, scrape.AWAITING_OWN_FIX_PRICE_SOURCES
         )
 
+    def test_a_parked_domain_is_gone_and_a_live_shop_is_not(self):
+        # The shop can lose the DOMAIN while the domain answers perfectly, and
+        # is_gone_storefront_root only sees the half where the parking service
+        # hops the ORIGIN onto another host (vala.supply -> ww19.vala.supply).
+        # A service that answers IN PLACE gives nothing away: 200, no hop (the
+        # destination comes back from an XHR at runtime), a body that embeds the
+        # requested path so it can never equal the root's, a root on the same
+        # host, a host that resolves, no literal for client_redirect_target to
+        # read, and no <script src=...> so is_client_rendered_shell rightly
+        # refuses to call it an app shell. Probed from a runner on 2026-09-25:
+        # auramech.com and hineybush.com answer every route with this stub, and
+        # both had been filed "teach the parser this platform" ever since.
+        parked = (
+            '<!doctype html><html><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            "</head><body><div>Redirecting...</div><div>Loading . . .</div>"
+            '<script>(()=>{"use strict";const t="eyJkb21haW5BcGV4IjoiYXVyYW1lY2guY29tIn0=";'
+            '(async function(e,t){const o=new XMLHttpRequest;o.open("POST",e,!0),'
+            'o.send(t)})("https://router.parklogic.com/",t).then()})();</script>'
+            "</body></html>"
+        )
+        self.assertTrue(scrape.is_parked_domain_page(parked))
+        # And none of the rules it sits beside can see it, which is the reason
+        # this one exists. Each of these staying False is the bug, not a nit.
+        self.assertIsNone(
+            scrape.client_redirect_target(parked, "https://auramech.com/products/x")
+        )
+        self.assertFalse(scrape.is_client_rendered_shell(parked))
+        self.assertFalse(
+            scrape.is_gone_redirect(
+                "https://auramech.com/products/x", "https://auramech.com/products/x"
+            )
+        )
+        self.assertFalse(
+            scrape.is_gone_storefront_root(
+                "https://auramech.com/products/x", "https://auramech.com/"
+            )
+        )
+        for body in (
+            "",
+            None,
+            # A page of its OWN is a page, whatever its scripts do — the same
+            # APP_SHELL_MAX_TEXT bound its siblings use, and what keeps a live
+            # storefront that merely writes about a parking service safe.
+            "<html><body><p>"
+            + ("We moved off a parking service. " * 20)
+            + "https://router.parklogic.com/ held it.</p></body></html>",
+            # A HOST inside a URL, never a loose substring: a look-alike
+            # registered under it is somebody else's domain.
+            '<html><body><script>fetch("https://router.parklogic.com.evil.test/")'
+            "</script></body></html>",
+            '<html><body><script>var s="router.parklogic.com";</script></body></html>',
+            # The controls every hiding rule here shares.
+            '<html><head><title>zFrontier</title></head><body><div id="app"></div>'
+            '<script src="/main.js"></script></body></html>',
+            '<html><body><h1>Opening Soon</h1><form action="/password"></form></body></html>',
+            '<html><body><div class="placeholder"></div></body></html>',
+        ):
+            with self.subTest(body=str(body)[:40]):
+                self.assertFalse(scrape.is_parked_domain_page(body))
+        # One entry, and it is the one that was probed. Adding another is a
+        # decision that needs the same evidence, so the list is pinned.
+        self.assertEqual(
+            scrape._PARKED_DOMAIN_ROUTER_HOSTS, ["router.parklogic.com"]
+        )
+
     def test_a_body_declared_redirect_is_followed_to_its_target(self):
         # A redirect declared in the BODY is still a redirect, and it is the one
         # kind no reader here could follow: the transport follows a Location
