@@ -24,6 +24,7 @@
 //   BASE_URL=https://keyboard-six-tau.vercel.app AFTER_SLUG=gmk-foo BATCH_SIZE=50 \
 //     node scripts/released-deals-audit.mjs
 
+import { currencyHomeCountry } from "./lib/currencies.mjs";
 import { catalogProductTitle, shopifyProductNode } from "./lib/storefront-catalog.mjs";
 
 const BASE = (process.env.BASE_URL ?? "https://keyboard-six-tau.vercel.app").replace(/\/$/, "");
@@ -49,11 +50,12 @@ const HOST_LANES = 6;
 // a cents-vs-units display).
 const PRICE_TOLERANCE = 0.02;
 
-async function get(url, { json = false } = {}) {
+async function get(url, { json = false, cookie } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(url, { headers: HEADERS, redirect: "follow", signal: controller.signal });
+    const headers = cookie ? { ...HEADERS, Cookie: cookie } : HEADERS;
+    const res = await fetch(url, { headers, redirect: "follow", signal: controller.signal });
     const text = await res.text();
     let data = null;
     if (json) {
@@ -120,9 +122,16 @@ function shopifyHandleUrl(url) {
 async function readShopify(productUrl) {
   const handleUrl = shopifyHandleUrl(productUrl);
   if (!handleUrl) return null;
+  // Pinned to the store's home market exactly as refreshPrices pins it: a
+  // runner is in the US, and Shopify Markets otherwise answers a Canadian or
+  // Australian shop in converted USD and a European one ex-VAT — a "mismatch"
+  // against the number the site correctly stores.
+  const currency = await shopCurrency(new URL(handleUrl).origin);
+  const home = currency ? currencyHomeCountry(currency) : null;
+  const cookie = currency ? `cart_currency=${currency}${home ? `; localization=${home}` : ""}` : undefined;
   // .js carries `available` per variant (the .json does not) and prices in
-  // cents; .json carries the base-currency price strings the price pass reads.
-  const [js, json] = await Promise.all([get(`${handleUrl}.js`, { json: true }), get(`${handleUrl}.json`, { json: true })]);
+  // cents; .json carries the price strings the price pass reads.
+  const [js, json] = await Promise.all([get(`${handleUrl}.js`, { json: true, cookie }), get(`${handleUrl}.json`, { json: true, cookie })]);
   const node = json.data ? shopifyProductNode(json.data) : null;
   if (!js.data?.variants && !node?.variants) {
     return { status: js.status || json.status, error: js.error ?? json.error, finalUrl: js.finalUrl };
@@ -143,7 +152,7 @@ async function readShopify(productUrl) {
     finalUrl: js.finalUrl,
     title: node ? catalogProductTitle(node) : js.data?.title ?? "",
     variants,
-    currency: await shopCurrency(new URL(handleUrl).origin),
+    currency,
   };
 }
 
@@ -297,7 +306,9 @@ async function judge(set, vk) {
 
   // Wrong product: the page's title shares no distinctive word with the set.
   const tokens = nameTokens(set.name);
-  const title = (live.title ?? "").toLowerCase();
+  // Compared with spacing and punctuation squeezed out, so "2Pack" and
+  // "2 Pack" are one word.
+  const title = (live.title ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
   if (tokens.length > 0 && title && !tokens.some((t) => title.includes(t))) {
     row.issues.push(`WRONG_PRODUCT(page "${live.title}")`);
   }
