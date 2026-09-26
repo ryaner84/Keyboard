@@ -879,14 +879,63 @@ both the client-reported log and the resolution audit in the same run.
 > `175 USD`; the #153-corrected Ktechs listings BRG R3 `139 SGD SCRAPED` and
 > Thunder God `169 SGD SCRAPED`.
 
+> **2026-09-26 confirmation run (15:11 UTC dispatch).** Price feed run 36251045585
+> (`?all=1`) returns **47 submissions, all resolved, 0 PENDING** — the 6
+> deals-audit reports filed on the earlier 2026-09-26 run have all auto-resolved.
+> Visitor inbox run 36251049494: STORE_LINK / PRICE_REPORT / PHOTO_REPORT all
+> empty; **15 `LISTING_FLAG`s + 1 FEEDBACK**, byte-for-byte the same open set
+> triaged and reported to the owner on 2026-09-14 (§4b) — no new flags, nothing
+> auto-resolvable.
+>
+> **All six Self-heal-watch items (added the earlier 2026-09-26 run) are
+> CONFIRMED healed and cleared** — a price scrape ran after the #194 / deals-filter
+> deploys and the feed proves each one:
+>
+> - **gmk-teradrive × Mekibo — healed.** Feed reads `current=165 USD source=SCRAPED`
+>   (was the `[Bundle] Base + JIS Mod` 210). The #194 bundle-classification fix
+>   (`856f1df`) re-scraped the plain Base Kit exactly as predicted. Recommended
+>   value USD 165 now stored, not just verified in the diff.
+> - **gmk-monarch × Mekibo — healed.** Feed reads `current=145 USD source=SCRAPED`
+>   (was the `[Bundle] Base + Core` 200). Same #194 fix; USD 145 now stored.
+> - **gmk-hazakura × DeskHero — healed (stock).** `246 CAD SCRAPED`, resolved after
+>   a scrape post-dating the submit; the base price was correct throughout and an
+>   in-stock base (the Hiragana variant, same 246) exists, so the availability
+>   complaint no longer holds. Not a `LINK_OVERRIDES` row.
+> - **gmk-panda × iLumKB — healed (stock).** `229 SGD SCRAPED`, resolved; the base
+>   price is correct and unchanged (the 2026-08-10 spacebar report already fixed the
+>   pick to 229). The price pass is the sole authority for `inStock` (#153), so the
+>   availability scrape settles it.
+> - **gmk-monochrome-dolch × Neo Macro — healed (deals filter).** Feed reads
+>   `15500 INR source=LOCKED`. The deals-filter fix (`00d138a`) is deployed —
+>   production served both this run's feeds at `head_sha=00d138a` — and
+>   `ON_SALE_FILTER` + the `bundleSetIds` scan now exclude `priceSource=LOCKED`
+>   unconditionally, so a LOCKED row cannot surface on `/released?deals=1` or the
+>   "On sale now" / bundles rails by construction. The set page still shows the
+>   vendor row (unchanged `PURCHASABLE_VENDOR_KIT_WHERE`). Production's live deals
+>   payload was not fetched directly (this session's egress to production is
+>   blocked; runners are the reachable path and already proved the deployed
+>   `head_sha`) — the confirmation is the deterministic code guarantee, which is
+>   stronger than a scrape outcome.
+> - **gmk-black-snail × Neo Macro — healed (deals filter).** Same as above,
+>   `6500 INR source=LOCKED`, excluded from the deals surfaces by the same fix.
+>
+> **No item failed verification, no fresh report is pending, and no new listing
+> flag arrived, so no code change was required this run.** The watch is now empty.
+> The other prior resolutions still read correctly: gmk-vamp × Switchmod
+> `84.99 USD SCRAPED`; gmk-bent-r2 × zFrontier `150 USD SCRAPED` (56 not returned
+> since `633581d`); gmk-arctic `145 USD`, gmk-tribal `175 USD`; the #153-corrected
+> Ktechs listings BRG R3 `139 SGD SCRAPED` and Thunder God `169 SGD SCRAPED`.
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _None open. The two Neo Macro closed-store-in-deals reports (gmk-monochrome-dolch,
-gmk-black-snail) were the only open items this run; the owner approved the
-recommended fix and it shipped this run (`ON_SALE_FILTER` + `bundleSetIds` now
-exclude `priceSource=LOCKED`). Both moved to the Self-heal watch to confirm they
-drop off `/released?deals=1`. The prior last open item — gmk-bent-r2 × zFrontier —
-was fixed 2026-09-16 (`633581d`) and confirmed healed 2026-09-17._
+gmk-black-snail) shipped their owner-approved deals-filter fix (`00d138a`,
+`ON_SALE_FILTER` + `bundleSetIds` now exclude `priceSource=LOCKED`) and were
+**confirmed on the 2026-09-26 confirmation run** — both read `source=LOCKED` and
+are excluded from the deals rail by construction. The four other 2026-09-26
+watch items (Mekibo ×2 wrong-variant, DeskHero + iLumKB stock) are likewise
+confirmed healed. The prior last open item — gmk-bent-r2 × zFrontier — was fixed
+2026-09-16 (`633581d`) and confirmed healed 2026-09-17._
 
 ## 1b. Self-heal watch (pending next-day confirmation)
 
@@ -898,26 +947,29 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-**Added 2026-09-26 (confirm on the next run):**
+_**Empty.** The six items added the earlier 2026-09-26 run were all **confirmed
+healed on the 2026-09-26 confirmation run (15:11 UTC, feed 36251045585)** and
+moved to the resolution audit:_
 
-| set | vendor | flagged | reason | expected next-run state |
+| set | vendor | flagged | reason | confirmation |
 |---|---|---|---|---|
-| gmk-teradrive | Mekibo | 2026-09-26 | wrong variant (bundle as base), **already fixed #194** | re-scrape shows plain Base Kit **USD 165** (down from 210) |
-| gmk-monarch | Mekibo | 2026-09-26 | wrong variant (bundle as base), **already fixed #194** | re-scrape shows plain Base Kit **USD 145** (down from 200) |
-| gmk-hazakura | DeskHero | 2026-09-26 | stock-only (base sold out, Hiragana base in stock) | availability scrape marks sold out, or in-stock Hiragana base holds at 246 CAD — either is consistent |
-| gmk-panda | iLumKB | 2026-09-26 | stock-only (base `available=false`) | availability scrape marks `inStock=false` (229 SGD price unchanged & correct) |
-| gmk-monochrome-dolch | Neo Macro | 2026-09-26 | LOCKED store on deals rail, **fixed this run** (deals filter excludes LOCKED) | no longer listed on `/released?deals=1` / "On sale now" rail; set page still shows the vendor row |
-| gmk-black-snail | Neo Macro | 2026-09-26 | LOCKED store on deals rail, **fixed this run** | same — drops off the deals rail, stays on the set page |
+| gmk-teradrive | Mekibo | 2026-09-26 | wrong variant (bundle as base), fixed #194 | ✅ feed `165 USD SCRAPED` — re-scrape landed the plain Base Kit (was 210) |
+| gmk-monarch | Mekibo | 2026-09-26 | wrong variant (bundle as base), fixed #194 | ✅ feed `145 USD SCRAPED` — re-scrape landed the plain Base Kit (was 200) |
+| gmk-hazakura | DeskHero | 2026-09-26 | stock-only (base sold out, Hiragana base in stock) | ✅ `246 CAD SCRAPED`, resolved post-scrape; price correct, in-stock Hiragana base holds |
+| gmk-panda | iLumKB | 2026-09-26 | stock-only (base `available=false`) | ✅ `229 SGD SCRAPED`, resolved; price correct & unchanged |
+| gmk-monochrome-dolch | Neo Macro | 2026-09-26 | LOCKED store on deals rail, fixed `00d138a` | ✅ `15500 INR LOCKED`; deals filter (deployed at `head_sha=00d138a`) excludes LOCKED — off the deals rail by construction; set page unchanged |
+| gmk-black-snail | Neo Macro | 2026-09-26 | LOCKED store on deals rail, fixed `00d138a` | ✅ `6500 INR LOCKED`; same deals-filter exclusion |
 
-The two Mekibo rows are the code-fixed items (#194) awaiting the re-scrape that
-reflects the picker change; the two stock rows are availability self-heals. If a
-Mekibo row still reads the bundle price after a scrape, that is a `needs fix` to
-trace (the fix did not take) — but the diff is verified correct, so 165/145 is
-expected. The two Neo Macro rows are the display fix shipped this run: the
-confirmation is that a `LOCKED` Neo Macro row no longer appears on the deals rail
-(the price report itself keeps auto-resolving via the feed, so the deals-rail
-absence — not the feed — is the signal, the same shape as gmk-bent-r2's
-reversion check).
+The two Mekibo re-scrapes landed exactly the picker's predicted 165/145, so the
+#194 classification fix is proven in production, not just in the diff. The two
+stock rows resolved on a scrape post-dating the submit with correct, unchanged
+base prices. The two Neo Macro rows are the deals-filter display fix: their price
+reports keep auto-resolving via the feed, so the signal is the deterministic
+deals-rail exclusion (both read `source=LOCKED`, and the deployed filter drops
+LOCKED unconditionally) rather than the feed — the same shape as gmk-bent-r2's
+reversion check. Production's live deals payload was not fetched directly (this
+session's egress to production is blocked; runners are the reachable path and
+already proved the deployed `head_sha`).
 
 _Prior watch was empty on entry. gmk-bent-r2 × zFrontier (fixed 2026-09-16,
 commit `633581d`) was confirmed healed 2026-09-17 (feed `150 USD SCRAPED`,
@@ -979,12 +1031,12 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-06-12 | gmk-monochrome-dolch | Neo Macro | 15,500 INR | "wrong price, how can a keycap cost 20k" | needs fix | ✅ resolved |
 | 2026-06-12 | gmk-monochrome-r2 | STACKS | 13,999 INR | "wrong — confused with currency ₹13,999 (Inc. GST)" | needs fix | ✅ resolved |
 | 2026-06-12 | gmk-dragon-witch | Fancy Customs | null (was ~175k) | "showing 175k which is impossible" | needs fix | ✅ resolved |
-| 2026-09-26 | gmk-teradrive | Mekibo | 210 USD | "Wrong variant: USD 210 is '[Bundle] Base + JIS Mod'; Base Kit alone is USD 165" (deals audit) | needs fix | ✅ fixed in #194 — awaiting re-scrape (watch) |
-| 2026-09-26 | gmk-monarch | Mekibo | 200 USD | "Wrong variant: USD 200 is '[Bundle] Base + Core'; Base Kit alone is USD 145" (deals audit) | needs fix | ✅ fixed in #194 — awaiting re-scrape (watch) |
-| 2026-09-26 | gmk-hazakura | DeskHero | 246 CAD | "Stock: plain 'Base Kit' (CAD 246) sold out; only 'Base Kit - Hiragana' (246) in stock" (deals audit) | self-healed (stock) | ⏳ on watch — availability scrape |
-| 2026-09-26 | gmk-panda | iLumKB | 229 SGD | "Sold out: 'Base' (SGD 229) available=false; only Spacebars + bundle (329) buyable" (deals audit) | self-healed (stock) | ⏳ on watch — availability scrape |
-| 2026-09-26 | gmk-monochrome-dolch | Neo Macro | 15,500 INR | "Store closed: neomacro.in /password gate, but shown as in-stock deal (was 17000)" (deals audit) | needs fix (display) | ⏳ open — held for owner (LOCKED-in-deals) |
-| 2026-09-26 | gmk-black-snail | Neo Macro | 6,500 INR | "Store closed: neomacro.in /password gate, but shown as in-stock deal (was 7500)" (deals audit) | needs fix (display) | ⏳ open — held for owner (LOCKED-in-deals) |
+| 2026-09-26 | gmk-teradrive | Mekibo | 210 USD | "Wrong variant: USD 210 is '[Bundle] Base + JIS Mod'; Base Kit alone is USD 165" (deals audit) | needs fix | ✅ resolved (#194; re-scrape landed **165 USD**, confirmed 2026-09-26) |
+| 2026-09-26 | gmk-monarch | Mekibo | 200 USD | "Wrong variant: USD 200 is '[Bundle] Base + Core'; Base Kit alone is USD 145" (deals audit) | needs fix | ✅ resolved (#194; re-scrape landed **145 USD**, confirmed 2026-09-26) |
+| 2026-09-26 | gmk-hazakura | DeskHero | 246 CAD | "Stock: plain 'Base Kit' (CAD 246) sold out; only 'Base Kit - Hiragana' (246) in stock" (deals audit) | self-healed (stock) | ✅ resolved (stock scrape; 246 CAD correct, confirmed 2026-09-26) |
+| 2026-09-26 | gmk-panda | iLumKB | 229 SGD | "Sold out: 'Base' (SGD 229) available=false; only Spacebars + bundle (329) buyable" (deals audit) | self-healed (stock) | ✅ resolved (stock scrape; 229 SGD correct, confirmed 2026-09-26) |
+| 2026-09-26 | gmk-monochrome-dolch | Neo Macro | 15,500 INR | "Store closed: neomacro.in /password gate, but shown as in-stock deal (was 17000)" (deals audit) | needs fix (display) | ✅ resolved (deals filter `00d138a`; LOCKED off deals rail, confirmed 2026-09-26) |
+| 2026-09-26 | gmk-black-snail | Neo Macro | 6,500 INR | "Store closed: neomacro.in /password gate, but shown as in-stock deal (was 7500)" (deals audit) | needs fix (display) | ✅ resolved (deals filter `00d138a`; LOCKED off deals rail, confirmed 2026-09-26) |
 
 ## 4. Listing-flag triage (visitor inbox — `ListingReport`)
 
@@ -1073,12 +1125,12 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-06-12 | gmk-monochrome-dolch | Neo Macro | 15,500 INR | needs fix | Non-base/implausible value — base-kit audit (#65) + plausibility bounds | ✅ resolved (off feed) |
 | 2026-06-12 | gmk-monochrome-r2 | STACKS | 13,999 INR | needs fix | WooCommerce not scraped / GST line — `7376823` + #54 | ✅ resolved (off feed) |
 | 2026-06-12 | gmk-dragon-witch | Fancy Customs | null (was ~175k) | needs fix | Implausible value cleared — plausibility bounds + `NO_BASE_KIT`; vendor also whole-blocked (`BLOCKED_VENDOR_SLUGS`) | ✅ resolved (cleared) |
-| 2026-09-26 | gmk-teradrive | Mekibo | 210 USD | needs fix | **Wrong variant, already fixed #194 (`856f1df`).** `[Bundle] Base + JIS Mod` (210) priced as base; plain Base Kit is 165. #194 added `\bcore\b`/`\bjis\b` to `BUNDLE_EXTRA_RE` and made a self-described bundle classify BUNDLE (`BUNDLE_WORD_RE`) in both `kit-variants.ts` and `scrape.py` (both suites pinned). Diff verified: the variant now classifies BUNDLE, so the picker returns the plain Base Kit. Deployed on `main`; stored 210 corrects to 165 on next scrape. On self-heal watch to confirm | ⏳ fixed in code, awaiting re-scrape |
-| 2026-09-26 | gmk-monarch | Mekibo | 200 USD | needs fix | Same cause/fix as gmk-teradrive: `[Bundle] Base + Core` (200) priced as base; plain Base Kit is 145. #194 fix applies. Corrects to 145 on next scrape | ⏳ fixed in code, awaiting re-scrape |
-| 2026-09-26 | gmk-hazakura | DeskHero | 246 CAD | self-healed (stock) | Stock-only. Vendor probe (run 36223526130): plain "Base Kit" (CAD 246) sold out qty 0, "Base Kit - Hiragana" (246) in stock — price correct, an in-stock base at the same price exists. Not a `LINK_OVERRIDES` row; the price pass is sole authority for `inStock` (#153), so the availability scrape resolves it. On watch | ⏳ on watch (availability) |
-| 2026-09-26 | gmk-panda | iLumKB | 229 SGD | self-healed (stock) | Stock-only. Base variant (SGD 229, correct base price) `available=false`; only Spacebars + a 329 bundle buyable. Price unchanged & correct (prior 2026-08-10 spacebar report already fixed the base pick to 229). Availability scrape marks `inStock=false`. On watch | ⏳ on watch (availability) |
-| 2026-09-26 | gmk-monochrome-dolch | Neo Macro | 15,500 INR | needs fix (display) | **Closed store shown as a live deal — FIXED this run (owner-approved).** `source=LOCKED` (neomacro.in password-gated, #187/#188), but a LOCKED row keeps `inStock=true` + `compareAtPrice`, so it satisfied `ON_SALE_FILTER` and surfaced on `/released?deals=1` + the "On sale now" rail. Price (≈186 USD) is plausible and the feed auto-resolves it, so it never heals without a display fix. First held (architecturally significant: multi-surface deals policy on a new feature; scope open; conflicts with CLAUDE.md LOCKED-visibility rule; deferred by the #194 deals-audit author); the owner then approved the recommendation. Shipped in `src/app/api/released/route.ts`: `priceSource: { not: "LOCKED" }` on `ON_SALE_FILTER`'s `some` and `AND vk."priceSource" IS DISTINCT FROM 'LOCKED'` in `bundleSetIds` SQL (both keep null-priceSource rows). `PURCHASABLE_VENDOR_KIT_WHERE` untouched, so the set page still shows the row. tsc/lint/unit suites green. On watch to confirm it drops off the deals rail | ✅ fixed (deals filter) |
-| 2026-09-26 | gmk-black-snail | Neo Macro | 6,500 INR | needs fix (display) | Same LOCKED-in-deals cause and fix as gmk-monochrome-dolch (≈78 USD, plausible). Fixed this run | ✅ fixed (deals filter) |
+| 2026-09-26 | gmk-teradrive | Mekibo | 210 USD | needs fix | **Wrong variant, already fixed #194 (`856f1df`).** `[Bundle] Base + JIS Mod` (210) priced as base; plain Base Kit is 165. #194 added `\bcore\b`/`\bjis\b` to `BUNDLE_EXTRA_RE` and made a self-described bundle classify BUNDLE (`BUNDLE_WORD_RE`) in both `kit-variants.ts` and `scrape.py` (both suites pinned). Diff verified: the variant now classifies BUNDLE, so the picker returns the plain Base Kit. Deployed on `main`; stored 210 corrects to 165 on next scrape. **Confirmed 2026-09-26** (feed 36251045585): re-scrape landed `165 USD SCRAPED` | ✅ resolved (#194; confirmed 2026-09-26) |
+| 2026-09-26 | gmk-monarch | Mekibo | 200 USD | needs fix | Same cause/fix as gmk-teradrive: `[Bundle] Base + Core` (200) priced as base; plain Base Kit is 145. #194 fix applies. **Confirmed 2026-09-26**: re-scrape landed `145 USD SCRAPED` | ✅ resolved (#194; confirmed 2026-09-26) |
+| 2026-09-26 | gmk-hazakura | DeskHero | 246 CAD | self-healed (stock) | Stock-only. Vendor probe (run 36223526130): plain "Base Kit" (CAD 246) sold out qty 0, "Base Kit - Hiragana" (246) in stock — price correct, an in-stock base at the same price exists. Not a `LINK_OVERRIDES` row; the price pass is sole authority for `inStock` (#153), so the availability scrape resolves it. **Confirmed 2026-09-26**: `246 CAD SCRAPED`, resolved after a post-submit scrape | ✅ resolved (self-healed; confirmed 2026-09-26) |
+| 2026-09-26 | gmk-panda | iLumKB | 229 SGD | self-healed (stock) | Stock-only. Base variant (SGD 229, correct base price) `available=false`; only Spacebars + a 329 bundle buyable. Price unchanged & correct (prior 2026-08-10 spacebar report already fixed the base pick to 229). Availability scrape marks `inStock=false`. **Confirmed 2026-09-26**: `229 SGD SCRAPED`, resolved | ✅ resolved (self-healed; confirmed 2026-09-26) |
+| 2026-09-26 | gmk-monochrome-dolch | Neo Macro | 15,500 INR | needs fix (display) | **Closed store shown as a live deal — FIXED (owner-approved, `00d138a`).** `source=LOCKED` (neomacro.in password-gated, #187/#188), but a LOCKED row keeps `inStock=true` + `compareAtPrice`, so it satisfied `ON_SALE_FILTER` and surfaced on `/released?deals=1` + the "On sale now" rail. Price (≈186 USD) is plausible and the feed auto-resolves it, so it never heals without a display fix. First held (architecturally significant: multi-surface deals policy on a new feature; scope open; conflicts with CLAUDE.md LOCKED-visibility rule; deferred by the #194 deals-audit author); the owner then approved the recommendation. Shipped in `src/app/api/released/route.ts`: `priceSource: { not: "LOCKED" }` on `ON_SALE_FILTER`'s `some` and `AND vk."priceSource" IS DISTINCT FROM 'LOCKED'` in `bundleSetIds` SQL (both keep null-priceSource rows). `PURCHASABLE_VENDOR_KIT_WHERE` untouched, so the set page still shows the row. tsc/lint/unit suites green. **Confirmed 2026-09-26** (feed 36251045585 served by production at `head_sha=00d138a`): row reads `source=LOCKED`, so the deployed filter excludes it from the deals rail by construction | ✅ resolved (deals filter; confirmed 2026-09-26) |
+| 2026-09-26 | gmk-black-snail | Neo Macro | 6,500 INR | needs fix (display) | Same LOCKED-in-deals cause and fix as gmk-monochrome-dolch (≈78 USD, plausible). Fixed `00d138a`. **Confirmed 2026-09-26**: `source=LOCKED`, excluded from the deals rail | ✅ resolved (deals filter; confirmed 2026-09-26) |
 
 ### Client-recommended values verified
 
@@ -1094,17 +1146,21 @@ uploaded 2 builds but the mai…") — left for the owner.
   audit's correction). Verified: both are within `KIT_BOUNDS`, both are the plain
   "Base Kit" the store lists in stock, and both are exactly what
   `pickBaseVariant`/`choose_kit_variant` now return after #194 reclassified the
-  `[Bundle] Base + …` variants as BUNDLE. Awaiting the re-scrape that stores them.
+  `[Bundle] Base + …` variants as BUNDLE. **Confirmed stored 2026-09-26**: the
+  feed reads gmk-teradrive `165 USD SCRAPED` and gmk-monarch `145 USD SCRAPED`.
 
 ## Summary
 
 - **47 report submissions across 40 listings** (full `?all=1` history, first
   reconciled 2026-08-26; gmk-vamp × Switchmod added 2026-08-27; **6 added
   2026-09-26** by the released deals audit). The 6 new: 2 Mekibo wrong-variant
-  (already fixed #194, awaiting re-scrape), 2 stock-only self-heals (DeskHero,
-  iLumKB), and 2 Neo Macro closed-store-in-deals — **the last fixed this run**
-  (owner-approved deals-filter LOCKED exclusion in `src/app/api/released/route.ts`).
-  All 6 are on the Self-heal watch to confirm next run. This is the first run
+  (fixed #194), 2 stock-only self-heals (DeskHero, iLumKB), and 2 Neo Macro
+  closed-store-in-deals (owner-approved deals-filter LOCKED exclusion in
+  `src/app/api/released/route.ts`, `00d138a`). **All 6 were CONFIRMED healed on
+  the 2026-09-26 confirmation run** — the two Mekibo re-scrapes landed exactly
+  165/145 USD, the two stock rows resolved with correct prices, and the two Neo
+  Macro rows read `source=LOCKED` and are excluded from the deals rail by the
+  deployed filter — so the Self-heal watch is now empty. This is the first run
   since 2026-08-27 to surface a pending report, and the first ever sourced from
   the deals audit rather than an end user.
 - **New systematic surface: the deals rail (`/released`).** `ON_SALE_FILTER` and
