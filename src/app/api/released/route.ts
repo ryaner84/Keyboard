@@ -43,18 +43,34 @@ const PRICED_FILTER = {
 // Rows where some vendor is running a markdown (compare_at_price > price) AND
 // will still sell it to you.
 //
-// The three conditions live in ONE `some` on purpose: as separate filters they
+// The conditions live in ONE `some` on purpose: as separate filters they
 // could be satisfied by different vendor rows, so a set could qualify because
 // vendor A is in stock and vendor B (sold out) is discounted. In stock is part
 // of the claim rather than a separate availability filter because "on sale"
 // means buyable at a markdown — a discount on a listing nobody can buy is a
 // price-history footnote, not a deal.
+//
+// A LOCKED row is precisely "a listing nobody can buy": priceSource=LOCKED means
+// the store is shut (password gate / 402 non-payment freeze, link-health.mjs),
+// yet the row deliberately keeps its last `inStock=true` and `compareAtPrice`
+// so it reappears when the store reopens (CLAUDE.md keeps LOCKED rows visible on
+// the set page). That visibility must not extend to the deals rail — Neo Macro's
+// closed neomacro.in was surfacing on /released?deals=1 as an in-stock discount —
+// so LOCKED is excluded here, completing the "nobody can buy it" intent above.
+// Prisma's `not` returns null-priceSource rows too, so ordinary scraped rows stay.
+// Scope is the deals surfaces only: PURCHASABLE_VENDOR_KIT_WHERE and the set page
+// are untouched, so a LOCKED listing still shows there exactly as before.
 const ON_SALE_FILTER = {
   kits: {
     some: {
       type: "BASE" as const,
       vendorKits: {
-        some: { price: { not: null }, compareAtPrice: { not: null }, inStock: true },
+        some: {
+          price: { not: null },
+          compareAtPrice: { not: null },
+          inStock: true,
+          priceSource: { not: "LOCKED" },
+        },
       },
     },
   },
@@ -85,6 +101,10 @@ const MARKDOWN_SCAN_CAP = 120;
 // extra kit. That is a strict SUPERSET of what classifyVariant() calls BUNDLE
 // (every bundle title contains both), so re-running the real classifier on the
 // handful of survivors gives the exact set — no false positives, none missed.
+//
+// The LOCKED exclusion mirrors ON_SALE_FILTER: a closed store is not selling its
+// bundle either. `IS DISTINCT FROM` keeps null-priceSource rows (SQL `<>` would
+// drop them), matching Prisma's `{ not: "LOCKED" }` on the markdown filter.
 const BUNDLE_BASE_RE = "(base|ベース)";
 const BUNDLE_EXTRA_RE =
   "(novelt|space ?bar|alpha|num(ber)? ?pad|40s|forties|accent|extension|hiragana|katakana|hangul|cyrillic|norde|nordic|iso|icon|macro|ノベルティ|スペースバー|アルファ)";
@@ -105,6 +125,7 @@ async function bundleSetIds(): Promise<string[] | null> {
       WHERE k.type = 'BASE'
         AND vk.price IS NOT NULL
         AND vk."inStock" = true
+        AND vk."priceSource" IS DISTINCT FROM 'LOCKED'
         AND vk.variants IS NOT NULL
         AND vk.variants::text ~* ${BUNDLE_BASE_RE}
         AND vk.variants::text ~* ${BUNDLE_EXTRA_RE}

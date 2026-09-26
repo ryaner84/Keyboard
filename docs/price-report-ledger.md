@@ -858,6 +858,21 @@ both the client-reported log and the resolution audit in the same run.
 >   set page exactly as today. Scope the change to the deals surfaces only; do not
 >   touch `PURCHASABLE_VENDOR_KIT_WHERE`.
 >
+>   **UPDATE — owner approved, FIXED this run.** The owner reviewed the two
+>   dispositions and said "follow your recommendation," so the recommended patch
+>   was implemented in `src/app/api/released/route.ts`: `ON_SALE_FILTER`'s `some`
+>   now carries `priceSource: { not: "LOCKED" }` (Prisma's `not` still returns
+>   null-priceSource rows, so ordinary scraped listings stay), and the
+>   `bundleSetIds` raw SQL now carries `AND vk."priceSource" IS DISTINCT FROM
+>   'LOCKED'` (which likewise keeps null rows, matching the Prisma half). Scope is
+>   the two deals surfaces only — `PURCHASABLE_VENDOR_KIT_WHERE` and the set page
+>   are untouched, so a LOCKED listing still shows on its set page as before, it
+>   just stops being counted as an in-stock deal on `/released?deals=1` and the
+>   "On sale now" / bundles rails. `tsc --noEmit`, `next lint`, and the JS unit
+>   suites all pass; no suite covers the released route directly, so the type
+>   check + lint are the gate. Both Neo Macro rows move to the Self-heal watch to
+>   confirm they drop off the deals rail on the next `/released?deals=1` load.
+>
 > The other prior resolutions all still read correctly in this feed: gmk-vamp ×
 > Switchmod `84.99 USD SCRAPED`; gmk-bent-r2 × zFrontier `150 USD SCRAPED` (56 has
 > not returned since the `633581d` fix); gmk-arctic `145 USD`, gmk-tribal
@@ -866,14 +881,12 @@ both the client-reported log and the resolution audit in the same run.
 
 ## 1. Open wrong-price reports (unresolved only)
 
-| logged (UTC) | set | vendor | current | reason (client) | verdict | recommendation / status |
-|---|---|---|---|---|---|---|
-| 2026-09-26 | gmk-monochrome-dolch | Neo Macro | 15,500 INR (LOCKED) | "Store closed: every neomacro.in product URL redirects to its /password gate, but the site shows this as an in-stock deal at INR 15500 (was 17000)" | needs fix (display) | **Held for owner** — exclude LOCKED rows from the deals filter (`ON_SALE_FILTER` + `bundleSetIds` SQL). Architecturally significant; the #194 deals-audit author deferred this same decision. Price value is plausible; feed auto-resolves it, so it never heals without the display fix |
-| 2026-09-26 | gmk-black-snail | Neo Macro | 6,500 INR (LOCKED) | "Store closed: every neomacro.in product URL redirects to its /password gate, but the site shows this as an in-stock deal at INR 6500 (was 7500)" | needs fix (display) | **Held for owner** — same LOCKED-in-deals cause and recommendation as gmk-monochrome-dolch above |
-
-_The 6th-and-earlier full-history reports are all resolved. The prior last open
-item — gmk-bent-r2 × zFrontier — was fixed 2026-09-16 (commit `633581d`) and
-confirmed healed 2026-09-17 (feed `150 USD SCRAPED`, 56 did not return)._
+_None open. The two Neo Macro closed-store-in-deals reports (gmk-monochrome-dolch,
+gmk-black-snail) were the only open items this run; the owner approved the
+recommended fix and it shipped this run (`ON_SALE_FILTER` + `bundleSetIds` now
+exclude `priceSource=LOCKED`). Both moved to the Self-heal watch to confirm they
+drop off `/released?deals=1`. The prior last open item — gmk-bent-r2 × zFrontier —
+was fixed 2026-09-16 (`633581d`) and confirmed healed 2026-09-17._
 
 ## 1b. Self-heal watch (pending next-day confirmation)
 
@@ -893,13 +906,18 @@ to the resolution audit and drops out of this table.
 | gmk-monarch | Mekibo | 2026-09-26 | wrong variant (bundle as base), **already fixed #194** | re-scrape shows plain Base Kit **USD 145** (down from 200) |
 | gmk-hazakura | DeskHero | 2026-09-26 | stock-only (base sold out, Hiragana base in stock) | availability scrape marks sold out, or in-stock Hiragana base holds at 246 CAD — either is consistent |
 | gmk-panda | iLumKB | 2026-09-26 | stock-only (base `available=false`) | availability scrape marks `inStock=false` (229 SGD price unchanged & correct) |
+| gmk-monochrome-dolch | Neo Macro | 2026-09-26 | LOCKED store on deals rail, **fixed this run** (deals filter excludes LOCKED) | no longer listed on `/released?deals=1` / "On sale now" rail; set page still shows the vendor row |
+| gmk-black-snail | Neo Macro | 2026-09-26 | LOCKED store on deals rail, **fixed this run** | same — drops off the deals rail, stays on the set page |
 
 The two Mekibo rows are the code-fixed items (#194) awaiting the re-scrape that
 reflects the picker change; the two stock rows are availability self-heals. If a
 Mekibo row still reads the bundle price after a scrape, that is a `needs fix` to
 trace (the fix did not take) — but the diff is verified correct, so 165/145 is
-expected. The Neo Macro pair are **not** on this watch: they are `needs fix`
-held for the owner (§1, LOCKED-in-deals), not self-heals.
+expected. The two Neo Macro rows are the display fix shipped this run: the
+confirmation is that a `LOCKED` Neo Macro row no longer appears on the deals rail
+(the price report itself keeps auto-resolving via the feed, so the deals-rail
+absence — not the feed — is the signal, the same shape as gmk-bent-r2's
+reversion check).
 
 _Prior watch was empty on entry. gmk-bent-r2 × zFrontier (fixed 2026-09-16,
 commit `633581d`) was confirmed healed 2026-09-17 (feed `150 USD SCRAPED`,
@@ -1059,8 +1077,8 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-09-26 | gmk-monarch | Mekibo | 200 USD | needs fix | Same cause/fix as gmk-teradrive: `[Bundle] Base + Core` (200) priced as base; plain Base Kit is 145. #194 fix applies. Corrects to 145 on next scrape | ⏳ fixed in code, awaiting re-scrape |
 | 2026-09-26 | gmk-hazakura | DeskHero | 246 CAD | self-healed (stock) | Stock-only. Vendor probe (run 36223526130): plain "Base Kit" (CAD 246) sold out qty 0, "Base Kit - Hiragana" (246) in stock — price correct, an in-stock base at the same price exists. Not a `LINK_OVERRIDES` row; the price pass is sole authority for `inStock` (#153), so the availability scrape resolves it. On watch | ⏳ on watch (availability) |
 | 2026-09-26 | gmk-panda | iLumKB | 229 SGD | self-healed (stock) | Stock-only. Base variant (SGD 229, correct base price) `available=false`; only Spacebars + a 329 bundle buyable. Price unchanged & correct (prior 2026-08-10 spacebar report already fixed the base pick to 229). Availability scrape marks `inStock=false`. On watch | ⏳ on watch (availability) |
-| 2026-09-26 | gmk-monochrome-dolch | Neo Macro | 15,500 INR | needs fix (display) | **Closed store shown as a live deal — held for owner.** `source=LOCKED` (neomacro.in password-gated, #187/#188), but a LOCKED row keeps `inStock=true` + `compareAtPrice`, so it satisfies `ON_SALE_FILTER` and surfaces on `/released?deals=1` + the "On sale now" rail. Price (≈186 USD) is plausible and the feed auto-resolves it, so it never heals without a display fix. Architecturally significant (multi-surface deals policy on a new feature; scope open; conflicts with CLAUDE.md LOCKED-visibility rule) and explicitly deferred by the #194 deals-audit author. Recommended patch: add `priceSource: { not: "LOCKED" }` to `ON_SALE_FILTER`'s `some` + mirror in `bundleSetIds` SQL; leave `PURCHASABLE_VENDOR_KIT_WHERE` untouched | ⏳ open — owner decision |
-| 2026-09-26 | gmk-black-snail | Neo Macro | 6,500 INR | needs fix (display) | Same LOCKED-in-deals cause and recommended patch as gmk-monochrome-dolch (≈78 USD, plausible). Held for owner | ⏳ open — owner decision |
+| 2026-09-26 | gmk-monochrome-dolch | Neo Macro | 15,500 INR | needs fix (display) | **Closed store shown as a live deal — FIXED this run (owner-approved).** `source=LOCKED` (neomacro.in password-gated, #187/#188), but a LOCKED row keeps `inStock=true` + `compareAtPrice`, so it satisfied `ON_SALE_FILTER` and surfaced on `/released?deals=1` + the "On sale now" rail. Price (≈186 USD) is plausible and the feed auto-resolves it, so it never heals without a display fix. First held (architecturally significant: multi-surface deals policy on a new feature; scope open; conflicts with CLAUDE.md LOCKED-visibility rule; deferred by the #194 deals-audit author); the owner then approved the recommendation. Shipped in `src/app/api/released/route.ts`: `priceSource: { not: "LOCKED" }` on `ON_SALE_FILTER`'s `some` and `AND vk."priceSource" IS DISTINCT FROM 'LOCKED'` in `bundleSetIds` SQL (both keep null-priceSource rows). `PURCHASABLE_VENDOR_KIT_WHERE` untouched, so the set page still shows the row. tsc/lint/unit suites green. On watch to confirm it drops off the deals rail | ✅ fixed (deals filter) |
+| 2026-09-26 | gmk-black-snail | Neo Macro | 6,500 INR | needs fix (display) | Same LOCKED-in-deals cause and fix as gmk-monochrome-dolch (≈78 USD, plausible). Fixed this run | ✅ fixed (deals filter) |
 
 ### Client-recommended values verified
 
@@ -1082,11 +1100,19 @@ uploaded 2 builds but the mai…") — left for the owner.
 
 - **47 report submissions across 40 listings** (full `?all=1` history, first
   reconciled 2026-08-26; gmk-vamp × Switchmod added 2026-08-27; **6 added
-  2026-09-26** by the released deals audit). **41 resolved; 6 pending** — 2 Mekibo
-  wrong-variant (already fixed #194, awaiting re-scrape), 2 stock-only self-heals
-  (DeskHero, iLumKB), and 2 Neo Macro closed-store-in-deals (needs a display fix,
-  held for owner). This is the first run since 2026-08-27 to surface a pending
-  report, and the first ever sourced from the deals audit rather than an end user.
+  2026-09-26** by the released deals audit). The 6 new: 2 Mekibo wrong-variant
+  (already fixed #194, awaiting re-scrape), 2 stock-only self-heals (DeskHero,
+  iLumKB), and 2 Neo Macro closed-store-in-deals — **the last fixed this run**
+  (owner-approved deals-filter LOCKED exclusion in `src/app/api/released/route.ts`).
+  All 6 are on the Self-heal watch to confirm next run. This is the first run
+  since 2026-08-27 to surface a pending report, and the first ever sourced from
+  the deals audit rather than an end user.
+- **New systematic surface: the deals rail (`/released`).** `ON_SALE_FILTER` and
+  the `bundleSetIds` scan counted a `LOCKED` (closed-store) row as a buyable
+  in-stock deal because a LOCKED row deliberately keeps `inStock=true` +
+  `compareAtPrice`. Both now exclude `priceSource=LOCKED`, completing the filter's
+  own "a discount on a listing nobody can buy is not a deal" intent, without
+  touching set-page visibility.
 - **Ledger completeness caveat (now closed for history-to-date).** The committed
   log was previously transcribed from pending-only snapshots, which drop a
   report the moment it resolves — so 25 reports that filed-and-healed between
