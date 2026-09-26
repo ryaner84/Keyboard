@@ -1,0 +1,80 @@
+# Batch audit of the /released "On sale" listings against the stores, plus the
+# explicit step that files what the review confirmed through the site's own
+# report buttons. GitHub runners reach both the site and the stores; the dev
+# sandbox reaches neither.
+#
+#   * Audit (default): scripts/released-deals-audit.mjs over the next
+#     `batch_size` on-sale sets after `after_slug` (alphabetical). Read-only.
+#     The log's NEXT_AFTER_SLUG line is the cursor for the next run; progress
+#     is recorded in docs/released-deals-audit-ledger.md.
+#   * Report: when `reports` is a JSON array, the audit is skipped and each
+#     entry is POSTed as a visitor would:
+#       {"kind":"price","setSlug":…,"vendorKitId":…,"vendorName":…,"reason":…}
+#         → /api/price-reports   (the ⚑ wrong-price flag on a vendor row)
+#       {"kind":"listing","slug":…,"name":…,"issueType":…,"notes":…}
+#         → /api/listing-reports (the flag icon beside a listing)
+name: Released deals audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      after_slug:
+        description: Last set slug the previous batch covered (blank = start)
+        required: false
+        type: string
+        default: ""
+      batch_size:
+        description: Sets per batch
+        required: false
+        type: string
+        default: "50"
+      reports:
+        description: JSON array of reports to file (skips the audit)
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  audit:
+    if: ${{ inputs.reports == '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Audit on-sale listings (read-only)
+        env:
+          AFTER_SLUG: ${{ inputs.after_slug }}
+          BATCH_SIZE: ${{ inputs.batch_size }}
+        run: node scripts/released-deals-audit.mjs
+
+  report:
+    if: ${{ inputs.reports != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: File reports
+        env:
+          REPORTS: ${{ inputs.reports }}
+        run: |
+          node -e '
+            const BASE = "https://keyboard-six-tau.vercel.app";
+            const list = JSON.parse(process.env.REPORTS);
+            (async () => {
+              let failed = 0;
+              for (const r of list) {
+                const { kind, ...body } = r;
+                const path = kind === "price" ? "/api/price-reports" : kind === "listing" ? "/api/listing-reports" : null;
+                if (!path) { console.log("SKIP | unknown kind", JSON.stringify(r)); failed++; continue; }
+                const res = await fetch(BASE + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+                const text = await res.text();
+                console.log((res.ok ? "FILED" : "FAILED") + " | " + kind + " | " + (body.setSlug ?? body.slug) + " | " + (body.vendorName ?? body.issueType) + " | " + res.status + " " + text.slice(0, 200));
+                if (!res.ok) failed++;
+              }
+              if (failed) process.exit(1);
+            })();
+          '
