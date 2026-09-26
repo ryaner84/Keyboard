@@ -275,7 +275,12 @@ async function judge(set, vk) {
     live = (await readShopify(url)) ?? null;
     if (!live || !live.variants) {
       const generic = await readGeneric(url);
-      live = generic.variants ? generic : live ?? generic;
+      // A renamed handle or a moved domain (novelkeys.xyz → novelkeys.com)
+      // answers the human page through a redirect while the old .js/.json
+      // do not follow it — re-ask the product JSON where the page landed.
+      const moved = generic.finalUrl && generic.finalUrl !== url ? await readShopify(generic.finalUrl) : null;
+      live = moved?.variants ? { ...moved, finalUrl: generic.finalUrl } : generic.variants ? generic : live ?? generic;
+      if (moved?.variants) row.issues.push(`MOVED(${generic.finalUrl})`);
     }
   } catch (err) {
     live = { status: 0, error: err.message };
@@ -321,7 +326,12 @@ async function judge(set, vk) {
   } else {
     if (!near(v.price, vk.price)) row.issues.push(`PRICE(site ${vk.price} / live ${v.price})`);
     const liveDiscount = v.compareAt != null && v.compareAt > v.price ? v.compareAt : null;
-    if (vk.compareAtPrice != null && liveDiscount == null) row.issues.push(`DISCOUNT_ENDED(site was ${vk.compareAtPrice} → ${vk.price}; live no markdown)`);
+    // A markdown is only shown on a buyable row; on one sold out on both
+    // sides a differing compare-at misleads nobody.
+    const bothSoldOut = !vk.inStock && v.available === false;
+    if (bothSoldOut) {
+      // nothing to check
+    } else if (vk.compareAtPrice != null && liveDiscount == null) row.issues.push(`DISCOUNT_ENDED(site was ${vk.compareAtPrice} → ${vk.price}; live no markdown)`);
     else if (vk.compareAtPrice != null && !near(liveDiscount, vk.compareAtPrice)) row.issues.push(`COMPARE_AT(site ${vk.compareAtPrice} / live ${liveDiscount})`);
     else if (vk.compareAtPrice == null && liveDiscount != null) row.issues.push(`DISCOUNT_MISSING(live ${liveDiscount} → ${v.price})`);
     if (v.available === false && vk.inStock) row.issues.push("STOCK(site in stock / live sold out)");
