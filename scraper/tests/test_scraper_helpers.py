@@ -1254,6 +1254,20 @@ class BundleVariantTests(unittest.TestCase):
         ):
             self.assertEqual(scrape.classify_variant(title), "BUNDLE", title)
 
+    def test_mekibo_bundles_do_not_outrank_the_base_kit(self):
+        # Mekibo lists its bundles FIRST and names extras the vocabulary did
+        # not know ("Core", "JIS Mod"), so they classified BASE and the $200
+        # bundle was stored against a $145 base kit.
+        for title in ("[Bundle] Base + Core", "[Bundle] Base + JIS Mod"):
+            self.assertEqual(scrape.classify_variant(title), "BUNDLE", title)
+        chosen = scrape.choose_kit_variant([
+            {"id": "1", "title": "[Bundle] Base + Core", "price": 200.0},
+            {"id": "2", "title": "[Bundle] Base + Novelties", "price": 180.0},
+            {"id": "3", "title": "Base Kit", "price": 145.0},
+            {"id": "4", "title": "Core", "price": 60.0},
+        ])
+        self.assertEqual(chosen["price"], 145.0)
+
     def test_plain_base_and_plain_subkits_are_unchanged(self):
         self.assertEqual(scrape.classify_variant("Base Kit"), "BASE")
         self.assertEqual(scrape.classify_variant("Novelties"), "NOVELTIES")

@@ -106,6 +106,26 @@ assert.equal(
 );
 assert.equal(classifyVariant("40s Monokit"), "OTHERS", "the 40s line classifies OTHERS");
 
+// ── A bundle that names an extra the vocabulary did not know ────────────────
+//
+// Mekibo lists "[Bundle] Base + Core" (USD 200) and "[Bundle] Base + JIS Mod"
+// ahead of the plain "Base Kit" (USD 145). Neither extra was in
+// BUNDLE_EXTRA_RE, so both classified BASE and the first one listed won.
+for (const title of ["[Bundle] Base + Core", "[Bundle] Base + JIS Mod"]) {
+  assert.equal(classifyVariant(title), "BUNDLE", title);
+}
+assert.equal(
+  pickBaseVariant([
+    { title: "[Bundle] Base + Core", price: 200 },
+    { title: "[Bundle] Base + Novelties", price: 180 },
+    { title: "Base Kit", price: 145 },
+    { title: "Core", price: 60 },
+  ])?.price,
+  145,
+  "the plain base kit wins over a bundle listed before it"
+);
+assert.equal(classifyVariant("Teal & White Base"), "BASE", "a colourway joiner is still not a bundle");
+
 // ── Every consumer of the pick passes the same flag ─────────────────────────
 //
 // pickBaseVariant has three callers and one of them WRITES: the nightly audit

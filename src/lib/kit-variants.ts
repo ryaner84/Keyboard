@@ -40,8 +40,15 @@ export const VARIANT_CATEGORIES: Array<{ value: VariantCategory; label: string }
 // Japanese keywords cover JP vendors (e.g. Yushakobo) whose variant titles
 // are ベースキット / ノベルティ / スペースバー / アルファ.
 // Kits a bundle can be bundled WITH — mirror of _BUNDLE_EXTRA_RE in scrape.py.
+//
+// "core" and "jis" are here, not in NONBASE_SUBKIT_RE: Mekibo sells
+// "[Bundle] Base + Core" and "[Bundle] Base + JIS Mod", which named no extra
+// this list knew, classified BASE, and — listed first — outranked the plain
+// "Base Kit" (USD 200 stored against a USD 145 base). A title that calls
+// itself a bundle is one regardless of what it names (BUNDLE_WORD_RE).
 const BUNDLE_EXTRA_RE =
-  /novelt|ノベルティ|space\s*bar|スペースバー|alpha|アルファ|num(?:ber)?\s*pad|\b40s\b|forties|accents?\b|extension|hiragana|katakana|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b/i;
+  /novelt|ノベルティ|space\s*bar|スペースバー|alpha|アルファ|num(?:ber)?\s*pad|\b40s\b|forties|accents?\b|extension|hiragana|katakana|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b|\bcore\b|\bjis\b/i;
+const BUNDLE_WORD_RE = /\bbundle\b/i;
 
 export function classifyVariant(title: string): VariantCategory {
   // Checked BEFORE the subkit patterns: "Base + Novelties" would otherwise
@@ -53,7 +60,7 @@ export function classifyVariant(title: string): VariantCategory {
   if (
     /base|ベース/i.test(title) &&
     /[+&/]|\band\b|\bwith\b|\bplus\b/i.test(title) &&
-    BUNDLE_EXTRA_RE.test(title)
+    (BUNDLE_EXTRA_RE.test(title) || BUNDLE_WORD_RE.test(title))
   ) {
     return "BUNDLE";
   }

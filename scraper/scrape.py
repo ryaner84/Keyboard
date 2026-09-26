@@ -1362,10 +1362,13 @@ def ensure_link_health_columns(conn) -> None:
 # Kits a bundle can be bundled WITH. Reuses the non-base subkit vocabulary and
 # adds the three standard kit names classify_variant tests for directly.
 _BUNDLE_EXTRA_RE = re.compile(
-    r"novelt|ノベルティ|space\s*bar|スペースバー|alpha|アルファ|"
+    r"novelt|ノベルティ|space\s*bar|スペースバー|alpha|アルファ|\bcore\b|\bjis\b|"
     + _NONBASE_SUBKIT_RE.pattern,
     re.IGNORECASE,
 )
+# Mirror of BUNDLE_WORD_RE: "[Bundle] Base + Core" (Mekibo) names no extra the
+# list above knew, so it classified BASE and outranked the plain "Base Kit".
+_BUNDLE_WORD_RE = re.compile(r"\bbundle\b", re.IGNORECASE)
 
 
 def classify_variant(title: str) -> str:
@@ -1385,7 +1388,7 @@ def classify_variant(title: str) -> str:
     if (
         re.search(r"base|ベース", title, re.IGNORECASE)
         and re.search(r"[+&/]|\band\b|\bwith\b|\bplus\b", title, re.IGNORECASE)
-        and _BUNDLE_EXTRA_RE.search(title)
+        and (_BUNDLE_EXTRA_RE.search(title) or _BUNDLE_WORD_RE.search(title))
     ):
         return "BUNDLE"
     if re.search(r"novelt|ノベルティ", title, re.IGNORECASE):
