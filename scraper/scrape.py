@@ -1362,7 +1362,7 @@ def ensure_link_health_columns(conn) -> None:
 # Kits a bundle can be bundled WITH. Reuses the non-base subkit vocabulary and
 # adds the three standard kit names classify_variant tests for directly.
 _BUNDLE_EXTRA_RE = re.compile(
-    r"novelt|ノベルティ|space\s*bar|スペースバー|alpha|アルファ|\bcore\b|\bjis\b|"
+    r"novelt|\bnovs?\b|ノベルティ|space\s*bar|\bspaces?\b|スペースバー|alpha|アルファ|\bcore\b|\bjis\b|"
     + _NONBASE_SUBKIT_RE.pattern,
     re.IGNORECASE,
 )

@@ -1268,6 +1268,23 @@ class BundleVariantTests(unittest.TestCase):
         ])
         self.assertEqual(chosen["price"], 145.0)
 
+    def test_abbreviated_bundle_does_not_mark_a_sold_out_base_in_stock(self):
+        # iLumKB: "Base" sold out beside an in-stock "Base+Nov+Space" bundle.
+        # The abbreviations named no extra the vocabulary knew, so the bundle
+        # classified BASE and its stock showed the base kit as buyable.
+        self.assertEqual(scrape.classify_variant("Base+Nov+Space"), "BUNDLE")
+        variants = [
+            {"id": "1", "title": "Base", "price": 229.0},
+            {"id": "2", "title": "Spacebars", "price": 39.0},
+            {"id": "3", "title": "Base+Nov+Space", "price": 329.0},
+        ]
+        chosen = scrape.choose_kit_variant(variants)
+        self.assertEqual(chosen["price"], 229.0)
+        self.assertFalse(scrape._base_variants_in_stock(
+            variants, chosen, None, {"1": False, "2": True, "3": True}))
+        # A colourway that merely contains "space" is still a base kit.
+        self.assertEqual(scrape.classify_variant("Space Grey Base"), "BASE")
+
     def test_plain_base_and_plain_subkits_are_unchanged(self):
         self.assertEqual(scrape.classify_variant("Base Kit"), "BASE")
         self.assertEqual(scrape.classify_variant("Novelties"), "NOVELTIES")
