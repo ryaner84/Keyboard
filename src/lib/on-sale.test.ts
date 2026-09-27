@@ -121,6 +121,7 @@ assert.doesNotMatch(released, /const ON_SALE_FILTER\s*=/, "/released must not re
 const home = readFileSync(join(root, "src/app/page.tsx"), "utf8");
 assert.match(home, /\.\.\.ON_SALE_FILTER/, "the homepage rail uses the shared filter");
 assert.match(home, /rankHomeSales\(/, "and the tested ranker");
+assert.match(home, /name: cleanDisplayName\(set\.name\)/, "the rail shows display names, as /released does");
 const pricing = readFileSync(join(root, "src/lib/pricing.ts"), "utf8");
 assert.match(pricing, /if \(!isOnSaleRow\(vk\)\) continue;/, "bestDiscount asks isOnSaleRow");
 
