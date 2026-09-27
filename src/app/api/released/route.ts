@@ -9,6 +9,7 @@ import {
   type KitFilter,
 } from "@/lib/kit-filters";
 import { bestDiscount } from "@/lib/pricing";
+import { ON_SALE_FILTER } from "@/lib/on-sale";
 
 const RELEASED_STATUSES = ["SHIPPING", "DELIVERED", "IN_STOCK"] as const;
 const VISIBLE_LISTING_WHERE = { dataTrustLevel: { not: "DEAD" } } as const;
@@ -40,41 +41,8 @@ const PRICED_FILTER = {
   },
 };
 
-// Rows where some vendor is running a markdown (compare_at_price > price) AND
-// will still sell it to you.
-//
-// The conditions live in ONE `some` on purpose: as separate filters they
-// could be satisfied by different vendor rows, so a set could qualify because
-// vendor A is in stock and vendor B (sold out) is discounted. In stock is part
-// of the claim rather than a separate availability filter because "on sale"
-// means buyable at a markdown — a discount on a listing nobody can buy is a
-// price-history footnote, not a deal.
-//
-// A LOCKED row is precisely "a listing nobody can buy": priceSource=LOCKED means
-// the store is shut (password gate / 402 non-payment freeze, link-health.mjs),
-// yet the row deliberately keeps its last `inStock=true` and `compareAtPrice`
-// so it reappears when the store reopens (CLAUDE.md keeps LOCKED rows visible on
-// the set page). That visibility must not extend to the deals rail — Neo Macro's
-// closed neomacro.in was surfacing on /released?deals=1 as an in-stock discount —
-// so LOCKED is excluded here, completing the "nobody can buy it" intent above.
-// Prisma's `not` returns null-priceSource rows too, so ordinary scraped rows stay.
-// Scope is the deals surfaces only: PURCHASABLE_VENDOR_KIT_WHERE and the set page
-// are untouched, so a LOCKED listing still shows there exactly as before.
-const ON_SALE_FILTER = {
-  kits: {
-    some: {
-      type: "BASE" as const,
-      vendorKits: {
-        some: {
-          price: { not: null },
-          compareAtPrice: { not: null },
-          inStock: true,
-          priceSource: { not: "LOCKED" },
-        },
-      },
-    },
-  },
-};
+// ON_SALE_FILTER lives in src/lib/on-sale.ts, shared with the homepage rail
+// and the SetCard badge so the three cannot disagree about what a sale is.
 
 const PRICING_INCLUDE = {
   kits: {

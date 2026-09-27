@@ -3,6 +3,7 @@
 import { convertCurrency } from "./currency-utils";
 import { dhlShippingUsd } from "./import/shipping";
 import { classifyVariant, parseVariants } from "./kit-variants";
+import { isOnSaleRow } from "./on-sale";
 import type {
   KitWithVendors,
   GroupBuyWithPricing,
@@ -86,20 +87,22 @@ export function computeSavings(allPrices: ComputedVendorPrice[]): Savings | null
 // own price, which is the thing a shopper recognises as "on sale".
 export function bestDiscount(
   set: GroupBuyWithPricing
-): { was: number; now: number; percent: number; currency: string | null } | null {
+): { was: number; now: number; percent: number; currency: string | null; vendorName: string; productUrl: string | null } | null {
   const base = baseKit(set);
   if (!base) return null;
-  let best: { was: number; now: number; percent: number; currency: string | null } | null = null;
+  let best: { was: number; now: number; percent: number; currency: string | null; vendorName: string; productUrl: string | null } | null = null;
   for (const vk of base.vendorKits ?? []) {
-    const now = vk.price;
-    const was = vk.compareAtPrice;
-    // Guard the ordering here too: the scrapers only store a real markdown, but
-    // a hand-edited row must never render as a negative discount.
-    if (now == null || was == null || was <= now) continue;
+    // Only a markdown someone can BUY counts — the same claim ON_SALE_FILTER
+    // makes in SQL. Scanning every row let a sold-out or shut store's old
+    // markdown win the badge on a set that qualified through a different,
+    // smaller one (GMK TeraDrive: 52% advertised, 6% buyable).
+    if (!isOnSaleRow(vk)) continue;
+    const now = vk.price as number;
+    const was = vk.compareAtPrice as number;
     const percent = Math.round((1 - now / was) * 100);
     if (percent <= 0) continue;
     if (!best || percent > best.percent) {
-      best = { was, now, percent, currency: vk.currency ?? null };
+      best = { was, now, percent, currency: vk.currency ?? vk.vendor.currency ?? null, vendorName: vk.vendor.name, productUrl: vk.productUrl ?? null };
     }
   }
   return best;
