@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { notHiddenWhere, notShowcaseWhere } from "@/lib/showcase";
+import { cleanDisplayName, notHiddenWhere, notShowcaseWhere } from "@/lib/showcase";
 import { cachedHomeQuery, STATIC_TTL, WINDOWED_TTL } from "@/lib/home-cache";
 import { HomeCarousel } from "@/components/home/HomeCarousel";
 import { SetCard } from "@/components/browse/SetCard";
@@ -71,7 +71,13 @@ const loadOnSale = cachedHomeQuery("on-sale", async () => {
     prisma.groupBuy.findMany({ where, include: PRICING_INCLUDE, take: 120 }),
     prisma.groupBuy.count({ where }),
   ]);
-  const sets = candidates as unknown as GroupBuyWithPricing[];
+  // Display names, as /released serves them: the raw scraped name can carry
+  // store decoration ("[GB] MW STONE Age (GB CLOSED)") that reads as broken
+  // on the first card of the page.
+  const sets = (candidates as unknown as GroupBuyWithPricing[]).map((set) => ({
+    ...set,
+    name: cleanDisplayName(set.name),
+  }));
   return {
     sets: rankHomeSales(
       sets.map((set) => ({ set, name: set.name, discount: bestDiscount(set) }))
