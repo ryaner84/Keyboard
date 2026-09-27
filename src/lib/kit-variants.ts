@@ -46,8 +46,13 @@ export const VARIANT_CATEGORIES: Array<{ value: VariantCategory; label: string }
 // this list knew, classified BASE, and — listed first — outranked the plain
 // "Base Kit" (USD 200 stored against a USD 145 base). A title that calls
 // itself a bundle is one regardless of what it names (BUNDLE_WORD_RE).
+//
+// "nov" and "space" are the abbreviations: iLumKB sells "Base+Nov+Space"
+// (SGD 329) beside a sold-out "Base" (SGD 229). It classified BASE, and since
+// stock is read across every BASE variant, the bundle being in stock showed
+// the sold-out base kit as buyable on /released.
 const BUNDLE_EXTRA_RE =
-  /novelt|ノベルティ|space\s*bar|スペースバー|alpha|アルファ|num(?:ber)?\s*pad|\b40s\b|forties|accents?\b|extension|hiragana|katakana|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b|\bcore\b|\bjis\b/i;
+  /novelt|\bnovs?\b|ノベルティ|space\s*bar|\bspaces?\b|スペースバー|alpha|アルファ|num(?:ber)?\s*pad|\b40s\b|forties|accents?\b|extension|hiragana|katakana|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b|\bcore\b|\bjis\b/i;
 const BUNDLE_WORD_RE = /\bbundle\b/i;
 
 export function classifyVariant(title: string): VariantCategory {

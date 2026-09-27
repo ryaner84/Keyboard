@@ -126,6 +126,12 @@ assert.equal(
 );
 assert.equal(classifyVariant("Teal & White Base"), "BASE", "a colourway joiner is still not a bundle");
 
+// iLumKB sells "Base+Nov+Space" beside a sold-out "Base". The abbreviations
+// named no known extra, so it classified BASE — and stock is read across every
+// BASE variant, so the in-stock bundle showed the sold-out base as buyable.
+assert.equal(classifyVariant("Base+Nov+Space"), "BUNDLE", "abbreviated extras still make a bundle");
+assert.equal(classifyVariant("Space Grey Base"), "BASE", "a colourway containing 'space' is still a base");
+
 // ── Every consumer of the pick passes the same flag ─────────────────────────
 //
 // pickBaseVariant has three callers and one of them WRITES: the nightly audit

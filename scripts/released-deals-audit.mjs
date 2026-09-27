@@ -334,7 +334,14 @@ async function judge(set, vk) {
     } else if (vk.compareAtPrice != null && liveDiscount == null) row.issues.push(`DISCOUNT_ENDED(site was ${vk.compareAtPrice} → ${vk.price}; live no markdown)`);
     else if (vk.compareAtPrice != null && !near(liveDiscount, vk.compareAtPrice)) row.issues.push(`COMPARE_AT(site ${vk.compareAtPrice} / live ${liveDiscount})`);
     else if (vk.compareAtPrice == null && liveDiscount != null) row.issues.push(`DISCOUNT_MISSING(live ${liveDiscount} → ${v.price})`);
-    if (v.available === false && vk.inStock) row.issues.push("STOCK(site in stock / live sold out)");
+    // A store can sell two base kits at one price (DeskHero Hazakura: "Base
+    // Kit" sold out, "Base Kit - Hiragana" in stock, both CAD 246). The price
+    // pass reads stock across every BASE variant, so "in stock" is right there
+    // — a base kit IS buyable at the price shown.
+    const siblingBaseInStock =
+      v.available === false &&
+      live.variants.some((x) => x !== v && x.available === true && near(x.price, v.price) && /\bbase\b/i.test(x.title) && !/\b(bundle|\+|and)\b/i.test(x.title));
+    if (v.available === false && vk.inStock && !siblingBaseInStock) row.issues.push("STOCK(site in stock / live sold out)");
     if (v.available === true && !vk.inStock) row.issues.push("STOCK(site sold out / live in stock)");
   }
   return row;

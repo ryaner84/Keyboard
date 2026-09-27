@@ -107,7 +107,7 @@ const MARKDOWN_SCAN_CAP = 120;
 // drop them), matching Prisma's `{ not: "LOCKED" }` on the markdown filter.
 const BUNDLE_BASE_RE = "(base|ベース)";
 const BUNDLE_EXTRA_RE =
-  "(novelt|space ?bar|alpha|num(ber)? ?pad|40s|forties|accent|extension|hiragana|katakana|hangul|cyrillic|norde|nordic|iso|icon|macro|ノベルティ|スペースバー|アルファ)";
+  "(nov|space|core|jis|alpha|num(ber)? ?pad|40s|forties|accent|extension|hiragana|katakana|hangul|cyrillic|norde|nordic|iso|icon|macro|ノベルティ|スペースバー|アルファ)";
 
 // Returns null when the scan could not run. This is the route's only raw SQL,
 // and it runs on EVERY unfiltered page-1 load to label the pill — so a failure
