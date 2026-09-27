@@ -109,6 +109,9 @@ export interface VendorKitPreview {
   gbUrl: string | null;
   productUrl: string | null;
   priceUpdatedAt: Date | string | null;
+  // "LOCKED" marks a shut store (see link-health.mjs); read by isOnSaleRow.
+  // Optional so narrow `select`s still satisfy this type.
+  priceSource?: string | null;
   // Raw scraped variant list ([{ title, price }]). Untyped on purpose — the
   // shape is a store's, not ours; parseVariants() in kit-variants.ts is the
   // only sanctioned reader. Optional so callers that `select` a narrow row

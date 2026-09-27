@@ -9,8 +9,8 @@ import {
   getCountdownLabel,
   getImageCandidates,
 } from "@/lib/utils";
-import { formatCurrency } from "@/lib/currency-utils";
-import { computeCheapest, computeSavings, latestUpdate, bestDiscount, bestBundle } from "@/lib/pricing";
+import { convertCurrency, formatCurrency } from "@/lib/currency-utils";
+import { baseKit, computeCheapest, computeSavings, latestUpdate, bestDiscount, bestBundle } from "@/lib/pricing";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
 import { useLocation } from "@/context/LocationContext";
 import { useCurrency } from "@/hooks/useCurrency";
@@ -20,6 +20,11 @@ import { DataTrustBadge } from "@/components/ui/DataTrustBadge";
 
 interface SetCardProps {
   set: GroupBuyWithPricing;
+  // Homepage "On sale now" rail: name the shop running the markdown and show
+  // its was/now in the visitor's currency. The price list below ranks by
+  // landed cost, so without this the card's headline shop can be a different
+  // one from the shop the rail is advertising.
+  highlightSale?: boolean;
 }
 
 // Pill label that identifies what kind of product this card represents.
@@ -55,7 +60,7 @@ function ProductTypePill({ type }: { type?: string | null }) {
   );
 }
 
-export function SetCard({ set }: SetCardProps) {
+export function SetCard({ set, highlightSale = false }: SetCardProps) {
   const { isTracked, toggle } = useTrackedSets();
   const { region, currency, countryCode } = useLocation();
   const { rates, loading } = useCurrency(currency);
@@ -85,6 +90,18 @@ export function SetCard({ set }: SetCardProps) {
   // "Base + extras" is a listing shape, not a price claim, so unlike the two
   // badges above it is shown on group buys as well.
   const bundle = bestBundle(set);
+  // Kit price only — shipping is the same whether or not the shop is on sale,
+  // and the landed totals are right below. A shop that explicitly doesn't
+  // ship to the visitor is still named, but said so, rather than hidden: the
+  // rail is cached for everyone, so it cannot be filtered per region.
+  const saleVendorKit =
+    highlightSale && discount
+      ? baseKit(set)?.vendorKits.find((vk) => vk.vendor.name === discount.vendorName)
+      : undefined;
+  const saleNoShip =
+    saleVendorKit?.vendor.shippingZones.some(
+      (z) => z.destinationRegion === region && !z.shipsToRegion
+    ) ?? false;
   const updated = latestUpdate(cheapest);
   const href = `/sets/${set.slug}?country=${countryCode}`;
 
@@ -179,6 +196,29 @@ export function SetCard({ set }: SetCardProps) {
             </button>
           </div>
         </div>
+
+        {highlightSale && discount && !loading && (
+          <Link
+            href={href}
+            className="mt-3 block rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-100 dark:border-rose-900 px-2.5 py-2"
+          >
+            <p className="text-[11px] text-rose-700 dark:text-rose-300 truncate">
+              On sale at <span className="font-semibold">{discount.vendorName}</span>
+            </p>
+            <p className="flex items-baseline flex-wrap gap-x-1.5 text-sm">
+              <span className="line-through text-gray-400">
+                {formatCurrency(convertCurrency(discount.was, discount.currency ?? "USD", currency, rates), currency)}
+              </span>
+              <span className="font-bold text-rose-600 dark:text-rose-400">
+                {formatCurrency(convertCurrency(discount.now, discount.currency ?? "USD", currency, rates), currency)}
+              </span>
+              <span className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">−{discount.percent}%</span>
+            </p>
+            {saleNoShip && (
+              <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Doesn&apos;t ship to {countryCode}</p>
+            )}
+          </Link>
+        )}
 
         {/* Price comparison preview */}
         <div className="mt-3 pt-3 border-t border-gray-50 dark:border-gray-800 flex-1">

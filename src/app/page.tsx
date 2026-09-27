@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { notHiddenWhere } from "@/lib/showcase";
+import { notHiddenWhere, notShowcaseWhere } from "@/lib/showcase";
 import { cachedHomeQuery, STATIC_TTL, WINDOWED_TTL } from "@/lib/home-cache";
 import { HomeCarousel } from "@/components/home/HomeCarousel";
 import { SetCard } from "@/components/browse/SetCard";
 import { LocationReminder } from "@/components/home/LocationReminder";
+import { bestDiscount } from "@/lib/pricing";
+import { ON_SALE_FILTER, rankHomeSales } from "@/lib/on-sale";
 import type { GroupBuyWithKits, GroupBuyWithPricing } from "@/types";
 import type { Metadata } from "next";
 
@@ -48,6 +50,41 @@ async function getFeaturedSets(): Promise<GroupBuyWithPricing[]> {
     return await loadFeaturedSets();
   } catch {
     return [];
+  }
+}
+
+// "On sale now" — shops cutting their OWN price on a released set, in stock.
+// Added beside Featured (not in place of it) so the two can be compared live;
+// removing either later is deleting its loader + section. The full list is
+// /released?deals=1, which counts with the same ON_SALE_FILTER, so the rail's
+// "See all N" matches what the click returns.
+const loadOnSale = cachedHomeQuery("on-sale", async () => {
+  const where = {
+    ...VISIBLE_LISTING_WHERE,
+    productType: "KEYCAPS" as const,
+    status: { in: ["SHIPPING", "DELIVERED", "IN_STOCK"] as ("SHIPPING" | "DELIVERED" | "IN_STOCK")[] },
+    ...notHiddenWhere,
+    ...notShowcaseWhere,
+    ...ON_SALE_FILTER,
+  };
+  const [candidates, total] = await Promise.all([
+    prisma.groupBuy.findMany({ where, include: PRICING_INCLUDE, take: 120 }),
+    prisma.groupBuy.count({ where }),
+  ]);
+  const sets = candidates as unknown as GroupBuyWithPricing[];
+  return {
+    sets: rankHomeSales(
+      sets.map((set) => ({ set, name: set.name, discount: bestDiscount(set) }))
+    ),
+    total,
+  };
+}, STATIC_TTL);
+
+async function getOnSale(): Promise<{ sets: GroupBuyWithPricing[]; total: number }> {
+  try {
+    return await loadOnSale();
+  } catch {
+    return { sets: [], total: 0 };
   }
 }
 
@@ -286,8 +323,9 @@ async function getReleasedForCarousel(): Promise<GroupBuyWithPricing[]> {
 }
 
 export default async function HomePage() {
-  const [featured, stats, upcoming, finishingSoon, newGBs, released, bestDeals, kbUpcoming, kbReleased] = await Promise.all([
+  const [featured, onSale, stats, upcoming, finishingSoon, newGBs, released, bestDeals, kbUpcoming, kbReleased] = await Promise.all([
     getFeaturedSets(),
+    getOnSale(),
     getStats(),
     getUpcomingSets(),
     getFinishingSoon(),
@@ -358,6 +396,31 @@ export default async function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* On sale now — vendor markdowns */}
+      {onSale.sets.length > 0 && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2 flex-wrap">
+              <span>🏷️</span> On sale now
+              <span className="px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950 text-rose-600 dark:text-rose-400 text-xs font-semibold border border-rose-100 dark:border-rose-900">
+                Shop markdowns
+              </span>
+            </h2>
+            <Link href="/released?deals=1" className="flex items-center gap-1 text-sm text-rose-600 hover:text-rose-700 dark:text-rose-400 font-medium whitespace-nowrap">
+              See all {onSale.total} →
+            </Link>
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+            Shops cutting their own price on released sets — in stock now.
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+            {onSale.sets.map((set) => (
+              <SetCard key={set.id} set={set} highlightSale />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Finishing Soon */}
       {finishingSoon.length > 0 && (

@@ -87,6 +87,14 @@ jobs:
         if: always()
         run: npm run test:collection-sales
 
+      # "On sale" is one claim made in three places — the /released filter,
+      # the homepage rail and the card badge. When the badge scanned rows the
+      # filter refused, a set that qualified through a buyable 6% markdown
+      # advertised a sold-out shop's 52%.
+      - name: on-sale
+        if: always()
+        run: npm run test:on-sale
+
       - name: http-json
         if: always()
         run: npm run test:http-json
