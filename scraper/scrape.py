@@ -521,7 +521,8 @@ _ADDON_VARIANT_RE = re.compile(
 # Mirror of NONBASE_SUBKIT_RE in src/lib/kit-variants.ts — keep in sync.
 _NONBASE_SUBKIT_RE = re.compile(
     r"num(?:ber)?\s*pad|\b40s\b|forties|accents?\b|extension|hiragana|katakana"
-    r"|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b",
+    r"|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b"
+    r"|\bmodifiers?\b|retro\s*points?\b",
     re.IGNORECASE,
 )
 

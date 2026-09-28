@@ -52,7 +52,7 @@ export const VARIANT_CATEGORIES: Array<{ value: VariantCategory; label: string }
 // stock is read across every BASE variant, the bundle being in stock showed
 // the sold-out base kit as buyable on /released.
 const BUNDLE_EXTRA_RE =
-  /novelt|\bnovs?\b|ノベルティ|space\s*bar|\bspaces?\b|スペースバー|alpha|アルファ|num(?:ber)?\s*pad|\b40s\b|forties|accents?\b|extension|hiragana|katakana|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b|\bcore\b|\bjis\b/i;
+  /novelt|\bnovs?\b|ノベルティ|space\s*bar|\bspaces?\b|スペースバー|alpha|アルファ|num(?:ber)?\s*pad|\b40s\b|forties|accents?\b|extension|hiragana|katakana|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b|\bmodifiers?\b|retro\s*points?\b|\bcore\b|\bjis\b/i;
 const BUNDLE_WORD_RE = /\bbundle\b/i;
 
 export function classifyVariant(title: string): VariantCategory {
@@ -98,8 +98,13 @@ export const PRODUCT_ACCESSORY_RE =
 // only these clears (NO_BASE_KIT) instead of storing a subkit price as the
 // base — a title that also says "base" classifies BASE first and is kept
 // (e.g. "Hiragana Base"). Mirror of _NONBASE_SUBKIT_RE in scraper/scrape.py.
+// "modifier" and "retro point" come from Neo Macro's GMK Black Snail, which
+// sells no base kit at all: "L9 Modifier Kit" INR 6000, "U9 Modifier Kit" 6500,
+// "GMK Retro Point" 600 beside the labeled subkits. None was in the vocabulary,
+// so the dearest — the U9 modifiers — published as the base kit on /released,
+// marked down from 7500. With both here the listing clears (NO_BASE_KIT).
 export const NONBASE_SUBKIT_RE =
-  /num(?:ber)?\s*pad|\b40s\b|forties|accents?\b|extension|hiragana|katakana|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b/i;
+  /num(?:ber)?\s*pad|\b40s\b|forties|accents?\b|extension|hiragana|katakana|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b|\bmodifiers?\b|retro\s*points?\b/i;
 
 // A product whose RAW title names a subkit or accessory. Discovery must not
 // link one as a normal set's VendorKit (normalizeSetName strips bracketed

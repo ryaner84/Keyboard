@@ -132,6 +132,24 @@ assert.equal(classifyVariant("Teal & White Base"), "BASE", "a colourway joiner i
 assert.equal(classifyVariant("Base+Nov+Space"), "BUNDLE", "abbreviated extras still make a bundle");
 assert.equal(classifyVariant("Space Grey Base"), "BASE", "a colourway containing 'space' is still a base");
 
+// Neo Macro's GMK Black Snail sells no base kit: two modifier kits, a 40s kit,
+// alphas, accents, a numpad and a Retro Point. The dearest unlabeled line (the
+// U9 modifiers, INR 6500) used to publish as the base kit.
+assert.equal(
+  pickBaseVariant([
+    { title: "L9 Modifier Kit", price: 6000 },
+    { title: "U9 Modifier Kit", price: 6500 },
+    { title: "40s Ortho linear Kit", price: 4900 },
+    { title: "GMK Retro Point", price: 600 },
+    { title: "Red Cyrillic Alphas", price: 9900 },
+    { title: "9009 Accents Kit", price: 3000 },
+    { title: "Numpad Kit", price: 2500 },
+  ]),
+  null,
+  "modifier kits and a Retro Point are subkits, never the base"
+);
+assert.equal(classifyVariant("Base + Modifiers"), "BUNDLE", "a base sold with modifiers is a bundle");
+
 // ── Every consumer of the pick passes the same flag ─────────────────────────
 //
 // pickBaseVariant has three callers and one of them WRITES: the nightly audit
