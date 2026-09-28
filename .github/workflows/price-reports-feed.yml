@@ -41,6 +41,7 @@ jobs:
                     ' | source=' + (l.priceSource ?? '?') +
                     ' | reason=' + JSON.stringify(r.reason ?? '') +
                     (r.resolvedAt ? ' | resolvedAt=' + r.resolvedAt : '') +
+                    ' | id=' + (l.id ?? '?') +
                     ' | url=' + (l.productUrl ?? '?');
                 };
                 console.log(pending.length + ' pending report(s):');
