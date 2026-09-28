@@ -977,9 +977,97 @@ both the client-reported log and the resolution audit in the same run.
 > BRG R3 `139 SGD SCRAPED` and Thunder God `169 SGD SCRAPED`. The two Neo Macro
 > deals-filter rows remain resolved (`00d138a`).
 
+> **2026-09-28 run — THREE new deals-audit reports (batch 3, #198), all healed;
+> both prior watch items resolved (one via deep investigation).** Price feed run
+> 36441926692 (`?all=1`) returns **52 submissions, all resolved, 0 PENDING**. The
+> 49 prior match the client-reported log; the **3 new** all carry
+> `submittedAt=2026-09-28T01:55` and were filed by the **released deals audit
+> batch 3** (`#198`, commit `6f36882`), not an end user. Visitor inbox run
+> 36441929944: STORE_LINK / PRICE_REPORT / PHOTO_REPORT all empty; **15
+> `LISTING_FLAG`s + 1 FEEDBACK**, byte-for-byte the same open set triaged and
+> reported to the owner on 2026-09-14 (§4b) — no new flags, nothing
+> auto-resolvable.
+>
+> The 3 new reports (all healed this run):
+>
+> - **gmk-black-snail × Neo Macro (was 6,500 INR) and
+>   gmk-black-snail---red-cyrillic-addon × Neo Macro — wrong variant, FIXED #198
+>   (`6f36882`).** neomacro.in sells no base kit for Black Snail; the picker took
+>   the dearest unlabeled line, the **U9 Modifier Kit** (INR 6500). #198 added
+>   `modifier` and `retro point` to `NONBASE_SUBKIT_RE` (and the TS bundle
+>   vocabulary; scrape.py composes its copy from the mirror) — verified present in
+>   both `src/lib/kit-variants.ts` and `scraper/scrape.py` this run. The row now
+>   clears to `NO_BASE_KIT`: the feed reads **`current=null`** for both rows,
+>   `resolvedAt` post-dating the submit. Healed.
+> - **gmk-mothman × GEONWORKS (was USD 150) — dead link (front-door redirect),
+>   self-healed.** `geon.works/products/group-buy-gmk-cyl-mothman` 302s to
+>   `geon.works/` (no product). `isGoneRedirect` marks it `DEAD_LINK` and clears
+>   the price; the feed reads **`current=null USD`**. Healed.
+>
+> **Incoming Self-heal watch (added 2026-09-27) — both resolved:**
+>
+> - **gmk-panda × iLumKB — CONFIRMED healed (#195).** Vendor probe (run
+>   36441929944… i.e. 36442068057) confirms the store's plain **Base (SGD 229) is
+>   `available=false` (sold out)**, with only Spacebars and the in-stock
+>   **Base+Nov+Space bundle (SGD 329)** buyable. #195 (`6ca0d95`) classifies the
+>   `nov`/`space` bundle as BUNDLE (verified in both halves), so the picker returns
+>   the real (sold-out) Base and the price pass — sole authority for `inStock`
+>   (#153) — marks the row sold out. Price 229 SGD is correct and was never
+>   disputed. **No 4th recurrence** (latest report still 2026-09-27). Resolved,
+>   dropped from the watch.
+> - **gmk-zm × SwitchKeys — NOT a dead link; the "dead link" report was a FALSE
+>   POSITIVE. Listing is LIVE, priced 229.99 AUD; a relink nuance is raised for the
+>   owner.** The 2026-09-27 deals-audit report ("switchkeys.com.au 404s the product
+>   URL") did not self-heal — the row still read `229.99 AUD SCRAPED` a full day and
+>   a nightly scrape later, and a FORCE refresh (`36443092241`, `dead=1070`) did not
+>   clear it. Root-caused: the reporter/audit tested the **collection-scoped** URL
+>   (`/collections/current-group-buys/products/gmik-zimo-group-buy`, which 404s
+>   because the product was removed from that collection) and the *corrected* handle
+>   `/products/gmk-zimo-group-buy` (also 404). But the price pass strips the
+>   collection prefix (`normalizeShopifyUrl`) to the **stored typo handle**
+>   `/products/gmik-zimo-group-buy`, which a probe (run 36444934333) shows
+>   **301-redirects → `/products/gmik-zimo` → `/products/gmk-zimo` (200)** — a
+>   **live product, "GMK Zimo"**. A targeted re-scrape by VendorKit id
+>   (`cmq585yjj03j0b17dsjv05k5w`, run 36445670318) returned **`attempted=1
+>   updated=1 dead=0`** and re-stored a valid price (229.99 AUD ≈ USD 150, within
+>   `KIT_BOUNDS`). So the row is **live and plausibly priced**, not dead — there is
+>   no scrape bug and nothing to clear. Why it never cleared before: the report
+>   re-queued it (`priceUpdatedAt=null`), but the pass that reached it read the live
+>   product (kept the price) rather than a 404, and the 2000-row FORCE batch
+>   (nulls-first, `limit=2000`) did not include it among the null backlog — so only
+>   a targeted `PRICE_REFRESH_IDS` re-scrape reliably reaches it. **Open owner
+>   item (genuine ambiguity):** the probe also shows the store's *current in-stock*
+>   "GMK Zimo" is `/products/gmk-zimo` with a **Base at 165 AUD**, a DIFFERENT
+>   product from the one the row prices (229.99). Discovery will not auto-relink a
+>   *priced* row (CLAUDE.md: a link the price pass reads successfully is not a
+>   homepage anchor's to replace), so the row stays on the old GB product. Whether
+>   to relink it to `/products/gmk-zimo` (showing the current 165 AUD in-stock
+>   price) or keep the 229.99 GB SKU is a discovery/catalog judgment with two real
+>   SKUs in play — brought to the owner rather than forced. Dropped from the
+>   auto-watch (live + stable); tracked as an open owner item (§1).
+>
+> **Tooling:** the price-reports feed now prints the VendorKit `id` on each line
+> (commit `cf67ecb`), so the routine can force a re-scrape of one specific reported
+> listing via `refresh-prices`' `PRICE_REFRESH_IDS` — which is what settled gmk-zm.
+>
+> The other prior resolutions still read correctly in this feed: gmk-vamp ×
+> Switchmod `84.99 USD SCRAPED`; gmk-bent-r2 × zFrontier `150 USD SCRAPED` (56 not
+> returned since `633581d`); gmk-arctic `145 USD`, gmk-tribal `175 USD`; the two
+> Mekibo #194 fixes `165`/`145 USD SCRAPED`; the #153-corrected Ktechs listings BRG
+> R3 `139 SGD SCRAPED` and Thunder God `169 SGD SCRAPED`; the two Neo Macro
+> deals-filter rows remain resolved (`00d138a`).
+
 ## 1. Open wrong-price reports (unresolved only)
 
-_None open. The two Neo Macro closed-store-in-deals reports (gmk-monochrome-dolch,
+_One owner item: **gmk-zm × SwitchKeys** — not a wrong price and not a dead link
+(the row is live and priced 229.99 AUD ≈ USD 150, confirmed by a targeted
+re-scrape `updated=1`), but the row points at the store's **old GB product**
+while the current in-stock listing is the renamed `/products/gmk-zimo` (Base
+**165 AUD**). Discovery won't auto-relink a priced row, so this needs an owner
+decision: relink to `/products/gmk-zimo` for the current in-stock price, or keep
+the 229.99 GB SKU. Not forced (two real SKUs; discovery/catalog judgment)._
+
+_The two Neo Macro closed-store-in-deals reports (gmk-monochrome-dolch,
 gmk-black-snail) shipped their owner-approved deals-filter fix (`00d138a`,
 `ON_SALE_FILTER` + `bundleSetIds` now exclude `priceSource=LOCKED`) and were
 **confirmed on the 2026-09-26 confirmation run** — both read `source=LOCKED` and
@@ -998,14 +1086,16 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-**Currently on the watch (added 2026-09-27, pending next-run confirmation):**
+**Currently on the watch: none.** Both items added 2026-09-27 were resolved on
+the 2026-09-28 run:
 
-| set | vendor | flagged | reason | fix / expected heal |
+| set | vendor | flagged | reason | resolution (2026-09-28) |
 |---|---|---|---|---|
-| gmk-panda | iLumKB | 2026-09-27 | recurrence (3rd); "Base+Nov+Space" bundle classified BASE → sold-out base shown in stock | **fixed #195 (`6ca0d95`)** — `nov`/`space` in `BUNDLE_EXTRA_RE` (both halves, tests pinned). Next availability scrape reads only the real (sold-out) Base variant → `inStock=false`. Confirm base marked sold out and no 4th recurrence |
-| gmk-zm | SwitchKeys | 2026-09-27 | dead link — switchkeys.com.au 404s the product URL, row still reads `229.99 AUD SCRAPED` | no code — dead-link machinery marks `DEAD_LINK`, clears price to null on next rotation. Confirm price clears / row goes dead |
+| gmk-panda | iLumKB | 2026-09-27 | recurrence (3rd); "Base+Nov+Space" bundle classified BASE → sold-out base shown in stock | ✅ **healed (#195, `6ca0d95`).** Probe (run 36442068057) confirms Base (SGD 229) `available=false`; the `nov`/`space` bundle now classifies BUNDLE, so the picker returns the sold-out Base and the price pass marks `inStock=false`. Price 229 SGD correct; **no 4th recurrence.** Moved to the resolution audit |
+| gmk-zm | SwitchKeys | 2026-09-27 | reported "dead link — 404, row reads `229.99 AUD SCRAPED`" | ⚠️ **not a dead link — false-positive report; listing LIVE.** Only the collection-scoped URL 404s; the stored typo handle `/products/gmik-zimo-group-buy` 301-redirects to the live `/products/gmk-zimo` (probe run 36444934333). A targeted re-scrape (id `cmq585yjj03j0b17dsjv05k5w`, run 36445670318) returned `updated=1 dead=0`, re-storing a valid 229.99 AUD (≈USD 150, in `KIT_BOUNDS`). No scrape bug. Open owner item (§1): the store's current in-stock product is `/products/gmk-zimo` at **165 AUD** — relink is an owner/discovery judgment (two real SKUs), not forced. Dropped from the auto-watch |
 
-_**Prior watch was empty on entry.** The six items added the earlier 2026-09-26
+_**Prior watch (added 2026-09-27) held the two rows above; both are resolved this
+run, so the watch is now empty.** The six items added the earlier 2026-09-26
 run were all **confirmed healed on the 2026-09-26 confirmation run (15:11 UTC,
 feed 36251045585)** and moved to the resolution audit:_
 
@@ -1095,8 +1185,11 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-09-26 | gmk-panda | iLumKB | 229 SGD | "Sold out: 'Base' (SGD 229) available=false; only Spacebars + bundle (329) buyable" (deals audit) | self-healed (stock) | ✅ resolved (stock scrape; 229 SGD correct, confirmed 2026-09-26) |
 | 2026-09-26 | gmk-monochrome-dolch | Neo Macro | 15,500 INR | "Store closed: neomacro.in /password gate, but shown as in-stock deal (was 17000)" (deals audit) | needs fix (display) | ✅ resolved (deals filter `00d138a`; LOCKED off deals rail, confirmed 2026-09-26) |
 | 2026-09-26 | gmk-black-snail | Neo Macro | 6,500 INR | "Store closed: neomacro.in /password gate, but shown as in-stock deal (was 7500)" (deals audit) | needs fix (display) | ✅ resolved (deals filter `00d138a`; LOCKED off deals rail, confirmed 2026-09-26) |
-| 2026-09-27 | gmk-panda | iLumKB | 229 SGD | "shown in stock at SGD 229, but Base is SOLD OUT (only 329 Base+Nov+Space bundle in stock); 2nd occurrence after 2026-09-26" (deals audit) | needs fix (recurrence) | ✅ resolved (#195 `6ca0d95`; bundle now classified, watch confirms base sold out) |
-| 2026-09-27 | gmk-zm | SwitchKeys | 229.99 AUD | "link is dead — switchkeys.com.au 404s the product URL, yet row shows AUD 229.99 in stock" (deals audit) | self-healed (dead link) | ⏳ on watch (dead-link clears price on next rotation) |
+| 2026-09-27 | gmk-panda | iLumKB | 229 SGD | "shown in stock at SGD 229, but Base is SOLD OUT (only 329 Base+Nov+Space bundle in stock); 2nd occurrence after 2026-09-26" (deals audit) | needs fix (recurrence) | ✅ resolved (#195 `6ca0d95`; probe-confirmed 2026-09-28 base sold out, no 4th recurrence) |
+| 2026-09-27 | gmk-zm | SwitchKeys | 229.99 AUD | "link is dead — switchkeys.com.au 404s the product URL, yet row shows AUD 229.99 in stock" (deals audit) | false positive (listing live) | ✅ resolved 2026-09-28 — NOT dead: stored handle 301-redirects to a live product; targeted re-scrape `updated=1`. Owner item (§1): relink to `/products/gmk-zimo` (165 AUD) is an open judgment |
+| 2026-09-28 | gmk-black-snail | Neo Macro | 6,500 INR | "wrong variant: no base kit; INR 6500 is the U9 Modifier Kit" (deals audit) | needs fix | ✅ resolved (#198 `6f36882`; `modifier`/`retro point` → NONBASE, row cleared to null) |
+| 2026-09-28 | gmk-black-snail---red-cyrillic-addon | Neo Macro | 6,500 INR | "wrong variant: INR 6500 is the U9 Modifier Kit, not a base kit" (deals audit) | needs fix | ✅ resolved (#198 `6f36882`; same fix; row cleared to null) |
+| 2026-09-28 | gmk-mothman | GEONWORKS | 150 USD | "dead link: geon.works product URL 302s to the front page" (deals audit) | self-healed (dead link) | ✅ resolved (dead-link redirect cleared price to null) |
 
 ## 4. Listing-flag triage (visitor inbox — `ListingReport`)
 
@@ -1191,8 +1284,11 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-09-26 | gmk-panda | iLumKB | 229 SGD | self-healed (stock) | Stock-only. Base variant (SGD 229, correct base price) `available=false`; only Spacebars + a 329 bundle buyable. Price unchanged & correct (prior 2026-08-10 spacebar report already fixed the base pick to 229). Availability scrape marks `inStock=false`. **Confirmed 2026-09-26**: `229 SGD SCRAPED`, resolved | ✅ resolved (self-healed; confirmed 2026-09-26) |
 | 2026-09-26 | gmk-monochrome-dolch | Neo Macro | 15,500 INR | needs fix (display) | **Closed store shown as a live deal — FIXED (owner-approved, `00d138a`).** `source=LOCKED` (neomacro.in password-gated, #187/#188), but a LOCKED row keeps `inStock=true` + `compareAtPrice`, so it satisfied `ON_SALE_FILTER` and surfaced on `/released?deals=1` + the "On sale now" rail. Price (≈186 USD) is plausible and the feed auto-resolves it, so it never heals without a display fix. First held (architecturally significant: multi-surface deals policy on a new feature; scope open; conflicts with CLAUDE.md LOCKED-visibility rule; deferred by the #194 deals-audit author); the owner then approved the recommendation. Shipped in `src/app/api/released/route.ts`: `priceSource: { not: "LOCKED" }` on `ON_SALE_FILTER`'s `some` and `AND vk."priceSource" IS DISTINCT FROM 'LOCKED'` in `bundleSetIds` SQL (both keep null-priceSource rows). `PURCHASABLE_VENDOR_KIT_WHERE` untouched, so the set page still shows the row. tsc/lint/unit suites green. **Confirmed 2026-09-26** (feed 36251045585 served by production at `head_sha=00d138a`): row reads `source=LOCKED`, so the deployed filter excludes it from the deals rail by construction | ✅ resolved (deals filter; confirmed 2026-09-26) |
 | 2026-09-26 | gmk-black-snail | Neo Macro | 6,500 INR | needs fix (display) | Same LOCKED-in-deals cause and fix as gmk-monochrome-dolch (≈78 USD, plausible). Fixed `00d138a`. **Confirmed 2026-09-26**: `source=LOCKED`, excluded from the deals rail | ✅ resolved (deals filter; confirmed 2026-09-26) |
-| 2026-09-27 | gmk-panda | iLumKB | 229 SGD | needs fix (recurrence) | **3rd report (2026-08-10, 2026-09-26, 2026-09-27); root cause fixed #195 (`6ca0d95`).** iLumKB's plain "Base" (SGD 229) is sold out beside an in-stock "Base+Nov+Space" bundle (SGD 329). `nov`/`space` named no extra `BUNDLE_EXTRA_RE` knew, so the bundle classified BASE; stock is read across every BASE variant, so the sold-out base showed buyable on `/released`. #195 added `\bnovs?\b`/`\bspaces?\b` to `BUNDLE_EXTRA_RE` in both `kit-variants.ts` and `scrape.py` (both suites pin `Base+Nov+Space` → BUNDLE) — verified in code this run. Price 229 SGD is correct (never disputed; the base pick was fixed to 229 by the 2026-08-10 spacebar report). The price pass is sole authority for `inStock` (#153), so the next availability scrape reads only the real sold-out Base variant and marks `inStock=false`. Deployed on `main`. On the Self-heal watch to confirm the re-scrape and no 4th recurrence | ⏳ fixed (#195), watch pending |
-| 2026-09-27 | gmk-zm | SwitchKeys | 229.99 AUD | self-healed (dead link) | Dead link — switchkeys.com.au answers **404** for `gmik-zimo-group-buy` (also `/products/gmk-zimo-group-buy`, `gmk-cyl-zimo`); the row still reads `229.99 AUD SCRAPED` from the last good scrape. The report re-queued the listing (cleared `priceUpdatedAt`), so the next price pass reaches the 404, marks the row `DEAD_LINK` and clears the price to null; discovery hands the row back on the next rotation (CLAUDE.md link-health). No code change. On the Self-heal watch to confirm the price clears; if it never heals (value survives / recurs) a future run drops the vendor-set pair | ⏳ self-heal, watch pending |
+| 2026-09-27 | gmk-panda | iLumKB | 229 SGD | needs fix (recurrence) | **3rd report (2026-08-10, 2026-09-26, 2026-09-27); root cause fixed #195 (`6ca0d95`).** iLumKB's plain "Base" (SGD 229) is sold out beside an in-stock "Base+Nov+Space" bundle (SGD 329). `nov`/`space` named no extra `BUNDLE_EXTRA_RE` knew, so the bundle classified BASE; stock is read across every BASE variant, so the sold-out base showed buyable on `/released`. #195 added `\bnovs?\b`/`\bspaces?\b` to `BUNDLE_EXTRA_RE` in both `kit-variants.ts` and `scrape.py` (both suites pin `Base+Nov+Space` → BUNDLE) — verified in code this run. Price 229 SGD is correct (never disputed; the base pick was fixed to 229 by the 2026-08-10 spacebar report). The price pass is sole authority for `inStock` (#153). **Confirmed healed 2026-09-28**: Vendor probe (run 36442068057) shows Base (SGD 229) `available=false`; no 4th recurrence | ✅ resolved (#195; confirmed 2026-09-28) |
+| 2026-09-27 | gmk-zm | SwitchKeys | 229.99 AUD | false positive (listing live) | **NOT a dead link — the report was a false positive.** The audit tested the collection-scoped URL (`/collections/current-group-buys/products/gmik-zimo-group-buy`, a 404 because the product was removed from that collection) and the corrected handle `/products/gmk-zimo-group-buy` (also 404). But the price pass strips the collection prefix (`normalizeShopifyUrl`) to the **stored typo handle** `/products/gmik-zimo-group-buy`, which **301-redirects → `/products/gmik-zimo` → `/products/gmk-zimo` (200)**, a live product (probe run 36444934333). A FORCE refresh (36443092241, `dead=1070`) did not clear it, and a targeted re-scrape by id `cmq585yjj03j0b17dsjv05k5w` (run 36445670318) returned `attempted=1 updated=1 dead=0`, re-storing a valid 229.99 AUD (≈USD 150, in `KIT_BOUNDS`). So the listing is **live and plausibly priced** — no scrape bug, nothing to clear. The stuck-stale state came from the report re-queue reaching the live product (kept the price) while the 2000-row FORCE batch (`limit=2000`, nulls-first) never included it; only `PRICE_REFRESH_IDS` reliably reaches it — which is why the feed now prints the id (`cf67ecb`). **Open owner item (§1):** the store's current in-stock "GMK Zimo" is `/products/gmk-zimo` at Base **165 AUD**, a different SKU from the row's 229.99 GB product; discovery won't auto-relink a priced row, so relinking is an owner/catalog judgment (two real SKUs), brought to the owner not forced | ✅ resolved (false positive; live 229.99 AUD; relink is an open owner item) |
+| 2026-09-28 | gmk-black-snail | Neo Macro | 6,500 INR | needs fix | **Wrong variant, fixed #198 (`6f36882`).** neomacro.in sells no base kit for Black Snail; the picker took the dearest unlabeled line, the **U9 Modifier Kit** (INR 6500). #198 added `modifier` and `retro point` to `NONBASE_SUBKIT_RE` in `kit-variants.ts` (scrape.py composes its copy from the mirror) — verified present in both halves this run. The row clears to `NO_BASE_KIT`; the feed reads `current=null`. Filed by the deals audit batch 3 | ✅ resolved (#198; row cleared to null) |
+| 2026-09-28 | gmk-black-snail---red-cyrillic-addon | Neo Macro | 6,500 INR | needs fix | Same product/cause/fix as gmk-black-snail (the add-on set's BASE listings ARE the Black Snail base-kit products). #198 clears it; feed reads `current=null` | ✅ resolved (#198; row cleared to null) |
+| 2026-09-28 | gmk-mothman | GEONWORKS | 150 USD | self-healed (dead link) | `geon.works/products/group-buy-gmk-cyl-mothman` 302s to `geon.works/` (front page, no product). `isGoneRedirect` marks the row `DEAD_LINK` and clears the price; the feed reads `current=null USD`. Filed by the deals audit batch 3 | ✅ resolved (dead-link redirect; cleared to null) |
 
 ### Client-recommended values verified
 
@@ -1213,11 +1309,19 @@ uploaded 2 builds but the mai…") — left for the owner.
 
 ## Summary
 
-- **49 report submissions across 41 listings** (full `?all=1` history, first
+- **52 report submissions across 42 listings** (full `?all=1` history, first
   reconciled 2026-08-26; gmk-vamp × Switchmod added 2026-08-27; 6 added
-  2026-09-26 and **2 added 2026-09-27** by the released deals audit — batch 2,
-  #195: gmk-panda × iLumKB (recurrence, fixed #195) and gmk-zm × SwitchKeys
-  (dead-link self-heal), both on the Self-heal watch for next-run confirmation).
+  2026-09-26, 2 added 2026-09-27, and **3 added 2026-09-28** by the released
+  deals audit — batch 3, #198: gmk-black-snail × Neo Macro and its red-cyrillic
+  add-on (wrong variant = the U9 Modifier Kit, fixed #198 → both cleared to
+  null) and gmk-mothman × GEONWORKS (dead-link redirect, cleared to null), all
+  healed this run. The 2 added 2026-09-27 (batch 2, #195) both resolved on
+  2026-09-28: gmk-panda × iLumKB (recurrence, #195 — probe-confirmed base sold
+  out, no 4th recurrence) and gmk-zm × SwitchKeys (the "dead link" was a FALSE
+  POSITIVE — only the collection URL 404s; the stored handle 301-redirects to a
+  live product, targeted re-scrape `updated=1` at a plausible 229.99 AUD; a
+  relink to the current in-stock `/products/gmk-zimo` at 165 AUD is an open
+  owner item).
   The 6 added 2026-09-26 were: 2 Mekibo wrong-variant
   (fixed #194), 2 stock-only self-heals (DeskHero, iLumKB), and 2 Neo Macro
   closed-store-in-deals (owner-approved deals-filter LOCKED exclusion in
