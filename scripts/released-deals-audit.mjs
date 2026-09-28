@@ -140,8 +140,14 @@ async function readShopify(productUrl) {
   const source = node?.variants ?? js.data.variants;
   const variants = source.map((v) => {
     const jv = jsById.get(String(v.id));
-    const price = node ? parseFloat(v.price) : v.price / 100;
-    const cmpRaw = node ? v.compare_at_price : v.compare_at_price != null ? v.compare_at_price / 100 : null;
+    // Price from .js when it has the variant: when the home-market pin misses
+    // (/meta.json unanswered), .json can serve an ex-tax number (Cafege 145.45
+    // against a shelf price of AUD 160; Yushakobo 12000 against JPY 13200),
+    // while .js carries the storefront's own shelf price.
+    const price = jv ? jv.price / 100 : node ? parseFloat(v.price) : v.price / 100;
+    const cmpRaw = jv
+      ? jv.compare_at_price != null ? jv.compare_at_price / 100 : null
+      : node ? v.compare_at_price : v.compare_at_price != null ? v.compare_at_price / 100 : null;
     const compareAt = cmpRaw != null && cmpRaw !== "" ? parseFloat(cmpRaw) : null;
     const available = jv ? jv.available : typeof v.available === "boolean" ? v.available : null;
     return { id: String(v.id), title: v.title ?? v.name ?? "", price, compareAt, available };

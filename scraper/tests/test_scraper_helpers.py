@@ -417,6 +417,17 @@ class BaseKitIdentificationTests(unittest.TestCase):
                 title,
             )
 
+    def test_modifier_kits_and_retro_point_are_not_the_base(self):
+        # Neo Macro GMK Black Snail: no base kit on offer; the U9 modifiers
+        # (INR 6500) used to publish as the base.
+        variants = [
+            {"id": "1", "title": "L9 Modifier Kit", "price": 6000},
+            {"id": "2", "title": "U9 Modifier Kit", "price": 6500},
+            {"id": "3", "title": "GMK Retro Point", "price": 600},
+            {"id": "4", "title": "Numpad Kit", "price": 2500},
+        ]
+        self.assertIsNone(scrape.choose_kit_variant(variants))
+
     def test_hiragana_base_still_counts_as_base(self):
         variants = [{"id": "1", "title": "Hiragana Base", "price": 120}]
         self.assertEqual(scrape.choose_kit_variant(variants)["price"], 120)
