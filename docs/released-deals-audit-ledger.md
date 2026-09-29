@@ -12,12 +12,12 @@ to the start.
 
 ## Cursor
 
-`after_slug` for the next run: **`gmk-stargaze`**
+`after_slug` for the next run: **`gmk-red-devils`**
 
-The list held 55 on-sale sets on 2026-09-28. That run covered the 3 sets left
-after the previous cursor (`gmk-varenye … gmk-zm`) and then wrapped to the top
-for 47 more (`dcs-dream-alert … gmk-stargaze`), 50 sets in all. The next run
-continues after `gmk-stargaze`.
+The list held 54 on-sale sets on 2026-09-29. That run covered the 9 sets left
+after the previous cursor (`gmk-tako … gmk-zm`) and then wrapped to the top
+for 41 more (`dcs-dream-alert … gmk-red-devils`), 50 sets in all. The next run
+continues after `gmk-red-devils`.
 
 ## Runs
 
@@ -26,6 +26,7 @@ continues after `gmk-stargaze`.
 | 2026-09-26 | dcs-dream-alert … gmk-vamp | 50 | 271 | 12 flagged → 6 confirmed | 6 (price-report button) | [36223373383](https://github.com/ryaner84/Keyboard/actions/runs/36223373383) (reports: [36223666503](https://github.com/ryaner84/Keyboard/actions/runs/36223666503)) |
 | 2026-09-27 | gmk-varenye … gmk-zm, wrap, dcs-dream-alert … gmk-vamp | 53 | 278 | 7 flagged → 2 confirmed | 2 (price-report button) | [36286575551](https://github.com/ryaner84/Keyboard/actions/runs/36286575551) + [36286576663](https://github.com/ryaner84/Keyboard/actions/runs/36286576663) (reports: [36286973228](https://github.com/ryaner84/Keyboard/actions/runs/36286973228)) |
 | 2026-09-28 | gmk-varenye … gmk-zm, wrap, dcs-dream-alert … gmk-stargaze | 50 | 270 | 15 flagged → 3 confirmed | 3 (price-report button) | [36367279492](https://github.com/ryaner84/Keyboard/actions/runs/36367279492) + [36367394828](https://github.com/ryaner84/Keyboard/actions/runs/36367394828) (reports: [36367812617](https://github.com/ryaner84/Keyboard/actions/runs/36367812617)) |
+| 2026-09-29 | gmk-tako … gmk-zm, wrap, dcs-dream-alert … gmk-red-devils | 50 | 273 | 11 flagged → 2 confirmed | 2 (price-report button) | [36509536114](https://github.com/ryaner84/Keyboard/actions/runs/36509536114) + [36509762528](https://github.com/ryaner84/Keyboard/actions/runs/36509762528) (reports: [36509979688](https://github.com/ryaner84/Keyboard/actions/runs/36509979688)) |
 
 ### 2026-09-26 findings
 
@@ -102,3 +103,36 @@ Follow-ups:
   on two Vendor rows with identical prices. `mergeDuplicateVendorRows` should fold
   them; the `cmuk0…` row ids suggest the duplicate was re-created recently.
 
+
+### 2026-09-29 findings
+
+Two audit runs (the 9 sets after the cursor, then a 41-set wrap) flagged 11 of
+273 listings; the candidates were checked with the **Vendor probe**
+([36509765122](https://github.com/ryaner84/Keyboard/actions/runs/36509765122),
+[36509926245](https://github.com/ryaner84/Keyboard/actions/runs/36509926245)):
+
+| set | vendor | site | store | verdict | filed |
+|---|---|---|---|---|---|
+| gmk-wasabi-r2 | SwitchKeys | AUD 199 (was 239.99), in stock | collection URL 404s; `/products/gmk-wasabi-v2-group-buy` 301s to `gmk-wasabi-v2` "GMK Wasabi V2", **Wasabi Base 143** | wrong price: the link lands on a page selling the base at 143 | price report |
+| gmk-botanical-r2 | Oblotzky Industries | EUR 159, in stock | `gmk-botanical-2` redirects to `gmk-cyl-botanical-2`: "Standard" **139** in stock; "Standard Base + Hibi & Botanical Leaf" 159 | wrong variant: the picker took a base + artisan bundle over the base kit titled plain "Standard" | price report |
+| gmk-zm | SwitchKeys | AUD 229.99, in stock | stored handle 301s to `gmk-zimo`: **Base 165** | same shape as gmk-wasabi-r2. The 2026-09-28 price-report review settled this as live and priced (an owner relink decision), so not refiled; the landing page's own base price is 165 | — |
+| gmk-dots-r2 | Daily Clack | AUD 129, no markdown shown | "Dots Dark - Base Kit" 129 (compare-at 230), in stock | price and stock right; the site shows no markdown the store does. Not filed | — |
+| gmk-finer-things | CannonKeys | USD 109, sold out | `gb-gmk-finer-things` 301s to `gmk-finer-things`, now titled **"GMK Finer Things R2"** (Teal/White Base 109) | the R1 set's link now reaches the R2 product. Shown sold out, so not filed; a relink/catalog question | — |
+| gmk-metropolis-r2 | NovelKeys | USD 70 (was 135), in stock | xyz collection URL 404s; `/products/` form redirects to `gmk-cyl-metropolis-r2-keycaps`, Base 70 | correct; auditor false positive (see below) | — |
+| gmk-botanical-r2 / gmk-centinela-extension-kits / gmk-dots-r2 (NovelKeys, Oblotzky) / gmk-zm (Mekibo) | — | — | renamed handles redirect to the same product and price | correct; stale handle in URL | — |
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+
+Auditor fix: the human-page fallback now reads the unscoped `/products/<handle>`
+URL, the way the price pass does (`normalizeShopifyUrl`), instead of the
+`/collections/<c>/products/<h>` alias. A store that drops a product from a
+collection 404s the alias while the product page still redirects, which is how
+gmk-zm × SwitchKeys was reported as dead on 2026-09-27 and how gmk-wasabi-r2,
+gmk-finer-things and gmk-metropolis-r2 read as dead links here.
+
+Follow-ups:
+- Picker: a variant titled plain "Standard" (Oblotzky's base kit) loses to
+  "Standard Base + <artisan>". `+` bundles with a base should not outrank a
+  lone variant when that variant is the cheapest full kit.
+- SwitchKeys renames GB products to their in-stock handle (`-group-buy` →
+  plain), and the site keeps an older price the landing page no longer shows,
+  on two sets now (gmk-zm, gmk-wasabi-r2).
