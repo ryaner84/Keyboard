@@ -113,6 +113,11 @@ function variantIdOf(url) {
   }
 }
 
+/** `/collections/<c>/products/<h>` → `/products/<h>`, query kept. */
+function unscopedProductUrl(url) {
+  return url.replace(/^(https?:\/\/[^/]+)\/collections\/[^/?#]+(\/products\/)/, "$1$2");
+}
+
 function shopifyHandleUrl(url) {
   const m = url.match(/^(https?:\/\/[^/]+)(?:\/[^/?#]+)*?\/products\/([^/?#]+)/);
   return m ? `${m[1]}/products/${m[2]}` : null;
@@ -280,7 +285,12 @@ async function judge(set, vk) {
   try {
     live = (await readShopify(url)) ?? null;
     if (!live || !live.variants) {
-      const generic = await readGeneric(url);
+      // The product page, not its collection-scoped alias: a store that drops
+      // a product from `/collections/current-group-buys` 404s the scoped path
+      // while `/products/<handle>` still redirects to the live page, and the
+      // price pass reads the latter (normalizeShopifyUrl). Reading the alias
+      // reported gmk-zm × SwitchKeys as a dead link that was not one.
+      const generic = await readGeneric(unscopedProductUrl(url));
       // A renamed handle or a moved domain (novelkeys.xyz → novelkeys.com)
       // answers the human page through a redirect while the old .js/.json
       // do not follow it — re-ask the product JSON where the page landed.
