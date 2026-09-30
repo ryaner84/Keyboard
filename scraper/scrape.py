@@ -1371,6 +1371,26 @@ _BUNDLE_EXTRA_RE = re.compile(
 # list above knew, so it classified BASE and outranked the plain "Base Kit".
 _BUNDLE_WORD_RE = re.compile(r"\bbundle\b", re.IGNORECASE)
 
+# Bracketed colourway groups, stripped before the "+ after base" test so
+# "Two Base（Teal + White）" is not read as a bundle. Mirror of the same strip in
+# basePlusExtra (src/lib/kit-variants.ts).
+_BRACKET_GROUP_RE = re.compile(r"\([^)]*\)|\[[^\]]*\]|（[^）]*）|【[^】]*】")
+
+
+def _base_plus_extra(title: str) -> bool:
+    """Mirror of basePlusExtra in src/lib/kit-variants.ts.
+
+    A base sold with a further kit is spelled "… Base + <extra>" — the extra
+    follows "base", joined by "+". Oblotzky's GMK Botanical sells "Standard Base
+    + Hibi & Botanical Leaf" (EUR 159) beside the plain "Standard" base (139),
+    naming an artisan kit no vocabulary lists. Narrower than a bare joiner: a "+"
+    BEFORE "base" or inside a parenthetical colourway spec is not a bundle."""
+    stripped = _BRACKET_GROUP_RE.sub(" ", title)
+    m = re.search(r"base|ベース", stripped, re.IGNORECASE)
+    if not m:
+        return False
+    return "+" in stripped[m.end():]
+
 
 def classify_variant(title: str) -> str:
     """Mirror of classifyVariant in src/lib/kit-variants.ts — order matters.
@@ -1385,11 +1405,17 @@ def classify_variant(title: str) -> str:
     #
     # A joiner alone is NOT enough. Oblotzky sells "Teal & White Base" and
     # Yushakobo "Two Baseセット（Teal + White）" — plain base kits whose COLOURWAY
-    # happens to contain "&"/"+". A bundle must also name an actual extra kit.
+    # happens to contain "&"/"+". A bundle must also name an actual extra kit,
+    # say "bundle", or take the "… Base + <extra>" shape (_base_plus_extra) —
+    # Oblotzky's Botanical bundle names an artisan kit no vocabulary lists.
     if (
         re.search(r"base|ベース", title, re.IGNORECASE)
         and re.search(r"[+&/]|\band\b|\bwith\b|\bplus\b", title, re.IGNORECASE)
-        and (_BUNDLE_EXTRA_RE.search(title) or _BUNDLE_WORD_RE.search(title))
+        and (
+            _BUNDLE_EXTRA_RE.search(title)
+            or _BUNDLE_WORD_RE.search(title)
+            or _base_plus_extra(title)
+        )
     ):
         return "BUNDLE"
     if re.search(r"novelt|ノベルティ", title, re.IGNORECASE):

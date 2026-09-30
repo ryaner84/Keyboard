@@ -150,6 +150,41 @@ assert.equal(
 );
 assert.equal(classifyVariant("Base + Modifiers"), "BUNDLE", "a base sold with modifiers is a bundle");
 
+// ── A bundle whose extra is a set-specific artisan kit ──────────────────────
+//
+// Oblotzky's GMK Botanical (probed 2026-09-30) sells "Standard Base + Hibi &
+// Botanical Leaf" (EUR 159) beside the plain "Standard" base (139). "Hibi" /
+// "Botanical Leaf" named no kit BUNDLE_EXTRA_RE knew and the title says no
+// literal "bundle" — and because the real base is titled "Standard" (no "base"
+// word → OTHERS), the "… Base + <extra>" bundle was the only variant classified
+// BASE and won, publishing 159 as the base. The "+ after base" shape is the fix.
+for (const title of [
+  "Standard Base + Hibi & Botanical Leaf",
+  "Standard Base + Hibi & Botanical Succulent",
+]) {
+  assert.equal(classifyVariant(title), "BUNDLE", title);
+}
+assert.equal(
+  pickBaseVariant([
+    { title: "Standard", price: 139 },
+    { title: "Standard Base + Hibi & Botanical Leaf", price: 159 },
+    { title: "Standard Base + Hibi & Botanical Succulent", price: 159 },
+    { title: "Desert", price: 139 },
+    { title: "International", price: 49 },
+    { title: "Novelty", price: 29 },
+    { title: "Hibi & Botanical Leaf", price: 39 },
+    { title: "Deskmat Light", price: 19 },
+  ])?.price,
+  139,
+  "the plain 'Standard' base wins over the '… Base + …' bundle"
+);
+// The '+ after base' rule must NOT catch a colourway '+' inside parentheses.
+assert.equal(
+  classifyVariant("Two Base（Teal + White）"),
+  "BASE",
+  "a '+' inside a parenthetical colourway spec is not a bundle joiner"
+);
+
 // ── Every consumer of the pick passes the same flag ─────────────────────────
 //
 // pickBaseVariant has three callers and one of them WRITES: the nightly audit

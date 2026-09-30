@@ -1279,6 +1279,30 @@ class BundleVariantTests(unittest.TestCase):
         ])
         self.assertEqual(chosen["price"], 145.0)
 
+    def test_base_plus_unknown_artisan_extra_is_a_bundle(self):
+        # Oblotzky's GMK Botanical (probed 2026-09-30) sells "Standard Base +
+        # Hibi & Botanical Leaf" (EUR 159) beside the plain "Standard" base
+        # (139). The extra ("Hibi & Botanical Leaf") named no kit the vocabulary
+        # knew and the title says no literal "bundle" — and because the real base
+        # is titled "Standard" (no "base" word -> OTHERS), the "... Base + <extra>"
+        # bundle was the only variant classified BASE and published 159 as base.
+        for title in (
+            "Standard Base + Hibi & Botanical Leaf",
+            "Standard Base + Hibi & Botanical Succulent",
+        ):
+            self.assertEqual(scrape.classify_variant(title), "BUNDLE", title)
+        chosen = scrape.choose_kit_variant([
+            {"id": "1", "title": "Standard", "price": 139.0},
+            {"id": "2", "title": "Standard Base + Hibi & Botanical Leaf", "price": 159.0},
+            {"id": "3", "title": "Standard Base + Hibi & Botanical Succulent", "price": 159.0},
+            {"id": "4", "title": "Desert", "price": 139.0},
+            {"id": "5", "title": "International", "price": 49.0},
+            {"id": "6", "title": "Novelty", "price": 29.0},
+            {"id": "7", "title": "Hibi & Botanical Leaf", "price": 39.0},
+            {"id": "8", "title": "Deskmat Light", "price": 19.0},
+        ])
+        self.assertEqual(chosen["price"], 139.0)
+
     def test_abbreviated_bundle_does_not_mark_a_sold_out_base_in_stock(self):
         # iLumKB: "Base" sold out beside an in-stock "Base+Nov+Space" bundle.
         # The abbreviations named no extra the vocabulary knew, so the bundle

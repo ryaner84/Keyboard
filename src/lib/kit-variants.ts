@@ -55,17 +55,36 @@ const BUNDLE_EXTRA_RE =
   /novelt|\bnovs?\b|ノベルティ|space\s*bar|\bspaces?\b|スペースバー|alpha|アルファ|num(?:ber)?\s*pad|\b40s\b|forties|accents?\b|extension|hiragana|katakana|hangul|cyrillic|norde\b|nordic\b|\biso\b|\bicons?\b|\bmacro\b|\bmodifiers?\b|retro\s*points?\b|\bcore\b|\bjis\b/i;
 const BUNDLE_WORD_RE = /\bbundle\b/i;
 
+// A base sold together with a further kit is spelled "… Base + <extra>": the
+// extra FOLLOWS the word "base", joined by "+". Oblotzky's GMK Botanical sells
+// "Standard Base + Hibi & Botanical Leaf" (EUR 159) beside the plain "Standard"
+// base (139) — its extra ("Hibi & Botanical Leaf") named no kit BUNDLE_EXTRA_RE
+// knew and the title carries no literal "bundle", so the "+ after base" SHAPE is
+// what marks it. It is deliberately narrower than a bare joiner, which the two
+// colourway shapes above already forbid: "Teal & White Base" has its joiner
+// BEFORE "base", and "Two Base（Teal + White）" has its "+" inside a parenthetical
+// colourway spec. So bracketed groups are stripped and only a "+" that comes
+// after the "base" token counts. Mirror of _base_plus_extra in scrape.py.
+function basePlusExtra(title: string): boolean {
+  const stripped = title.replace(/\([^)]*\)|\[[^\]]*\]|（[^）]*）|【[^】]*】/g, " ");
+  const m = /base|ベース/i.exec(stripped);
+  if (!m) return false;
+  return stripped.slice(m.index + m[0].length).includes("+");
+}
+
 export function classifyVariant(title: string): VariantCategory {
   // Checked BEFORE the subkit patterns: "Base + Novelties" would otherwise
   // match `novelt` and be filed as a novelty kit.
   //
   // A joiner alone is NOT enough. Oblotzky sells "Teal & White Base" and
   // Yushakobo "Two Baseセット（Teal + White）" — plain base kits whose COLOURWAY
-  // contains "&"/"+". A bundle must also name an actual extra kit.
+  // contains "&"/"+". A bundle must also name an actual extra kit, say "bundle",
+  // or take the "… Base + <extra>" shape (basePlusExtra) — Oblotzky's Botanical
+  // bundle names an artisan kit no vocabulary lists.
   if (
     /base|ベース/i.test(title) &&
     /[+&/]|\band\b|\bwith\b|\bplus\b/i.test(title) &&
-    (BUNDLE_EXTRA_RE.test(title) || BUNDLE_WORD_RE.test(title))
+    (BUNDLE_EXTRA_RE.test(title) || BUNDLE_WORD_RE.test(title) || basePlusExtra(title))
   ) {
     return "BUNDLE";
   }
