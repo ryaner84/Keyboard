@@ -76,6 +76,8 @@ const EMPTY_DETAILS: CollectionItemDetails = {
   keycaps: null,
   plateType: null,
   mountType: null,
+  pcbType: null,
+  layoutVariant: null,
   buildDetails: null,
   notes: null,
   displayOrder: 0,
@@ -124,6 +126,33 @@ const MOUNT_TYPE_SUGGESTIONS = [
   "Sandwich",
   "Burger mount",
   "Plateless / PCB mount",
+];
+
+// How the switches attach is the PCB fact that changes what an owner can do
+// with a board — hotswap and Mill-Max can be re-switched without an iron,
+// solder cannot — so those lead; thickness, flex cuts and firmware are what
+// people add after it ("Hotswap, 1.2mm flex cut, VIA").
+const PCB_TYPE_SUGGESTIONS = [
+  "Hotswap",
+  "Solder",
+  "Mill-Max sockets",
+  "Solder + hotswap (dual)",
+  "Hotswap, flex cuts",
+  "Solder, flex cuts",
+  "Wireless (hotswap)",
+];
+
+// Which variant of the board's form factor this unit is. Split into the terms
+// a secondhand listing uses, since that is where the question gets asked.
+const LAYOUT_VARIANT_SUGGESTIONS = [
+  "WK",
+  "WKL",
+  "HHKB",
+  "ANSI",
+  "ISO",
+  "Split backspace",
+  "Split right shift",
+  "Stepped caps",
 ];
 
 interface SpendingEntry {
@@ -425,6 +454,8 @@ function BuildSummary({
     build.keycaps,
     build.plateType,
     build.mountType,
+    build.pcbType,
+    build.layoutVariant,
   ].filter(Boolean) as string[];
   const sold = build.isSold === true;
   if (sold) {
@@ -1460,6 +1491,36 @@ function BuildFields({
           />
           <datalist id="mount-type-options">
             {MOUNT_TYPE_SUGGESTIONS.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+        </Field>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="PCB type">
+          <input
+            value={build.pcbType || ""}
+            onChange={(event) => onChange({ pcbType: event.target.value })}
+            placeholder="e.g. Hotswap, Mill-Max, solder"
+            list="pcb-type-options"
+            className={inputClass}
+          />
+          <datalist id="pcb-type-options">
+            {PCB_TYPE_SUGGESTIONS.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+        </Field>
+        <Field label="Layout">
+          <input
+            value={build.layoutVariant || ""}
+            onChange={(event) => onChange({ layoutVariant: event.target.value })}
+            placeholder="e.g. WKL, split backspace"
+            list="layout-variant-options"
+            className={inputClass}
+          />
+          <datalist id="layout-variant-options">
+            {LAYOUT_VARIANT_SUGGESTIONS.map((option) => (
               <option key={option} value={option} />
             ))}
           </datalist>
@@ -4276,6 +4337,8 @@ function KeyboardCollectionItemEditor({
         keycaps: first.keycaps || null,
         plateType: first.plateType || null,
         mountType: first.mountType || null,
+        pcbType: first.pcbType || null,
+        layoutVariant: first.layoutVariant || null,
         buildDetails: first.buildDetails || null,
         notes: first.notes || null,
         customImageUrl: first.imageUrl || null,

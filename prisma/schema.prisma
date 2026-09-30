@@ -337,6 +337,14 @@ model TrackerItem {
   // materials are ordinary in this hobby, and a closed list would refuse them.
   plateType         String?
   mountType         String?
+  // The PCB beside them: how switches attach (hotswap / solder / Mill-Max
+  // sockets) decides whether a board can be re-switched without an iron,
+  // and layout (WK / WKL / HHKB, split backspace…) is the first thing a
+  // buyer asks. Nullable text for the same reason as plate and mount.
+  pcbType           String?
+  // Not `layout`: GroupBuy.layout is the catalog's FORM FACTOR ("65%"),
+  // this is which variant of it the owner has.
+  layoutVariant     String?
   buildDetails      String?
   notes             String?
   displayOrder      Int       @default(0)
