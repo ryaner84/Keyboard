@@ -1057,6 +1057,58 @@ both the client-reported log and the resolution audit in the same run.
 > R3 `139 SGD SCRAPED` and Thunder God `169 SGD SCRAPED`; the two Neo Macro
 > deals-filter rows remain resolved (`00d138a`).
 
+> **2026-09-30 run.** Price feed run 36734965401 (`?all=1`) returns **0 pending,
+> 56 resolved** — every report auto-resolves each sweep, so RECURRENCE and the
+> stored value, not the feed, are the signals. This run reconciled the reports
+> the deals audit filed as batches 4 (2026-09-29, #199) and 5 (2026-09-30, #200),
+> four in all. Visitor inbox run 36734974715: STORE_LINK 0, PRICE_REPORT 0,
+> **LISTING_FLAG 15 + FEEDBACK 1 — the SAME items triaged and reported to the
+> owner on 2026-09-14** (§4b), no new flags and nothing auto-resolvable;
+> PHOTO_REPORT 0. Incoming **Self-heal watch was empty** (both 2026-09-27 items
+> cleared on the 2026-09-28 run).
+>
+> **One needs-fix, root-caused and FIXED in-run (#201, `95e1e0d`).**
+> **gmk-botanical-r2 × Oblotzky** read `159 EUR SCRAPED` — the value the
+> 2026-09-29 reporter flagged as the "Standard Base + Hibi & Botanical Leaf"
+> bundle, still there after the next scrape (never-heals). Vendor probe (run
+> 36735257689, `/products/gmk-cyl-botanical-2`) confirmed the real base is
+> **"Standard" 139 EUR, in stock**, beside two "Standard Base + Hibi & …" bundles
+> at 159. Root cause in the shared picker: the bundle names artisan kits
+> ("Hibi", "Botanical Leaf") no `BUNDLE_EXTRA_RE` lists and no literal "bundle",
+> so `classifyVariant` fell through to BASE — and because the real base "Standard"
+> carries no "base" word (→ OTHERS), the "… Base + …" bundle was the ONLY variant
+> classified BASE, so `pickBaseVariant`'s `titledBase` returned it. Fixed by
+> adding the **"+ after base" shape** as a third bundle signal (`basePlusExtra` /
+> `_base_plus_extra`), narrower than a bare joiner: "Teal & White Base" joins
+> before "base" and "Two Base（Teal + White）" has its "+" inside a parenthetical
+> colourway spec (both stay BASE). With the bundle reclassified, the picker
+> returns the dearest real base = "Standard" 139. A targeted re-scrape (id
+> `cmq585ux202a0b17d1q505hsa`, run 36736521078, `updated=1`) landed it: the
+> confirmation feed (run 36736657805) reads **`current=139 EUR SCRAPED`.** 215
+> Python tests, all 24 npm suites, tsc and next lint clean. On the Self-heal
+> watch to confirm 139 holds.
+>
+> **Two stock self-heals, probe-confirmed and added to the watch.**
+> **gmk-varenye × iLumKB** ("shown SOLD OUT, Full Base 209 available") — probe
+> shows Full Base 209 **available=true** (TKL Base 179 too); the picker's 209 SGD
+> pick is correct and the availability scrape clears the sold-out display.
+> **gmk-masterpiece-r2 × Oblotzky** ("shown SOLD OUT, Origin Base 119 available")
+> — probe shows Origin Base 119 **available=true** (pre-order tag); 119 EUR pick
+> correct. Both prices were never disputed; watched for next-run confirmation.
+>
+> **One false-positive report, no fix.** **gmk-wasabi-r2 × SwitchKeys** ("site
+> shows AUD 199 … link lands on Wasabi Base 143") — batch 5 already established
+> 199 AUD is correct (matches the store's own `.js`); the 143 came from the
+> geo-converted `.json`. Feed reads `199 AUD SCRAPED`. No scrape bug.
+>
+> The other prior resolutions still read correctly: gmk-vamp × Switchmod
+> `84.99 USD`; gmk-bent-r2 × zFrontier `150 USD` (56 not returned since `633581d`);
+> gmk-arctic `145`, gmk-tribal `175`; the two Mekibo #194 fixes `165`/`145 USD`;
+> the #153 Ktechs listings BRG R3 `139 SGD`, Thunder God `169 SGD`; the two Neo
+> Macro deals-filter rows resolved (`00d138a`). gmk-zm × SwitchKeys stays the one
+> open owner item (§1): live and priced 229.99 AUD, but relinking to the current
+> in-stock `/products/gmk-zimo` (165 AUD) is an owner/discovery judgment.
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _One owner item: **gmk-zm × SwitchKeys** — not a wrong price and not a dead link
@@ -1086,8 +1138,21 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-**Currently on the watch: none.** Both items added 2026-09-27 were resolved on
-the 2026-09-28 run:
+**Currently on the watch: three (all added 2026-09-30).** The *next* run must
+confirm each healed (report resolved, wrong value gone / stock correct) or fix it:
+
+| set | vendor | flagged | reason | verdict this run |
+|---|---|---|---|---|
+| gmk-botanical-r2 | Oblotzky | 2026-09-30 | wrong variant — "Standard Base + Hibi & Botanical Leaf" bundle (159) priced as base; real base "Standard" 139 | ✅ **fixed in-run (#201, `95e1e0d`).** "+ after base" now classifies the bundle BUNDLE; targeted re-scrape (run 36736521078, `updated=1`) landed it and the feed reads `139 EUR SCRAPED`. Watched to confirm 139 holds and 159 does not return |
+| gmk-varenye | iLumKB | 2026-09-30 | stock — shown SOLD OUT, but "Full Base" 209 available | ✅ self-heal (stock). Probe run 36735257689: Full Base 209 `available=true` (TKL Base 179 too); 209 SGD pick correct. Availability scrape clears the sold-out display. Watched for confirmation |
+| gmk-masterpiece-r2 | Oblotzky | 2026-09-30 | stock — shown SOLD OUT, but "Origin Base" 119 available (pre-order) | ✅ self-heal (stock/pre-order). Probe run 36735257689: Origin Base 119 `available=true` (pre-order tag); 119 EUR pick correct. Watched for confirmation |
+
+_gmk-wasabi-r2 × SwitchKeys (2026-09-29) is NOT watched: a false-positive report
+— 199 AUD is correct (matches the store's `.js`; the 143 was a geo-converted
+`.json` reading), already established by deals-audit batch 5. No oscillation to
+track._
+
+**Prior watch (added 2026-09-27) — both resolved on the 2026-09-28 run:**
 
 | set | vendor | flagged | reason | resolution (2026-09-28) |
 |---|---|---|---|---|
@@ -1190,6 +1255,10 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-09-28 | gmk-black-snail | Neo Macro | 6,500 INR | "wrong variant: no base kit; INR 6500 is the U9 Modifier Kit" (deals audit) | needs fix | ✅ resolved (#198 `6f36882`; `modifier`/`retro point` → NONBASE, row cleared to null) |
 | 2026-09-28 | gmk-black-snail---red-cyrillic-addon | Neo Macro | 6,500 INR | "wrong variant: INR 6500 is the U9 Modifier Kit, not a base kit" (deals audit) | needs fix | ✅ resolved (#198 `6f36882`; same fix; row cleared to null) |
 | 2026-09-28 | gmk-mothman | GEONWORKS | 150 USD | "dead link: geon.works product URL 302s to the front page" (deals audit) | self-healed (dead link) | ✅ resolved (dead-link redirect cleared price to null) |
+| 2026-09-29 | gmk-wasabi-r2 | SwitchKeys | 199 AUD | "wrong price: site shows AUD 199, link lands on Wasabi Base 143" (deals audit) | false positive | ✅ resolved 2026-09-30 — 199 AUD correct (matches store `.js`); 143 was a geo-converted `.json` reading (deals-audit batch 5) |
+| 2026-09-29 | gmk-botanical-r2 | Oblotzky Industries | 159 EUR | "wrong variant: EUR 159 is the 'Standard Base + Hibi & Botanical Leaf' bundle; base 'Standard' is EUR 139" (deals audit) | needs fix | ✅ resolved (#201 `95e1e0d`; "+ after base" → BUNDLE; re-scrape landed **139 EUR**) |
+| 2026-09-30 | gmk-masterpiece-r2 | Oblotzky Industries | 119 EUR | "stock wrong: shown SOLD OUT, but 'Origin Base' EUR 119 available (pre-order)" (deals audit) | self-healed (stock) | ✅ resolved (stock/pre-order scrape; 119 EUR correct, probe-confirmed available) — on watch |
+| 2026-09-30 | gmk-varenye | iLumKB | 209 SGD | "stock wrong: shown SOLD OUT, but 'Full Base' SGD 209 available" (deals audit) | self-healed (stock) | ✅ resolved (stock scrape; 209 SGD correct, probe-confirmed available) — on watch |
 
 ## 4. Listing-flag triage (visitor inbox — `ListingReport`)
 
@@ -1289,6 +1358,10 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-09-28 | gmk-black-snail | Neo Macro | 6,500 INR | needs fix | **Wrong variant, fixed #198 (`6f36882`).** neomacro.in sells no base kit for Black Snail; the picker took the dearest unlabeled line, the **U9 Modifier Kit** (INR 6500). #198 added `modifier` and `retro point` to `NONBASE_SUBKIT_RE` in `kit-variants.ts` (scrape.py composes its copy from the mirror) — verified present in both halves this run. The row clears to `NO_BASE_KIT`; the feed reads `current=null`. Filed by the deals audit batch 3 | ✅ resolved (#198; row cleared to null) |
 | 2026-09-28 | gmk-black-snail---red-cyrillic-addon | Neo Macro | 6,500 INR | needs fix | Same product/cause/fix as gmk-black-snail (the add-on set's BASE listings ARE the Black Snail base-kit products). #198 clears it; feed reads `current=null` | ✅ resolved (#198; row cleared to null) |
 | 2026-09-28 | gmk-mothman | GEONWORKS | 150 USD | self-healed (dead link) | `geon.works/products/group-buy-gmk-cyl-mothman` 302s to `geon.works/` (front page, no product). `isGoneRedirect` marks the row `DEAD_LINK` and clears the price; the feed reads `current=null USD`. Filed by the deals audit batch 3 | ✅ resolved (dead-link redirect; cleared to null) |
+| 2026-09-29 | gmk-wasabi-r2 | SwitchKeys | 199 AUD | false positive | **Not a wrong price.** Deals-audit batch 5 established AUD 199 is correct (matches switchkeys.com.au's own `.js`); the 143 the batch-4 report cited came from the store's geo-converted `.json`. The stored collection URL 404s but `normalizeShopifyUrl` strips it to `/products/gmk-wasabi-v2-group-buy`, which 301s to the live `/products/gmk-wasabi-v2`; the price reads 199 AUD SCRAPED. No scrape bug | ✅ resolved (false positive; 199 AUD correct) |
+| 2026-09-29 | gmk-botanical-r2 | Oblotzky Industries | 159 EUR | needs fix | **Wrong variant, fixed #201 (`95e1e0d`).** Vendor probe (run 36735257689, `/products/gmk-cyl-botanical-2`): real base "Standard" 139 EUR `available=true`, beside "Standard Base + Hibi & Botanical Leaf"/"… Succulent" bundles at 159. The bundle names artisan kits ("Hibi", "Botanical Leaf") no `BUNDLE_EXTRA_RE` lists and no literal "bundle", so `classifyVariant` fell through to BASE — and the real base "Standard" carries no "base" word (→ OTHERS), so the "… Base + …" bundle was the only variant classified BASE and `titledBase` returned it. #201 adds the "+ after base" shape (`basePlusExtra` / `_base_plus_extra`) as a third bundle signal, stripping parenthetical colourway specs so "Teal & White Base" and "Two Base（Teal + White）" stay BASE. The picker then returns the dearest real base = "Standard" 139. Targeted re-scrape (id `cmq585ux202a0b17d1q505hsa`, run 36736521078, `updated=1`); confirmation feed (run 36736657805) reads `139 EUR SCRAPED`. `test:kit-variants` + Python suite pin both halves | ✅ resolved (#201; 139 EUR) — on watch |
+| 2026-09-30 | gmk-masterpiece-r2 | Oblotzky Industries | 119 EUR | self-healed (stock) | Stock/pre-order. Vendor probe (run 36735257689): "Origin Base" 119 EUR `available=true` (product tag "pre-order"), beside "Roman Base" 139. The picker's 119 (first titled base, the cheaper colourway) is correct and was never disputed; the report was that the tracker showed it SOLD OUT. Availability scrape clears the display; the price pass is sole authority for `inStock` (#153). Recurs as a pre-order/stock note (cf. the 2026-07-18 masterpiece pre-order reports) | ✅ resolved (self-healed; on watch) |
+| 2026-09-30 | gmk-varenye | iLumKB | 209 SGD | self-healed (stock) | Stock. Vendor probe (run 36735257689): "Full Base" 209 SGD `available=true` (TKL Base 179, Extension 76, Alt Mods 132). The picker's 209 (dearest titled base) is correct and was never disputed; the report was that the tracker showed it SOLD OUT. Availability scrape clears it | ✅ resolved (self-healed; on watch) |
 
 ### Client-recommended values verified
 
@@ -1306,16 +1379,26 @@ uploaded 2 builds but the mai…") — left for the owner.
   `pickBaseVariant`/`choose_kit_variant` now return after #194 reclassified the
   `[Bundle] Base + …` variants as BUNDLE. **Confirmed stored 2026-09-26**: the
   feed reads gmk-teradrive `165 USD SCRAPED` and gmk-monarch `145 USD SCRAPED`.
+- **gmk-botanical-r2 base = EUR 139** (Oblotzky, deals audit's correction).
+  Verified against the probe (run 36735257689): "Standard" is the plain base at
+  EUR 139, in stock, and within `KIT_BOUNDS`; the 159 the reporter flagged is the
+  "Standard Base + Hibi & Botanical Leaf" bundle. **Confirmed stored 2026-09-30**
+  after #201: the feed reads `139 EUR SCRAPED`.
 
 ## Summary
 
-- **52 report submissions across 42 listings** (full `?all=1` history, first
+- **56 report submissions across 44 listings** (full `?all=1` history, first
   reconciled 2026-08-26; gmk-vamp × Switchmod added 2026-08-27; 6 added
-  2026-09-26, 2 added 2026-09-27, and **3 added 2026-09-28** by the released
-  deals audit — batch 3, #198: gmk-black-snail × Neo Macro and its red-cyrillic
+  2026-09-26, 2 added 2026-09-27, 3 added 2026-09-28, **2 added 2026-09-29**
+  (batch 4, #199: gmk-wasabi-r2 × SwitchKeys — false positive, 199 AUD correct;
+  gmk-botanical-r2 × Oblotzky — wrong variant, fixed **#201**) and **2 added
+  2026-09-30** (batch 5, #200: gmk-masterpiece-r2 × Oblotzky and gmk-varenye ×
+  iLumKB, both stock-only self-heals with correct prices, on the watch) by the
+  released deals audit. The 3 added 2026-09-28 were batch 3, #198:
+  gmk-black-snail × Neo Macro and its red-cyrillic
   add-on (wrong variant = the U9 Modifier Kit, fixed #198 → both cleared to
   null) and gmk-mothman × GEONWORKS (dead-link redirect, cleared to null), all
-  healed this run. The 2 added 2026-09-27 (batch 2, #195) both resolved on
+  healed. The 2 added 2026-09-27 (batch 2, #195) both resolved on
   2026-09-28: gmk-panda × iLumKB (recurrence, #195 — probe-confirmed base sold
   out, no 4th recurrence) and gmk-zm × SwitchKeys (the "dead link" was a FALSE
   POSITIVE — only the collection URL 404s; the stored handle 301-redirects to a
@@ -1341,6 +1424,14 @@ uploaded 2 builds but the mai…") — left for the owner.
   `compareAtPrice`. Both now exclude `priceSource=LOCKED`, completing the filter's
   own "a discount on a listing nobody can buy is not a deal" intent, without
   touching set-page visibility.
+- **Wrong-variant family extended: a base named without the word "base".**
+  #194/#195/#198 fixed bundles that named an extra the vocabulary did not know.
+  #201 (`95e1e0d`) closes the harder shape behind it: Oblotzky's GMK Botanical
+  sells the plain base as "Standard" (no "base" word → OTHERS) beside a "Standard
+  Base + Hibi & Botanical Leaf" bundle whose only "base"-classified sibling made
+  it the picker's `titledBase`. The "+ after base" shape (`basePlusExtra`) marks
+  it a bundle without a per-set vocabulary, and parenthetical colourway specs are
+  stripped so "Two Base（Teal + White）" stays a base. `159 → 139 EUR` confirmed.
 - **Ledger completeness caveat (now closed for history-to-date).** The committed
   log was previously transcribed from pending-only snapshots, which drop a
   report the moment it resolves — so 25 reports that filed-and-healed between
