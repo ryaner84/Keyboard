@@ -69,6 +69,8 @@ export async function PATCH(
     keycaps?: string | null;
     plateType?: string | null;
     mountType?: string | null;
+    pcbType?: string | null;
+    layoutVariant?: string | null;
     buildDetails?: string | null;
     notes?: string | null;
     displayOrder?: number;
@@ -147,6 +149,8 @@ export async function PATCH(
   if ("keycaps" in body) data.keycaps = cleanOptionalText(body.keycaps, 160);
   if ("plateType" in body) data.plateType = cleanOptionalText(body.plateType, 160);
   if ("mountType" in body) data.mountType = cleanOptionalText(body.mountType, 160);
+  if ("pcbType" in body) data.pcbType = cleanOptionalText(body.pcbType, 160);
+  if ("layoutVariant" in body) data.layoutVariant = cleanOptionalText(body.layoutVariant, 160);
   if ("buildDetails" in body) data.buildDetails = cleanOptionalText(body.buildDetails, 500);
   if ("notes" in body) data.notes = cleanOptionalText(body.notes, 1000);
   if (Number.isInteger(body.displayOrder)) {
@@ -261,6 +265,8 @@ export async function PATCH(
       keycaps: updated.keycaps,
       plateType: updated.plateType,
       mountType: updated.mountType,
+      pcbType: updated.pcbType,
+      layoutVariant: updated.layoutVariant,
       buildDetails: updated.buildDetails,
       notes: updated.notes,
       displayOrder: updated.displayOrder,
@@ -329,6 +335,8 @@ function cleanUnit(u: unknown): CollectionUnit {
     keycaps: cleanOptionalText(o.keycaps, 160),
     plateType: cleanOptionalText(o.plateType, 160),
     mountType: cleanOptionalText(o.mountType, 160),
+    pcbType: cleanOptionalText(o.pcbType, 160),
+    layoutVariant: cleanOptionalText(o.layoutVariant, 160),
     buildDetails: cleanOptionalText(o.buildDetails, 500),
     notes: cleanOptionalText(o.notes, 1000),
     imageUrl: cleanCollectionPhoto(o.imageUrl),

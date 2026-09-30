@@ -1,0 +1,3 @@
+ALTER TABLE "TrackerItem"
+ADD COLUMN IF NOT EXISTS "pcbType" TEXT,
+ADD COLUMN IF NOT EXISTS "layoutVariant" TEXT;

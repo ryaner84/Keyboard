@@ -51,6 +51,8 @@ export async function GET() {
         keycaps: item.keycaps,
         plateType: item.plateType,
         mountType: item.mountType,
+        pcbType: item.pcbType,
+        layoutVariant: item.layoutVariant,
         buildDetails: item.buildDetails,
         notes: item.notes,
         displayOrder: item.displayOrder,

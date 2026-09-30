@@ -19,6 +19,8 @@ const baseDetails: CollectionItemDetails = {
   keycaps: null,
   plateType: null,
   mountType: null,
+  pcbType: null,
+  layoutVariant: null,
   buildDetails: null,
   notes: "Legacy purchase",
   displayOrder: 0,

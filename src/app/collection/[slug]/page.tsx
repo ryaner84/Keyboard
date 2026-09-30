@@ -54,6 +54,8 @@ const getPublicCollection = cache(async (slug: string) =>
           keycaps: true,
           plateType: true,
           mountType: true,
+          pcbType: true,
+          layoutVariant: true,
           buildDetails: true,
           color: true,
           quantity: true,
@@ -300,6 +302,8 @@ function PublicCollectionCard({
     keycaps: string | null;
     plateType: string | null;
     mountType: string | null;
+    pcbType: string | null;
+    layoutVariant: string | null;
     buildDetails: string | null;
     color: string | null;
     quantity: number;
@@ -409,6 +413,8 @@ function PublicCollectionCard({
             item.keycaps ||
             item.plateType ||
             item.mountType ||
+            item.pcbType ||
+            item.layoutVariant ||
             item.color) && (
           <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-gray-100 pt-5 dark:border-white/10">
             {specs.length > 0 && <PublicSpec label="Format" value={specs.join(" · ")} />}
@@ -417,6 +423,8 @@ function PublicCollectionCard({
             {item.keycaps && <PublicSpec label="Keycaps" value={item.keycaps} />}
             {item.plateType && <PublicSpec label="Plate" value={item.plateType} />}
             {item.mountType && <PublicSpec label="Mount" value={item.mountType} />}
+            {item.pcbType && <PublicSpec label="PCB" value={item.pcbType} />}
+            {item.layoutVariant && <PublicSpec label="Layout" value={item.layoutVariant} />}
             {item.showPurchasePrice && item.purchasePrice != null && (
               <PublicSpec
                 label={item.quantity > 1 ? "Price per unit" : "Acquired for"}
@@ -635,6 +643,8 @@ function publicKeycapAcquisitions(item: {
     keycaps: null,
     plateType: null,
     mountType: null,
+    pcbType: null,
+    layoutVariant: null,
     buildDetails: null,
     notes: null,
     displayOrder: 0,
@@ -709,6 +719,8 @@ type PublicBuildShape = {
   keycaps: string | null;
   plateType: string | null;
   mountType: string | null;
+  pcbType: string | null;
+  layoutVariant: string | null;
   buildDetails: string | null;
   imageUrl: string | null;
   // Carried through regardless of the owner's switches; every render site
@@ -733,6 +745,8 @@ function assemblePublicBuilds(item: {
   keycaps: string | null;
   plateType: string | null;
   mountType: string | null;
+  pcbType: string | null;
+  layoutVariant: string | null;
   buildDetails: string | null;
   customImageUrl: string | null;
   quantity: number;
@@ -753,6 +767,8 @@ function assemblePublicBuilds(item: {
     keycaps: item.keycaps,
     plateType: item.plateType,
     mountType: item.mountType,
+    pcbType: item.pcbType,
+    layoutVariant: item.layoutVariant,
     buildDetails: item.buildDetails,
     imageUrl: item.customImageUrl,
     isSold: item.isSold === true,
@@ -782,6 +798,8 @@ function assemblePublicBuilds(item: {
         keycaps: (u?.keycaps as string) ?? null,
         plateType: (u?.plateType as string) ?? null,
         mountType: (u?.mountType as string) ?? null,
+        pcbType: (u?.pcbType as string) ?? null,
+        layoutVariant: (u?.layoutVariant as string) ?? null,
         buildDetails: (u?.buildDetails as string) ?? null,
         imageUrl: (u?.imageUrl as string) ?? null,
         // Unlike the purchase fields above there is NO inheritance from the
@@ -804,6 +822,8 @@ function assemblePublicBuilds(item: {
       keycaps: null,
       plateType: null,
       mountType: null,
+      pcbType: null,
+      layoutVariant: null,
       buildDetails: null,
       imageUrl: null,
       isSold: false,
@@ -852,6 +872,8 @@ function PublicBuild({
     build.keycaps,
     build.plateType,
     build.mountType,
+    build.pcbType,
+    build.layoutVariant,
   ].filter(Boolean) as string[];
   // Only when the owner opted in; the amount needs the price switch as well.
   const soldPublicly = showSoldStatus && build.isSold;

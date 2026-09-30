@@ -147,6 +147,8 @@ export interface CollectionUnit {
   keycaps: string | null;
   plateType: string | null;
   mountType: string | null;
+  pcbType: string | null;
+  layoutVariant: string | null;
   buildDetails: string | null;
   notes: string | null;
   imageUrl: string | null;
@@ -244,6 +246,8 @@ export interface CollectionItemDetails {
   keycaps: string | null;
   plateType: string | null;
   mountType: string | null;
+  pcbType: string | null;
+  layoutVariant: string | null;
   buildDetails: string | null;
   notes: string | null;
   displayOrder: number;

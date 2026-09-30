@@ -1214,7 +1214,8 @@ async function ensureKeycapAcquisitionsColumn(client) {
 // switch that decides whether the public page reveals sold state at all.
 // Builds 2..N and per-purchase keycap records keep theirs inside the existing
 // `units` / `keycapAcquisitions` jsonb, so they need no column.
-// Plate and mount, recorded per build. Both used to live inside the free-text
+// Plate, mount, PCB type and layout variant, recorded per build. Plate and
+// mount used to live inside the free-text
 // `buildDetails` blob — its own placeholder read "Plate, mounting
 // configuration, stabilizers, foam, artisan details…" — so the two specs an
 // owner is most often asked about could be written down but never read back.
@@ -1227,7 +1228,9 @@ async function ensureBuildSpecColumns(client) {
     await client.query(
       `ALTER TABLE public."TrackerItem"
        ADD COLUMN IF NOT EXISTS "plateType" text,
-       ADD COLUMN IF NOT EXISTS "mountType" text`
+       ADD COLUMN IF NOT EXISTS "mountType" text,
+       ADD COLUMN IF NOT EXISTS "pcbType" text,
+       ADD COLUMN IF NOT EXISTS "layoutVariant" text`
     );
   } catch (err) {
     console.warn(`[db-setup] build spec columns setup skipped: ${err.message}`);
