@@ -12,12 +12,12 @@ to the start.
 
 ## Cursor
 
-`after_slug` for the next run: **`gmk-red-devils`**
+`after_slug` for the next run: **`gmk-orange-alert`**
 
-The list held 54 on-sale sets on 2026-09-29. That run covered the 9 sets left
-after the previous cursor (`gmk-tako … gmk-zm`) and then wrapped to the top
-for 41 more (`dcs-dream-alert … gmk-red-devils`), 50 sets in all. The next run
-continues after `gmk-red-devils`.
+The list held 53 on-sale sets on 2026-09-30. That run covered the 13 sets left
+after the previous cursor (`gmk-redline … gmk-zm`) and then wrapped to the top
+for 37 more (`dcs-dream-alert … gmk-orange-alert`), 50 sets in all. The next
+run continues after `gmk-orange-alert`.
 
 ## Runs
 
@@ -27,6 +27,7 @@ continues after `gmk-red-devils`.
 | 2026-09-27 | gmk-varenye … gmk-zm, wrap, dcs-dream-alert … gmk-vamp | 53 | 278 | 7 flagged → 2 confirmed | 2 (price-report button) | [36286575551](https://github.com/ryaner84/Keyboard/actions/runs/36286575551) + [36286576663](https://github.com/ryaner84/Keyboard/actions/runs/36286576663) (reports: [36286973228](https://github.com/ryaner84/Keyboard/actions/runs/36286973228)) |
 | 2026-09-28 | gmk-varenye … gmk-zm, wrap, dcs-dream-alert … gmk-stargaze | 50 | 270 | 15 flagged → 3 confirmed | 3 (price-report button) | [36367279492](https://github.com/ryaner84/Keyboard/actions/runs/36367279492) + [36367394828](https://github.com/ryaner84/Keyboard/actions/runs/36367394828) (reports: [36367812617](https://github.com/ryaner84/Keyboard/actions/runs/36367812617)) |
 | 2026-09-29 | gmk-tako … gmk-zm, wrap, dcs-dream-alert … gmk-red-devils | 50 | 273 | 11 flagged → 2 confirmed | 2 (price-report button) | [36509536114](https://github.com/ryaner84/Keyboard/actions/runs/36509536114) + [36509762528](https://github.com/ryaner84/Keyboard/actions/runs/36509762528) (reports: [36509979688](https://github.com/ryaner84/Keyboard/actions/runs/36509979688)) |
+| 2026-09-30 | gmk-redline … gmk-zm, wrap, dcs-dream-alert … gmk-orange-alert | 50 | 268 | 11 flagged → 2 confirmed | 2 (price-report button) | [36656751452](https://github.com/ryaner84/Keyboard/actions/runs/36656751452) + [36656982393](https://github.com/ryaner84/Keyboard/actions/runs/36656982393) (reports: [36657385954](https://github.com/ryaner84/Keyboard/actions/runs/36657385954)) |
 
 ### 2026-09-26 findings
 
@@ -136,3 +137,31 @@ Follow-ups:
 - SwitchKeys renames GB products to their in-stock handle (`-group-buy` →
   plain), and the site keeps an older price the landing page no longer shows,
   on two sets now (gmk-zm, gmk-wasabi-r2).
+
+### 2026-09-30 findings
+
+Two audit runs (the 13 sets after the cursor, then a 37-set wrap) flagged 11
+of 268 listings; the candidates were checked with the **Vendor probe**
+([36656989840](https://github.com/ryaner84/Keyboard/actions/runs/36656989840),
+[36657302686](https://github.com/ryaner84/Keyboard/actions/runs/36657302686)):
+
+| set | vendor | site | store | verdict | filed |
+|---|---|---|---|---|---|
+| gmk-masterpiece-r2 | Oblotzky Industries | EUR 119, **sold out** | "Origin Base" 119 **available** (tagged pre-order; Roman Base 139 also available) | stock | price report |
+| gmk-varenye | iLumKB | SGD 209, **sold out** | "[Group Buy] GMK CYL Varenye": "Full Base" 209 **available**, TKL Base 179 available | stock | price report |
+| gmk-wasabi-r2 | SwitchKeys | AUD 199 (was 239.99), in stock | `gmk-wasabi-v2` `.js`: "Wasabi Base" **199** available; the `.json` served a US runner reads 142 (geo-converted: Latin Alphas 49.99 → 36) | site is right. **The 2026-09-29 report on this row (143) was an auditor false positive** — the `.json` price in a converted currency, not the store's AUD. The price-report review should dismiss it rather than act on it | — |
+| gmk-botanical-r2 | Oblotzky Industries | EUR 159, in stock | "Standard" 139 in stock; "Standard Base + Hibi & Botanical Leaf" 159 | still the bundle; reported 2026-09-29 and awaiting the picker follow-up below. Not refiled | — |
+| gmk-metropolis-r2 | NovelKeys | USD 70 (was 135), in stock | "Base" 70 sold out; **"Midnight Base" 70 available** | site is right — a base kit is buyable at 70 | — |
+| gmk-zm | SwitchKeys / Mekibo | AUD 229.99 / USD 160 (was 180) | renamed handles redirect to `gmk-zimo`, same price | as 2026-09-29; stale handle in URL | — |
+| gmk-dots-r2 (NovelKeys, Oblotzky) / gmk-finer-things (CannonKeys) | — | — | renamed handles redirect to the same product and price | as 2026-09-29 | — |
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+
+Follow-ups:
+- Both stock errors were read by the price pass on 2026-09-29 and are stored
+  sold out while `.js` says available now. `refreshPrices` takes availability
+  from `.js` across every BASE variant, so this looks like a reopen after the
+  last read (Masterpiece R2's variants are newly created pre-order ones) rather
+  than a reader bug. Check whether the next pass heals them.
+- The 2026-09-29 gmk-zm × SwitchKeys note ("the landing page's own base price
+  is 165") came from the same `.json` geo-conversion as the wasabi report; the
+  store's `.js` today says 229.99, matching the site.
