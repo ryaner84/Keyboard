@@ -6,6 +6,8 @@ import {
   pickBaseVariant,
   htmlDeclaresVariantProductGroup,
   offersNameEveryKit,
+  shelfPriceById,
+  applyShelfPrices,
   ADDON_VARIANT_RE,
   NONBASE_SUBKIT_RE,
   PRODUCT_ACCESSORY_RE,
@@ -593,7 +595,7 @@ async function fetchShopifyPrice(
     // recognised rather than assumed. See scripts/lib/storefront-catalog.mjs.
     const product = shopifyProductNode(await res.json()) as ShopifyProductNode | null;
     const rawVariants = product?.variants ?? [];
-    const variants = rawVariants
+    let variants = rawVariants
       .map((v) => {
         // compare_at_price is often populated at the SAME value as price on
         // Shopify; treating that as a markdown would advertise 0% off across
@@ -642,7 +644,12 @@ async function fetchShopifyPrice(
     }
 
     // Shopify's product.json omits availability on some themes. product.js
-    // exposes the same variant IDs with an explicit `available` boolean.
+    // exposes the same variant IDs with an explicit `available` boolean — and
+    // its price, which is the one to STORE: product.json is geo-localizable by
+    // Shopify Markets and serves a datacenter IP a converted number when the
+    // home-market pin misses, while product.js always carries the shelf price
+    // in the shop's base currency (see shelfPriceById). The same fetch answers
+    // both questions.
     const availableById = new Map<string, boolean>();
     for (const variant of rawVariants) {
       if (typeof variant.available === "boolean") {
@@ -656,13 +663,23 @@ async function fetchShopifyPrice(
       );
       if (stockRes.ok) {
         const stockData = (await stockRes.json()) as {
-          variants?: Array<{ id?: number | string; available?: boolean }>;
+          variants?: Array<{
+            id?: number | string;
+            available?: boolean;
+            price?: number | string;
+            compare_at_price?: number | string | null;
+          }>;
         };
         for (const variant of stockData.variants ?? []) {
           if (typeof variant.available === "boolean") {
             availableById.set(String(variant.id ?? ""), variant.available);
           }
         }
+        // Replace each .json price with the un-localized .js shelf price where
+        // .js answered for that variant; a variant .js did not return keeps its
+        // .json price. Must run BEFORE the base pick below so the pick and the
+        // stored number are both the shelf price.
+        variants = applyShelfPrices(variants, shelfPriceById(stockData.variants));
       }
     } catch {
       // Availability remains unknown; preserve the priced listing as available.
