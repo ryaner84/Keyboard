@@ -1518,6 +1518,83 @@ class CompareAtPriceTests(unittest.TestCase):
         self.assertNotIn("compareAt", out[0])
 
 
+class ShelfPriceTests(unittest.TestCase):
+    """The Python mirror of shelfPriceById / applyShelfPrices in kit-variants.ts.
+
+    product.json is geo-localizable by Shopify Markets: a datacenter IP whose
+    home-market pin missed is served a converted number stored under the shop's
+    own currency code (KeyBay CAD 209 read back as 158, probed 2026-10-01).
+    product.js is never localized, so its price is the shelf price to store.
+    """
+
+    def test_cents_to_major_units(self):
+        shelf = scrape._shelf_prices_by_id([{"id": 1, "price": 20900}])
+        self.assertEqual(shelf["1"]["price"], 209.0)
+
+    def test_compare_at_kept_only_when_above_price(self):
+        shelf = scrape._shelf_prices_by_id([
+            {"id": 1, "price": 18000, "compare_at_price": 17615},  # fake markdown
+            {"id": 2, "price": 18000, "compare_at_price": 20000},  # real markdown
+            {"id": 3, "price": 20900, "compare_at_price": 0},
+        ])
+        self.assertNotIn("compareAt", shelf["1"])
+        self.assertEqual(shelf["2"]["compareAt"], 200.0)
+        self.assertNotIn("compareAt", shelf["3"])
+
+    def test_idless_unparseable_and_zero_prices_are_skipped(self):
+        shelf = scrape._shelf_prices_by_id([
+            {"id": "", "price": 10000},
+            {"id": 9, "price": "nope"},
+            {"id": 10, "price": 0},
+        ])
+        self.assertEqual(shelf, {})
+
+    def test_shelf_price_replaces_the_geo_converted_json_price(self):
+        # KeyBay / Keebz: .json served the US-geo converted number, .js the shelf.
+        json_variants = [
+            {"id": "a", "title": "Base", "price": 158.0},
+            {"id": "b", "title": "Novelties", "price": 21.08, "compareAt": 25.0},
+        ]
+        shelf = scrape._shelf_prices_by_id([
+            {"id": "a", "price": 20900},
+            {"id": "b", "price": 3000},  # .js has no compare-at → drop the fake one
+        ])
+        fixed = scrape._apply_shelf_prices(json_variants, shelf)
+        self.assertEqual(fixed[0]["price"], 209.0)
+        self.assertEqual(fixed[1]["price"], 30.0)
+        self.assertNotIn("compareAt", fixed[1])
+        # Input not mutated.
+        self.assertEqual(json_variants[0]["price"], 158.0)
+        # The base pick now returns the shelf price.
+        self.assertEqual(scrape.choose_kit_variant(fixed)["price"], 209.0)
+
+    def test_one_directional_for_unconverted_stores(self):
+        json_variants = [{"id": "x", "title": "Base", "price": 155.0}]
+        shelf = scrape._shelf_prices_by_id([{"id": "x", "price": 15500}])
+        self.assertEqual(scrape._apply_shelf_prices(json_variants, shelf)[0]["price"], 155.0)
+
+    def test_variant_js_omitted_keeps_json_price(self):
+        json_variants = [
+            {"id": "p", "title": "Base", "price": 140.0},
+            {"id": "q", "title": "Novelties", "price": 20.0},
+        ]
+        fixed = scrape._apply_shelf_prices(
+            json_variants, scrape._shelf_prices_by_id([{"id": "p", "price": 18000}])
+        )
+        self.assertEqual(fixed[0]["price"], 180.0)
+        self.assertEqual(fixed[1]["price"], 20.0)
+
+    def test_empty_shelf_leaves_variants_untouched(self):
+        variants = [{"id": "z", "title": "Base", "price": 99.0}]
+        self.assertEqual(scrape._apply_shelf_prices(variants, {}), variants)
+
+    def test_both_halves_apply_the_shelf_price(self):
+        # Written twice — prices.ts imports kit-variants, scrape.py mirrors it.
+        src = Path(scrape.__file__).read_text()
+        self.assertIn("_apply_shelf_prices(variants, shelf_by_id)", src)
+        self.assertIn("shelf_by_id = _shelf_prices_by_id(", src)
+
+
 class MultiSetListingExclusionTests(unittest.TestCase):
     """A clearance page holding MANY sets must never link as one set's listing.
 

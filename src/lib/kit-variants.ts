@@ -368,3 +368,76 @@ export function offersNameEveryKit(offers: Array<{ name?: string | null }>): boo
   if (!Array.isArray(offers) || offers.length === 0) return false;
   return offers.every((offer) => String(offer?.name ?? "").trim() !== "");
 }
+
+// The STORE'S OWN shelf price, read off /products/<handle>.js rather than the
+// .json the base pick is otherwise built from.
+//
+// /products/<handle>.json is geo-localizable by Shopify Markets: a datacenter
+// IP whose home-market pin missed — /meta.json blocked, or Markets ignoring the
+// cart_currency/localization cookie the price pass sends — is served a
+// CONVERTED number, which is then stored under the shop's OWN currency code.
+// Probed from a runner on 2026-10-01: Keebz n Cables' AUD 180 base read back as
+// 144 and KeyBay's CAD 209 as 158 — the exact figures a US visitor's .json
+// returns, a USD conversion mislabelled AUD/CAD, visibly cheaper than the shelf
+// price (and, on Keebz, carrying a compare-at the store never shows). The pin
+// defeats this only when it lands, so the row OSCILLATES run to run; the deals
+// audit filed six such reports (gmk-finer-things, gmk-cyl-finer-things-r2,
+// gmk-alt-grrrrr-addon, gmk-orange-alert × Keebz; gmk-kitsune, gmk-manta ×
+// KeyBay), the never-heals signature.
+//
+// /products/<handle>.js is NEVER localized: it always carries the storefront's
+// own shelf price, in the shop's base currency, and both endpoints share
+// variant ids. So when .js answered for a variant, its price — and its real
+// compare-at — is the number to store, while .json's titles and order are kept.
+// The deals auditor (scripts/released-deals-audit.mjs readShopify) has read
+// price from .js since 2026-09-28 for exactly this reason; this brings both
+// price passes into line with it. The change is one-directional: for a store
+// Shopify Markets does not convert, .js and .json carry the SAME base-currency
+// price, so nothing moves; it only ever replaces a geo-converted number with
+// the shelf price, never a correct number with a wrong one. A variant .js did
+// not return — a store that blocks .js to datacenter IPs — keeps its .json
+// price, which is no worse than before.
+//
+// `.js` prices are integers in the currency's SUBUNIT (cents), for every
+// currency including the zero-decimal ones (Yushakobo's JPY 13200 is 1320000),
+// so the divide-by-100 is unconditional, matching the auditor. Mirrored as
+// _shelf_prices_by_id / _apply_shelf_prices in scraper/scrape.py;
+// test:kit-variants and the Python suite pin both halves.
+export function shelfPriceById(
+  jsVariants: Array<{
+    id?: number | string;
+    price?: number | string;
+    compare_at_price?: number | string | null;
+  }> | null | undefined
+): Map<string, { price: number; compareAt?: number }> {
+  const map = new Map<string, { price: number; compareAt?: number }>();
+  for (const v of jsVariants ?? []) {
+    const id = String(v?.id ?? "");
+    if (!id) continue;
+    const price = Number(v?.price) / 100;
+    if (!Number.isFinite(price) || price <= 0) continue;
+    const compare = Number(v?.compare_at_price) / 100;
+    // Keep a compare-at only when strictly greater, exactly as the .json parse
+    // does — a field left equal to price is not a markdown.
+    map.set(
+      id,
+      Number.isFinite(compare) && compare > price ? { price, compareAt: compare } : { price }
+    );
+  }
+  return map;
+}
+
+export function applyShelfPrices<T extends { id: string; price: number; compareAt?: number }>(
+  variants: T[],
+  shelf: Map<string, { price: number; compareAt?: number }>
+): T[] {
+  if (shelf.size === 0) return variants;
+  return variants.map((v) => {
+    const s = shelf.get(v.id);
+    if (!s) return v;
+    const next: T = { ...v, price: s.price };
+    if (s.compareAt != null) next.compareAt = s.compareAt;
+    else if (next.compareAt != null) delete next.compareAt;
+    return next;
+  });
+}

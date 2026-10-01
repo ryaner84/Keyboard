@@ -10,6 +10,8 @@ import {
   isSubkitSetName,
   offersNameEveryKit,
   pickBaseVariant,
+  shelfPriceById,
+  applyShelfPrices,
 } from "@/lib/kit-variants";
 
 const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
@@ -426,6 +428,89 @@ assert.ok(
 assert.ok(
   /return AMBIGUOUS_OFFERS/.test(scrape) && /offer is AMBIGUOUS_OFFERS/.test(scrape),
   "scrape.py must answer an unnamed aggregate with AMBIGUOUS_OFFERS, not None"
+);
+
+// --- shelf price (.js) preferred over the geo-localizable .json ------------
+
+// .js prices are integer subunits (cents); the map is in major units.
+{
+  const shelf = shelfPriceById([
+    { id: 1, price: 20900, compare_at_price: 0 }, // KeyBay "Base" CAD 209
+    { id: 2, price: 18000, compare_at_price: 17615 }, // compare-at below price → dropped
+    { id: 3, price: 18000, compare_at_price: 20000 }, // a real markdown → kept
+  ]);
+  assert.equal(shelf.get("1")?.price, 209, "cents → major units");
+  assert.equal(shelf.get("1")?.compareAt, undefined, "a zero compare-at is not a markdown");
+  assert.equal(shelf.get("2")?.compareAt, undefined, "compare-at below price is not a markdown");
+  assert.equal(shelf.get("3")?.compareAt, 200, "a compare-at strictly above price is kept");
+}
+// A variant with no id, a non-numeric price, or price 0 is skipped.
+{
+  const shelf = shelfPriceById([
+    { id: "", price: 10000 },
+    { id: 9, price: "nope" },
+    { id: 10, price: 0 },
+  ]);
+  assert.equal(shelf.size, 0, "idless / unparseable / zero prices contribute nothing");
+}
+
+// The core fix: the KeyBay / Keebz case. .json served the US-geo converted
+// number (158 CAD, 143.68 AUD); .js carries the shelf price (209 / 180).
+{
+  const jsonVariants = [
+    { id: "a", title: "Base", price: 158 }, // geo-converted
+    { id: "b", title: "Novelties", price: 21.08, compareAt: 25 }, // fake .json markdown
+  ];
+  const shelf = shelfPriceById([
+    { id: "a", price: 20900 },
+    { id: "b", price: 3000 }, // .js has no compare-at → drop the fake one
+  ]);
+  const fixed = applyShelfPrices(jsonVariants, shelf);
+  assert.equal(fixed[0].price, 209, "base takes the .js shelf price, not the .json conversion");
+  assert.equal(fixed[1].price, 30, "subkit takes the .js price too");
+  assert.equal(fixed[1].compareAt, undefined, "the .json-only fake markdown is dropped");
+  // The input is not mutated.
+  assert.equal(jsonVariants[0].price, 158, "applyShelfPrices does not mutate its input");
+  // And the base pick now returns the shelf price.
+  assert.equal(pickBaseVariant(fixed)?.price, 209, "the pick reflects the shelf price");
+}
+
+// One-directional: a store Markets does not convert serves the SAME base
+// price on both endpoints, so applying the shelf map changes nothing.
+{
+  const jsonVariants = [{ id: "x", title: "Base", price: 155 }];
+  const shelf = shelfPriceById([{ id: "x", price: 15500 }]);
+  assert.equal(applyShelfPrices(jsonVariants, shelf)[0].price, 155, "equal prices stay put");
+}
+// A variant .js did not return (store blocks .js to datacenter IPs) keeps its
+// .json price — never worse than before.
+{
+  const jsonVariants = [
+    { id: "p", title: "Base", price: 140 },
+    { id: "q", title: "Novelties", price: 20 },
+  ];
+  const fixed = applyShelfPrices(jsonVariants, shelfPriceById([{ id: "p", price: 18000 }]));
+  assert.equal(fixed[0].price, 180, "the variant .js answered for is corrected");
+  assert.equal(fixed[1].price, 20, "the variant .js omitted keeps its .json price");
+}
+// An empty shelf map (no .js at all) returns the variants untouched.
+assert.deepEqual(
+  applyShelfPrices([{ id: "z", title: "Base", price: 99 }], shelfPriceById([])),
+  [{ id: "z", title: "Base", price: 99 }],
+  "no .js data leaves .json prices as they were"
+);
+
+// Both price passes must prefer the shelf price. The rule is written twice —
+// prices.ts imports this module, scrape.py mirrors it — and a fix to one half
+// is only half a fix (the nightly and the six-hourly pass both store prices).
+assert.ok(
+  /applyShelfPrices\(variants, shelfPriceById\(stockData\.variants\)\)/.test(prices),
+  "prices.ts must overwrite the .json price with the .js shelf price"
+);
+assert.ok(
+  /_apply_shelf_prices\(variants, shelf_by_id\)/.test(scrape) &&
+    /shelf_by_id = _shelf_prices_by_id\(/.test(scrape),
+  "scrape.py must capture and apply the .js shelf price the same way"
 );
 
 console.log("kit-variants tests passed");

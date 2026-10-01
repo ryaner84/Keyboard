@@ -1572,6 +1572,61 @@ def _parse_shopify_variants(raw_variants: list) -> list[dict]:
     return out
 
 
+def _shelf_prices_by_id(js_variants: list) -> dict[str, dict]:
+    """product.js variants (price/compare_at in CENTS) → {id: {price, compareAt?}}.
+
+    Mirror of shelfPriceById in src/lib/kit-variants.ts. product.json is
+    geo-localizable by Shopify Markets, so a datacenter IP whose home-market pin
+    misses is served a converted number stored under the shop's own currency
+    code; product.js is never localized and carries the store's own shelf price
+    in its base currency. Prices are integer subunits (cents) for every currency
+    including the zero-decimal ones, so the /100 is unconditional.
+    """
+    out: dict[str, dict] = {}
+    for v in js_variants or []:
+        vid = str(v.get("id") or "")
+        if not vid:
+            continue
+        try:
+            price = float(v.get("price")) / 100.0
+        except (TypeError, ValueError):
+            continue
+        if price <= 0:
+            continue
+        entry: dict = {"price": price}
+        try:
+            compare = float(v.get("compare_at_price")) / 100.0
+        except (TypeError, ValueError):
+            compare = 0.0
+        if compare > price:
+            entry["compareAt"] = compare
+        out[vid] = entry
+    return out
+
+
+def _apply_shelf_prices(variants: list[dict], shelf: dict[str, dict]) -> list[dict]:
+    """Override each variant's price/compareAt with the .js shelf price when that
+    id was present in .js; keep the .json price otherwise. Mirror of
+    applyShelfPrices. One-directional: for a store Markets does not convert, .js
+    and .json carry the same base-currency price, so nothing moves."""
+    if not shelf:
+        return variants
+    out: list[dict] = []
+    for v in variants:
+        s = shelf.get(v["id"])
+        if not s:
+            out.append(v)
+            continue
+        nv = dict(v)
+        nv["price"] = s["price"]
+        if "compareAt" in s:
+            nv["compareAt"] = s["compareAt"]
+        else:
+            nv.pop("compareAt", None)
+        out.append(nv)
+    return out
+
+
 def _pick_variant(
     variants: list[dict], pinned_id: str | None, allow_subkits: bool = False
 ) -> dict | None:
@@ -2045,8 +2100,14 @@ def shopify_price(
             return NO_BASE_KIT if variants else None
 
         # product.json omits stock on some themes; product.js exposes an
-        # explicit `available` flag for the same variant IDs.
+        # explicit `available` flag for the same variant IDs — and its price,
+        # which is the one to STORE: product.json is geo-localizable by Shopify
+        # Markets and serves a datacenter IP a converted number when the
+        # home-market pin misses, while product.js always carries the shelf
+        # price in the shop's base currency (see _shelf_prices_by_id). Captured
+        # here and applied after the currency repin below.
         availability_by_id: dict[str, bool] = {}
+        shelf_by_id: dict[str, dict] = {}
         for variant in product.get("variants") or []:
             available = variant.get("available")
             if isinstance(available, bool):
@@ -2060,6 +2121,7 @@ def shopify_price(
                 available = variant.get("available")
                 if isinstance(available, bool):
                     availability_by_id[str(variant.get("id") or "")] = available
+            shelf_by_id = _shelf_prices_by_id(stock_data.get("variants") or [])
         if not availability_by_id:
             relevant_ids = [
                 variant["id"]
@@ -2100,6 +2162,8 @@ def shopify_price(
                     available = variant.get("available")
                     if isinstance(available, bool):
                         availability_by_id[str(variant.get("id") or "")] = available
+                if not shelf_by_id:
+                    shelf_by_id = _shelf_prices_by_id(stock_data.get("variants") or [])
             if not availability_by_id:
                 for variant in _relevant_base_variants(variants, chosen, pinned_id):
                     variant_data = browser_json(
@@ -2209,6 +2273,18 @@ def shopify_price(
                         variants, chosen = v2, c2
             except Exception:  # noqa: BLE001
                 pass
+
+        # Replace each .json price with the un-localized .js shelf price where
+        # .js answered for that variant, then re-pick: the repin above still
+        # reads .json, which Markets can convert when the pin misses, so the
+        # shelf price is the authority and is applied last. Same variant IDs, so
+        # it holds through the repin's re-parse. A variant .js did not return
+        # keeps its .json price — no worse than before.
+        if shelf_by_id:
+            variants = _apply_shelf_prices(variants, shelf_by_id)
+            repicked = _pick_variant(variants, pinned_id, allow_subkits)
+            if repicked is not None:
+                chosen = repicked
 
         # Fall back to the vendor's own currency (e.g. DeskHero = CAD), never
         # a blind USD default that inflates CA$88 into US$88.
