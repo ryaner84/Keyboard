@@ -1109,6 +1109,60 @@ both the client-reported log and the resolution audit in the same run.
 > open owner item (§1): live and priced 229.99 AUD, but relinking to the current
 > in-stock `/products/gmk-zimo` (165 AUD) is an owner/discovery judgment.
 
+> **2026-10-01 run.** Price feed run 36882423486 (`?all=1`) returns **0 pending,
+> 64 resolved** — the feed now carries the **8 batch-6 reports** filed by the
+> released deals audit (#202, run 36803622470, 2026-10-01T01:58), which this
+> ledger had not yet recorded (#202 logged them only in
+> `released-deals-audit-ledger.md`). Visitor inbox run 36882428168: the SAME **15
+> `LISTING_FLAG`s + 1 FEEDBACK** already triaged and reported to the owner since
+> 2026-09-14 (§4b); no new flags, nothing auto-resolvable; STORE_LINK /
+> PRICE_REPORT / PHOTO_REPORT channels empty.
+>
+> **Incoming Self-heal watch (3, from 2026-09-30) — all three CONFIRMED healed
+> and cleared.** gmk-botanical-r2 × Oblotzky reads `139 EUR SCRAPED` (#201 holds;
+> 159 bundle not returned); gmk-varenye × iLumKB `209 SGD SCRAPED`;
+> gmk-masterpiece-r2 × Oblotzky `119 EUR SCRAPED`. All post-date their submits;
+> moved to the resolution audit.
+>
+> **Batch 6 — two groups.** Group A (proto[Typist] wrong-variant regression from
+> #201) was already fixed in #202's picker change and reads corrected:
+> dcs-handarbeit `95 GBP`, dcs-dream-alert `105.83 GBP`. On the watch to confirm.
+>
+> **Group B — Keebz n Cables ×4 + KeyBay ×2: a geo-converted `.json` price;
+> root-caused and FIXED in-run (`abc3021`).** #202 handed this to the review
+> ("the home-market pin does not reach them; reading `.js` first would. Worth
+> checking in the price-report review"). The reports read the corrected values
+> now (Keebz 180/180/19/211 AUD, KeyBay 209/209 CAD), but a wrong-currency reason
+> does NOT self-heal (routine step 3) — the correct read is the oscillation trap.
+> **Ground truth, Vendor probe run 36883084292 (US runner):** `/products/<h>.json`
+> (plain) serves the geo-CONVERTED figure — KeyBay Base `158`, Keebz Teal/White
+> Base `143.68`, Alt Grrrrr `12.77/15.17` — while `/products/<h>.js` carries the
+> store's shelf price — `209 CAD`, `180 AUD`, `16/19 AUD`, `211 AUD` — the exact
+> values the reports call correct. The price pass reads price from the
+> **geo-localizable `.json`** and defends only with a `cart_currency`/
+> `localization` cookie, which Shopify Markets honours *only when `/meta.json`
+> lands*; when it misses (a datacenter-IP block), `.json` returns the US-geo
+> conversion stored under the shop's own currency code — AUD 180 → 144, CAD 209 →
+> 158 — plus a compare-at the store never shows. A targeted re-scrape (run
+> 36883078790, `updated=6`) happened to land the cookie and re-stored the correct
+> values, which is exactly the run-to-run flip the audit caught. The deals
+> auditor's own `readShopify` has read price from `.js` since 2026-09-28 for this
+> reason; the two price passes had not.
+>
+> **Fix (`abc3021`):** `shelfPriceById` + `applyShelfPrices` (pure, in
+> `kit-variants.ts`; mirrored as `_shelf_prices_by_id`/`_apply_shelf_prices` in
+> `scrape.py`) overwrite each variant's `.json` price with the un-localized `.js`
+> shelf price when `.js` answered for that variant id, keeping `.json`'s
+> titles/order and falling back to the `.json` price when `.js` is blocked. It is
+> **one-directional**: for a store Shopify Markets does not convert, `.js` and
+> `.json` carry the same base-currency price so nothing moves; it only ever
+> replaces a geo-converted number with the shelf price, never a correct number
+> with a wrong one, and it also drops the fake `.json` compare-at. Both price
+> passes already fetched `.js` (for availability), so no new request. 232 Python
+> tests, all 24 npm suites, `tsc --noEmit` and `next lint` clean. All six Group B
+> rows are on the Self-heal watch; a post-deploy re-scrape makes the correct value
+> deterministic (no longer dependent on the cookie landing).
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _One owner item: **gmk-zm × SwitchKeys** — not a wrong price and not a dead link
@@ -1138,19 +1192,33 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-**Currently on the watch: three (all added 2026-09-30).** The *next* run must
-confirm each healed (report resolved, wrong value gone / stock correct) or fix it:
+**Currently on the watch: eight (all added 2026-10-01, batch 6 / #202).** The
+*next* run must confirm each (report resolved, wrong value gone / stock correct):
 
 | set | vendor | flagged | reason | verdict this run |
 |---|---|---|---|---|
-| gmk-botanical-r2 | Oblotzky | 2026-09-30 | wrong variant — "Standard Base + Hibi & Botanical Leaf" bundle (159) priced as base; real base "Standard" 139 | ✅ **fixed in-run (#201, `95e1e0d`).** "+ after base" now classifies the bundle BUNDLE; targeted re-scrape (run 36736521078, `updated=1`) landed it and the feed reads `139 EUR SCRAPED`. Watched to confirm 139 holds and 159 does not return |
-| gmk-varenye | iLumKB | 2026-09-30 | stock — shown SOLD OUT, but "Full Base" 209 available | ✅ self-heal (stock). Probe run 36735257689: Full Base 209 `available=true` (TKL Base 179 too); 209 SGD pick correct. Availability scrape clears the sold-out display. Watched for confirmation |
-| gmk-masterpiece-r2 | Oblotzky | 2026-09-30 | stock — shown SOLD OUT, but "Origin Base" 119 available (pre-order) | ✅ self-heal (stock/pre-order). Probe run 36735257689: Origin Base 119 `available=true` (pre-order tag); 119 EUR pick correct. Watched for confirmation |
+| gmk-cyl-finer-things-r2-keycaps | Keebz n Cables | 2026-10-01 | wrong price (geo-converted `.json`) + fake markdown — site AUD 144.12 (was 176.15); store base 180, no compare-at | ✅ **fixed in-run (`abc3021`).** `.js`-shelf-price fix; feed reads `180 AUD SCRAPED`. Watched to confirm 180 holds and 144 does not return |
+| gmk-finer-things | Keebz n Cables | 2026-10-01 | R1 set links to the R2 product; site AUD 144.12, store base 180 | ✅ **fixed in-run (`abc3021`).** Feed reads `180 AUD SCRAPED`. Watched |
+| gmk-alt-grrrrr-addon | Keebz n Cables | 2026-10-01 | wrong price (geo-converted `.json`) + fake markdown — site AUD 15.21; store `.js` Dolch 16 / Evil Dolch 19 | ✅ **fixed in-run (`abc3021`).** Feed reads `19 AUD SCRAPED`. Watched |
+| gmk-orange-alert | Keebz n Cables | 2026-10-01 | wrong price (geo-converted `.json`) — site AUD 168.95; store "TKL Base" 211 (sold out both sides) | ✅ **fixed in-run (`abc3021`).** Feed reads `211 AUD SCRAPED`; `.js` says TKL Base `available=false`. Watched |
+| gmk-kitsune | KeyBay | 2026-10-01 | wrong price (geo-converted `.json`) — site CAD 158; store "Base" 209 | ✅ **fixed in-run (`abc3021`).** Feed reads `209 CAD SCRAPED`. Watched |
+| gmk-manta | KeyBay | 2026-10-01 | wrong price (geo-converted `.json`) — site CAD 158; store "Base" 209 | ✅ **fixed in-run (`abc3021`).** Feed reads `209 CAD SCRAPED`. Watched |
+| dcs-handarbeit | proto[Typist] | 2026-10-01 | wrong variant — GBP 15.83 "WASD" kit priced as base; base "Base Kit + UKISO" 95 (#201 regression) | ✅ **fixed #202 (`86c4eef`).** Picker drops an unlabelled candidate under half the cheapest bundle; feed reads `95 GBP SCRAPED`. Watched to confirm 95 holds |
+| dcs-dream-alert | proto[Typist] | 2026-10-01 | wrong variant — GBP 15 "6.25u" kit priced as base; base "Base Kit + UKISO" 105.83 (#201 regression) | ✅ **fixed #202 (`86c4eef`).** Same picker fix; feed reads `105.83 GBP SCRAPED`. Watched |
 
 _gmk-wasabi-r2 × SwitchKeys (2026-09-29) is NOT watched: a false-positive report
 — 199 AUD is correct (matches the store's `.js`; the 143 was a geo-converted
 `.json` reading), already established by deals-audit batch 5. No oscillation to
 track._
+
+**Prior watch (added 2026-09-30) — all three CONFIRMED healed on the 2026-10-01
+run and moved to the resolution audit:**
+
+| set | vendor | flagged | reason | confirmation (2026-10-01) |
+|---|---|---|---|---|
+| gmk-botanical-r2 | Oblotzky | 2026-09-30 | wrong variant, fixed #201 | ✅ feed `139 EUR SCRAPED`; 159 bundle not returned — #201 holds |
+| gmk-varenye | iLumKB | 2026-09-30 | stock-only (Full Base 209 available) | ✅ feed `209 SGD SCRAPED`, resolved; price correct & unchanged |
+| gmk-masterpiece-r2 | Oblotzky | 2026-09-30 | stock-only (Origin Base 119 pre-order available) | ✅ feed `119 EUR SCRAPED`, resolved; price correct & unchanged |
 
 **Prior watch (added 2026-09-27) — both resolved on the 2026-09-28 run:**
 
@@ -1258,7 +1326,15 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-09-29 | gmk-wasabi-r2 | SwitchKeys | 199 AUD | "wrong price: site shows AUD 199, link lands on Wasabi Base 143" (deals audit) | false positive | ✅ resolved 2026-09-30 — 199 AUD correct (matches store `.js`); 143 was a geo-converted `.json` reading (deals-audit batch 5) |
 | 2026-09-29 | gmk-botanical-r2 | Oblotzky Industries | 159 EUR | "wrong variant: EUR 159 is the 'Standard Base + Hibi & Botanical Leaf' bundle; base 'Standard' is EUR 139" (deals audit) | needs fix | ✅ resolved (#201 `95e1e0d`; "+ after base" → BUNDLE; re-scrape landed **139 EUR**) |
 | 2026-09-30 | gmk-masterpiece-r2 | Oblotzky Industries | 119 EUR | "stock wrong: shown SOLD OUT, but 'Origin Base' EUR 119 available (pre-order)" (deals audit) | self-healed (stock) | ✅ resolved (stock/pre-order scrape; 119 EUR correct, probe-confirmed available) — on watch |
-| 2026-09-30 | gmk-varenye | iLumKB | 209 SGD | "stock wrong: shown SOLD OUT, but 'Full Base' SGD 209 available" (deals audit) | self-healed (stock) | ✅ resolved (stock scrape; 209 SGD correct, probe-confirmed available) — on watch |
+| 2026-09-30 | gmk-varenye | iLumKB | 209 SGD | "stock wrong: shown SOLD OUT, but 'Full Base' SGD 209 available" (deals audit) | self-healed (stock) | ✅ resolved (stock scrape; 209 SGD correct, probe-confirmed available; confirmed healed 2026-10-01) |
+| 2026-10-01 | dcs-handarbeit | proto[Typist] | 95 GBP | "wrong variant: GBP 15.83 is the 'WASD' kit; base is 'Base Kit + UKISO' GBP 95 (#201 regression)" (deals audit) | needs fix | ✅ resolved (#202 `86c4eef`; picker drops a cheap unlabelled subkit under half the bundle; feed `95 GBP`) — on watch |
+| 2026-10-01 | dcs-dream-alert | proto[Typist] | 105.83 GBP | "wrong variant: GBP 15 is the '6.25u Kit'; base is 'Base Kit + UKISO' GBP 105.83 (#201 regression)" (deals audit) | needs fix | ✅ resolved (#202 `86c4eef`; same picker fix; feed `105.83 GBP`) — on watch |
+| 2026-10-01 | gmk-cyl-finer-things-r2-keycaps | Keebz n Cables | 180 AUD | "wrong price + fake markdown: site AUD 144.12 (was 176.15); store base 180, no compare-at (geo-converted .json)" (deals audit) | needs fix | ✅ resolved (`abc3021`; `.js` shelf price preferred over geo-localizable `.json`; feed `180 AUD`) — on watch |
+| 2026-10-01 | gmk-finer-things | Keebz n Cables | 180 AUD | "wrong product and price: R1 set links to the R2 product; site AUD 144.12, store base 180" (deals audit) | needs fix | ✅ resolved (`abc3021`; `.js` shelf price; feed `180 AUD`) — on watch |
+| 2026-10-01 | gmk-alt-grrrrr-addon | Keebz n Cables | 19 AUD | "wrong price + fake markdown: site AUD 15.21; store .js Dolch 16 / Evil Dolch 19 (geo-converted .json)" (deals audit) | needs fix | ✅ resolved (`abc3021`; `.js` shelf price; feed `19 AUD`) — on watch |
+| 2026-10-01 | gmk-orange-alert | Keebz n Cables | 211 AUD | "wrong price: site AUD 168.95; store 'TKL Base' 211 sold out (geo-converted .json)" (deals audit) | needs fix | ✅ resolved (`abc3021`; `.js` shelf price; feed `211 AUD`) — on watch |
+| 2026-10-01 | gmk-kitsune | KeyBay | 209 CAD | "wrong price: site CAD 158; store 'Base' CAD 209 (geo-converted .json served to a US visitor)" (deals audit) | needs fix | ✅ resolved (`abc3021`; `.js` shelf price; feed `209 CAD`) — on watch |
+| 2026-10-01 | gmk-manta | KeyBay | 209 CAD | "wrong price: site CAD 158; store 'Base' CAD 209 (geo-converted .json)" (deals audit) | needs fix | ✅ resolved (`abc3021`; `.js` shelf price; feed `209 CAD`) — on watch |
 
 ## 4. Listing-flag triage (visitor inbox — `ListingReport`)
 
@@ -1361,7 +1437,15 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-09-29 | gmk-wasabi-r2 | SwitchKeys | 199 AUD | false positive | **Not a wrong price.** Deals-audit batch 5 established AUD 199 is correct (matches switchkeys.com.au's own `.js`); the 143 the batch-4 report cited came from the store's geo-converted `.json`. The stored collection URL 404s but `normalizeShopifyUrl` strips it to `/products/gmk-wasabi-v2-group-buy`, which 301s to the live `/products/gmk-wasabi-v2`; the price reads 199 AUD SCRAPED. No scrape bug | ✅ resolved (false positive; 199 AUD correct) |
 | 2026-09-29 | gmk-botanical-r2 | Oblotzky Industries | 159 EUR | needs fix | **Wrong variant, fixed #201 (`95e1e0d`).** Vendor probe (run 36735257689, `/products/gmk-cyl-botanical-2`): real base "Standard" 139 EUR `available=true`, beside "Standard Base + Hibi & Botanical Leaf"/"… Succulent" bundles at 159. The bundle names artisan kits ("Hibi", "Botanical Leaf") no `BUNDLE_EXTRA_RE` lists and no literal "bundle", so `classifyVariant` fell through to BASE — and the real base "Standard" carries no "base" word (→ OTHERS), so the "… Base + …" bundle was the only variant classified BASE and `titledBase` returned it. #201 adds the "+ after base" shape (`basePlusExtra` / `_base_plus_extra`) as a third bundle signal, stripping parenthetical colourway specs so "Teal & White Base" and "Two Base（Teal + White）" stay BASE. The picker then returns the dearest real base = "Standard" 139. Targeted re-scrape (id `cmq585ux202a0b17d1q505hsa`, run 36736521078, `updated=1`); confirmation feed (run 36736657805) reads `139 EUR SCRAPED`. `test:kit-variants` + Python suite pin both halves | ✅ resolved (#201; 139 EUR) — on watch |
 | 2026-09-30 | gmk-masterpiece-r2 | Oblotzky Industries | 119 EUR | self-healed (stock) | Stock/pre-order. Vendor probe (run 36735257689): "Origin Base" 119 EUR `available=true` (product tag "pre-order"), beside "Roman Base" 139. The picker's 119 (first titled base, the cheaper colourway) is correct and was never disputed; the report was that the tracker showed it SOLD OUT. Availability scrape clears the display; the price pass is sole authority for `inStock` (#153). Recurs as a pre-order/stock note (cf. the 2026-07-18 masterpiece pre-order reports) | ✅ resolved (self-healed; on watch) |
-| 2026-09-30 | gmk-varenye | iLumKB | 209 SGD | self-healed (stock) | Stock. Vendor probe (run 36735257689): "Full Base" 209 SGD `available=true` (TKL Base 179, Extension 76, Alt Mods 132). The picker's 209 (dearest titled base) is correct and was never disputed; the report was that the tracker showed it SOLD OUT. Availability scrape clears it | ✅ resolved (self-healed; on watch) |
+| 2026-09-30 | gmk-varenye | iLumKB | 209 SGD | self-healed (stock) | Stock. Vendor probe (run 36735257689): "Full Base" 209 SGD `available=true` (TKL Base 179, Extension 76, Alt Mods 132). The picker's 209 (dearest titled base) is correct and was never disputed; the report was that the tracker showed it SOLD OUT. Availability scrape clears it. **Confirmed healed 2026-10-01** (feed `209 SGD SCRAPED`) | ✅ resolved (self-healed; confirmed 2026-10-01) |
+| 2026-10-01 | dcs-handarbeit | proto[Typist] | 95 GBP | needs fix | **Wrong variant, already fixed #202 (`86c4eef`).** proto[Typist] sells its only base as "DCS Handarbeit - Base Kit + UKISO" (GBP 95) beside "WASD" (15.83), "BAE", "10U". #201's "+ after base" rule correctly classified the base as a BUNDLE — but with no plain base left, `pickBaseVariant` fell back to the dearest UNLABELLED line, and the cheap WASD subkit won. #202 drops an unlabelled candidate priced under HALF the cheapest bundle (a bundle is a base plus something, so the base inside it costs well over half), so the bundle is used. Re-scrape landed the base; feed reads `95 GBP SCRAPED`. Filed by the deals audit batch 6 | ✅ resolved (#202; 95 GBP) — on watch |
+| 2026-10-01 | dcs-dream-alert | proto[Typist] | 105.83 GBP | needs fix | Same cause/fix as dcs-handarbeit: "6.25u Kit" (GBP 15) priced as base; the base is "Base Kit + UKISO Kit" GBP 105.83 (sold out). #202 half-the-bundle rule; feed reads `105.83 GBP SCRAPED` | ✅ resolved (#202; 105.83 GBP) — on watch |
+| 2026-10-01 | gmk-cyl-finer-things-r2-keycaps | Keebz n Cables | 180 AUD | needs fix | **Geo-converted `.json` price, fixed in-run (`abc3021`).** Vendor probe run 36883084292: `/products/<h>.json` (plain, no cookie) served "Teal Base"/"White Base" **143.68** with a fake 176.15 compare-at, while `/products/<h>.js` carries the shelf price **180 AUD** (available=true, no compare-at). `/products/<handle>.json` is geo-localizable by Shopify Markets: a datacenter IP whose home-market pin misses (`/meta.json` blocked, or Markets ignoring the `cart_currency`/`localization` cookie) is served the US-geo conversion, stored under the shop's own currency code; `.js` is never localized. #202 handed this to the review. Both price passes now prefer the `.js` shelf price per variant id (`shelfPriceById`/`applyShelfPrices` in `kit-variants.ts`, mirrored `_shelf_prices_by_id`/`_apply_shelf_prices` in `scrape.py`), falling back to `.json` when `.js` is blocked — one-directional: an unconverted store serves the same price on both endpoints. The fake `.json` compare-at is dropped too. The deals auditor's `readShopify` has read `.js` since 2026-09-28; this brings the price passes into line. `test:kit-variants` + Python suite pin both halves. Feed reads `180 AUD SCRAPED` | ✅ resolved (`abc3021`; 180 AUD) — on watch |
+| 2026-10-01 | gmk-finer-things | Keebz n Cables | 180 AUD | needs fix | Same vendor/product/fix as gmk-cyl-finer-things-r2 (the R1 set links to the R2 product page). `.js` shelf price 180 AUD; feed `180 AUD SCRAPED` | ✅ resolved (`abc3021`; 180 AUD) — on watch |
+| 2026-10-01 | gmk-alt-grrrrr-addon | Keebz n Cables | 19 AUD | needs fix | Same cause/fix. Probe: `.json` Dolch 12.77 / Evil Dolch 15.17 (converted); `.js` Dolch 16 / Evil Dolch 19 (shelf, available=true, no compare-at). `.js`-shelf-price fix; feed `19 AUD SCRAPED` | ✅ resolved (`abc3021`; 19 AUD) — on watch |
+| 2026-10-01 | gmk-orange-alert | Keebz n Cables | 211 AUD | needs fix | Same cause/fix. Probe: `.json` "TKL Base" 168.43 (converted); `.js` 211 AUD, `available=false` (sold out both sides). `.js`-shelf-price fix; feed `211 AUD SCRAPED` | ✅ resolved (`abc3021`; 211 AUD) — on watch |
+| 2026-10-01 | gmk-kitsune | KeyBay | 209 CAD | needs fix | Same cause/fix, KeyBay (CA store). Probe: `.json` "Base" 158 (US-geo conversion stored as CAD); `.js` "Base" 209 CAD, available=true. `.js`-shelf-price fix; feed `209 CAD SCRAPED` | ✅ resolved (`abc3021`; 209 CAD) — on watch |
+| 2026-10-01 | gmk-manta | KeyBay | 209 CAD | needs fix | Same cause/fix as gmk-kitsune. `.json` 158, `.js` 209 CAD; feed `209 CAD SCRAPED` | ✅ resolved (`abc3021`; 209 CAD) — on watch |
 
 ### Client-recommended values verified
 
@@ -1384,16 +1468,36 @@ uploaded 2 builds but the mai…") — left for the owner.
   EUR 139, in stock, and within `KIT_BOUNDS`; the 159 the reporter flagged is the
   "Standard Base + Hibi & Botanical Leaf" bundle. **Confirmed stored 2026-09-30**
   after #201: the feed reads `139 EUR SCRAPED`.
+- **Keebz n Cables AUD / KeyBay CAD shelf prices** (deals audit batch 6's
+  correction): gmk-cyl-finer-things-r2 / gmk-finer-things **180 AUD**,
+  gmk-alt-grrrrr-addon **19 AUD**, gmk-orange-alert **211 AUD** (sold out),
+  gmk-kitsune / gmk-manta **209 CAD**. Verified against the Vendor probe (run
+  36883084292): each is the store's own `/products/<handle>.js` shelf price in
+  the shop's base currency (the reported wrong figures — 144.12 / 15.21 / 168.95
+  AUD, 158 CAD — were the geo-converted `/products/<handle>.json` a US runner is
+  served). The `.js`-shelf-price fix stores these deterministically.
+- **dcs-handarbeit base = GBP 95 / dcs-dream-alert base = GBP 105.83**
+  (proto[Typist], deals audit batch 6's correction). Verified: both are the
+  store's "Base Kit + UKISO" variant, within `KIT_BOUNDS`, and exactly what the
+  picker returns after #202 stops a cheap unlabelled subkit outranking the only
+  bundle. Feed reads `95 GBP` / `105.83 GBP SCRAPED`.
 
 ## Summary
 
-- **56 report submissions across 44 listings** (full `?all=1` history, first
+- **64 report submissions across ~50 listings** (full `?all=1` history, first
   reconciled 2026-08-26; gmk-vamp × Switchmod added 2026-08-27; 6 added
-  2026-09-26, 2 added 2026-09-27, 3 added 2026-09-28, **2 added 2026-09-29**
+  2026-09-26, 2 added 2026-09-27, 3 added 2026-09-28, 2 added 2026-09-29, 2 added
+  2026-09-30, and **8 added 2026-10-01** (batch 6, #202 + this run's `.js`
+  shelf-price fix): dcs-handarbeit / dcs-dream-alert × proto[Typist] (#201
+  wrong-variant regression, fixed **#202** — a cheap unlabelled subkit no longer
+  outranks the only bundle) and four Keebz n Cables + two KeyBay rows
+  (geo-converted `.json` price, fixed this run by preferring the un-localized
+  `.js` shelf price). The earlier batches: **2 added 2026-09-29**
   (batch 4, #199: gmk-wasabi-r2 × SwitchKeys — false positive, 199 AUD correct;
   gmk-botanical-r2 × Oblotzky — wrong variant, fixed **#201**) and **2 added
   2026-09-30** (batch 5, #200: gmk-masterpiece-r2 × Oblotzky and gmk-varenye ×
-  iLumKB, both stock-only self-heals with correct prices, on the watch) by the
+  iLumKB, both stock-only self-heals with correct prices, confirmed healed
+  2026-10-01) by the
   released deals audit. The 3 added 2026-09-28 were batch 3, #198:
   gmk-black-snail × Neo Macro and its red-cyrillic
   add-on (wrong variant = the U9 Modifier Kit, fixed #198 → both cleared to
@@ -1432,6 +1536,21 @@ uploaded 2 builds but the mai…") — left for the owner.
   it the picker's `titledBase`. The "+ after base" shape (`basePlusExtra`) marks
   it a bundle without a per-set vocabulary, and parenthetical colourway specs are
   stripped so "Two Base（Teal + White）" stays a base. `159 → 139 EUR` confirmed.
+- **New systematic surface: the geo-localized `.json` price.** Both price passes
+  read a Shopify listing's price from `/products/<handle>.json`, which Shopify
+  Markets converts to the requester's geo (a US datacenter IP) whenever the
+  `cart_currency`/`localization` cookie's pin misses — storing the US conversion
+  under the shop's own currency code, visibly cheapest, with a compare-at the
+  store never shows. The row oscillates run to run depending on whether the pin
+  lands. `/products/<handle>.js` is never localized and carries the store's own
+  shelf price; both passes now prefer it per variant id (`shelfPriceById` /
+  `applyShelfPrices`, mirrored in `scrape.py`), falling back to `.json` when `.js`
+  is blocked. One-directional — an unconverted store serves the same price on
+  both endpoints — and it matches what the deals auditor's `readShopify` has done
+  since 2026-09-28. Fixed this run for six rows (Keebz n Cables AUD ×4, KeyBay
+  CAD ×2). The complementary wrong-variant regression (proto[Typist] ×2, #201's
+  "+ after base" left a cheap unlabelled subkit outranking the only bundle) was
+  fixed in **#202 (`86c4eef`)**.
 - **Ledger completeness caveat (now closed for history-to-date).** The committed
   log was previously transcribed from pending-only snapshots, which drop a
   report the moment it resolves — so 25 reports that filed-and-healed between
