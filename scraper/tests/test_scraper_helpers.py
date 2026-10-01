@@ -1303,6 +1303,21 @@ class BundleVariantTests(unittest.TestCase):
         ])
         self.assertEqual(chosen["price"], 139.0)
 
+    def test_cheap_unlabelled_subkit_does_not_outrank_the_only_bundle(self):
+        # proto[Typist] sells its only base as "... Base Kit + UKISO" (probed
+        # 2026-10-01). With that classified BUNDLE, the dearest unlabelled line
+        # ("WASD" 15.83) was published as the base. Mirrors kit-variants.test.ts.
+        chosen = scrape.choose_kit_variant([
+            {"id": "1", "title": "DCS Handarbeit - Base Kit + UKISO", "price": 95.0},
+            {"id": "2", "title": "DCS Handarbeit - Extension Kit", "price": 44.17},
+            {"id": "3", "title": "DCS Handarbeit - Numpad Kit", "price": 35.83},
+            {"id": "4", "title": "DCS Handarbeit - Spacebars Kit", "price": 28.33},
+            {"id": "5", "title": "DCS Handarbeit - WASD", "price": 15.83},
+            {"id": "6", "title": "DCS Handarbeit - BAE", "price": 10.0},
+            {"id": "7", "title": "DCS Handarbeit - 10U", "price": 5.83},
+        ])
+        self.assertEqual(chosen["price"], 95.0)
+
     def test_abbreviated_bundle_does_not_mark_a_sold_out_base_in_stock(self):
         # iLumKB: "Base" sold out beside an in-stock "Base+Nov+Space" bundle.
         # The abbreviations named no extra the vocabulary knew, so the bundle

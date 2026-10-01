@@ -178,6 +178,34 @@ assert.equal(
   139,
   "the plain 'Standard' base wins over the '… Base + …' bundle"
 );
+// …and the bundle rule must not hand the pick to a cheap unlabelled subkit.
+// proto[Typist] sells its ONLY base as "… Base Kit + UKISO" (probed
+// 2026-10-01); with that classified BUNDLE, the dearest unlabelled line
+// ("WASD" 15.83, "6.25u Kit" 15) was published as the base on the next pass.
+assert.equal(
+  pickBaseVariant([
+    { title: "DCS Handarbeit - Base Kit + UKISO", price: 95 },
+    { title: "DCS Handarbeit - Extension Kit", price: 44.17 },
+    { title: "DCS Handarbeit - Numpad Kit", price: 35.83 },
+    { title: "DCS Handarbeit - Spacebars Kit", price: 28.33 },
+    { title: "DCS Handarbeit - WASD", price: 15.83 },
+    { title: "DCS Handarbeit - BAE", price: 10 },
+    { title: "DCS Handarbeit - 10U", price: 5.83 },
+  ])?.price,
+  95,
+  "an unlabelled variant under half the cheapest bundle is a subkit, not the base"
+);
+assert.equal(
+  pickBaseVariant([
+    { title: "DCS Dream Alert - Base Kit + UKISO Kit", price: 105.83 },
+    { title: "DCS Dream Alert - Non-Alert Kit", price: 11.67 },
+    { title: "DCS Dream Alert - Macro Kit", price: 9.17 },
+    { title: "DCS Dream Alert - 6.25u Kit", price: 15 },
+    { title: "DCS Dream Alert - Numpad", price: 27.5 },
+    { title: "DCS Dream Alert - Norde", price: 22.5 },
+  ])?.price,
+  105.83
+);
 // The '+ after base' rule must NOT catch a colourway '+' inside parentheses.
 assert.equal(
   classifyVariant("Two Base（Teal + White）"),

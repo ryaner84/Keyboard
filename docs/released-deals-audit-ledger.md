@@ -14,10 +14,10 @@ to the start.
 
 `after_slug` for the next run: **`gmk-orange-alert`**
 
-The list held 53 on-sale sets on 2026-09-30. That run covered the 13 sets left
-after the previous cursor (`gmk-redline … gmk-zm`) and then wrapped to the top
-for 37 more (`dcs-dream-alert … gmk-orange-alert`), 50 sets in all. The next
-run continues after `gmk-orange-alert`.
+The list held 50 on-sale sets on 2026-10-01, so one batch is the whole list.
+That run covered the 15 sets after the previous cursor (`gmk-panda … gmk-zm`)
+and then wrapped to the top for 35 more (`dcs-dream-alert … gmk-orange-alert`),
+50 sets in all. The next run continues after `gmk-orange-alert`.
 
 ## Runs
 
@@ -28,6 +28,7 @@ run continues after `gmk-orange-alert`.
 | 2026-09-28 | gmk-varenye … gmk-zm, wrap, dcs-dream-alert … gmk-stargaze | 50 | 270 | 15 flagged → 3 confirmed | 3 (price-report button) | [36367279492](https://github.com/ryaner84/Keyboard/actions/runs/36367279492) + [36367394828](https://github.com/ryaner84/Keyboard/actions/runs/36367394828) (reports: [36367812617](https://github.com/ryaner84/Keyboard/actions/runs/36367812617)) |
 | 2026-09-29 | gmk-tako … gmk-zm, wrap, dcs-dream-alert … gmk-red-devils | 50 | 273 | 11 flagged → 2 confirmed | 2 (price-report button) | [36509536114](https://github.com/ryaner84/Keyboard/actions/runs/36509536114) + [36509762528](https://github.com/ryaner84/Keyboard/actions/runs/36509762528) (reports: [36509979688](https://github.com/ryaner84/Keyboard/actions/runs/36509979688)) |
 | 2026-09-30 | gmk-redline … gmk-zm, wrap, dcs-dream-alert … gmk-orange-alert | 50 | 268 | 11 flagged → 2 confirmed | 2 (price-report button) | [36656751452](https://github.com/ryaner84/Keyboard/actions/runs/36656751452) + [36656982393](https://github.com/ryaner84/Keyboard/actions/runs/36656982393) (reports: [36657385954](https://github.com/ryaner84/Keyboard/actions/runs/36657385954)) |
+| 2026-10-01 | gmk-panda … gmk-zm, wrap, dcs-dream-alert … gmk-orange-alert | 50 | 262 | 16 flagged → 8 confirmed | 8 (price-report button) | [36802757204](https://github.com/ryaner84/Keyboard/actions/runs/36802757204) + [36803087195](https://github.com/ryaner84/Keyboard/actions/runs/36803087195) (reports: [36803622470](https://github.com/ryaner84/Keyboard/actions/runs/36803622470)) |
 
 ### 2026-09-26 findings
 
@@ -165,3 +166,40 @@ Follow-ups:
 - The 2026-09-29 gmk-zm × SwitchKeys note ("the landing page's own base price
   is 165") came from the same `.json` geo-conversion as the wasabi report; the
   store's `.js` today says 229.99, matching the site.
+
+### 2026-10-01 findings
+
+Two audit runs (the 15 sets after the cursor, then a 35-set wrap) flagged 16
+of 262 listings; the candidates were checked with the **Vendor probe**
+([36803245099](https://github.com/ryaner84/Keyboard/actions/runs/36803245099)):
+
+| set | vendor | site | store | verdict | filed |
+|---|---|---|---|---|---|
+| dcs-handarbeit | proto[Typist] | GBP 15.83, in stock | **"DCS Handarbeit - Base Kit + UKISO" 95**, in stock; "WASD" 15.83 | wrong variant: **regression from #201**. The "+ after base" rule made proto's only base a BUNDLE, and the dearest unlabelled line (WASD) beat it. Fixed here | price report |
+| dcs-dream-alert | proto[Typist] | GBP 15, sold out | **"… Base Kit + UKISO Kit" 105.83**, sold out; "6.25u Kit" 15 | same regression | price report |
+| gmk-cyl-finer-things-r2-keycaps | Keebz n Cables | AUD 144.12 (was 176.15), in stock | Teal / White Base **AUD 180**, in stock, no compare-at | wrong price and a markdown the store does not show; 144.06 is what `.json` serves a non-AU visitor | price report |
+| gmk-finer-things | Keebz n Cables | AUD 144.12 (was 176.15), in stock | same R2 product page, AUD 180 | the R1 set links to the R2 product, at the converted price | price report |
+| gmk-alt-grrrrr-addon | Keebz n Cables | AUD 15.21 (was 20.02), in stock | Dolch 16, Evil Dolch **19** | converted `.json` price, invented markdown | price report |
+| gmk-orange-alert | Keebz n Cables | AUD 168.95, sold out | "TKL Base" **211**, sold out | converted `.json` price | price report |
+| gmk-kitsune | KeyBay | CAD 158, in stock | "Base" **CAD 209**, in stock (`.js`); `.json` reads 158 | converted price stored as CAD | price report |
+| gmk-manta | KeyBay | CAD 158, in stock | "Base" **CAD 209**, in stock | same | price report |
+| gmk-botanical-r2 | Oblotzky Industries | EUR 139, in stock | "Standard" 139 | **#201 healed it** (was 159). Only the renamed handle is flagged | — |
+| gmk-metropolis-r2 | NovelKeys | USD 70 (was 135), in stock | "Base" sold out; "Midnight Base" 70 available | site is right | — |
+| gmk-wasabi-r2 / gmk-zm (SwitchKeys, Mekibo) / gmk-dots-r2 (NovelKeys, Oblotzky) | — | — | renamed handles redirect to the same product and price | as 2026-09-30 | — |
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+
+Picker fix (both halves, `pickBaseVariant` / `choose_kit_variant`): when there
+is no titled base but a bundle exists, an unlabelled variant priced under half
+the cheapest bundle is a subkit, not the base, so it is dropped from the pool
+and the cheapest bundle wins. Oblotzky's "Standard" (139 beside a 159 bundle)
+is unaffected; the regression tests pin both shapes.
+
+Follow-ups:
+- Keebz n Cables (4 rows) and KeyBay (2 rows) all store the `.json` figure a
+  non-home-market visitor is served, about 0.80× and 0.76× of the shelf price,
+  and Keebz rows carry a compare-at the store does not show, which is what puts
+  them on the deals page. Both stores are new to this list. The price pass's
+  home-market pin evidently does not reach them; reading `.js` first (as the
+  auditor does since 2026-09-28) would. Worth checking in the price-report
+  review.
+

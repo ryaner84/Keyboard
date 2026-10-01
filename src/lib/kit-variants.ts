@@ -188,17 +188,26 @@ export function pickBaseVariant<T extends { title: string; price: number }>(
   });
   const titledBase = basePool.find((v) => classifyVariant(v.title) === "BASE");
   if (titledBase) return titledBase;
+  const bundles = nonAddon.filter((v) => classifyVariant(v.title) === "BUNDLE");
+  const cheapestBundle = bundles.length
+    ? bundles.reduce((best, v) => (v.price < best.price ? v : best))
+    : null;
+  // A bundle is a base plus something, so the base inside it costs well over
+  // half of it: an unlabelled variant under that is a subkit, not the base.
+  // proto[Typist] sells its only base as "… Base Kit + UKISO" (GBP 95) beside
+  // "WASD" (15.83), "BAE" and "10U"; once the "+ after base" rule made that a
+  // bundle, the dearest unlabelled line (WASD) was published as the base.
+  // Oblotzky's plain "Standard" (139 beside a 159 bundle) stays a candidate.
+  const candidates = cheapestBundle
+    ? basePool.filter((v) => v.price * 2 >= cheapestBundle.price)
+    : basePool;
   // No plain base kit on offer: fall back to the CHEAPEST bundle rather than
   // storing nothing. A bundle costs more than the base alone, so it is only
   // ever used when there is no base to be had — that keeps a dearer bundle
   // from displacing a real base kit, and keeps the pick independent of the
   // vendor's variant order.
-  if (basePool.length === 0) {
-    const bundles = nonAddon.filter((v) => classifyVariant(v.title) === "BUNDLE");
-    if (bundles.length === 0) return null;
-    return bundles.reduce((best, v) => (v.price < best.price ? v : best));
-  }
-  return basePool.reduce((best, v) => (v.price > best.price ? v : best));
+  if (candidates.length === 0) return cheapestBundle;
+  return candidates.reduce((best, v) => (v.price > best.price ? v : best));
 }
 
 // Parse the raw Json column (unknown shape at the type level) into KitVariant[].
