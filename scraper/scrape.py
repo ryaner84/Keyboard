@@ -1494,16 +1494,21 @@ def choose_kit_variant(
     for v in base_pool:
         if classify_variant(v["title"]) == "BASE":
             return v
+    bundles = [v for v in pool if classify_variant(v["title"]) == "BUNDLE"]
+    cheapest_bundle = min(bundles, key=lambda v: v["price"]) if bundles else None
+    # A bundle is a base plus something, so the base inside it costs well over
+    # half of it: an unlabelled variant under that is a subkit, not the base
+    # (proto[Typist]'s "… Base Kit + UKISO" beside "WASD"). Mirrors
+    # pickBaseVariant (TS).
+    if cheapest_bundle is not None:
+        base_pool = [v for v in base_pool if v["price"] * 2 >= cheapest_bundle["price"]]
     # No plain base kit on offer: fall back to the CHEAPEST bundle instead of
     # storing nothing. A bundle costs more than the base alone, so it is used
     # only when there is no base to be had — that keeps a dearer bundle from
     # displacing a real base kit, and keeps the pick independent of the
     # vendor's variant order.
     if not base_pool:
-        bundles = [v for v in pool if classify_variant(v["title"]) == "BUNDLE"]
-        if not bundles:
-            return None
-        return min(bundles, key=lambda v: v["price"])
+        return cheapest_bundle
     # No variant is titled "base": the real base is the dearest candidate, not
     # whichever subkit happens to come first in display order (an out-of-range
     # bundle is rejected downstream by is_plausible_base_price).
