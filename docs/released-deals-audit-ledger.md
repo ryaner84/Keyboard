@@ -12,12 +12,12 @@ to the start.
 
 ## Cursor
 
-`after_slug` for the next run: **`gmk-orange-alert`**
+`after_slug` for the next run: **`gmk-nightshade`**
 
-The list held 50 on-sale sets on 2026-10-01, so one batch is the whole list.
-That run covered the 15 sets after the previous cursor (`gmk-panda … gmk-zm`)
-and then wrapped to the top for 35 more (`dcs-dream-alert … gmk-orange-alert`),
-50 sets in all. The next run continues after `gmk-orange-alert`.
+The list held 52 on-sale sets on 2026-10-02. That run covered the 16 sets after
+the previous cursor (`gmk-panda … gmk-zm`) and then wrapped to the top for 34
+more (`dcs-dream-alert … gmk-nightshade`), 50 sets in all. The next run
+continues after `gmk-nightshade`.
 
 ## Runs
 
@@ -29,6 +29,7 @@ and then wrapped to the top for 35 more (`dcs-dream-alert … gmk-orange-alert`)
 | 2026-09-29 | gmk-tako … gmk-zm, wrap, dcs-dream-alert … gmk-red-devils | 50 | 273 | 11 flagged → 2 confirmed | 2 (price-report button) | [36509536114](https://github.com/ryaner84/Keyboard/actions/runs/36509536114) + [36509762528](https://github.com/ryaner84/Keyboard/actions/runs/36509762528) (reports: [36509979688](https://github.com/ryaner84/Keyboard/actions/runs/36509979688)) |
 | 2026-09-30 | gmk-redline … gmk-zm, wrap, dcs-dream-alert … gmk-orange-alert | 50 | 268 | 11 flagged → 2 confirmed | 2 (price-report button) | [36656751452](https://github.com/ryaner84/Keyboard/actions/runs/36656751452) + [36656982393](https://github.com/ryaner84/Keyboard/actions/runs/36656982393) (reports: [36657385954](https://github.com/ryaner84/Keyboard/actions/runs/36657385954)) |
 | 2026-10-01 | gmk-panda … gmk-zm, wrap, dcs-dream-alert … gmk-orange-alert | 50 | 262 | 16 flagged → 8 confirmed | 8 (price-report button) | [36802757204](https://github.com/ryaner84/Keyboard/actions/runs/36802757204) + [36803087195](https://github.com/ryaner84/Keyboard/actions/runs/36803087195) (reports: [36803622470](https://github.com/ryaner84/Keyboard/actions/runs/36803622470)) |
+| 2026-10-02 | gmk-panda … gmk-zm, wrap, dcs-dream-alert … gmk-nightshade | 50 | 262 | 9 flagged → 1 confirmed | 1 (price-report button) | [36952559488](https://github.com/ryaner84/Keyboard/actions/runs/36952559488) + [36952665718](https://github.com/ryaner84/Keyboard/actions/runs/36952665718) (reports: [36952859148](https://github.com/ryaner84/Keyboard/actions/runs/36952859148)) |
 
 ### 2026-09-26 findings
 
@@ -203,3 +204,30 @@ Follow-ups:
   auditor does since 2026-09-28) would. Worth checking in the price-report
   review.
 
+### 2026-10-02 findings
+
+Two audit runs (the 16 sets after the cursor, then a 34-set wrap) flagged 9
+of 262 listings; the candidates were checked with the **Vendor probe**
+([36952672522](https://github.com/ryaner84/Keyboard/actions/runs/36952672522),
+[36952795189](https://github.com/ryaner84/Keyboard/actions/runs/36952795189),
+[36952810945](https://github.com/ryaner84/Keyboard/actions/runs/36952810945)):
+
+| set | vendor | site | store | verdict | filed |
+|---|---|---|---|---|---|
+| gmk-varenye | GEONWORKS | USD 150, in stock | `group-buy-gmk-cyl-varenye` 302s to `geon.works/`; `gmk-cyl-varenye` and `gmk-varenye` 404 | dead link (front-door redirect), the gmk-mothman shape of 2026-09-28 | price report |
+| gmk-metropolis-r2 | NovelKeys | USD 70 (was 135), in stock | "Base" 70 sold out; **"Midnight Base" 70 available** | site is right | — |
+| gmk-wasabi-r2 / gmk-zm (SwitchKeys, Mekibo) / gmk-dots-r2 (NovelKeys, Oblotzky) / gmk-botanical-r2 (Oblotzky) | — | — | renamed handles redirect to the same product and price | as 2026-10-01; stale handle in URL | — |
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+
+All eight rows reported on 2026-10-01 now read correct: dcs-handarbeit ×
+proto[Typist] 95 GBP and dcs-dream-alert 105.83 GBP (the base + UKISO kit),
+Keebz n Cables 180 / 180 / 19 / 211 AUD, KeyBay 209 / 209 CAD. #203's `.js`
+shelf price holds.
+
+Follow-up: the GEONWORKS row id is a UUID (`eea1e7ba-…`), not a discovery
+`cm…` id, and it was stamped `upd=2026-10-01` while still showing a price and
+in stock. A front-door redirect should have cleared it through `isGoneRedirect`.
+It is not a curated link (`vendor-overrides.ts` names no geon.works URL), so
+the price-report review should check why the price pass has not cleared it. The
+store's search finds 5 "varenye" results, so the product may live under a new
+handle.
