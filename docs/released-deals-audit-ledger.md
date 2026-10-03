@@ -12,12 +12,12 @@ to the start.
 
 ## Cursor
 
-`after_slug` for the next run: **`gmk-nightshade`**
+`after_slug` for the next run: **`gmk-mothman`**
 
-The list held 52 on-sale sets on 2026-10-02. That run covered the 16 sets after
-the previous cursor (`gmk-panda … gmk-zm`) and then wrapped to the top for 34
-more (`dcs-dream-alert … gmk-nightshade`), 50 sets in all. The next run
-continues after `gmk-nightshade`.
+The list held 53 on-sale sets on 2026-10-03. That run covered the 18 sets after
+the previous cursor (`gmk-nord … gmk-zm`) and then wrapped to the top for 32
+more (`dcs-dream-alert … gmk-mothman`), 50 sets in all. The next run
+continues after `gmk-mothman`.
 
 ## Runs
 
@@ -30,6 +30,7 @@ continues after `gmk-nightshade`.
 | 2026-09-30 | gmk-redline … gmk-zm, wrap, dcs-dream-alert … gmk-orange-alert | 50 | 268 | 11 flagged → 2 confirmed | 2 (price-report button) | [36656751452](https://github.com/ryaner84/Keyboard/actions/runs/36656751452) + [36656982393](https://github.com/ryaner84/Keyboard/actions/runs/36656982393) (reports: [36657385954](https://github.com/ryaner84/Keyboard/actions/runs/36657385954)) |
 | 2026-10-01 | gmk-panda … gmk-zm, wrap, dcs-dream-alert … gmk-orange-alert | 50 | 262 | 16 flagged → 8 confirmed | 8 (price-report button) | [36802757204](https://github.com/ryaner84/Keyboard/actions/runs/36802757204) + [36803087195](https://github.com/ryaner84/Keyboard/actions/runs/36803087195) (reports: [36803622470](https://github.com/ryaner84/Keyboard/actions/runs/36803622470)) |
 | 2026-10-02 | gmk-panda … gmk-zm, wrap, dcs-dream-alert … gmk-nightshade | 50 | 262 | 9 flagged → 1 confirmed | 1 (price-report button) | [36952559488](https://github.com/ryaner84/Keyboard/actions/runs/36952559488) + [36952665718](https://github.com/ryaner84/Keyboard/actions/runs/36952665718) (reports: [36952859148](https://github.com/ryaner84/Keyboard/actions/runs/36952859148)) |
+| 2026-10-03 | gmk-nord … gmk-zm, wrap, dcs-dream-alert … gmk-mothman | 50 | 263 | 9 flagged + 1 unflagged → 2 confirmed | 2 (price-report button) | [37087385725](https://github.com/ryaner84/Keyboard/actions/runs/37087385725) + [37087515730](https://github.com/ryaner84/Keyboard/actions/runs/37087515730) (reports: [37087701521](https://github.com/ryaner84/Keyboard/actions/runs/37087701521)) |
 
 ### 2026-09-26 findings
 
@@ -231,3 +232,29 @@ It is not a curated link (`vendor-overrides.ts` names no geon.works URL), so
 the price-report review should check why the price pass has not cleared it. The
 store's search finds 5 "varenye" results, so the product may live under a new
 handle.
+
+### 2026-10-03 findings
+
+Two audit runs (the 18 sets after the cursor, then a 32-set wrap) flagged 9 of
+263 listings; the new candidates were checked with the **Vendor probe**
+([37087613361](https://github.com/ryaner84/Keyboard/actions/runs/37087613361)):
+
+| set | vendor | site | store | verdict | filed |
+|---|---|---|---|---|---|
+| gmk-2pack-add-on | Oblotzky Industries | EUR 32, **sold out** | "GMK CYL 2 Pack" 32, **available** (tagged pre-order) | stock | price report |
+| gmk-2pack-add-on | Swagkeys | AUD 44.99 (was 49.99), in stock | link is **switchkeys.com.au**/products/gmk-2pack, "GMK 2PACK" 44.99 AUD | **wrong vendor**: SwitchKeys' listing filed on the Swagkeys row (Swagkeys is a KR store quoting USD). Not flagged by the auditor, which checks the page, not whose page it is | price report |
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+| gmk-metropolis-r2 | NovelKeys | USD 70 (was 135), in stock | "Base" 70 sold out; "Midnight Base" 70 available | site is right (as 2026-09-30) | — |
+| gmk-hazakura | DeskHero | CAD 246, in stock | "Base Kit" sold out; "Base Kit - Hiragana" 246 in stock | site is right (as 2026-09-27); not flagged | — |
+| gmk-wasabi-r2 / gmk-zm (SwitchKeys, Mekibo) / gmk-dots-r2 (NovelKeys, Oblotzky) / gmk-botanical-r2 (Oblotzky) | — | — | renamed handles redirect to the same product and price | as 2026-10-02; stale handle in URL | — |
+
+gmk-2pack-add-on is new to the on-sale list (53 sets, up from 52).
+gmk-varenye × GEONWORKS (reported 2026-10-02) no longer appears among the
+priced listings, so its dead-link clear has landed.
+
+Follow-up: the auditor has no check that a listing's host belongs to its
+vendor. A `HOST_MISMATCH` verdict (listing host ≠ the vendor's `websiteUrl`
+host) would have caught the Swagkeys/SwitchKeys row; the name collision looks
+like an upstream KeycapLendar mis-filing that host-based vendor matching
+(`nextVendorWebsiteUrl`, `planStorefrontOwnership`) does not reach for a single
+listing.
