@@ -1208,9 +1208,74 @@ both the client-reported log and the resolution audit in the same run.
 > live and priced 229.99 AUD, with a relink to the in-stock `/products/gmk-zimo`
 > (165 AUD) an owner/discovery judgment. No in-run code fix was required.
 
+> **2026-10-03 run.** Price feed run 37132372410 (`?all=1`) returns **0 pending,
+> 67 resolved** — two more than the ledger's 65, the two new submissions being the
+> batch 8 / #205 pair on **gmk-2pack-add-on** (filed 2026-10-03T01:51 UTC through
+> the price-report button). Visitor inbox run 37132376585: STORE_LINK 0,
+> PRICE_REPORT 0, PHOTO_REPORT 0, and the SAME **15 `LISTING_FLAG`s + 1 FEEDBACK**
+> triaged and reported to the owner since 2026-09-14 (§4b) — no new flags, nothing
+> auto-resolvable.
+>
+> **Incoming Self-heal watch (1, from 2026-10-02 / batch 7) — CONFIRMED healed and
+> cleared.** gmk-varenye × GEONWORKS reads `current=null USD SCRAPED` in the feed,
+> `resolvedAt=2026-10-03T05:33:28.602Z` (post-dating the 2026-10-02T01:50 submit) —
+> the null held across the nightly scrape, so the dead-link redirect behaviour is
+> stable (the row stays correctly hidden on the released set, not relinked). This
+> is the deterministic dead-link confirmation (same shape as gmk-mothman ×
+> GEONWORKS), not a point-in-time read. Moved to the resolution audit.
+>
+> **One new report self-heals (stock); one is held for the owner (wrong vendor).**
+> - **gmk-2pack-add-on × Oblotzky Industries** (32 EUR) — **stock-only self-heal.**
+>   The site showed the listing sold out, but the store's "GMK CYL 2 Pack" base is
+>   EUR 32, `available=true` (pre-order), confirmed from a runner by the batch-8
+>   Vendor probe 37087613361. The price (32 EUR) is correct and was never
+>   disputed; the price pass is sole authority for `inStock` (#153), so the next
+>   availability scrape flips the display in stock. No code change. Placed on the
+>   Self-heal watch (§1b) to confirm the in-stock flip.
+> - **gmk-2pack-add-on × Swagkeys** (44.99 AUD) — **wrong vendor; held for the
+>   owner.** The Swagkeys row (a Korean store, `swagkeys.com` / `swagkey.kr`)
+>   carries a listing whose link and AUD 44.99 price are **SwitchKeys'**
+>   (`switchkeys.com.au/products/gmk-2pack`, an Australian store). The price itself
+>   is a correct read of the SwitchKeys listing — this is **not** a price-scrape
+>   bug (no wrong currency/product/variant), so re-scraping only re-reads the same
+>   URL under the same vendor and the feed's auto-resolution (both rows stamped
+>   `resolvedAt=2026-10-03T06:03:12.839Z`) is spurious: the mis-attribution
+>   persists. Swagkeys and SwitchKeys are two **genuinely distinct real shops**
+>   whose names look alike, so the repair is a targeted **VendorKit reassignment**
+>   (move the listing to the SwitchKeys vendor row, or drop it from Swagkeys since
+>   discovery links SwitchKeys' own catalogue) — a catalog / vendor-identity
+>   decision no price-scraper code and no automated heal/seed pass performs
+>   (`planStorefrontOwnership` fixes a vendor's `websiteUrl`, never a single
+>   listing's vendor), and one needing production DB access this session lacks.
+>   Per the routine's genuine-ambiguity / architecturally-significant exception it
+>   is brought to the owner (§1), in the same class as the `kt-dyad-tkl`
+>   `wrong_vendor` flag and the gmk-zm relink, not fixed speculatively.
+>
+> The other prior resolutions still read correctly: gmk-vamp × Switchmod
+> `84.99 USD`; gmk-bent-r2 × zFrontier `150 USD` (56 not returned since `633581d`);
+> gmk-arctic `145`, gmk-tribal `175`; the #194 Mekibo fixes `165`/`145 USD`; the
+> #201 gmk-botanical-r2 `139 EUR`; the #202 proto[Typist] `95`/`105.83 GBP`; the
+> `abc3021`/#203 Keebz n Cables `180`/`19`/`211 AUD` and KeyBay `209 CAD`; the #153
+> Ktechs listings BRG R3 `139 SGD`, Thunder God `169 SGD`. gmk-zm × SwitchKeys
+> stays the one prior open owner item (§1): live and priced 229.99 AUD, with a
+> relink to the in-stock `/products/gmk-zimo` (165 AUD) an owner/discovery
+> judgment.
+
 ## 1. Open wrong-price reports (unresolved only)
 
-_One owner item: **gmk-zm × SwitchKeys** — not a wrong price and not a dead link
+_Two owner items this run._
+
+_**gmk-2pack-add-on × Swagkeys** (new 2026-10-03, batch 8 / #205) — **wrong
+vendor**, not a wrong price. The Swagkeys row (Korean, `swagkeys.com`) carries
+SwitchKeys' listing (`switchkeys.com.au/products/gmk-2pack`, AUD 44.99). The
+price is a correct read of the SwitchKeys listing; the row attribution is wrong.
+Two distinct real shops, so the fix is a VendorKit reassignment to the SwitchKeys
+vendor (or a drop from Swagkeys) — a catalog/vendor-identity decision no
+price-scraper code or automated heal pass makes, and one needing production DB
+access. Held for owner; not a scrape bug, so the feed's auto-resolution is
+spurious and the mis-attribution persists until reassigned._
+
+_One prior owner item: **gmk-zm × SwitchKeys** — not a wrong price and not a dead link
 (the row is live and priced 229.99 AUD ≈ USD 150, confirmed by a targeted
 re-scrape `updated=1`), but the row points at the store's **old GB product**
 while the current in-stock listing is the renamed `/products/gmk-zimo` (Base
@@ -1237,13 +1302,20 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-**Currently on the watch: one (added 2026-10-02, batch 7 / #204).** The *next*
-run must confirm it (price stays `null` — the dead link is not relinked, so the
-listing stays correctly hidden on the released set):
+**Currently on the watch: one (added 2026-10-03, batch 8 / #205).** The *next*
+run must confirm the in-stock display flips once the price pass reads the
+available pre-order base (the price, 32 EUR, is correct and unchanged):
 
 | set | vendor | flagged | reason | verdict this run |
 |---|---|---|---|---|
-| gmk-varenye | GEONWORKS | 2026-10-02 | dead link — `geon.works/products/group-buy-gmk-cyl-varenye` 302s to the store front page; `gmk-cyl-varenye`/`gmk-varenye` handles 404. Site still shows USD 150 in stock | ✅ **self-heal (dead link), no code.** `isGoneRedirect` cleared the price; feed reads `current=null USD SCRAPED`, resolved 06:42Z (post-dating the 01:50 submit) — same as gmk-mothman × GEONWORKS (2026-09-28). Watched to confirm null holds |
+| gmk-2pack-add-on | Oblotzky Industries | 2026-10-03 | stock wrong — site shows SOLD OUT, but the store's "GMK CYL 2 Pack" base is EUR 32, `available=true` (pre-order), confirmed from a runner (batch-8 probe 37087613361) | ✅ **self-heal (stock), no code.** Price 32 EUR correct and never disputed; the price pass is sole authority for `inStock` (#153), so the next availability scrape flips the display in stock. Watched to confirm the in-stock flip |
+
+**Prior watch (added 2026-10-02, batch 7 / #204) — CONFIRMED healed on the
+2026-10-03 run and moved to the resolution audit:**
+
+| set | vendor | flagged | reason | confirmation (2026-10-03) |
+|---|---|---|---|---|
+| gmk-varenye | GEONWORKS | 2026-10-02 | dead link — `geon.works/products/group-buy-gmk-cyl-varenye` 302s to the store front page; handles 404. Site still showed USD 150 in stock | ✅ feed `null USD SCRAPED`, `resolvedAt=2026-10-03T05:33:28.602Z` (post-dating the 01:50 submit); null held across the nightly scrape — `isGoneRedirect` dead-link behaviour stable, row correctly hidden, not relinked |
 
 **Prior watch (added 2026-10-01, batch 6 / #202) — all eight CONFIRMED healed on
 the 2026-10-02 run and moved to the resolution audit:**
@@ -1388,7 +1460,9 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-10-01 | gmk-orange-alert | Keebz n Cables | 211 AUD | "wrong price: site AUD 168.95; store 'TKL Base' 211 sold out (geo-converted .json)" (deals audit) | needs fix | ✅ resolved (`abc3021`; `.js` shelf price; feed `211 AUD`; confirmed 2026-10-02) |
 | 2026-10-01 | gmk-kitsune | KeyBay | 209 CAD | "wrong price: site CAD 158; store 'Base' CAD 209 (geo-converted .json served to a US visitor)" (deals audit) | needs fix | ✅ resolved (`abc3021`; `.js` shelf price; feed `209 CAD`; confirmed 2026-10-02) |
 | 2026-10-01 | gmk-manta | KeyBay | 209 CAD | "wrong price: site CAD 158; store 'Base' CAD 209 (geo-converted .json)" (deals audit) | needs fix | ✅ resolved (`abc3021`; `.js` shelf price; feed `209 CAD`; confirmed 2026-10-02) |
-| 2026-10-02 | gmk-varenye | GEONWORKS | null USD | "dead link: geon.works/products/group-buy-gmk-cyl-varenye 302s to the store front page, no product; gmk-cyl-varenye/gmk-varenye handles 404. Site still shows USD 150 in stock" (deals audit) | self-healed (dead link) | ✅ resolved 2026-10-02 — `isGoneRedirect` cleared price to null (feed `null USD SCRAPED`); same as gmk-mothman × GEONWORKS. On watch |
+| 2026-10-02 | gmk-varenye | GEONWORKS | null USD | "dead link: geon.works/products/group-buy-gmk-cyl-varenye 302s to the store front page, no product; gmk-cyl-varenye/gmk-varenye handles 404. Site still shows USD 150 in stock" (deals audit) | self-healed (dead link) | ✅ resolved 2026-10-02 — `isGoneRedirect` cleared price to null (feed `null USD SCRAPED`); confirmed healed 2026-10-03 (null held). Same as gmk-mothman × GEONWORKS |
+| 2026-10-03 | gmk-2pack-add-on | Oblotzky Industries | 32 EUR | "Stock is wrong: the site shows this listing sold out, but the store's product (GMK CYL 2 Pack, EUR 32, tagged pre-order) is available to buy (product.js available=true, checked 2026-10-03 from a runner)." (deals audit batch 8) | self-healed (stock) | ✅ resolved 2026-10-03 — stock-only; 32 EUR correct & unchanged, store base available (pre-order); price pass flips in-stock on next availability scrape. On watch |
+| 2026-10-03 | gmk-2pack-add-on | Swagkeys | 44.99 AUD | "Wrong vendor: this row is labelled Swagkeys (a Korean store, swagkeys.com) but its link and AUD 44.99 price are SwitchKeys' listing (switchkeys.com.au/products/gmk-2pack). The listing belongs on the SwitchKeys vendor row, not Swagkeys." (deals audit batch 8) | wrong vendor (held for owner) | ⚠️ open owner item (§1) — not a price-scrape bug; price 44.99 AUD is a correct read of the SwitchKeys listing, but on the wrong vendor row. Needs a VendorKit reassignment to SwitchKeys (or drop from Swagkeys); two distinct real shops, so a catalog/vendor-identity decision. Feed auto-resolution spurious |
 
 ## 4. Listing-flag triage (visitor inbox — `ListingReport`)
 
@@ -1500,7 +1574,9 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-10-01 | gmk-orange-alert | Keebz n Cables | 211 AUD | needs fix | Same cause/fix. Probe: `.json` "TKL Base" 168.43 (converted); `.js` 211 AUD, `available=false` (sold out both sides). `.js`-shelf-price fix; feed `211 AUD SCRAPED` | ✅ resolved (`abc3021`; 211 AUD; confirmed 2026-10-02) |
 | 2026-10-01 | gmk-kitsune | KeyBay | 209 CAD | needs fix | Same cause/fix, KeyBay (CA store). Probe: `.json` "Base" 158 (US-geo conversion stored as CAD); `.js` "Base" 209 CAD, available=true. `.js`-shelf-price fix; feed `209 CAD SCRAPED` | ✅ resolved (`abc3021`; 209 CAD; confirmed 2026-10-02) |
 | 2026-10-01 | gmk-manta | KeyBay | 209 CAD | needs fix | Same cause/fix as gmk-kitsune. `.json` 158, `.js` 209 CAD; feed `209 CAD SCRAPED` | ✅ resolved (`abc3021`; 209 CAD; confirmed 2026-10-02) |
-| 2026-10-02 | gmk-varenye | GEONWORKS | null USD | self-healed (dead link) | `geon.works/products/group-buy-gmk-cyl-varenye` 302s to `geon.works/` (front page, no product); the `gmk-cyl-varenye`/`gmk-varenye` handles 404. `isGoneRedirect` recognises the root-redirect, marks the row `DEAD_LINK` and clears the price; the feed reads `current=null USD SCRAPED`, `resolvedAt=2026-10-02T06:42:34.892Z` (post-dating the 01:50 submit). Identical designed behaviour to gmk-mothman × GEONWORKS (2026-09-28) — GEONWORKS 302s removed products to its front page store-wide. The unpriced row is correctly hidden on the released set; the deals-rail "USD 150 in stock" the reporter saw is a stale point-in-time artifact cleared by deploy/scrape propagation. No code change. Filed by the deals audit batch 7 (#204) | ✅ resolved (self-healed; dead-link redirect cleared to null) — on watch |
+| 2026-10-02 | gmk-varenye | GEONWORKS | null USD | self-healed (dead link) | `geon.works/products/group-buy-gmk-cyl-varenye` 302s to `geon.works/` (front page, no product); the `gmk-cyl-varenye`/`gmk-varenye` handles 404. `isGoneRedirect` recognises the root-redirect, marks the row `DEAD_LINK` and clears the price; the feed reads `current=null USD SCRAPED`, `resolvedAt=2026-10-02T06:42:34.892Z` (post-dating the 01:50 submit). Identical designed behaviour to gmk-mothman × GEONWORKS (2026-09-28) — GEONWORKS 302s removed products to its front page store-wide. The unpriced row is correctly hidden on the released set; the deals-rail "USD 150 in stock" the reporter saw is a stale point-in-time artifact cleared by deploy/scrape propagation. No code change. Filed by the deals audit batch 7 (#204). **Confirmed healed 2026-10-03** (feed `null USD SCRAPED`, `resolvedAt=2026-10-03T05:33:28.602Z` post-dating the submit; null held across the nightly scrape) | ✅ resolved (self-healed; confirmed 2026-10-03) |
+| 2026-10-03 | gmk-2pack-add-on | Oblotzky Industries | 32 EUR | self-healed (stock) | Stock-only. Site showed the listing SOLD OUT; the store's "GMK CYL 2 Pack" base is EUR 32, `available=true` (product tag "pre-order"), confirmed from a runner by the batch-8 Vendor probe (run 37087613361). Price 32 EUR is correct and was never disputed; the price pass is sole authority for `inStock` (#153), so the next availability scrape flips the display in stock. No code change. Filed by the deals audit batch 8 (#205) | ✅ resolved (self-healed; on watch) |
+| 2026-10-03 | gmk-2pack-add-on | Swagkeys | 44.99 AUD | wrong vendor (held for owner) | **Not a wrong price — wrong vendor attribution.** The Swagkeys row (a Korean store, `swagkeys.com` / `swagkey.kr`; two seed rows `swagkeys` + `swagkeys-kr`) carries a VendorKit whose `productUrl` and AUD 44.99 price are **SwitchKeys'** (`switchkeys.com.au/products/gmk-2pack`, an Australian store, confirmed by batch-8 probe 37087613361). The price pass reads the SwitchKeys listing correctly — no wrong currency/product/variant — so this is not a price-scrape bug and re-scraping re-reads the same URL under the same vendor (the feed's `resolvedAt=2026-10-03T06:03:12.839Z` auto-resolution is spurious). Swagkeys and SwitchKeys are two genuinely distinct real shops with look-alike names (SwitchKeys exists in production — it is the gmk-zm owner item's vendor — but is not in `src/data/seed/vendors.json`); the listing is almost certainly a one-off upstream KeycapLendar mis-attribution, not a systematic matcher bug (neither Swagkeys `websiteUrl` points at switchkeys.com.au, so discovery did not crawl it there). The repair is a targeted **VendorKit reassignment** to the SwitchKeys vendor row (or a drop from Swagkeys, since discovery links SwitchKeys' own catalogue) — a catalog / vendor-identity decision no price-scraper code and no automated heal/seed pass performs (`planStorefrontOwnership` fixes a vendor's `websiteUrl`, never a single listing's vendor), needing production DB access this session lacks. **Held for the owner** per the routine's genuine-ambiguity / architecturally-significant exception (same class as the `kt-dyad-tkl` `wrong_vendor` flag §4b and the gmk-zm relink §1). Filed by the deals audit batch 8 (#205) | ⚠️ open owner item (§1) — awaiting reassignment |
 
 ### Client-recommended values verified
 
@@ -1539,12 +1615,17 @@ uploaded 2 builds but the mai…") — left for the owner.
 
 ## Summary
 
-- **65 report submissions across ~51 listings** (full `?all=1` history, first
+- **67 report submissions across ~52 listings** (full `?all=1` history, first
   reconciled 2026-08-26; gmk-vamp × Switchmod added 2026-08-27; 6 added
   2026-09-26, 2 added 2026-09-27, 3 added 2026-09-28, 2 added 2026-09-29, 2 added
-  2026-09-30, 8 added 2026-10-01, and **1 added 2026-10-02** (batch 7, #204:
+  2026-09-30, 8 added 2026-10-01, 1 added 2026-10-02 (batch 7, #204:
   gmk-varenye × GEONWORKS — dead-link redirect self-heal, price cleared to null,
-  identical to gmk-mothman × GEONWORKS). The 8 added 2026-10-01 (batch 6, #202 +
+  identical to gmk-mothman × GEONWORKS; confirmed healed 2026-10-03), and **2
+  added 2026-10-03** (batch 8, #205, both on gmk-2pack-add-on: × Oblotzky — a
+  stock-only self-heal, EUR 32 base available pre-order, on watch; × Swagkeys — a
+  **wrong-vendor** attribution, a SwitchKeys listing on the Korean Swagkeys row,
+  held for the owner as a VendorKit-reassignment catalog decision, not a
+  price-scrape bug). The 8 added 2026-10-01 (batch 6, #202 +
   the `.js` shelf-price fix #203), all confirmed healed on the 2026-10-02 run: dcs-handarbeit / dcs-dream-alert × proto[Typist] (#201
   wrong-variant regression, fixed **#202** — a cheap unlabelled subkit no longer
   outranks the only bundle) and four Keebz n Cables + two KeyBay rows
