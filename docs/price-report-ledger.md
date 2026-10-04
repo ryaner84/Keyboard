@@ -1261,9 +1261,108 @@ both the client-reported log and the resolution audit in the same run.
 > relink to the in-stock `/products/gmk-zimo` (165 AUD) an owner/discovery
 > judgment.
 
+> **2026-10-04 run.** Price feed run 37212048772 (`?all=1`) returns **0 pending,
+> 68 resolved** — one more than the ledger's 67, the single new submission being
+> the batch 9 / #206 report on **gmk-black-snail---red-cyrillic-addon × Neo Macro**
+> (filed 2026-10-04T01:59:28 UTC through the price-report button). Visitor inbox
+> run 37212052961: STORE_LINK 0, PRICE_REPORT 0, PHOTO_REPORT 0, and the SAME
+> **15 `LISTING_FLAG`s + 1 FEEDBACK** triaged and reported to the owner since
+> 2026-09-14 (§4b) — no new flags, nothing auto-resolvable.
+>
+> **Incoming Self-heal watch (1, from 2026-10-03 / batch 8) — CONFIRMED healed and
+> cleared.** gmk-2pack-add-on × Oblotzky Industries reads `current=32 EUR
+> SCRAPED`, `resolvedAt=2026-10-04T06:09:27.742Z` (post-dating the 2026-10-03T01:51
+> submit); the batch-9 deals audit independently observed the site showing "EUR 32,
+> in stock" and recorded the row "healed". The price (32 EUR) was never disputed —
+> the stock-only complaint healed on the availability scrape, exactly as a #153
+> price-pass-owns-`inStock` flip predicts. Moved to the resolution audit.
+>
+> **One new report — a RECURRENCE, reclassified `needs fix`, root-caused, and
+> HELD for the owner (architecturally significant).**
+> **gmk-black-snail---red-cyrillic-addon × Neo Macro** was reported 2026-09-28,
+> fixed by #198 (`6f36882` added `\bmodifiers?\b|retro\s*points?\b` to
+> `NONBASE_SUBKIT_RE` so the modifier kits clear), and is now reported again:
+> the site shows INR 6500 in stock, the **U9 Modifier Kit** value #198 was written
+> to exclude. A value that comes back across the #198 scrape is the never-heals
+> case (routine step 2), so this is `needs fix`, not a self-heal — and the feed's
+> auto-resolution (the report's listing join returns empty, `id=?`, so the sweep
+> stamps it resolved) is spurious.
+>
+> **Root cause (probe run 37212339509, `neomacro.in/products/gmk-black-snail`,
+> READABLE Shopify, 8 variants all `available=true`, INR):** L9 Modifier 6000,
+> **U9 Modifier 6500**, 40s Ortho linear 4900, GMK Retro Point 600, **Red Cyrillic
+> Alphas 9900**, 9009 Accents 3000, Numpad 2500, Cherry Accents 1900 — and **no
+> variant titled "Base"**. The set name contains "Addon" (and "Cyrillic"), so
+> `isSubkitSetName` is **true** and the pickers (`pickBaseVariant` in
+> `kit-variants.ts`, `choose_kit_variant` in `scrape.py`) are called with
+> `allowSubkits=true`. That flag exists for legitimate subkit sets (DCS 40s / Bae
+> Addon / 10U Spacebars), and it **bypasses the `NONBASE_SUBKIT_RE` exclusion**
+> (`kit-variants.ts:187`, `scrape.py:1491`) — so #198's modifier-kit exclusion
+> never fires on THIS row. With no "Base" variant, and "Red Cyrillic Alphas"
+> classified **ALPHA** (so excluded from the base pool), the dearest remaining
+> OTHERS variant is **U9 Modifier (6500)** → the wrong value is picked. #198 was
+> never wrong; the subkit-set exception re-opens the hole for this one set.
+>
+> **Held for owner decision — the correct OUTCOME is contested and the repair is
+> roster-wide.** Two mutually-exclusive repairs exist and neither is a safe,
+> one-directional change this unattended run should ship:
+> 1. **Keep the set and price it at the Red Cyrillic Alphas variant (INR 9900)** —
+>    requires a NEW name-match heuristic in the shared `pickBaseVariant` /
+>    `choose_kit_variant` (prefer the variant whose title matches the subkit set's
+>    own add-on name), mirrored across both halves and all four call sites, and
+>    **propagated nightly by the price audit that overwrites stored prices**. That
+>    has real regression surface across every subkit set and also needs the
+>    ALPHA-classification of "Red Cyrillic Alphas" revisited. This is exactly the
+>    shared-picker blast radius the genuine-ambiguity exception is for.
+> 2. **Remove / merge the row as a near-duplicate of `gmk-black-snail`** — both set
+>    rows point at the SAME Neo Macro product (same URL, same variant list); the
+>    parent `gmk-black-snail` row correctly clears to null under #198 because it is
+>    not a subkit set. The batch-9 audit noted the VendorKit
+>    (`cmuslcupj000n04igkpdo3hmn`) may have been re-created rather than re-priced.
+>    A DELETE/merge is a catalog-identity decision no price-scraper or automated
+>    heal pass performs, and one needing production DB access this session lacks.
+>
+> **Recommendation:** option 1 if the owner wants to keep `-red-cyrillic-addon`
+> as a trackable add-on set (its Red Cyrillic Alphas kit genuinely is for sale at
+> 9900), otherwise option 2 (remove the near-duplicate). Note the **live harm**:
+> the row currently displays INR 6500 as a marked-down "base kit" on `/released`,
+> a visible wrong price, until one of the two is applied. Per the routine's
+> genuine-ambiguity / architecturally-significant exception this is brought to the
+> owner (§1), in the same class as the Swagkeys wrong-vendor and gmk-zm relink
+> items, not fixed speculatively.
+>
+> The other prior resolutions still read correctly: gmk-vamp × Switchmod
+> `84.99 USD`; gmk-bent-r2 × zFrontier `150 USD`; gmk-arctic `145`, gmk-tribal
+> `175`; the #194 Mekibo `165`/`145 USD`; #201 gmk-botanical-r2 `139 EUR`; #202
+> proto[Typist] `95`/`105.83 GBP`; `abc3021`/#203 Keebz n Cables `180`/`19`/`211
+> AUD` and KeyBay `209 CAD`; #153 Ktechs BRG R3 `139 SGD`, Thunder God `169 SGD`.
+> The incoming Self-heal watch is now empty (the one healed item moved to the
+> audit; the red-cyrillic recurrence is an owner item, not a self-heal). gmk-zm ×
+> SwitchKeys and gmk-2pack-add-on × Swagkeys remain the prior open owner items (§1).
+
 ## 1. Open wrong-price reports (unresolved only)
 
-_Two owner items this run._
+_Three owner items this run._
+
+_**gmk-black-snail---red-cyrillic-addon × Neo Macro** (new 2026-10-04, batch 9 /
+#206) — **wrong variant, recurrence of 2026-09-28; held for owner (architecturally
+significant).** The Neo Macro product (`neomacro.in/products/gmk-black-snail`,
+probe-confirmed READABLE Shopify, 8 variants all in stock) sells **no base kit**;
+its dearest non-alpha subkit, the **U9 Modifier Kit (INR 6500)**, is what the row
+displays as a marked-down base on `/released`. #198 added the modifier kits to
+`NONBASE_SUBKIT_RE`, but this set's name contains "Addon"/"Cyrillic" →
+`isSubkitSetName` = true → the pickers run with `allowSubkits=true`, which bypasses
+that exclusion. The variant this set actually names, "Red Cyrillic Alphas" (9900),
+classifies ALPHA and is excluded from the base pool, so the dearest OTHERS (U9
+Modifier 6500) wins. The correct repair is contested — either (1) keep the set and
+price it at the Red Cyrillic Alphas 9900 via a NEW name-match heuristic in the
+SHARED `pickBaseVariant`/`choose_kit_variant` (roster-wide risk, propagated by the
+nightly audit, both halves + four call sites, and the ALPHA classification must be
+revisited), or (2) remove/merge the row as a near-duplicate of `gmk-black-snail`
+(same product URL + variant list; the parent correctly clears to null; catalog
+decision needing production DB access). Not a safe one-directional change for an
+unattended run; held for owner with a recommended patch (see the 2026-10-04 run
+note). Live harm: INR 6500 shows as a fake base price until repaired._
 
 _**gmk-2pack-add-on × Swagkeys** (new 2026-10-03, batch 8 / #205) — **wrong
 vendor**, not a wrong price. The Swagkeys row (Korean, `swagkeys.com`) carries
@@ -1302,13 +1401,16 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-**Currently on the watch: one (added 2026-10-03, batch 8 / #205).** The *next*
-run must confirm the in-stock display flips once the price pass reads the
-available pre-order base (the price, 32 EUR, is correct and unchanged):
+**Currently on the watch: none.** The red-cyrillic-addon recurrence surfaced this
+run is an owner item (§1), not a self-heal, so it is not watched; it is tracked in
+§1 and the client-reported log until the owner applies one of the two repairs.
 
-| set | vendor | flagged | reason | verdict this run |
+**Prior watch (added 2026-10-03, batch 8 / #205) — CONFIRMED healed on the
+2026-10-04 run and moved to the resolution audit:**
+
+| set | vendor | flagged | reason | confirmation (2026-10-04) |
 |---|---|---|---|---|
-| gmk-2pack-add-on | Oblotzky Industries | 2026-10-03 | stock wrong — site shows SOLD OUT, but the store's "GMK CYL 2 Pack" base is EUR 32, `available=true` (pre-order), confirmed from a runner (batch-8 probe 37087613361) | ✅ **self-heal (stock), no code.** Price 32 EUR correct and never disputed; the price pass is sole authority for `inStock` (#153), so the next availability scrape flips the display in stock. Watched to confirm the in-stock flip |
+| gmk-2pack-add-on | Oblotzky Industries | 2026-10-03 | stock wrong — site showed SOLD OUT, but the store's "GMK CYL 2 Pack" base is EUR 32, `available=true` (pre-order) | ✅ feed `32 EUR SCRAPED`, `resolvedAt=2026-10-04T06:09:27.742Z` (post-dating the 2026-10-03T01:51 submit); batch-9 deals audit independently observed the site showing "EUR 32, in stock" — the in-stock flip happened on the availability scrape, price 32 EUR correct and unchanged (#153 price-pass-owns-`inStock`) |
 
 **Prior watch (added 2026-10-02, batch 7 / #204) — CONFIRMED healed on the
 2026-10-03 run and moved to the resolution audit:**
@@ -1446,7 +1548,7 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-09-27 | gmk-panda | iLumKB | 229 SGD | "shown in stock at SGD 229, but Base is SOLD OUT (only 329 Base+Nov+Space bundle in stock); 2nd occurrence after 2026-09-26" (deals audit) | needs fix (recurrence) | ✅ resolved (#195 `6ca0d95`; probe-confirmed 2026-09-28 base sold out, no 4th recurrence) |
 | 2026-09-27 | gmk-zm | SwitchKeys | 229.99 AUD | "link is dead — switchkeys.com.au 404s the product URL, yet row shows AUD 229.99 in stock" (deals audit) | false positive (listing live) | ✅ resolved 2026-09-28 — NOT dead: stored handle 301-redirects to a live product; targeted re-scrape `updated=1`. Owner item (§1): relink to `/products/gmk-zimo` (165 AUD) is an open judgment |
 | 2026-09-28 | gmk-black-snail | Neo Macro | 6,500 INR | "wrong variant: no base kit; INR 6500 is the U9 Modifier Kit" (deals audit) | needs fix | ✅ resolved (#198 `6f36882`; `modifier`/`retro point` → NONBASE, row cleared to null) |
-| 2026-09-28 | gmk-black-snail---red-cyrillic-addon | Neo Macro | 6,500 INR | "wrong variant: INR 6500 is the U9 Modifier Kit, not a base kit" (deals audit) | needs fix | ✅ resolved (#198 `6f36882`; same fix; row cleared to null) |
+| 2026-09-28 | gmk-black-snail---red-cyrillic-addon | Neo Macro | 6,500 INR | "wrong variant: INR 6500 is the U9 Modifier Kit, not a base kit" (deals audit) | needs fix | ⚠️ **recurred 2026-10-04** — #198's `NONBASE_SUBKIT_RE` fix does NOT reach this row (its name → `isSubkitSetName`→`allowSubkits` bypasses the exclusion), so the U9 Modifier (6500) is picked again. Reopened as an owner item (§1); see the 2026-10-04 report row |
 | 2026-09-28 | gmk-mothman | GEONWORKS | 150 USD | "dead link: geon.works product URL 302s to the front page" (deals audit) | self-healed (dead link) | ✅ resolved (dead-link redirect cleared price to null) |
 | 2026-09-29 | gmk-wasabi-r2 | SwitchKeys | 199 AUD | "wrong price: site shows AUD 199, link lands on Wasabi Base 143" (deals audit) | false positive | ✅ resolved 2026-09-30 — 199 AUD correct (matches store `.js`); 143 was a geo-converted `.json` reading (deals-audit batch 5) |
 | 2026-09-29 | gmk-botanical-r2 | Oblotzky Industries | 159 EUR | "wrong variant: EUR 159 is the 'Standard Base + Hibi & Botanical Leaf' bundle; base 'Standard' is EUR 139" (deals audit) | needs fix | ✅ resolved (#201 `95e1e0d`; "+ after base" → BUNDLE; re-scrape landed **139 EUR**) |
@@ -1461,8 +1563,9 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-10-01 | gmk-kitsune | KeyBay | 209 CAD | "wrong price: site CAD 158; store 'Base' CAD 209 (geo-converted .json served to a US visitor)" (deals audit) | needs fix | ✅ resolved (`abc3021`; `.js` shelf price; feed `209 CAD`; confirmed 2026-10-02) |
 | 2026-10-01 | gmk-manta | KeyBay | 209 CAD | "wrong price: site CAD 158; store 'Base' CAD 209 (geo-converted .json)" (deals audit) | needs fix | ✅ resolved (`abc3021`; `.js` shelf price; feed `209 CAD`; confirmed 2026-10-02) |
 | 2026-10-02 | gmk-varenye | GEONWORKS | null USD | "dead link: geon.works/products/group-buy-gmk-cyl-varenye 302s to the store front page, no product; gmk-cyl-varenye/gmk-varenye handles 404. Site still shows USD 150 in stock" (deals audit) | self-healed (dead link) | ✅ resolved 2026-10-02 — `isGoneRedirect` cleared price to null (feed `null USD SCRAPED`); confirmed healed 2026-10-03 (null held). Same as gmk-mothman × GEONWORKS |
-| 2026-10-03 | gmk-2pack-add-on | Oblotzky Industries | 32 EUR | "Stock is wrong: the site shows this listing sold out, but the store's product (GMK CYL 2 Pack, EUR 32, tagged pre-order) is available to buy (product.js available=true, checked 2026-10-03 from a runner)." (deals audit batch 8) | self-healed (stock) | ✅ resolved 2026-10-03 — stock-only; 32 EUR correct & unchanged, store base available (pre-order); price pass flips in-stock on next availability scrape. On watch |
+| 2026-10-03 | gmk-2pack-add-on | Oblotzky Industries | 32 EUR | "Stock is wrong: the site shows this listing sold out, but the store's product (GMK CYL 2 Pack, EUR 32, tagged pre-order) is available to buy (product.js available=true, checked 2026-10-03 from a runner)." (deals audit batch 8) | self-healed (stock) | ✅ resolved 2026-10-03 — stock-only; 32 EUR correct & unchanged; **confirmed healed 2026-10-04** (feed `32 EUR SCRAPED`; batch-9 audit saw site "EUR 32, in stock" — the in-stock flip happened) |
 | 2026-10-03 | gmk-2pack-add-on | Swagkeys | 44.99 AUD | "Wrong vendor: this row is labelled Swagkeys (a Korean store, swagkeys.com) but its link and AUD 44.99 price are SwitchKeys' listing (switchkeys.com.au/products/gmk-2pack). The listing belongs on the SwitchKeys vendor row, not Swagkeys." (deals audit batch 8) | wrong vendor (held for owner) | ⚠️ open owner item (§1) — not a price-scrape bug; price 44.99 AUD is a correct read of the SwitchKeys listing, but on the wrong vendor row. Needs a VendorKit reassignment to SwitchKeys (or drop from Swagkeys); two distinct real shops, so a catalog/vendor-identity decision. Feed auto-resolution spurious |
+| 2026-10-04 | gmk-black-snail---red-cyrillic-addon | Neo Macro | 6,500 INR | "Wrong variant (recurrence of 2026-09-28): site shows INR 6500 (was 7500) in stock, which is the U9 Modifier Kit. neomacro.in/products/gmk-black-snail sells no base kit; the Red Cyrillic add-on this set names is the 'Red Cyrillic Alphas' variant, INR 9900, available. Likely cause: the set name contains 'Addon', so isSubkitSetName lets subkits through and the dearest-unlabeled pick takes the modifier kit" (deals audit batch 9 / #206) | needs fix (recurrence; held for owner) | ⚠️ open owner item (§1) — recurrence of the 2026-09-28 report; #198 does not reach this row because `isSubkitSetName`→`allowSubkits` bypasses `NONBASE_SUBKIT_RE`, and "Red Cyrillic Alphas" (the correct 9900 variant) classifies ALPHA. Repair is contested (price at 9900 via a shared-picker name-match vs remove the near-duplicate row) → architecturally significant, held per routine step 4. Probe run 37212339509 |
 
 ## 4. Listing-flag triage (visitor inbox — `ListingReport`)
 
@@ -1560,7 +1663,7 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-09-27 | gmk-panda | iLumKB | 229 SGD | needs fix (recurrence) | **3rd report (2026-08-10, 2026-09-26, 2026-09-27); root cause fixed #195 (`6ca0d95`).** iLumKB's plain "Base" (SGD 229) is sold out beside an in-stock "Base+Nov+Space" bundle (SGD 329). `nov`/`space` named no extra `BUNDLE_EXTRA_RE` knew, so the bundle classified BASE; stock is read across every BASE variant, so the sold-out base showed buyable on `/released`. #195 added `\bnovs?\b`/`\bspaces?\b` to `BUNDLE_EXTRA_RE` in both `kit-variants.ts` and `scrape.py` (both suites pin `Base+Nov+Space` → BUNDLE) — verified in code this run. Price 229 SGD is correct (never disputed; the base pick was fixed to 229 by the 2026-08-10 spacebar report). The price pass is sole authority for `inStock` (#153). **Confirmed healed 2026-09-28**: Vendor probe (run 36442068057) shows Base (SGD 229) `available=false`; no 4th recurrence | ✅ resolved (#195; confirmed 2026-09-28) |
 | 2026-09-27 | gmk-zm | SwitchKeys | 229.99 AUD | false positive (listing live) | **NOT a dead link — the report was a false positive.** The audit tested the collection-scoped URL (`/collections/current-group-buys/products/gmik-zimo-group-buy`, a 404 because the product was removed from that collection) and the corrected handle `/products/gmk-zimo-group-buy` (also 404). But the price pass strips the collection prefix (`normalizeShopifyUrl`) to the **stored typo handle** `/products/gmik-zimo-group-buy`, which **301-redirects → `/products/gmik-zimo` → `/products/gmk-zimo` (200)**, a live product (probe run 36444934333). A FORCE refresh (36443092241, `dead=1070`) did not clear it, and a targeted re-scrape by id `cmq585yjj03j0b17dsjv05k5w` (run 36445670318) returned `attempted=1 updated=1 dead=0`, re-storing a valid 229.99 AUD (≈USD 150, in `KIT_BOUNDS`). So the listing is **live and plausibly priced** — no scrape bug, nothing to clear. The stuck-stale state came from the report re-queue reaching the live product (kept the price) while the 2000-row FORCE batch (`limit=2000`, nulls-first) never included it; only `PRICE_REFRESH_IDS` reliably reaches it — which is why the feed now prints the id (`cf67ecb`). **Open owner item (§1):** the store's current in-stock "GMK Zimo" is `/products/gmk-zimo` at Base **165 AUD**, a different SKU from the row's 229.99 GB product; discovery won't auto-relink a priced row, so relinking is an owner/catalog judgment (two real SKUs), brought to the owner not forced | ✅ resolved (false positive; live 229.99 AUD; relink is an open owner item) |
 | 2026-09-28 | gmk-black-snail | Neo Macro | 6,500 INR | needs fix | **Wrong variant, fixed #198 (`6f36882`).** neomacro.in sells no base kit for Black Snail; the picker took the dearest unlabeled line, the **U9 Modifier Kit** (INR 6500). #198 added `modifier` and `retro point` to `NONBASE_SUBKIT_RE` in `kit-variants.ts` (scrape.py composes its copy from the mirror) — verified present in both halves this run. The row clears to `NO_BASE_KIT`; the feed reads `current=null`. Filed by the deals audit batch 3 | ✅ resolved (#198; row cleared to null) |
-| 2026-09-28 | gmk-black-snail---red-cyrillic-addon | Neo Macro | 6,500 INR | needs fix | Same product/cause/fix as gmk-black-snail (the add-on set's BASE listings ARE the Black Snail base-kit products). #198 clears it; feed reads `current=null` | ✅ resolved (#198; row cleared to null) |
+| 2026-09-28 | gmk-black-snail---red-cyrillic-addon | Neo Macro | 6,500 INR | needs fix | ⚠️ **#198 did NOT reach this row — recurred 2026-10-04.** The 2026-09-28 note assumed the same fix as gmk-black-snail, but that set is NOT a subkit set while this one IS: its name contains "Addon"/"Cyrillic", so `isSubkitSetName` is true, the pickers run with `allowSubkits=true`, and that flag bypasses the `NONBASE_SUBKIT_RE` exclusion #198 relies on. So the modifier kits were never excluded here and the U9 Modifier (6500) was picked again. Reopened as an owner item — see the 2026-10-04 audit row below | ⚠️ reopened (see 2026-10-04 row) |
 | 2026-09-28 | gmk-mothman | GEONWORKS | 150 USD | self-healed (dead link) | `geon.works/products/group-buy-gmk-cyl-mothman` 302s to `geon.works/` (front page, no product). `isGoneRedirect` marks the row `DEAD_LINK` and clears the price; the feed reads `current=null USD`. Filed by the deals audit batch 3 | ✅ resolved (dead-link redirect; cleared to null) |
 | 2026-09-29 | gmk-wasabi-r2 | SwitchKeys | 199 AUD | false positive | **Not a wrong price.** Deals-audit batch 5 established AUD 199 is correct (matches switchkeys.com.au's own `.js`); the 143 the batch-4 report cited came from the store's geo-converted `.json`. The stored collection URL 404s but `normalizeShopifyUrl` strips it to `/products/gmk-wasabi-v2-group-buy`, which 301s to the live `/products/gmk-wasabi-v2`; the price reads 199 AUD SCRAPED. No scrape bug | ✅ resolved (false positive; 199 AUD correct) |
 | 2026-09-29 | gmk-botanical-r2 | Oblotzky Industries | 159 EUR | needs fix | **Wrong variant, fixed #201 (`95e1e0d`).** Vendor probe (run 36735257689, `/products/gmk-cyl-botanical-2`): real base "Standard" 139 EUR `available=true`, beside "Standard Base + Hibi & Botanical Leaf"/"… Succulent" bundles at 159. The bundle names artisan kits ("Hibi", "Botanical Leaf") no `BUNDLE_EXTRA_RE` lists and no literal "bundle", so `classifyVariant` fell through to BASE — and the real base "Standard" carries no "base" word (→ OTHERS), so the "… Base + …" bundle was the only variant classified BASE and `titledBase` returned it. #201 adds the "+ after base" shape (`basePlusExtra` / `_base_plus_extra`) as a third bundle signal, stripping parenthetical colourway specs so "Teal & White Base" and "Two Base（Teal + White）" stay BASE. The picker then returns the dearest real base = "Standard" 139. Targeted re-scrape (id `cmq585ux202a0b17d1q505hsa`, run 36736521078, `updated=1`); confirmation feed (run 36736657805) reads `139 EUR SCRAPED`. `test:kit-variants` + Python suite pin both halves | ✅ resolved (#201; 139 EUR) — on watch |
@@ -1575,8 +1678,9 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-10-01 | gmk-kitsune | KeyBay | 209 CAD | needs fix | Same cause/fix, KeyBay (CA store). Probe: `.json` "Base" 158 (US-geo conversion stored as CAD); `.js` "Base" 209 CAD, available=true. `.js`-shelf-price fix; feed `209 CAD SCRAPED` | ✅ resolved (`abc3021`; 209 CAD; confirmed 2026-10-02) |
 | 2026-10-01 | gmk-manta | KeyBay | 209 CAD | needs fix | Same cause/fix as gmk-kitsune. `.json` 158, `.js` 209 CAD; feed `209 CAD SCRAPED` | ✅ resolved (`abc3021`; 209 CAD; confirmed 2026-10-02) |
 | 2026-10-02 | gmk-varenye | GEONWORKS | null USD | self-healed (dead link) | `geon.works/products/group-buy-gmk-cyl-varenye` 302s to `geon.works/` (front page, no product); the `gmk-cyl-varenye`/`gmk-varenye` handles 404. `isGoneRedirect` recognises the root-redirect, marks the row `DEAD_LINK` and clears the price; the feed reads `current=null USD SCRAPED`, `resolvedAt=2026-10-02T06:42:34.892Z` (post-dating the 01:50 submit). Identical designed behaviour to gmk-mothman × GEONWORKS (2026-09-28) — GEONWORKS 302s removed products to its front page store-wide. The unpriced row is correctly hidden on the released set; the deals-rail "USD 150 in stock" the reporter saw is a stale point-in-time artifact cleared by deploy/scrape propagation. No code change. Filed by the deals audit batch 7 (#204). **Confirmed healed 2026-10-03** (feed `null USD SCRAPED`, `resolvedAt=2026-10-03T05:33:28.602Z` post-dating the submit; null held across the nightly scrape) | ✅ resolved (self-healed; confirmed 2026-10-03) |
-| 2026-10-03 | gmk-2pack-add-on | Oblotzky Industries | 32 EUR | self-healed (stock) | Stock-only. Site showed the listing SOLD OUT; the store's "GMK CYL 2 Pack" base is EUR 32, `available=true` (product tag "pre-order"), confirmed from a runner by the batch-8 Vendor probe (run 37087613361). Price 32 EUR is correct and was never disputed; the price pass is sole authority for `inStock` (#153), so the next availability scrape flips the display in stock. No code change. Filed by the deals audit batch 8 (#205) | ✅ resolved (self-healed; on watch) |
+| 2026-10-03 | gmk-2pack-add-on | Oblotzky Industries | 32 EUR | self-healed (stock) | Stock-only. Site showed the listing SOLD OUT; the store's "GMK CYL 2 Pack" base is EUR 32, `available=true` (product tag "pre-order"), confirmed from a runner by the batch-8 Vendor probe (run 37087613361). Price 32 EUR is correct and was never disputed; the price pass is sole authority for `inStock` (#153), so the next availability scrape flips the display in stock. No code change. Filed by the deals audit batch 8 (#205). **Confirmed healed 2026-10-04** (feed `32 EUR SCRAPED`; batch-9 deals audit independently observed the site "EUR 32, in stock" — the in-stock flip happened) | ✅ resolved (self-healed; confirmed 2026-10-04) |
 | 2026-10-03 | gmk-2pack-add-on | Swagkeys | 44.99 AUD | wrong vendor (held for owner) | **Not a wrong price — wrong vendor attribution.** The Swagkeys row (a Korean store, `swagkeys.com` / `swagkey.kr`; two seed rows `swagkeys` + `swagkeys-kr`) carries a VendorKit whose `productUrl` and AUD 44.99 price are **SwitchKeys'** (`switchkeys.com.au/products/gmk-2pack`, an Australian store, confirmed by batch-8 probe 37087613361). The price pass reads the SwitchKeys listing correctly — no wrong currency/product/variant — so this is not a price-scrape bug and re-scraping re-reads the same URL under the same vendor (the feed's `resolvedAt=2026-10-03T06:03:12.839Z` auto-resolution is spurious). Swagkeys and SwitchKeys are two genuinely distinct real shops with look-alike names (SwitchKeys exists in production — it is the gmk-zm owner item's vendor — but is not in `src/data/seed/vendors.json`); the listing is almost certainly a one-off upstream KeycapLendar mis-attribution, not a systematic matcher bug (neither Swagkeys `websiteUrl` points at switchkeys.com.au, so discovery did not crawl it there). The repair is a targeted **VendorKit reassignment** to the SwitchKeys vendor row (or a drop from Swagkeys, since discovery links SwitchKeys' own catalogue) — a catalog / vendor-identity decision no price-scraper code and no automated heal/seed pass performs (`planStorefrontOwnership` fixes a vendor's `websiteUrl`, never a single listing's vendor), needing production DB access this session lacks. **Held for the owner** per the routine's genuine-ambiguity / architecturally-significant exception (same class as the `kt-dyad-tkl` `wrong_vendor` flag §4b and the gmk-zm relink §1). Filed by the deals audit batch 8 (#205) | ⚠️ open owner item (§1) — awaiting reassignment |
+| 2026-10-04 | gmk-black-snail---red-cyrillic-addon | Neo Macro | 6,500 INR | needs fix (recurrence; held for owner) | **Wrong variant, recurrence of 2026-09-28; #198 does not reach this row.** Vendor probe run 37212339509 (`neomacro.in/products/gmk-black-snail`, READABLE Shopify, 8 variants all `available=true`, INR): L9 Modifier 6000, **U9 Modifier 6500**, 40s Ortho linear 4900, GMK Retro Point 600, **Red Cyrillic Alphas 9900**, 9009 Accents 3000, Numpad 2500, Cherry Accents 1900 — **no "Base" variant**. The set name contains "Addon"/"Cyrillic" → `isSubkitSetName` true → pickers run `allowSubkits=true`, which bypasses the `NONBASE_SUBKIT_RE` exclusion (`kit-variants.ts:187`, `scrape.py:1491`), so #198's modifier exclusion never fires. "Red Cyrillic Alphas" (the variant this set actually names, 9900) classifies ALPHA → excluded from the base pool, so the dearest OTHERS = U9 Modifier (6500) is picked. The correct outcome is contested and the repair is roster-wide: (1) keep the set and price it at Red Cyrillic Alphas 9900 via a NEW name-match heuristic in the shared `pickBaseVariant`/`choose_kit_variant` (both halves, 4 call sites, propagated nightly by the price audit, + the ALPHA classification must be revisited) — architecturally significant; or (2) remove/merge the near-duplicate row (same product URL + variant list as `gmk-black-snail`, which correctly clears to null; VendorKit `cmuslcupj000n04igkpdo3hmn` may have been re-created per the batch-9 audit) — a catalog decision needing production DB access. Neither clear-to-null nor block-the-pair is correct (the Red Cyrillic Alphas kit genuinely is for sale). **Held for the owner** per routine step 4; recommendation: option 1 if keeping the set, else option 2. Live harm: INR 6500 shows as a fake base price on `/released` until repaired. Filed by the deals audit batch 9 (#206) | ⚠️ open owner item (§1) — awaiting decision |
 
 ### Client-recommended values verified
 
