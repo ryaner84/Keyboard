@@ -12,12 +12,12 @@ to the start.
 
 ## Cursor
 
-`after_slug` for the next run: **`gmk-mothman`**
+`after_slug` for the next run: **`gmk-metropolis-r2`**
 
-The list held 53 on-sale sets on 2026-10-03. That run covered the 18 sets after
-the previous cursor (`gmk-nord … gmk-zm`) and then wrapped to the top for 32
-more (`dcs-dream-alert … gmk-mothman`), 50 sets in all. The next run
-continues after `gmk-mothman`.
+The list held 54 on-sale sets on 2026-10-04. That run covered the 21 sets after
+the previous cursor (`gmk-mr-sleeves-r2 … gmk-zm`) and then wrapped to the top
+for 29 more (`dcs-dream-alert … gmk-metropolis-r2`), 50 sets in all. The next
+run continues after `gmk-metropolis-r2`.
 
 ## Runs
 
@@ -31,6 +31,7 @@ continues after `gmk-mothman`.
 | 2026-10-01 | gmk-panda … gmk-zm, wrap, dcs-dream-alert … gmk-orange-alert | 50 | 262 | 16 flagged → 8 confirmed | 8 (price-report button) | [36802757204](https://github.com/ryaner84/Keyboard/actions/runs/36802757204) + [36803087195](https://github.com/ryaner84/Keyboard/actions/runs/36803087195) (reports: [36803622470](https://github.com/ryaner84/Keyboard/actions/runs/36803622470)) |
 | 2026-10-02 | gmk-panda … gmk-zm, wrap, dcs-dream-alert … gmk-nightshade | 50 | 262 | 9 flagged → 1 confirmed | 1 (price-report button) | [36952559488](https://github.com/ryaner84/Keyboard/actions/runs/36952559488) + [36952665718](https://github.com/ryaner84/Keyboard/actions/runs/36952665718) (reports: [36952859148](https://github.com/ryaner84/Keyboard/actions/runs/36952859148)) |
 | 2026-10-03 | gmk-nord … gmk-zm, wrap, dcs-dream-alert … gmk-mothman | 50 | 263 | 9 flagged + 1 unflagged → 2 confirmed | 2 (price-report button) | [37087385725](https://github.com/ryaner84/Keyboard/actions/runs/37087385725) + [37087515730](https://github.com/ryaner84/Keyboard/actions/runs/37087515730) (reports: [37087701521](https://github.com/ryaner84/Keyboard/actions/runs/37087701521)) |
+| 2026-10-04 | gmk-mr-sleeves-r2 … gmk-zm, wrap, dcs-dream-alert … gmk-metropolis-r2 | 50 | 260 | 8 flagged + 1 unflagged → 1 confirmed | 1 (price-report button) | [37169065857](https://github.com/ryaner84/Keyboard/actions/runs/37169065857) + [37169067014](https://github.com/ryaner84/Keyboard/actions/runs/37169067014) (reports: [37169656893](https://github.com/ryaner84/Keyboard/actions/runs/37169656893)) |
 
 ### 2026-09-26 findings
 
@@ -258,3 +259,36 @@ host) would have caught the Swagkeys/SwitchKeys row; the name collision looks
 like an upstream KeycapLendar mis-filing that host-based vendor matching
 (`nextVendorWebsiteUrl`, `planStorefrontOwnership`) does not reach for a single
 listing.
+
+### 2026-10-04 findings
+
+Two audit runs (the 21 sets after the cursor, then a wrap; only the first 29
+sets of the wrap run, 149 of its 262 listings, belong to this batch) flagged 8
+of 260 listings, all of them known stale-handle or pinned-variant shapes. One
+unflagged listing was wrong, and the **Vendor probe**
+([37169634084](https://github.com/ryaner84/Keyboard/actions/runs/37169634084))
+confirmed it:
+
+| set | vendor | site | store | verdict | filed |
+|---|---|---|---|---|---|
+| gmk-black-snail---red-cyrillic-addon | Neo Macro | INR 6500 (was 7500), in stock | no base kit: L9 Modifier 6000, **U9 Modifier 6500**, 40s Ortho 4900, **Red Cyrillic Alphas 9900**, accents, numpad, Retro Point 600, all available | **recurrence** of 2026-09-28: wrong variant. #198 cleared this row to null, but it is priced again from the U9 Modifier Kit. Not flagged by the auditor because its "price match" accepts any variant at the site's price | price report |
+| gmk-2pack-add-on | Oblotzky Industries | EUR 32, in stock | "GMK CYL 2 Pack" 32 available | **healed** (reported 2026-10-03) | — |
+| gmk-2pack-add-on | Swagkeys | AUD 44.99 (was 49.99) | switchkeys.com.au listing on the Swagkeys row | still the wrong vendor; held for the owner by the 2026-10-03 price-report review. Not refiled | — |
+| gmk-monochrome-dolch | Neo Macro | INR 15500 (was 17000), in stock | "Full Base" 15500 available; store open again | correct | — |
+| gmk-metropolis-r2 | NovelKeys | USD 70 (was 135), in stock | "Base" sold out; "Midnight Base" 70 available | site is right (as 2026-09-30) | — |
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+| gmk-wasabi-r2 / gmk-zm (SwitchKeys, Mekibo) / gmk-dots-r2 (NovelKeys, Oblotzky) / gmk-botanical-r2 (Oblotzky) | — | — | renamed handles redirect to the same product and price | as 2026-10-03; stale handle in URL | — |
+
+A host check over every listing in the batch found no other vendor/host mismatch
+besides Swagkeys → switchkeys.com.au.
+
+Follow-up for the price-report review: the add-on set's name contains "Addon",
+so `isSubkitSetName` is true and `allowSubkits` lets the modifier kits back into
+the pool, where the dearest-unlabelled rule takes U9 Modifier (6500). On a set
+named for the Red Cyrillic add-on, the matching variant is "Red Cyrillic
+Alphas" (9900). Either the subkit-set pick should prefer the variant that
+matches the set's own add-on name, or this set row (a near-duplicate of
+gmk-black-snail, see 2026-09-28) should go. The vendor kit id is
+`cmuslcupj000n04igkpdo3hmn`. It was created on the same day as the
+re-created Toro Studios row (`cmuslc…`), so the row may have been re-created
+rather than re-priced.
