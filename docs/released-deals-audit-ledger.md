@@ -12,12 +12,12 @@ to the start.
 
 ## Cursor
 
-`after_slug` for the next run: **`gmk-metropolis-r2`**
+`after_slug` for the next run: **`gmk-maestro`**
 
-The list held 54 on-sale sets on 2026-10-04. That run covered the 21 sets after
-the previous cursor (`gmk-mr-sleeves-r2 … gmk-zm`) and then wrapped to the top
-for 29 more (`dcs-dream-alert … gmk-metropolis-r2`), 50 sets in all. The next
-run continues after `gmk-metropolis-r2`.
+The list held 54 on-sale sets on 2026-10-05. That run covered the 25 sets after
+the previous cursor (`gmk-mika … gmk-zm`) and then wrapped to the top for 25
+more (`dcs-dream-alert … gmk-maestro`), 50 sets in all. The next run continues
+after `gmk-maestro`.
 
 ## Runs
 
@@ -32,6 +32,7 @@ run continues after `gmk-metropolis-r2`.
 | 2026-10-02 | gmk-panda … gmk-zm, wrap, dcs-dream-alert … gmk-nightshade | 50 | 262 | 9 flagged → 1 confirmed | 1 (price-report button) | [36952559488](https://github.com/ryaner84/Keyboard/actions/runs/36952559488) + [36952665718](https://github.com/ryaner84/Keyboard/actions/runs/36952665718) (reports: [36952859148](https://github.com/ryaner84/Keyboard/actions/runs/36952859148)) |
 | 2026-10-03 | gmk-nord … gmk-zm, wrap, dcs-dream-alert … gmk-mothman | 50 | 263 | 9 flagged + 1 unflagged → 2 confirmed | 2 (price-report button) | [37087385725](https://github.com/ryaner84/Keyboard/actions/runs/37087385725) + [37087515730](https://github.com/ryaner84/Keyboard/actions/runs/37087515730) (reports: [37087701521](https://github.com/ryaner84/Keyboard/actions/runs/37087701521)) |
 | 2026-10-04 | gmk-mr-sleeves-r2 … gmk-zm, wrap, dcs-dream-alert … gmk-metropolis-r2 | 50 | 260 | 8 flagged + 1 unflagged → 1 confirmed | 1 (price-report button) | [37169065857](https://github.com/ryaner84/Keyboard/actions/runs/37169065857) + [37169067014](https://github.com/ryaner84/Keyboard/actions/runs/37169067014) (reports: [37169656893](https://github.com/ryaner84/Keyboard/actions/runs/37169656893)) |
+| 2026-10-05 | gmk-mika … gmk-zm, wrap, dcs-dream-alert … gmk-maestro | 50 | 259 | 6 flagged + 2 unflagged → 2 confirmed | 2 (listing flag) | [37252749968](https://github.com/ryaner84/Keyboard/actions/runs/37252749968) + [37252751983](https://github.com/ryaner84/Keyboard/actions/runs/37252751983) (reports: [37253002800](https://github.com/ryaner84/Keyboard/actions/runs/37253002800)) |
 
 ### 2026-09-26 findings
 
@@ -292,3 +293,36 @@ gmk-black-snail, see 2026-09-28) should go. The vendor kit id is
 `cmuslcupj000n04igkpdo3hmn`. It was created on the same day as the
 re-created Toro Studios row (`cmuslc…`), so the row may have been re-created
 rather than re-priced.
+
+### 2026-10-05 findings
+
+Two audit runs (the 25 sets after the cursor, then a wrap; only the first 25
+sets of the wrap run, 123 of its 266 listings, belong to this batch) flagged 6
+of 259 listings. All 6 are stale-handle or pinned-variant cases already in this
+ledger. Two problems the auditor does not check for (set identity and vendor
+identity) were confirmed with the **Vendor probe**
+([37252951369](https://github.com/ryaner84/Keyboard/actions/runs/37252951369))
+and filed through the listing flag (`duplicate`):
+
+| set | vendor | site | store | verdict | filed |
+|---|---|---|---|---|---|
+| gmk-finer-things | Keebz n Cables, Aiglatson Studio, Mecha MY, Daily Clack | Keebz AUD 180 (was 220), **in stock**, shown as a deal | every product is **"GMK Finer Things R2"** (Keebz: "[Pre-order] GMK Finer Things R2 Keycaps", Teal/White Base 180 available) | the R1 set row carries the R2 product's listings, which also sit on `gmk-cyl-finer-things-r2-keycaps`. The 2026-10-01 price report fixed the price only, so the wrong-product half was still open | listing flag |
+| gmk-cyl-finer-things-r2-keycaps (and gmk-finer-things) | Mecha MY + Mecha.store | MYR 459, sold out, listed twice | `mecha.store/products/group-buy-gmk-finer-things-r2` 301s to `www.mecha.com.my/…` | **one shop on two Vendor rows**, the Toro Studio / Toro Studios shape | listing flag |
+| gmk-black-snail---red-cyrillic-addon | Neo Macro | INR 6500 (was 7500), in stock | U9 Modifier Kit 6500 (no base kit) | still the wrong variant; held for the owner by the 2026-10-04 price-report review. Not refiled | — |
+| gmk-2pack-add-on | Swagkeys | AUD 44.99 (was 49.99) | switchkeys.com.au listing | still the wrong vendor; held for the owner since 2026-10-03. Not refiled | — |
+| gmk-varenye | Toro Studio + Toro Studios | AUD 245 ×2 | same URL | duplicate vendor rows (as 2026-09-28); still unmerged | — |
+| gmk-metropolis-r2 | NovelKeys | USD 70 (was 135), in stock | "Base" sold out; "Midnight Base" 70 available | site is right (as 2026-09-30) | — |
+| gmk-hazakura | DeskHero | CAD 246, in stock | "Base Kit" sold out; "Base Kit - Hiragana" 246 in stock | site is right (as 2026-09-27) | — |
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+| gmk-wasabi-r2 / gmk-zm (SwitchKeys, Mekibo) / gmk-dots-r2 (NovelKeys) / gmk-botanical-r2 (Oblotzky) | — | — | renamed handles redirect to the same product and price | as 2026-10-04; stale handle in URL | — |
+
+Everything else matched the store on price, markdown and stock.
+
+Follow-up: Mecha.store is in no roster entry (`src/data/seed/vendors.json` names
+no Mecha shop), so `mergeDuplicateVendorRows` cannot fold the pair until a
+roster entry carries both slugs (`aliases`). Toro Studio / Toro Studios is
+different: the roster already lists `toro-studios` as an alias of `toro-studio`,
+yet both rows still show on gmk-varenye. The Toro Studios VendorKit id
+(`cmuu0so0k…`) is newer than the one recorded on 2026-09-28, so the duplicate row
+appears to be merged on deploy and then re-created by an import. Worth a look in
+the price-report review.
