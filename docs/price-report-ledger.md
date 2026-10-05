@@ -1340,6 +1340,54 @@ both the client-reported log and the resolution audit in the same run.
 > audit; the red-cyrillic recurrence is an owner item, not a self-heal). gmk-zm ×
 > SwitchKeys and gmk-2pack-add-on × Swagkeys remain the prior open owner items (§1).
 
+> **2026-10-05 run.** Price feed run 37330934240 (`?all=1`) returns **0 pending,
+> 68 resolved** — a 1:1 match with the client-reported log, so **no new price
+> report** has filed since the 2026-10-04 submission
+> (gmk-black-snail---red-cyrillic-addon × Neo Macro, 2026-10-04T01:59:28). That
+> red-cyrillic report now shows `resolvedAt=2026-10-05T06:01:13.839Z`,
+> `current=null`, `id=?` — the **spurious feed auto-resolution** the 2026-10-04
+> note predicted (the listing join returns empty), not a real heal; it stays the
+> open owner item in §1. Visitor inbox run 37330943638: STORE_LINK 0,
+> PRICE_REPORT 0, PHOTO_REPORT 0, 1 FEEDBACK (the 2026-06-24 collection-display
+> item), and **17 `LISTING_FLAG`s** — the 15 already reported to the owner since
+> 2026-09-14 (§4b) plus **two new `duplicate` flags filed 2026-10-05 by the
+> deals-audit batch 10** (#207, vendor probe 37252951369):
+> - **gmk-finer-things** (`duplicate`, id `cmuulevsi000004lbc4mdapdg`) — the R1
+>   set row carries the **R2 product's** listings (every priced listing resolves
+>   to "GMK Finer Things R2", also sitting on `gmk-cyl-finer-things-r2-keycaps`).
+>   The 2026-10-01 price report (`abc3021`) fixed only the *price* half; the
+>   wrong-product half is a **set-identity merge** decision. → owner (§4b).
+> - **gmk-cyl-finer-things-r2-keycaps + gmk-finer-things** (`duplicate`, id
+>   `cmuulewnq000104lbsfwahwvl`) — **Mecha MY** (`mecha.com.my`) and
+>   **Mecha.store** are one shop on two Vendor rows (`mecha.store/products/…`
+>   301s to `www.mecha.com.my/…`). `mergeDuplicateVendorRows` cannot fold the
+>   pair until a roster entry in `src/data/seed/vendors.json` carries both slugs
+>   as `aliases`, and a DELETE-level vendor merge is the "only the roster may
+>   declare two slugs one shop" case CLAUDE.md reserves — architecturally
+>   significant. → owner (§4b).
+>
+> Both new flags are catalog **identity** decisions (a set merge, a vendor-row
+> merge), not scraper-pricing bugs, so — exactly as every prior `duplicate` flag
+> — they are reported to the owner, not auto-resolved or cleared. `LISTING_FLAG`
+> has no auto-resolution, so they persist in the inbox until the owner acts.
+>
+> **Incoming Self-heal watch was empty** (the 2026-10-04 run confirmed and moved
+> gmk-2pack-add-on × Oblotzky to the audit; the red-cyrillic recurrence is an
+> owner item, not a self-heal), so there was nothing to re-verify and **no
+> watched item failed verification** — no in-run fix was required. The three §1
+> owner items are unchanged and still correctly held:
+> red-cyrillic-addon × Neo Macro (wrong variant; contested shared-picker vs
+> catalog-merge repair), gmk-2pack-add-on × Swagkeys (wrong vendor; VendorKit
+> reassignment), gmk-zm × SwitchKeys (relink judgment). The deals-audit batch 10
+> independently re-confirmed all three still live (red-cyrillic INR 6500 shown,
+> Swagkeys AUD 44.99 on the wrong row, gmk-zm stale handle redirecting). No
+> safely one-directional code fix exists for any item surfaced this run, so none
+> was shipped. Prior resolutions still read correctly in the feed: gmk-vamp ×
+> Switchmod `84.99 USD`, gmk-bent-r2 `150 USD`, gmk-arctic `145`, gmk-tribal
+> `175`; #194 Mekibo `165`/`145 USD`; #201 gmk-botanical-r2 `139 EUR`; #202
+> proto[Typist] `95`/`105.83 GBP`; `abc3021` Keebz/KeyBay `180`/`19`/`211 AUD` /
+> `209 CAD`; #153 Ktechs BRG R3 `139 SGD`, Thunder God `169 SGD`.
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _Three owner items this run._
@@ -1589,13 +1637,15 @@ dealt with (`scripts/resolve-listing-flags.mjs`). First full triage: 2026-09-14.
 | gmk-cyl-kitsune-keycaps | wrong_price | 2026-07-06 | NO ROW | orphan merged / numpad-drop cleared (see resolution audit) |
 | gh-110579 | inactive | 2026-06-16 | NO ROW | row already removed |
 
-### 4b. Open — reported to owner (15 flags, awaiting decision)
+### 4b. Open — reported to owner (17 flags, awaiting decision)
 
 These are genuinely ambiguous or architecturally significant; the review
 session does not merge/delete catalog rows or demote GB status on its own.
 
 | slug(s) | issue | flagged | inspector state | why open / recommendation |
 |---|---|---|---|---|
+| gmk-finer-things | duplicate | 2026-10-05 | R1 set row carries the R2 product's listings (probe 37252951369, batch 10) | **set-identity merge.** Every priced listing on the R1 set resolves to "GMK Finer Things R2" (Keebz n Cables "[Pre-order] GMK Finer Things R2", Teal/White Base AUD 180 in stock), which also sit on `gmk-cyl-finer-things-r2-keycaps`. The 2026-10-01 price report (`abc3021`) fixed the price only; the wrong-product half is a DELETE/merge decision the auto-pass won't make — owner decide merge R1→R2 or re-point the listings |
+| gmk-cyl-finer-things-r2-keycaps (+ gmk-finer-things) | duplicate | 2026-10-05 | Mecha MY (mecha.com.my) + Mecha.store, one shop on two Vendor rows (probe 37252951369, batch 10) | **vendor-row merge.** `mecha.store/products/group-buy-gmk-finer-things-r2` 301s to `www.mecha.com.my/…` — the Toro Studio/Toro Studios shape. `mergeDuplicateVendorRows` cannot fold the pair until `src/data/seed/vendors.json` gains a roster entry carrying both slugs as `aliases`; "only the roster may declare two slugs one shop" (CLAUDE.md), a DELETE-level decision — owner decide whether to add the roster entry / merge |
 | gmk-ramune-tkl + gmk-cyl-ramune | duplicate ×2 | 2026-07-21 | both live keycap rows; identities `gmk::ramune tkl` vs `gmk::ramune` (auto-merge won't fold — "TKL" differs); designers read Hatoworks / blank (GMK Ramune is biip's) | DELETE-level judgement: is "GMK Ramune TKL" a distinct product or a mis-named/mis-slugged duplicate? If duplicate, needs a manual merge the auto-pass deliberately refuses |
 | kbd-rf-8x + kt-rf-8x | duplicate ×4 | 2026-06-27 … 2026-07-21 | both KEYBOARD "RF-8X"; KBDfans row 1 priced link, Ktechs row 0 links | one keyboard, two vendor rows; keyboards carry no auto-dedup (editions kept separate by design) — owner decide merge / drop the empty Ktechs row |
 | kt-vs06 | inactive + duplicate ×2 | 2026-06-28 … 2026-08-26 | KEYBOARD, ACTIVE_GB, 0 links, no twin found | empty stale Ktechs keyboard row; twin (if any) already gone — owner decide retire/remove |
@@ -1719,7 +1769,7 @@ uploaded 2 builds but the mai…") — left for the owner.
 
 ## Summary
 
-- **67 report submissions across ~52 listings** (full `?all=1` history, first
+- **68 report submissions across ~52 listings** (full `?all=1` history, first
   reconciled 2026-08-26; gmk-vamp × Switchmod added 2026-08-27; 6 added
   2026-09-26, 2 added 2026-09-27, 3 added 2026-09-28, 2 added 2026-09-29, 2 added
   2026-09-30, 8 added 2026-10-01, 1 added 2026-10-02 (batch 7, #204:
@@ -1729,7 +1779,13 @@ uploaded 2 builds but the mai…") — left for the owner.
   stock-only self-heal, EUR 32 base available pre-order, on watch; × Swagkeys — a
   **wrong-vendor** attribution, a SwitchKeys listing on the Korean Swagkeys row,
   held for the owner as a VendorKit-reassignment catalog decision, not a
-  price-scrape bug). The 8 added 2026-10-01 (batch 6, #202 +
+  price-scrape bug), and **1 added 2026-10-04** (batch 9, #206:
+  gmk-black-snail---red-cyrillic-addon × Neo Macro — a **recurrence** of the
+  2026-09-28 report; #198's `NONBASE_SUBKIT_RE` does not reach this row because
+  its name trips `isSubkitSetName` → `allowSubkits` bypasses the exclusion, so
+  the U9 Modifier Kit INR 6500 is picked again; held for the owner as a contested
+  shared-picker-heuristic vs catalog-merge repair, architecturally significant).
+  The 8 added 2026-10-01 (batch 6, #202 +
   the `.js` shelf-price fix #203), all confirmed healed on the 2026-10-02 run: dcs-handarbeit / dcs-dream-alert × proto[Typist] (#201
   wrong-variant regression, fixed **#202** — a cheap unlabelled subkit no longer
   outranks the only bundle) and four Keebz n Cables + two KeyBay rows
