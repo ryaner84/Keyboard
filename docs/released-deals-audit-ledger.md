@@ -12,12 +12,12 @@ to the start.
 
 ## Cursor
 
-`after_slug` for the next run: **`gmk-maestro`**
+`after_slug` for the next run: **`gmk-hangulbeit-tkl`**
 
-The list held 54 on-sale sets on 2026-10-05. That run covered the 25 sets after
-the previous cursor (`gmk-mika … gmk-zm`) and then wrapped to the top for 25
-more (`dcs-dream-alert … gmk-maestro`), 50 sets in all. The next run continues
-after `gmk-maestro`.
+The list held 54 on-sale sets on 2026-10-06. That run covered the 29 sets after
+the previous cursor (`gmk-manta … gmk-zm`) and then wrapped to the top for 21
+more (`dcs-dream-alert … gmk-hangulbeit-tkl`), 50 sets in all. The next run
+continues after `gmk-hangulbeit-tkl`.
 
 ## Runs
 
@@ -33,6 +33,7 @@ after `gmk-maestro`.
 | 2026-10-03 | gmk-nord … gmk-zm, wrap, dcs-dream-alert … gmk-mothman | 50 | 263 | 9 flagged + 1 unflagged → 2 confirmed | 2 (price-report button) | [37087385725](https://github.com/ryaner84/Keyboard/actions/runs/37087385725) + [37087515730](https://github.com/ryaner84/Keyboard/actions/runs/37087515730) (reports: [37087701521](https://github.com/ryaner84/Keyboard/actions/runs/37087701521)) |
 | 2026-10-04 | gmk-mr-sleeves-r2 … gmk-zm, wrap, dcs-dream-alert … gmk-metropolis-r2 | 50 | 260 | 8 flagged + 1 unflagged → 1 confirmed | 1 (price-report button) | [37169065857](https://github.com/ryaner84/Keyboard/actions/runs/37169065857) + [37169067014](https://github.com/ryaner84/Keyboard/actions/runs/37169067014) (reports: [37169656893](https://github.com/ryaner84/Keyboard/actions/runs/37169656893)) |
 | 2026-10-05 | gmk-mika … gmk-zm, wrap, dcs-dream-alert … gmk-maestro | 50 | 259 | 6 flagged + 2 unflagged → 2 confirmed | 2 (listing flag) | [37252749968](https://github.com/ryaner84/Keyboard/actions/runs/37252749968) + [37252751983](https://github.com/ryaner84/Keyboard/actions/runs/37252751983) (reports: [37253002800](https://github.com/ryaner84/Keyboard/actions/runs/37253002800)) |
+| 2026-10-06 | gmk-manta … gmk-zm, wrap, dcs-dream-alert … gmk-hangulbeit-tkl | 50 | 262 | 9 flagged → 2 confirmed | 2 (price-report button) | [37400885163](https://github.com/ryaner84/Keyboard/actions/runs/37400885163) + [37400887830](https://github.com/ryaner84/Keyboard/actions/runs/37400887830) (reports: [37401348466](https://github.com/ryaner84/Keyboard/actions/runs/37401348466)) |
 
 ### 2026-09-26 findings
 
@@ -326,3 +327,31 @@ yet both rows still show on gmk-varenye. The Toro Studios VendorKit id
 (`cmuu0so0k…`) is newer than the one recorded on 2026-09-28, so the duplicate row
 appears to be merged on deploy and then re-created by an import. Worth a look in
 the price-report review.
+
+### 2026-10-06 findings
+
+Two audit runs (the 29 sets after the cursor, then a wrap; only the first 21
+sets of the wrap run, 101 of its 266 listings, belong to this batch) flagged 9
+of 262 listings. Seven are stale-handle or pinned-variant cases already in this
+ledger. The two new ones were confirmed with the **Vendor probe**
+([37401216836](https://github.com/ryaner84/Keyboard/actions/runs/37401216836)):
+
+| set | vendor | site | store | verdict | filed |
+|---|---|---|---|---|---|
+| gmk-masterpiece-r2 | iLumKB | SGD 159, **sold out** (upd 2026-10-05) | "[Pre-Order] GMK CYL Masterpiece R2": Origin Base 159 **available** | stock: the site hides a buyable pre-order | price report |
+| gmk-cyl-hyperfuse-origins-r3-keycaps | Oblotzky Industries | EUR 125, **sold out** (upd 2026-10-05) | Base 125 **available** (tagged `pre-order`) | stock: same shape | price report |
+| gmk-black-snail---red-cyrillic-addon | Neo Macro | INR 6500 (was 7500), in stock | U9 Modifier Kit 6500 | still the wrong variant; held for the owner since 2026-10-04. Not refiled | — |
+| gmk-2pack-add-on | Swagkeys | AUD 44.99 (was 49.99) | switchkeys.com.au listing | still the wrong vendor; held since 2026-10-03. Not refiled | — |
+| gmk-finer-things / gmk-cyl-finer-things-r2-keycaps | Mecha MY + Mecha.store, R1 row carrying R2 listings | — | — | flagged 2026-10-05; still unmerged. Not refiled | — |
+| gmk-varenye | Toro Studio + Toro Studios | AUD 245 ×2 | same URL | duplicate vendor rows (as 2026-09-28); still unmerged | — |
+| gmk-metropolis-r2 | NovelKeys | USD 70 (was 135), in stock | "Base" sold out; "Midnight Base" 70 available | site is right (as 2026-09-30) | — |
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+| gmk-wasabi-r2 / gmk-zm (SwitchKeys, Mekibo) / gmk-dots-r2 (NovelKeys) / gmk-botanical-r2 (Oblotzky) | — | — | renamed handles redirect to the same product and price | as 2026-10-05; stale handle in URL | — |
+
+gmk-zm × SwitchKeys now reads AUD 229.99 in stock through a redirect to
+`/products/gmk-zimo`, so the 404 reported on 2026-09-27 has healed at the store's
+end. Everything else matched the store on price, markdown and stock.
+
+Both stock errors are rows last read on 2026-10-05 while their set siblings were
+read on 2026-10-06, so the next price pass may correct them by itself. Check them
+in the next price-report review.
