@@ -1388,6 +1388,58 @@ both the client-reported log and the resolution audit in the same run.
 > proto[Typist] `95`/`105.83 GBP`; `abc3021` Keebz/KeyBay `180`/`19`/`211 AUD` /
 > `209 CAD`; #153 Ktechs BRG R3 `139 SGD`, Thunder God `169 SGD`.
 
+> **2026-10-06 run.** Price feed run 37485313440 (`?all=1`) returns **0 pending,
+> 70 resolved** — **two new reports** since the 2026-10-05 run (which saw 68
+> resolved), both filed by the **batch-11 deals audit (#208)** on 2026-10-06T01:52
+> and both **stock-only pre-order self-heals**, probe-confirmed price-correct:
+> - **gmk-cyl-hyperfuse-origins-r3-keycaps × Oblotzky Industries** — "site shows
+>   EUR 125 SOLD OUT, but the store's Base variant (125 EUR, id 54877394075916)
+>   is `available=true` (pre-order tag) (probe run 37401216836). Price is
+>   correct." New set/vendor, never reported before. Feed already shows it
+>   resolved `125 EUR SCRAPED`, `resolvedAt=2026-10-06T07:12:34.112Z`
+>   (post-dating the 01:52 submit).
+> - **gmk-masterpiece-r2 × iLumKB** — "site shows SGD 159 SOLD OUT, but the
+>   store's Origin Base variant (159 SGD, id 42466709536850) is `available=true`
+>   on the [Pre-Order] product (probe run 37401216836). Price is correct." Feed
+>   resolved `159 SGD SCRAPED`, `resolvedAt=2026-10-06T07:12:34.112Z`.
+>
+> Both are the well-understood **pre-order stock-lag** shape (the store marks its
+> base variant available under a pre-order tag; our last scrape caught it genuinely
+> sold out, and the next availability scrape flips the display): identical to
+> gmk-2pack-add-on × Oblotzky (2026-10-03→confirmed 2026-10-04), gmk-masterpiece-r2
+> × Oblotzky (2026-09-30→confirmed 2026-10-01) and gmk-varenye × iLumKB
+> (2026-09-30→confirmed 2026-10-01). The price pass is sole authority for `inStock`
+> (#153), so no code change applies; both are placed on the **Self-heal watch (§1b)**
+> for next-run confirmation of the in-stock flip. **gmk-masterpiece-r2 × iLumKB was
+> reported once before** (2026-07-18, "pre-order link not actual units",
+> self-healed-link) — not a recurrence of the same wrong *value* (159 SGD is stable
+> and probe-confirmed correct both times; the two complaints are opposite — "it's a
+> pre-order" vs "shown sold out but actually available"), so the oscillating-value
+> recurrence rule does not fire; it is watched, and if the in-stock flip does NOT
+> land after the nightly scrape it becomes `needs fix`. 125 EUR and 159 SGD are both
+> within `KIT_BOUNDS`; EUR/SGD are registered currencies; Oblotzky and iLumKB are
+> established vendors — nothing new to register (routine step 9).
+>
+> **Visitor inbox run 37485318228:** STORE_LINK 0, PRICE_REPORT 0, PHOTO_REPORT 0,
+> **17 `LISTING_FLAG`s** and 1 FEEDBACK — byte-for-byte the SAME open set already
+> triaged and reported to the owner (§4b), by id: no new flags, nothing
+> auto-resolvable. The FEEDBACK is the same 2026-06-24 collection-display item. No
+> inbox action.
+>
+> **Incoming Self-heal watch was empty** (the 2026-10-05 run left it empty), so
+> there was nothing to re-verify and **no watched item failed verification** — no
+> in-run fix was required. The three §1 owner items are unchanged and still
+> correctly held: red-cyrillic-addon × Neo Macro (wrong variant; contested
+> shared-picker vs catalog-merge repair), gmk-2pack-add-on × Swagkeys (wrong
+> vendor; VendorKit reassignment), gmk-zm × SwitchKeys (relink judgment) — each
+> shows a spurious feed auto-resolution (listing join empty / price re-read under
+> the same row) rather than a real heal, as prior runs established. Prior
+> resolutions still read correctly in the feed: gmk-vamp × Switchmod `84.99 USD`,
+> gmk-bent-r2 `150 USD`, gmk-arctic `145`, gmk-tribal `175`; #194 Mekibo
+> `165`/`145 USD`; #201 gmk-botanical-r2 `139 EUR`; #202 proto[Typist]
+> `95`/`105.83 GBP`; `abc3021` Keebz/KeyBay `180`/`19`/`211 AUD` / `209 CAD`; #153
+> Ktechs BRG R3 `139 SGD`, Thunder God `169 SGD`.
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _Three owner items this run._
@@ -1449,9 +1501,17 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-**Currently on the watch: none.** The red-cyrillic-addon recurrence surfaced this
-run is an owner item (§1), not a self-heal, so it is not watched; it is tracked in
-§1 and the client-reported log until the owner applies one of the two repairs.
+**Currently on the watch (added 2026-10-06, batch 11 / #208) — two stock-only
+pre-order self-heals awaiting next-run confirmation of the in-stock flip:**
+
+| set | vendor | flagged | reason | why on watch |
+|---|---|---|---|---|
+| gmk-cyl-hyperfuse-origins-r3-keycaps | Oblotzky Industries | 2026-10-06 | stock wrong — site showed SOLD OUT, but the store's Base variant is EUR 125 `available=true` (pre-order), probe 37401216836 | feed `125 EUR SCRAPED`, `resolvedAt=2026-10-06T07:12:34.112Z` (post-dating 01:52 submit); price correct & undisputed — confirm the availability scrape flips it in stock next run |
+| gmk-masterpiece-r2 | iLumKB | 2026-10-06 | stock wrong — site showed SOLD OUT, but the store's Origin Base is SGD 159 `available=true` on the [Pre-Order] product, probe 37401216836 | feed `159 SGD SCRAPED`, `resolvedAt=2026-10-06T07:12:34.112Z`; price correct & undisputed (also reported 2026-07-18 pre-order-link, self-healed — not an oscillating value); confirm the in-stock flip next run |
+
+The red-cyrillic-addon recurrence (§1) is an owner item, not a self-heal, so it is
+not watched; it is tracked in §1 and the client-reported log until the owner
+applies one of the two repairs.
 
 **Prior watch (added 2026-10-03, batch 8 / #205) — CONFIRMED healed on the
 2026-10-04 run and moved to the resolution audit:**
@@ -1614,6 +1674,8 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-10-03 | gmk-2pack-add-on | Oblotzky Industries | 32 EUR | "Stock is wrong: the site shows this listing sold out, but the store's product (GMK CYL 2 Pack, EUR 32, tagged pre-order) is available to buy (product.js available=true, checked 2026-10-03 from a runner)." (deals audit batch 8) | self-healed (stock) | ✅ resolved 2026-10-03 — stock-only; 32 EUR correct & unchanged; **confirmed healed 2026-10-04** (feed `32 EUR SCRAPED`; batch-9 audit saw site "EUR 32, in stock" — the in-stock flip happened) |
 | 2026-10-03 | gmk-2pack-add-on | Swagkeys | 44.99 AUD | "Wrong vendor: this row is labelled Swagkeys (a Korean store, swagkeys.com) but its link and AUD 44.99 price are SwitchKeys' listing (switchkeys.com.au/products/gmk-2pack). The listing belongs on the SwitchKeys vendor row, not Swagkeys." (deals audit batch 8) | wrong vendor (held for owner) | ⚠️ open owner item (§1) — not a price-scrape bug; price 44.99 AUD is a correct read of the SwitchKeys listing, but on the wrong vendor row. Needs a VendorKit reassignment to SwitchKeys (or drop from Swagkeys); two distinct real shops, so a catalog/vendor-identity decision. Feed auto-resolution spurious |
 | 2026-10-04 | gmk-black-snail---red-cyrillic-addon | Neo Macro | 6,500 INR | "Wrong variant (recurrence of 2026-09-28): site shows INR 6500 (was 7500) in stock, which is the U9 Modifier Kit. neomacro.in/products/gmk-black-snail sells no base kit; the Red Cyrillic add-on this set names is the 'Red Cyrillic Alphas' variant, INR 9900, available. Likely cause: the set name contains 'Addon', so isSubkitSetName lets subkits through and the dearest-unlabeled pick takes the modifier kit" (deals audit batch 9 / #206) | needs fix (recurrence; held for owner) | ⚠️ open owner item (§1) — recurrence of the 2026-09-28 report; #198 does not reach this row because `isSubkitSetName`→`allowSubkits` bypasses `NONBASE_SUBKIT_RE`, and "Red Cyrillic Alphas" (the correct 9900 variant) classifies ALPHA. Repair is contested (price at 9900 via a shared-picker name-match vs remove the near-duplicate row) → architecturally significant, held per routine step 4. Probe run 37212339509 |
+| 2026-10-06 | gmk-cyl-hyperfuse-origins-r3-keycaps | Oblotzky Industries | 125 EUR | "Stock is wrong: site shows EUR 125 SOLD OUT, but the store's Base variant (125 EUR, id 54877394075916) is available=true (pre-order tag) (probe run 37401216836). Price is correct." (deals audit batch 11 / #208) | self-healed (stock) | ✅ resolved 2026-10-06 — stock-only pre-order lag; 125 EUR correct & undisputed; feed `125 EUR SCRAPED`, `resolvedAt=2026-10-06T07:12:34.112Z`. On the Self-heal watch (§1b) to confirm the in-stock flip |
+| 2026-10-06 | gmk-masterpiece-r2 | iLumKB | 159 SGD | "Stock is wrong: site shows SGD 159 SOLD OUT, but the store's Origin Base variant (159 SGD, id 42466709536850) is available=true on the [Pre-Order] product (probe run 37401216836). Price is correct." (deals audit batch 11 / #208) | self-healed (stock) | ✅ resolved 2026-10-06 — stock-only pre-order lag; 159 SGD correct & undisputed (also reported 2026-07-18 pre-order-link, self-healed; not an oscillating value); feed `159 SGD SCRAPED`, `resolvedAt=2026-10-06T07:12:34.112Z`. On the Self-heal watch (§1b) |
 
 ## 4. Listing-flag triage (visitor inbox — `ListingReport`)
 
@@ -1731,6 +1793,8 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-10-03 | gmk-2pack-add-on | Oblotzky Industries | 32 EUR | self-healed (stock) | Stock-only. Site showed the listing SOLD OUT; the store's "GMK CYL 2 Pack" base is EUR 32, `available=true` (product tag "pre-order"), confirmed from a runner by the batch-8 Vendor probe (run 37087613361). Price 32 EUR is correct and was never disputed; the price pass is sole authority for `inStock` (#153), so the next availability scrape flips the display in stock. No code change. Filed by the deals audit batch 8 (#205). **Confirmed healed 2026-10-04** (feed `32 EUR SCRAPED`; batch-9 deals audit independently observed the site "EUR 32, in stock" — the in-stock flip happened) | ✅ resolved (self-healed; confirmed 2026-10-04) |
 | 2026-10-03 | gmk-2pack-add-on | Swagkeys | 44.99 AUD | wrong vendor (held for owner) | **Not a wrong price — wrong vendor attribution.** The Swagkeys row (a Korean store, `swagkeys.com` / `swagkey.kr`; two seed rows `swagkeys` + `swagkeys-kr`) carries a VendorKit whose `productUrl` and AUD 44.99 price are **SwitchKeys'** (`switchkeys.com.au/products/gmk-2pack`, an Australian store, confirmed by batch-8 probe 37087613361). The price pass reads the SwitchKeys listing correctly — no wrong currency/product/variant — so this is not a price-scrape bug and re-scraping re-reads the same URL under the same vendor (the feed's `resolvedAt=2026-10-03T06:03:12.839Z` auto-resolution is spurious). Swagkeys and SwitchKeys are two genuinely distinct real shops with look-alike names (SwitchKeys exists in production — it is the gmk-zm owner item's vendor — but is not in `src/data/seed/vendors.json`); the listing is almost certainly a one-off upstream KeycapLendar mis-attribution, not a systematic matcher bug (neither Swagkeys `websiteUrl` points at switchkeys.com.au, so discovery did not crawl it there). The repair is a targeted **VendorKit reassignment** to the SwitchKeys vendor row (or a drop from Swagkeys, since discovery links SwitchKeys' own catalogue) — a catalog / vendor-identity decision no price-scraper code and no automated heal/seed pass performs (`planStorefrontOwnership` fixes a vendor's `websiteUrl`, never a single listing's vendor), needing production DB access this session lacks. **Held for the owner** per the routine's genuine-ambiguity / architecturally-significant exception (same class as the `kt-dyad-tkl` `wrong_vendor` flag §4b and the gmk-zm relink §1). Filed by the deals audit batch 8 (#205) | ⚠️ open owner item (§1) — awaiting reassignment |
 | 2026-10-04 | gmk-black-snail---red-cyrillic-addon | Neo Macro | 6,500 INR | needs fix (recurrence; held for owner) | **Wrong variant, recurrence of 2026-09-28; #198 does not reach this row.** Vendor probe run 37212339509 (`neomacro.in/products/gmk-black-snail`, READABLE Shopify, 8 variants all `available=true`, INR): L9 Modifier 6000, **U9 Modifier 6500**, 40s Ortho linear 4900, GMK Retro Point 600, **Red Cyrillic Alphas 9900**, 9009 Accents 3000, Numpad 2500, Cherry Accents 1900 — **no "Base" variant**. The set name contains "Addon"/"Cyrillic" → `isSubkitSetName` true → pickers run `allowSubkits=true`, which bypasses the `NONBASE_SUBKIT_RE` exclusion (`kit-variants.ts:187`, `scrape.py:1491`), so #198's modifier exclusion never fires. "Red Cyrillic Alphas" (the variant this set actually names, 9900) classifies ALPHA → excluded from the base pool, so the dearest OTHERS = U9 Modifier (6500) is picked. The correct outcome is contested and the repair is roster-wide: (1) keep the set and price it at Red Cyrillic Alphas 9900 via a NEW name-match heuristic in the shared `pickBaseVariant`/`choose_kit_variant` (both halves, 4 call sites, propagated nightly by the price audit, + the ALPHA classification must be revisited) — architecturally significant; or (2) remove/merge the near-duplicate row (same product URL + variant list as `gmk-black-snail`, which correctly clears to null; VendorKit `cmuslcupj000n04igkpdo3hmn` may have been re-created per the batch-9 audit) — a catalog decision needing production DB access. Neither clear-to-null nor block-the-pair is correct (the Red Cyrillic Alphas kit genuinely is for sale). **Held for the owner** per routine step 4; recommendation: option 1 if keeping the set, else option 2. Live harm: INR 6500 shows as a fake base price on `/released` until repaired. Filed by the deals audit batch 9 (#206) | ⚠️ open owner item (§1) — awaiting decision |
+| 2026-10-06 | gmk-cyl-hyperfuse-origins-r3-keycaps | Oblotzky Industries | 125 EUR | self-healed (stock) | Stock-only pre-order lag. Site showed the listing SOLD OUT; the store's Base variant is EUR 125, `available=true` under a pre-order tag (id 54877394075916, probe run 37401216836). Price 125 EUR is correct and was never disputed; the price pass is sole authority for `inStock` (#153), so the next availability scrape flips the display in stock. No code change. Feed `125 EUR SCRAPED`, `resolvedAt=2026-10-06T07:12:34.112Z` (post-dating the 01:52 submit). Filed by the deals audit batch 11 (#208). On the Self-heal watch (§1b) for next-run confirmation | ✅ resolved (self-healed; confirm next run) |
+| 2026-10-06 | gmk-masterpiece-r2 | iLumKB | 159 SGD | self-healed (stock) | Stock-only pre-order lag, same shape. Site showed SOLD OUT; the store's "Origin Base" variant is SGD 159, `available=true` on the [Pre-Order] product (id 42466709536850, probe run 37401216836). Price 159 SGD correct and undisputed. Reported once before (2026-07-18, "pre-order link not actual units", self-healed-link) — the same listing's stock state flips with pre-order windows; the value is stable, so this is not the oscillating-value recurrence case, and no scrape bug is implicated. Feed `159 SGD SCRAPED`, `resolvedAt=2026-10-06T07:12:34.112Z`. Filed by the deals audit batch 11 (#208). On the Self-heal watch (§1b) | ✅ resolved (self-healed; confirm next run) |
 
 ### Client-recommended values verified
 
