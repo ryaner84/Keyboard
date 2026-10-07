@@ -12,12 +12,12 @@ to the start.
 
 ## Cursor
 
-`after_slug` for the next run: **`gmk-hangulbeit-tkl`**
+`after_slug` for the next run: **`gmk-evil-dolch`**
 
-The list held 54 on-sale sets on 2026-10-06. That run covered the 29 sets after
-the previous cursor (`gmk-manta … gmk-zm`) and then wrapped to the top for 21
-more (`dcs-dream-alert … gmk-hangulbeit-tkl`), 50 sets in all. The next run
-continues after `gmk-hangulbeit-tkl`.
+The list held 54 on-sale sets on 2026-10-07. That run covered the 34 sets after
+the previous cursor (`gmk-hazakura … gmk-zm`) and then wrapped to the top for 16
+more (`dcs-dream-alert … gmk-evil-dolch`), 50 sets in all. The next run
+continues after `gmk-evil-dolch`.
 
 ## Runs
 
@@ -34,6 +34,7 @@ continues after `gmk-hangulbeit-tkl`.
 | 2026-10-04 | gmk-mr-sleeves-r2 … gmk-zm, wrap, dcs-dream-alert … gmk-metropolis-r2 | 50 | 260 | 8 flagged + 1 unflagged → 1 confirmed | 1 (price-report button) | [37169065857](https://github.com/ryaner84/Keyboard/actions/runs/37169065857) + [37169067014](https://github.com/ryaner84/Keyboard/actions/runs/37169067014) (reports: [37169656893](https://github.com/ryaner84/Keyboard/actions/runs/37169656893)) |
 | 2026-10-05 | gmk-mika … gmk-zm, wrap, dcs-dream-alert … gmk-maestro | 50 | 259 | 6 flagged + 2 unflagged → 2 confirmed | 2 (listing flag) | [37252749968](https://github.com/ryaner84/Keyboard/actions/runs/37252749968) + [37252751983](https://github.com/ryaner84/Keyboard/actions/runs/37252751983) (reports: [37253002800](https://github.com/ryaner84/Keyboard/actions/runs/37253002800)) |
 | 2026-10-06 | gmk-manta … gmk-zm, wrap, dcs-dream-alert … gmk-hangulbeit-tkl | 50 | 262 | 9 flagged → 2 confirmed | 2 (price-report button) | [37400885163](https://github.com/ryaner84/Keyboard/actions/runs/37400885163) + [37400887830](https://github.com/ryaner84/Keyboard/actions/runs/37400887830) (reports: [37401348466](https://github.com/ryaner84/Keyboard/actions/runs/37401348466)) |
+| 2026-10-07 | gmk-hazakura … gmk-zm, wrap, dcs-dream-alert … gmk-evil-dolch | 50 | 271 | 8 flagged + 2 unflagged → 2 confirmed | 2 (price-report button) | [37558774635](https://github.com/ryaner84/Keyboard/actions/runs/37558774635) + [37558777081](https://github.com/ryaner84/Keyboard/actions/runs/37558777081) (reports: [37559415669](https://github.com/ryaner84/Keyboard/actions/runs/37559415669)) |
 
 ### 2026-09-26 findings
 
@@ -355,3 +356,40 @@ end. Everything else matched the store on price, markdown and stock.
 Both stock errors are rows last read on 2026-10-05 while their set siblings were
 read on 2026-10-06, so the next price pass may correct them by itself. Check them
 in the next price-report review.
+
+### 2026-10-07 findings
+
+Two audit runs (the 34 sets after the cursor, then a wrap; only the first 16
+sets of the wrap run, 79 of its 272 listings, belong to this batch) flagged 8
+of 271 listings, all of them stale-handle, pinned-variant or unreadable-platform
+cases. Two unflagged listings were wrong. The auditor passed them because a
+single-variant product counts as a match. The **Vendor probe**
+([37559225235](https://github.com/ryaner84/Keyboard/actions/runs/37559225235))
+confirmed both:
+
+| set | vendor | site | store | verdict | filed |
+|---|---|---|---|---|---|
+| gmk-evil-dolch | SwiftCables | USD 39.5 (was 70), **in stock**, the set's only in-stock listing | `gmk-evil-dolch-extras`: "GMK Evil Dolch Extras", one Default Title variant at 39.50, a cable | **wrong product**. This is the cable listing dropped from gmk-evil-dolch-r2 by `BLOCKED_VENDOR_SET_PAIRS` (`swiftcables::gmk-evil-dolch-r2`), and it now sits on the R1 set row. The pair block covers one set slug only | price report |
+| gmk-aurora-polaris | SwiftCables | USD 45 (was 75), in stock | `gmk-aurora-polaris-extras`: "GMK Aurora Polaris Extras", one Default Title variant at 45.00 | wrong product: same SwiftCables `-extras` cable shape | price report |
+| gmk-monochrome-r2 | FunKeys | UAH 4300, sold out | Tilda page, 200, no price markup (the auditor has no Tilda reader); page text says the shipment is delayed | can't be checked by the auditor; shown sold out, so no misleading Buy button. Not filed | — |
+| gh-116846 | iLumKB | SGD 79.5 (was 159), in stock | "[In Stock] MW Stone Age Keycap Set": "Base(Brand New Opened Set)" 79.50 available, Novelties 49 | price and stock match. The markdown is for an **opened-box** unit, which the site does not say. Not filed | — |
+| gmk-mr-sleeves-r2 | NovelKeys / iLumKB | USD 10 sold out / SGD 29.7 in stock | Original/New Sleeves 10 (sold out); Light/Dark Kit 29.70 (available) | correct (clearance) | — |
+| gmk-relegendables | Omnitype | USD 6.99 (was 9.99) | "WS1 (10)" 6.99, a 10-pack of relegendable caps | matches the store; the product is an accessory pack. Not filed | — |
+| gmk-masterpiece-r2 (iLumKB), gmk-cyl-hyperfuse-origins-r3-keycaps (Oblotzky) | — | now in stock | available | **healed** (reported 2026-10-06) | — |
+| gmk-2pack-add-on | Swagkeys | AUD 44.99 (was 49.99) | switchkeys.com.au listing | still the wrong vendor; held since 2026-10-03. Not refiled | — |
+| gmk-finer-things / gmk-cyl-finer-things-r2-keycaps | Mecha MY + Mecha.store, R1 row carrying R2 listings | — | — | flagged 2026-10-05; still unmerged. Not refiled | — |
+| gmk-varenye | Toro Studio + Toro Studios | AUD 245 ×2 | same URL | duplicate vendor rows (as 2026-09-28); still unmerged | — |
+| gmk-metropolis-r2 | NovelKeys | USD 70 (was 135), in stock | "Base" sold out; "Midnight Base" 70 available | site is right (as 2026-09-30) | — |
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+| gmk-wasabi-r2 / gmk-zm (SwitchKeys, Mekibo) / gmk-dots-r2 (NovelKeys) / gmk-botanical-r2 (Oblotzky) | — | — | renamed handles redirect to the same product and price | as 2026-10-06; stale handle in URL | — |
+
+gmk-black-snail and gmk-black-snail---red-cyrillic-addon are no longer on the
+on-sale list. Everything else matched the store on price, markdown and stock.
+
+Follow-up for the price-report review: SwiftCables is a cable maker whose
+`/products/gmk-<set>-extras` pages are cables named after a keycap set.
+Blocking one vendor-set pair at a time does not hold, because the evil-dolch
+cable came back on the sibling set. A vendor-wide rule would hold: no
+SwiftCables `-extras` listing on any set. Check gmk-mika × SwiftCables
+(`gmk-mika-keycaps-1`, "Base Kit" 79) before applying it, because that one is a
+real keycap product.
