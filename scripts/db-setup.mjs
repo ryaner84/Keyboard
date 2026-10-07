@@ -1150,6 +1150,37 @@ async function purgeBlockedVendorSetPairs(client) {
   }
 }
 
+// Accessory-only vendors whose "-extras" product pages are cables named after a
+// keycap set, never that set's base kit (SwiftCables). A per-(vendor, set) pair
+// above does not hold — the same cable re-appears on a sibling set — so this
+// drops ANY row for these vendors whose product URL handle ends in "-extras",
+// vendor-wide. Mirror of ADDON_ONLY_VENDOR_SLUGS + isBlockedVendorListing in
+// src/lib/on-sale.ts: scoped to the vendor slug (Switchmod's gmk-vamp-extras is
+// a real keycap) and to the "-extras" handle (SwiftCables' gmk-mika-keycaps-1 is
+// a real keycap). Runs every deploy so discovery or an import can't resurrect it.
+const ADDON_ONLY_VENDOR_SLUGS = ["swiftcables"];
+async function purgeAddonOnlyVendorListings(client) {
+  try {
+    let total = 0;
+    for (const vendor of ADDON_ONLY_VENDOR_SLUGS) {
+      const res = await client.query(
+        `DELETE FROM public."VendorKit" vk
+          USING public."Vendor" v
+         WHERE vk."vendorId" = v.id
+           AND v.slug = $1
+           AND vk."productUrl" ~* '-extras/?$'`,
+        [vendor]
+      );
+      total += res.rowCount;
+    }
+    if (total > 0) {
+      console.log(`[db-setup] Purged ${total} addon-only vendor listing(s).`);
+    }
+  } catch (err) {
+    console.warn(`[db-setup] addon-only vendor purge skipped: ${err.message}`);
+  }
+}
+
 // Some keycap sets get scraped into the KEYBOARD section by mistake (a vendor's
 // "group buy" collection includes a metal-keycap drop, a Geekhack keycap GB is
 // classified as a board, etc.) — so they pollute /released?type=keyboards.
@@ -1517,6 +1548,7 @@ async function main() {
         await purgeCancelledSets(client);
         await purgeTestProductListings(client);
         await purgeBlockedVendorSetPairs(client);
+        await purgeAddonOnlyVendorListings(client);
         await reclassifyKeycapKeyboards(client);
         await healBlankVendorUrls(client);
         await ensureHiddenBuildsColumn(client);
@@ -1602,6 +1634,7 @@ async function main() {
     await purgeCancelledSets(client);
     await purgeTestProductListings(client);
     await purgeBlockedVendorSetPairs(client);
+    await purgeAddonOnlyVendorListings(client);
     await ensureDiscoveryColumn(client);
     await ensureLinkHealthColumns(client);
     await ensureDataTrustLayer(client);

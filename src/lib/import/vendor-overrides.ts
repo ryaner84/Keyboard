@@ -5,6 +5,7 @@
 // (slugify(vendor.name)). SG vendors matter most since SG is the primary market.
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/utils";
+import { isBlockedVendorListing } from "@/lib/on-sale";
 import { buildShippingZones } from "./shipping";
 import type { Region } from "@/generated/prisma";
 
@@ -375,6 +376,13 @@ export async function processVendorSuggestions(): Promise<SuggestionResult> {
     }
     // Owner removed this vendor for this specific set — never re-link it.
     if (isBlockedVendorSet(def.slug, s.slug)) {
+      await markDone();
+      continue;
+    }
+    // Accessory-only vendor (SwiftCables) "-extras" cable mis-linked to a keycap
+    // set — drop it vendor-wide, since a per-set block does not hold (the same
+    // cable re-appears on a sibling set). See isBlockedVendorListing.
+    if (isBlockedVendorListing(def.slug, s.productUrl)) {
       await markDone();
       continue;
     }

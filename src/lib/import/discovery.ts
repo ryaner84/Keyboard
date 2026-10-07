@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { isBlockedVendorSet } from "./vendor-overrides";
+import { isBlockedVendorListing } from "@/lib/on-sale";
 import { NOT_MANUFACTURER_VENDOR } from "./manufacturer-vendors";
 // One host list, one definition of "is this a shop" — shared with db-setup's
 // storefront repairs rather than re-listed here.
@@ -468,6 +469,11 @@ export async function discoverGmkProducts(opts: DiscoveryOptions = {}): Promise<
       if (SUBKIT_PRODUCT_RE.test(product.title) && !match.isSubkit) continue;
       // Owner removed this vendor for this set — don't re-create/relink it.
       if (isBlockedVendorSet(vendor.slug, match.slug)) continue;
+      // Accessory-only vendor (SwiftCables) "-extras" cable — never link it to a
+      // keycap set, on ANY set. The product URL is the evidence here (it carries
+      // the "-extras" handle), which the per-set block cannot see. See
+      // isBlockedVendorListing.
+      if (isBlockedVendorListing(vendor.slug, product.url)) continue;
 
       const current = existingByKit.get(match.baseKitId);
       if (!current) {

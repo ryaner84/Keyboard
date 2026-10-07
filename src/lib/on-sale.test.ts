@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { bestDiscount } from "./pricing";
-import { ON_SALE_FILTER, isAddonListingUrl, isOnSaleRow, rankHomeSales } from "./on-sale";
+import { ON_SALE_FILTER, isAddonListingUrl, isBlockedVendorListing, isOnSaleRow, rankHomeSales } from "./on-sale";
 import type { GroupBuyWithPricing } from "@/types";
 
 type Row = {
@@ -104,6 +104,15 @@ assert.ok(isAddonListingUrl("https://x.com/products/gmk-foo-novelties"));
 assert.ok(!isAddonListingUrl("https://swiftcables.net/products/gmk-mika-keycaps-1"));
 assert.ok(!isAddonListingUrl("https://prototypist.net/products/in-stock-gmk-mika"));
 assert.ok(!isAddonListingUrl(null) && !isAddonListingUrl("not a url"));
+
+// An accessory-only vendor's "-extras" cable is dropped vendor-wide (it does not
+// heal via a per-set block — the same cable re-appears on a sibling set), but
+// the block is scoped so it can only ever drop a cable, never a real keycap.
+assert.ok(isBlockedVendorListing("swiftcables", "https://swiftcables.net/products/gmk-evil-dolch-extras"), "SwiftCables -extras cable on R1 set");
+assert.ok(isBlockedVendorListing("swiftcables", "https://swiftcables.net/products/gmk-aurora-polaris-extras"), "SwiftCables -extras cable, any set");
+assert.ok(!isBlockedVendorListing("swiftcables", "https://swiftcables.net/products/gmk-mika-keycaps-1"), "SwiftCables' one real keycap (not -extras) is kept");
+assert.ok(!isBlockedVendorListing("switchmod", "https://switchmod.net/products/gmk-vamp-extras"), "another vendor's -extras handle is a real keycap — not blocked");
+assert.ok(!isBlockedVendorListing("swiftcables", null) && !isBlockedVendorListing(null, "https://swiftcables.net/products/x-extras") && !isBlockedVendorListing("swiftcables", "not a url"), "null/garbage safe");
 assert.deepEqual(
   rankHomeSales([
     { set: "polaris", name: "GMK Aurora Polaris", discount: { vendorName: "SwiftCables", percent: 40, productUrl: "https://swiftcables.net/products/gmk-aurora-polaris-extras" } },
@@ -124,5 +133,17 @@ assert.match(home, /rankHomeSales\(/, "and the tested ranker");
 assert.match(home, /name: cleanDisplayName\(set\.name\)/, "the rail shows display names, as /released does");
 const pricing = readFileSync(join(root, "src/lib/pricing.ts"), "utf8");
 assert.match(pricing, /if \(!isOnSaleRow\(vk\)\) continue;/, "bestDiscount asks isOnSaleRow");
+
+// The addon-only vendor block is enforced at every place a listing is linked
+// (both discovery halves of the import) and purged in db-setup — a guard missing
+// from one half lets the cable re-appear, which is exactly the per-set block's
+// failure. Pin all three so none silently drops it.
+const discovery = readFileSync(join(root, "src/lib/import/discovery.ts"), "utf8");
+assert.match(discovery, /isBlockedVendorListing/, "discovery skips addon-only vendor listings");
+const overrides = readFileSync(join(root, "src/lib/import/vendor-overrides.ts"), "utf8");
+assert.match(overrides, /isBlockedVendorListing/, "the link-override import skips them too");
+const dbSetup = readFileSync(join(root, "scripts/db-setup.mjs"), "utf8");
+assert.match(dbSetup, /purgeAddonOnlyVendorListings/, "db-setup purges them every deploy");
+assert.match(dbSetup, /-extras\/\?\$/, "db-setup mirrors the vendor + -extras handle rule");
 
 console.log("on-sale checks passed");

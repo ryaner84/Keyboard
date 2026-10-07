@@ -92,6 +92,36 @@ export function isAddonListingUrl(url: string | null | undefined): boolean {
   return isSubkitSetName(words) || /\bextras?\b/i.test(words);
 }
 
+// Accessory-only vendors whose "-extras" product pages are cables named after a
+// keycap set, never that set's base kit. SwiftCables (swiftcables.net) is a
+// cable maker: /products/<set>-extras is a single "Default Title" cable,
+// plausibly priced (USD 39.5/45) so the base-kit picker cannot reject it, and
+// "extras" is deliberately allowed as a base word — so the row keeps re-storing
+// the cable price and never heals (reported on gmk-evil-dolch-r2 3× in 2026-08,
+// then again on gmk-evil-dolch R1 and gmk-aurora-polaris on 2026-10-07).
+// Blocking one (vendor, set) pair at a time does not hold: the SAME cable
+// re-appears on a sibling set, so the block is keyed vendor-wide on the vendor
+// slug + the "-extras" handle. It is scoped TWO ways so it can only ever drop a
+// cable: to these vendor slugs (Switchmod's gmk-vamp-extras is a real keycap on
+// a different vendor), and to the "-extras" handle (SwiftCables' one real keycap,
+// gmk-mika-keycaps-1, does not match). Mirror in scripts/db-setup.mjs
+// (purgeAddonOnlyVendorListings).
+export const ADDON_ONLY_VENDOR_SLUGS = new Set(["swiftcables"]);
+
+export function isBlockedVendorListing(
+  vendorSlug: string | null | undefined,
+  url: string | null | undefined
+): boolean {
+  if (!vendorSlug || !ADDON_ONLY_VENDOR_SLUGS.has(vendorSlug) || !url) return false;
+  let handle = "";
+  try {
+    handle = new URL(url).pathname.split("/").filter(Boolean).pop() ?? "";
+  } catch {
+    return false;
+  }
+  return /-extras$/i.test(decodeURIComponent(handle).replace(/[_\s]+/g, "-"));
+}
+
 export interface RankableSale<T> {
   set: T;
   name: string;
