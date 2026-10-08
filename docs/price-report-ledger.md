@@ -1505,6 +1505,62 @@ both the client-reported log and the resolution audit in the same run.
 > `180`/`19`/`211 AUD` / `209 CAD`; #153 Ktechs BRG R3 `139 SGD`, Thunder God
 > `169 SGD`.
 
+> **2026-10-08 run — ONE new deals-audit report (batch 13, #210), self-healed;
+> both SwiftCables watch items CONFIRMED HEALED.** Price feed run 37798782431
+> (`?all=1`) returns **0 pending, 73 resolved** — **one new report** since the
+> 2026-10-07 run (72 resolved), filed by the **batch-13 deals audit (#210)** on
+> 2026-10-08T01:55 (not an end user):
+> - **gmk-thunder-god × proto[Typist]** — the site showed a **stale GBP 157**, but
+>   the store's only base variant, "GMK Thunder God - Base Kit", is **GBP 115.83,
+>   in stock** (the other variant is a Novelties Kit at 29.17; no variant on the
+>   page is 157). Confirmed by the batch-13 Vendor probe (run 37715214379). The
+>   feed already reads **`current=115.83 GBP source=SCRAPED`**,
+>   `resolvedAt=2026-10-08T07:00:30.388Z` (post-dating the 01:55 submit) — a scrape
+>   ran after the report and re-stored the correct base.
+>
+>   **Verdict: self-healed (stale price, now re-scraped correct).** This is NOT a
+>   wrong-variant case like the #202 proto[Typist] regressions: the 157 is not a
+>   current variant at all (the only two variants are "Base Kit" 115.83 and
+>   "Novelties Kit" 29.17), so the picker — which classifies the literally-titled
+>   "Base Kit" as BASE and returns 115.83 — is correct, and there is no scrape
+>   mechanism that would re-produce 157 from the current page (the JSON-LD/OG
+>   fallback would read the base or the cheapest variant, never 157). The 157 was
+>   a stale stored value from an earlier scrape; the re-scrape corrected it. First
+>   report for this (set, vendor) pair — no recurrence. Recommended base GBP
+>   115.83 verified: it is the store's plain in-stock "Base Kit", picker-selected,
+>   and within `KIT_BOUNDS` (GBP window [0, 320]). **Placed on the Self-heal watch
+>   (§1b)** to confirm 115.83 holds and 157 does not return. No code change.
+>
+> **Incoming Self-heal watch (2, added 2026-10-07, batch 12 / #209) — both
+> CONFIRMED HEALED and cleared.** The two SwiftCables cable listings fixed in-run
+> by the vendor-wide `-extras` block (`6e74210`):
+> - **gmk-evil-dolch × SwiftCables** — feed reads **`current=null`** (price
+>   cleared, `resolvedAt=2026-10-08T06:27:25.847Z`). The deploy's
+>   `purgeAddonOnlyVendorListings` dropped the cable row exactly as predicted, and
+>   discovery did not relink it.
+> - **gmk-aurora-polaris × SwiftCables** — same: feed reads **`current=null`**,
+>   same `resolvedAt`. Dropped by the deploy purge.
+>
+> Both are confirmed healed (the `-extras` block holds), moved to the resolution
+> audit, and dropped from the watch — which now carries only the gmk-thunder-god
+> self-heal above.
+>
+> **Visitor inbox run 37798793021:** STORE_LINK 0, PRICE_REPORT 0, PHOTO_REPORT
+> 0, **17 `LISTING_FLAG`s + 1 FEEDBACK** — byte-for-byte the SAME open set already
+> triaged and reported to the owner (§4b); no new flags, nothing auto-resolvable
+> (`LISTING_FLAG` has no auto-resolution). No inbox action.
+>
+> **The three §1 owner items are unchanged and still correctly held:**
+> red-cyrillic-addon × Neo Macro (wrong variant; contested shared-picker vs
+> catalog-merge repair), gmk-2pack-add-on × Swagkeys (wrong vendor; VendorKit
+> reassignment), gmk-zm × SwitchKeys (relink judgment). Prior resolutions all
+> still read correctly in the feed: gmk-vamp × Switchmod `84.99 USD`, gmk-bent-r2
+> `150`, gmk-arctic `145`, gmk-tribal `175`; #194 Mekibo `165`/`145 USD`; #201
+> gmk-botanical-r2 `139 EUR`; #202 proto[Typist] `95`/`105.83 GBP`; `abc3021`
+> Keebz/KeyBay `180`/`19`/`211 AUD` / `209 CAD`; #153 Ktechs BRG R3 `139 SGD`,
+> Thunder God `169 SGD`. No item failed verification and no fresh report needs a
+> fix, so no code change was required this run.
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _Three owner items this run._
@@ -1569,18 +1625,24 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-**Currently on the watch (added 2026-10-07, batch 12 / #209) — two SwiftCables
-cable listings FIXED in-run (`6e74210`), awaiting next-run confirmation the deploy
-purge drops them:**
+**Currently on the watch (added 2026-10-08, batch 13 / #210) — one stale-price
+self-heal, awaiting next-run confirmation:**
 
 | set | vendor | flagged | reason | why on watch |
 |---|---|---|---|---|
-| gmk-evil-dolch | SwiftCables | 2026-10-07 | wrong product — `/products/gmk-evil-dolch-extras` is a cable (39.5 USD), not the keycap base; re-stored across scrapes (never heals) | fixed by the vendor-wide `-extras` block (`isBlockedVendorListing`, `6e74210`); confirm next run the deploy's `purgeAddonOnlyVendorListings` dropped the row (feed reads `current=null` / row gone) and discovery did not relink it |
-| gmk-aurora-polaris | SwiftCables | 2026-10-07 | wrong product — `/products/gmk-aurora-polaris-extras` is a cable (45 USD), same shape | same fix (`6e74210`); confirm the row is dropped next run |
+| gmk-thunder-god | proto[Typist] | 2026-10-08 | stale price — site showed GBP 157, but the store's only base variant ("GMK Thunder God - Base Kit") is GBP 115.83, in stock; 157 is not a current variant | feed already reads `current=115.83 GBP SCRAPED`, `resolvedAt=2026-10-08T07:00:30.388Z` (post-dating the submit) — the stale 157 re-scraped to the correct base. Picker-correct (literally-titled "Base Kit" → BASE); no scrape mechanism re-produces 157. Confirm next run 115.83 holds and 157 does not return |
 
 The red-cyrillic-addon recurrence (§1) is an owner item, not a self-heal, so it is
 not watched; it is tracked in §1 and the client-reported log until the owner
 applies one of the two repairs.
+
+**Prior watch (added 2026-10-07, batch 12 / #209) — both CONFIRMED healed on the
+2026-10-08 run and moved to the resolution audit:**
+
+| set | vendor | flagged | reason | confirmation (2026-10-08) |
+|---|---|---|---|---|
+| gmk-evil-dolch | SwiftCables | 2026-10-07 | wrong product — `/products/gmk-evil-dolch-extras` is a cable (39.5 USD), not the keycap base; re-stored across scrapes (never heals) | ✅ feed `current=null`, `resolvedAt=2026-10-08T06:27:25.847Z`; the deploy's `purgeAddonOnlyVendorListings` dropped the cable row (`6e74210` vendor-wide `-extras` block) and discovery did not relink it |
+| gmk-aurora-polaris | SwiftCables | 2026-10-07 | wrong product — `/products/gmk-aurora-polaris-extras` is a cable (45 USD), same shape | ✅ feed `current=null`, same `resolvedAt`; dropped by the same deploy purge |
 
 **Prior watch (added 2026-10-06, batch 11 / #208) — both CONFIRMED healed on the
 2026-10-07 run and moved to the resolution audit:**
@@ -1754,7 +1816,8 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-10-06 | gmk-cyl-hyperfuse-origins-r3-keycaps | Oblotzky Industries | 125 EUR | "Stock is wrong: site shows EUR 125 SOLD OUT, but the store's Base variant (125 EUR, id 54877394075916) is available=true (pre-order tag) (probe run 37401216836). Price is correct." (deals audit batch 11 / #208) | self-healed (stock) | ✅ resolved 2026-10-06 — stock-only pre-order lag; 125 EUR correct & undisputed; feed `125 EUR SCRAPED`, `resolvedAt=2026-10-06T07:12:34.112Z`. On the Self-heal watch (§1b) to confirm the in-stock flip |
 | 2026-10-06 | gmk-masterpiece-r2 | iLumKB | 159 SGD | "Stock is wrong: site shows SGD 159 SOLD OUT, but the store's Origin Base variant (159 SGD, id 42466709536850) is available=true on the [Pre-Order] product (probe run 37401216836). Price is correct." (deals audit batch 11 / #208) | self-healed (stock) | ✅ resolved 2026-10-06 — stock-only pre-order lag; 159 SGD correct & undisputed (also reported 2026-07-18 pre-order-link, self-healed; not an oscillating value); feed `159 SGD SCRAPED`, `resolvedAt=2026-10-06T07:12:34.112Z`. **Confirmed healed 2026-10-07** (feed `159 SGD SCRAPED`, resolved post-submit; batch-12 audit saw it in stock) |
 | 2026-10-07 | gmk-evil-dolch | SwiftCables | 39.5 USD | "wrong product (deals audit 2026-10-07): swiftcables.net/products/gmk-evil-dolch-extras is 'GMK Evil Dolch Extras', a single-variant cable at USD 39.50, not the keycap base kit. Same listing already blocked for gmk-evil-dolch-r2; it now shows on gmk-evil-dolch as an in-stock deal (was 70)." (deals audit batch 12 / #209) | needs fix | ✅ resolved (`6e74210`; vendor-wide SwiftCables `-extras` block — per-set block did not hold) — on watch |
-| 2026-10-07 | gmk-aurora-polaris | SwiftCables | 45 USD | "wrong product (deals audit 2026-10-07): swiftcables.net/products/gmk-aurora-polaris-extras is 'GMK Aurora Polaris Extras', a single-variant SwiftCables cable at USD 45, not a keycap base kit; shown as an in-stock deal (was 75). Same shape as the evil-dolch-extras cable." (deals audit batch 12 / #209) | needs fix | ✅ resolved (`6e74210`; same vendor-wide `-extras` block) — on watch |
+| 2026-10-07 | gmk-aurora-polaris | SwiftCables | 45 USD | "wrong product (deals audit 2026-10-07): swiftcables.net/products/gmk-aurora-polaris-extras is 'GMK Aurora Polaris Extras', a single-variant SwiftCables cable at USD 45, not a keycap base kit; shown as an in-stock deal (was 75). Same shape as the evil-dolch-extras cable." (deals audit batch 12 / #209) | needs fix | ✅ resolved (`6e74210`; same vendor-wide `-extras` block; confirmed healed 2026-10-08 — feed `current=null`) |
+| 2026-10-08 | gmk-thunder-god | proto[Typist] | 115.83 GBP | "wrong price: site shows GBP 157 but the store's only base variant 'GMK Thunder God - Base Kit' is GBP 115.83, in stock (other variant: Novelties Kit 29.17). No variant on the page is 157." (deals audit batch 13 / #210) | self-healed (stale price) | ✅ resolved 2026-10-08 — 157 was a stale stored value; re-scrape landed the correct base `115.83 GBP SCRAPED` (not a wrong-variant case — 157 is not a current variant, picker-correct). On the Self-heal watch (§1b) |
 
 ## 4. Listing-flag triage (visitor inbox — `ListingReport`)
 
@@ -1874,8 +1937,9 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-10-04 | gmk-black-snail---red-cyrillic-addon | Neo Macro | 6,500 INR | needs fix (recurrence; held for owner) | **Wrong variant, recurrence of 2026-09-28; #198 does not reach this row.** Vendor probe run 37212339509 (`neomacro.in/products/gmk-black-snail`, READABLE Shopify, 8 variants all `available=true`, INR): L9 Modifier 6000, **U9 Modifier 6500**, 40s Ortho linear 4900, GMK Retro Point 600, **Red Cyrillic Alphas 9900**, 9009 Accents 3000, Numpad 2500, Cherry Accents 1900 — **no "Base" variant**. The set name contains "Addon"/"Cyrillic" → `isSubkitSetName` true → pickers run `allowSubkits=true`, which bypasses the `NONBASE_SUBKIT_RE` exclusion (`kit-variants.ts:187`, `scrape.py:1491`), so #198's modifier exclusion never fires. "Red Cyrillic Alphas" (the variant this set actually names, 9900) classifies ALPHA → excluded from the base pool, so the dearest OTHERS = U9 Modifier (6500) is picked. The correct outcome is contested and the repair is roster-wide: (1) keep the set and price it at Red Cyrillic Alphas 9900 via a NEW name-match heuristic in the shared `pickBaseVariant`/`choose_kit_variant` (both halves, 4 call sites, propagated nightly by the price audit, + the ALPHA classification must be revisited) — architecturally significant; or (2) remove/merge the near-duplicate row (same product URL + variant list as `gmk-black-snail`, which correctly clears to null; VendorKit `cmuslcupj000n04igkpdo3hmn` may have been re-created per the batch-9 audit) — a catalog decision needing production DB access. Neither clear-to-null nor block-the-pair is correct (the Red Cyrillic Alphas kit genuinely is for sale). **Held for the owner** per routine step 4; recommendation: option 1 if keeping the set, else option 2. Live harm: INR 6500 shows as a fake base price on `/released` until repaired. Filed by the deals audit batch 9 (#206) | ⚠️ open owner item (§1) — awaiting decision |
 | 2026-10-06 | gmk-cyl-hyperfuse-origins-r3-keycaps | Oblotzky Industries | 125 EUR | self-healed (stock) | Stock-only pre-order lag. Site showed the listing SOLD OUT; the store's Base variant is EUR 125, `available=true` under a pre-order tag (id 54877394075916, probe run 37401216836). Price 125 EUR is correct and was never disputed; the price pass is sole authority for `inStock` (#153), so the next availability scrape flips the display in stock. No code change. Feed `125 EUR SCRAPED`, `resolvedAt=2026-10-06T07:12:34.112Z` (post-dating the 01:52 submit). Filed by the deals audit batch 11 (#208). **Confirmed healed 2026-10-07** (feed `125 EUR SCRAPED`, `resolvedAt=2026-10-07T06:16:41.474Z`; batch-12 audit saw it back in stock — the in-stock flip landed) | ✅ resolved (self-healed; confirmed 2026-10-07) |
 | 2026-10-06 | gmk-masterpiece-r2 | iLumKB | 159 SGD | self-healed (stock) | Stock-only pre-order lag, same shape. Site showed SOLD OUT; the store's "Origin Base" variant is SGD 159, `available=true` on the [Pre-Order] product (id 42466709536850, probe run 37401216836). Price 159 SGD correct and undisputed. Reported once before (2026-07-18, "pre-order link not actual units", self-healed-link) — the same listing's stock state flips with pre-order windows; the value is stable, so this is not the oscillating-value recurrence case, and no scrape bug is implicated. Feed `159 SGD SCRAPED`, `resolvedAt=2026-10-06T07:12:34.112Z`. Filed by the deals audit batch 11 (#208). **Confirmed healed 2026-10-07** (feed `159 SGD SCRAPED`, `resolvedAt=2026-10-07T06:16:41.474Z`; batch-12 audit saw it in stock) | ✅ resolved (self-healed; confirmed 2026-10-07) |
-| 2026-10-07 | gmk-evil-dolch | SwiftCables | 39.5 USD | needs fix | **Wrong product (cable), fixed in-run (`6e74210`).** `swiftcables.net/products/gmk-evil-dolch-extras` is "GMK Evil Dolch Extras", a single "Default Title" cable at USD 39.50 (Vendor probe 37559225235), not the keycap base. The 39.5 is plausible so the base-kit picker cannot reject it and "extras" is an allowed base word, so the row re-stored the cable price every scrape — a never-heals, same as the 2026-08 gmk-evil-dolch-r2 × SwiftCables reports. That pair was blocked via `BLOCKED_VENDOR_SET_PAIRS` (`swiftcables::gmk-evil-dolch-r2`), but the block is keyed per set, so the SAME cable re-appeared on the R1 set `gmk-evil-dolch`. Fixed vendor-wide: `isBlockedVendorListing`/`ADDON_ONLY_VENDOR_SLUGS` in `src/lib/on-sale.ts` drop any SwiftCables listing whose product handle ends in `-extras`, enforced in both import halves (`discovery.ts`, `vendor-overrides.ts`) and purged every deploy (`purgeAddonOnlyVendorListings` in `db-setup.mjs`). Scoped so it only drops a cable: vendor slug (Switchmod's `gmk-vamp-extras` is a real keycap) + `-extras` handle (SwiftCables' `gmk-mika-keycaps-1` is a real keycap, kept). `test:on-sale` pins the predicate and all three enforcement points; full npm suite / tsc / lint clean. scrape.py needs no mirror (rows come via the KeycapLendar import, cleaned by the deploy purge). The deploy drops the row → unpriced → hidden on the released set. Filed by the deals audit batch 12 (#209). On the Self-heal watch (§1b) | ✅ resolved (`6e74210`; confirm next run) |
-| 2026-10-07 | gmk-aurora-polaris | SwiftCables | 45 USD | needs fix | Same cause/fix as gmk-evil-dolch × SwiftCables: `swiftcables.net/products/gmk-aurora-polaris-extras` is "GMK Aurora Polaris Extras", a single-variant cable at USD 45 (was 75, probe 37559225235), not a keycap base. Covered by the same vendor-wide `-extras` block (`6e74210`). Filed by the deals audit batch 12 (#209). On the Self-heal watch (§1b) | ✅ resolved (`6e74210`; confirm next run) |
+| 2026-10-07 | gmk-evil-dolch | SwiftCables | 39.5 USD | needs fix | **Wrong product (cable), fixed in-run (`6e74210`).** `swiftcables.net/products/gmk-evil-dolch-extras` is "GMK Evil Dolch Extras", a single "Default Title" cable at USD 39.50 (Vendor probe 37559225235), not the keycap base. The 39.5 is plausible so the base-kit picker cannot reject it and "extras" is an allowed base word, so the row re-stored the cable price every scrape — a never-heals, same as the 2026-08 gmk-evil-dolch-r2 × SwiftCables reports. That pair was blocked via `BLOCKED_VENDOR_SET_PAIRS` (`swiftcables::gmk-evil-dolch-r2`), but the block is keyed per set, so the SAME cable re-appeared on the R1 set `gmk-evil-dolch`. Fixed vendor-wide: `isBlockedVendorListing`/`ADDON_ONLY_VENDOR_SLUGS` in `src/lib/on-sale.ts` drop any SwiftCables listing whose product handle ends in `-extras`, enforced in both import halves (`discovery.ts`, `vendor-overrides.ts`) and purged every deploy (`purgeAddonOnlyVendorListings` in `db-setup.mjs`). Scoped so it only drops a cable: vendor slug (Switchmod's `gmk-vamp-extras` is a real keycap) + `-extras` handle (SwiftCables' `gmk-mika-keycaps-1` is a real keycap, kept). `test:on-sale` pins the predicate and all three enforcement points; full npm suite / tsc / lint clean. scrape.py needs no mirror (rows come via the KeycapLendar import, cleaned by the deploy purge). The deploy drops the row → unpriced → hidden on the released set. Filed by the deals audit batch 12 (#209). **Confirmed healed 2026-10-08** (feed run 37798782431: `current=null`, `resolvedAt=2026-10-08T06:27:25.847Z` — the deploy purge dropped the row and discovery did not relink it) | ✅ resolved (`6e74210`; confirmed 2026-10-08) |
+| 2026-10-07 | gmk-aurora-polaris | SwiftCables | 45 USD | needs fix | Same cause/fix as gmk-evil-dolch × SwiftCables: `swiftcables.net/products/gmk-aurora-polaris-extras` is "GMK Aurora Polaris Extras", a single-variant cable at USD 45 (was 75, probe 37559225235), not a keycap base. Covered by the same vendor-wide `-extras` block (`6e74210`). Filed by the deals audit batch 12 (#209). **Confirmed healed 2026-10-08** (feed `current=null`, same `resolvedAt`) | ✅ resolved (`6e74210`; confirmed 2026-10-08) |
+| 2026-10-08 | gmk-thunder-god | proto[Typist] | 115.83 GBP | self-healed (stale price) | **Stale price, self-healed — not a scrape bug.** The site showed a **stale GBP 157**; the store's only base variant, "GMK Thunder God - Base Kit", is **GBP 115.83, in stock** (other variant: Novelties Kit 29.17), confirmed by the batch-13 Vendor probe (run 37715214379). No variant on the page is 157, so this is **not** the #202 proto[Typist] wrong-variant shape: the picker classifies the literally-titled "Base Kit" as BASE and returns 115.83, and the JSON-LD/OG fallback would read the base or the cheapest variant (never 157) — there is no scrape mechanism that re-produces 157. The 157 was a stale stored value from an earlier scrape; a re-scrape after the 01:55 submit re-stored the correct base (feed reads `115.83 GBP SCRAPED`, `resolvedAt=2026-10-08T07:00:30.388Z`). First report for this (set, vendor) pair — no recurrence. Recommended base GBP 115.83 verified: store's plain in-stock "Base Kit", picker-selected, within `KIT_BOUNDS` (GBP [0, 320]). Filed by the deals audit batch 13 (#210). On the Self-heal watch (§1b) to confirm 115.83 holds and 157 does not return | ✅ resolved (self-healed; confirm next run) |
 
 ### Client-recommended values verified
 
@@ -1911,11 +1975,24 @@ uploaded 2 builds but the mai…") — left for the owner.
   store's "Base Kit + UKISO" variant, within `KIT_BOUNDS`, and exactly what the
   picker returns after #202 stops a cheap unlabelled subkit outranking the only
   bundle. Feed reads `95 GBP` / `105.83 GBP SCRAPED`.
+- **gmk-thunder-god base = GBP 115.83** (proto[Typist], deals audit batch 13's
+  correction). Verified against the batch-13 Vendor probe (run 37715214379): the
+  store's only base variant, "GMK Thunder God - Base Kit", is GBP 115.83, in
+  stock — the literally-titled base the picker returns — within `KIT_BOUNDS`
+  (GBP [0, 320]). The GBP 157 the reporter saw was a stale stored value, not a
+  current variant (the only other variant is a Novelties Kit at 29.17); a
+  re-scrape corrected it. Feed reads `115.83 GBP SCRAPED`.
 
 ## Summary
 
-- **72 report submissions across ~56 listings** (full `?all=1` history, first
-  reconciled 2026-08-26; gmk-vamp × Switchmod added 2026-08-27; 6 added
+- **73 report submissions across ~57 listings** (full `?all=1` history, first
+  reconciled 2026-08-26; gmk-vamp × Switchmod added 2026-08-27; **1 added
+  2026-10-08** (batch 13, #210: gmk-thunder-god × proto[Typist] — a stale-price
+  self-heal, the site's stale GBP 157 re-scraped to the correct in-stock base GBP
+  115.83; not a wrong-variant case, 157 is not a current variant; on the watch);
+  the **2 added 2026-10-07** (batch 12, #209: the SwiftCables `-extras` cables)
+  were CONFIRMED healed on the 2026-10-08 run — the deploy purge dropped both rows
+  (feed `current=null`); 6 added
   2026-09-26, 2 added 2026-09-27, 3 added 2026-09-28, 2 added 2026-09-29, 2 added
   2026-09-30, 8 added 2026-10-01, **2 added 2026-10-06** (batch 11, #208:
   gmk-cyl-hyperfuse-origins-r3-keycaps × Oblotzky and gmk-masterpiece-r2 ×
