@@ -12,12 +12,14 @@ to the start.
 
 ## Cursor
 
-`after_slug` for the next run: **`gmk-evil-dolch`**
+`after_slug` for the next run: **`gmk-cyl-hyperfuse-origins-r3-keycaps`**
 
-The list held 54 on-sale sets on 2026-10-07. That run covered the 34 sets after
-the previous cursor (`gmk-hazakura … gmk-zm`) and then wrapped to the top for 16
-more (`dcs-dream-alert … gmk-evil-dolch`), 50 sets in all. The next run
-continues after `gmk-evil-dolch`.
+The list held 51 on-sale sets on 2026-10-08 (gmk-evil-dolch has dropped off).
+That run covered the 38 sets after the previous cursor (`gmk-finer-things …
+gmk-zm`) and then wrapped to the top for 12 more (`dcs-dream-alert …
+gmk-cyl-hyperfuse-origins-r3-keycaps`), 50 sets in all. The next run continues
+after `gmk-cyl-hyperfuse-origins-r3-keycaps`. A 50-set batch now covers all but
+one set, so a batch can start with `gmk-dots-r2`.
 
 ## Runs
 
@@ -35,6 +37,7 @@ continues after `gmk-evil-dolch`.
 | 2026-10-05 | gmk-mika … gmk-zm, wrap, dcs-dream-alert … gmk-maestro | 50 | 259 | 6 flagged + 2 unflagged → 2 confirmed | 2 (listing flag) | [37252749968](https://github.com/ryaner84/Keyboard/actions/runs/37252749968) + [37252751983](https://github.com/ryaner84/Keyboard/actions/runs/37252751983) (reports: [37253002800](https://github.com/ryaner84/Keyboard/actions/runs/37253002800)) |
 | 2026-10-06 | gmk-manta … gmk-zm, wrap, dcs-dream-alert … gmk-hangulbeit-tkl | 50 | 262 | 9 flagged → 2 confirmed | 2 (price-report button) | [37400885163](https://github.com/ryaner84/Keyboard/actions/runs/37400885163) + [37400887830](https://github.com/ryaner84/Keyboard/actions/runs/37400887830) (reports: [37401348466](https://github.com/ryaner84/Keyboard/actions/runs/37401348466)) |
 | 2026-10-07 | gmk-hazakura … gmk-zm, wrap, dcs-dream-alert … gmk-evil-dolch | 50 | 271 | 8 flagged + 2 unflagged → 2 confirmed | 2 (price-report button) | [37558774635](https://github.com/ryaner84/Keyboard/actions/runs/37558774635) + [37558777081](https://github.com/ryaner84/Keyboard/actions/runs/37558777081) (reports: [37559415669](https://github.com/ryaner84/Keyboard/actions/runs/37559415669)) |
+| 2026-10-08 | gmk-finer-things … gmk-zm, wrap, dcs-dream-alert … gmk-cyl-hyperfuse-origins-r3-keycaps | 50 | 274 | 9 flagged → 1 confirmed | 1 (price-report button) | [37714709757](https://github.com/ryaner84/Keyboard/actions/runs/37714709757) + [37714712242](https://github.com/ryaner84/Keyboard/actions/runs/37714712242) (reports: [37715348211](https://github.com/ryaner84/Keyboard/actions/runs/37715348211)) |
 
 ### 2026-09-26 findings
 
@@ -393,3 +396,28 @@ cable came back on the sibling set. A vendor-wide rule would hold: no
 SwiftCables `-extras` listing on any set. Check gmk-mika × SwiftCables
 (`gmk-mika-keycaps-1`, "Base Kit" 79) before applying it, because that one is a
 real keycap product.
+
+### 2026-10-08 findings
+
+Two audit runs covered this batch. The first took the 38 sets after the cursor.
+The second wrapped to the start, and only its first 12 sets (63 of its 274
+listings) belong to this batch. Between them they flagged 9 of 274 listings.
+Eight are stale-handle, pinned-variant or unreadable-platform cases already in
+this ledger. The new one was confirmed with the **Vendor probe**
+([37715214379](https://github.com/ryaner84/Keyboard/actions/runs/37715214379)):
+
+| set | vendor | site | store | verdict | filed |
+|---|---|---|---|---|---|
+| gmk-thunder-god | proto[Typist] | GBP 157, in stock | "(In Stock) GMK CYL Thunder God": **Base Kit 115.83** available, Novelties Kit 29.17 | wrong price: no variant on the page is 157 | price report |
+| gmk-monochrome-r2 | FunKeys | UAH 4300, sold out | Tilda page, no price markup the auditor can read | as 2026-10-07; shown sold out. Not filed | — |
+| gmk-metropolis-r2 | NovelKeys | USD 70 (was 135), in stock | "Base" sold out; "Midnight Base" 70 available | site is right (as 2026-09-30) | — |
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+| gmk-wasabi-r2 / gmk-zm (SwitchKeys, Mekibo) / gmk-dots-r2 (NovelKeys) / gmk-botanical-r2 (Oblotzky) | — | — | renamed handles redirect to the same product and price | as 2026-10-07; stale handle in URL | — |
+| gmk-2pack-add-on | Swagkeys | AUD 44.99 (was 49.99) | switchkeys.com.au listing | still the wrong vendor; held since 2026-10-03. Not refiled | — |
+| gmk-finer-things / gmk-cyl-finer-things-r2-keycaps | Mecha MY + Mecha.store, R1 row carrying R2 listings | — | — | flagged 2026-10-05; still unmerged. Not refiled | — |
+| gmk-varenye | Toro Studio + Toro Studios | AUD 245 ×2 | same URL | duplicate vendor rows (as 2026-09-28); still unmerged | — |
+
+gmk-evil-dolch and gmk-aurora-polaris (yesterday's SwiftCables cable listings)
+are no longer on the on-sale list, so the vendor-wide `-extras` block from
+6e74210 has taken effect. Everything else matched the store on price, markdown
+and stock.
