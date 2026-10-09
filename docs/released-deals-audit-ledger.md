@@ -14,12 +14,11 @@ to the start.
 
 `after_slug` for the next run: **`gmk-cyl-hyperfuse-origins-r3-keycaps`**
 
-The list held 51 on-sale sets on 2026-10-08 (gmk-evil-dolch has dropped off).
-That run covered the 38 sets after the previous cursor (`gmk-finer-things …
-gmk-zm`) and then wrapped to the top for 12 more (`dcs-dream-alert …
-gmk-cyl-hyperfuse-origins-r3-keycaps`), 50 sets in all. The next run continues
-after `gmk-cyl-hyperfuse-origins-r3-keycaps`. A 50-set batch now covers all but
-one set, so a batch can start with `gmk-dots-r2`.
+The list held 50 on-sale sets on 2026-10-09 (gmk-monochrome-r2 has dropped off),
+so a 50-set batch is now the whole list. That run covered the 38 sets after the
+previous cursor (`gmk-dots-r2 … gmk-zm`) and then wrapped to the top for 12 more
+(`dcs-dream-alert … gmk-cyl-hyperfuse-origins-r3-keycaps`). The cursor is
+therefore unchanged, and the next run starts again at `gmk-dots-r2`.
 
 ## Runs
 
@@ -38,6 +37,7 @@ one set, so a batch can start with `gmk-dots-r2`.
 | 2026-10-06 | gmk-manta … gmk-zm, wrap, dcs-dream-alert … gmk-hangulbeit-tkl | 50 | 262 | 9 flagged → 2 confirmed | 2 (price-report button) | [37400885163](https://github.com/ryaner84/Keyboard/actions/runs/37400885163) + [37400887830](https://github.com/ryaner84/Keyboard/actions/runs/37400887830) (reports: [37401348466](https://github.com/ryaner84/Keyboard/actions/runs/37401348466)) |
 | 2026-10-07 | gmk-hazakura … gmk-zm, wrap, dcs-dream-alert … gmk-evil-dolch | 50 | 271 | 8 flagged + 2 unflagged → 2 confirmed | 2 (price-report button) | [37558774635](https://github.com/ryaner84/Keyboard/actions/runs/37558774635) + [37558777081](https://github.com/ryaner84/Keyboard/actions/runs/37558777081) (reports: [37559415669](https://github.com/ryaner84/Keyboard/actions/runs/37559415669)) |
 | 2026-10-08 | gmk-finer-things … gmk-zm, wrap, dcs-dream-alert … gmk-cyl-hyperfuse-origins-r3-keycaps | 50 | 274 | 9 flagged → 1 confirmed | 1 (price-report button) | [37714709757](https://github.com/ryaner84/Keyboard/actions/runs/37714709757) + [37714712242](https://github.com/ryaner84/Keyboard/actions/runs/37714712242) (reports: [37715348211](https://github.com/ryaner84/Keyboard/actions/runs/37715348211)) |
+| 2026-10-09 | gmk-dots-r2 … gmk-zm, wrap, dcs-dream-alert … gmk-cyl-hyperfuse-origins-r3-keycaps | 50 | 268 | 7 flagged → 0 confirmed | 0 | [37871406474](https://github.com/ryaner84/Keyboard/actions/runs/37871406474) + [37871408463](https://github.com/ryaner84/Keyboard/actions/runs/37871408463) |
 
 ### 2026-09-26 findings
 
@@ -421,3 +421,33 @@ gmk-evil-dolch and gmk-aurora-polaris (yesterday's SwiftCables cable listings)
 are no longer on the on-sale list, so the vendor-wide `-extras` block from
 6e74210 has taken effect. Everything else matched the store on price, markdown
 and stock.
+
+### 2026-10-09 findings
+
+The list is down to 50 sets, so the wrap run (37871408463) read the whole list
+on its own: 268 listings, 7 flagged. The run after the cursor (37871406474) read
+38 of those sets again and agreed with it on every row. All 7 flags are cases
+this ledger already explains, so no probe was needed and nothing was filed:
+
+| set | vendor | flag | verdict |
+|---|---|---|---|
+| gmk-dots-r2 / gmk-metropolis-r2 | NovelKeys | MOVED (novelkeys.xyz → novelkeys.com) | redirect reaches the same product and price. For metropolis the site is right (as 2026-09-30): "Midnight Base" 70 is available |
+| gmk-wasabi-r2 / gmk-zm | SwitchKeys | MOVED (`-group-buy` → plain handle) | price and stock match the landing page; stale handle in the URL |
+| gmk-zm | Mekibo | MOVED (`gmk-zimo-group-buy` → `gmk-zimo`) | Base 160 (was 180), matches |
+| gmk-botanical-r2 | Oblotzky Industries | MOVED (`gmk-botanical-2` → `gmk-cyl-botanical-2`) | "Standard" 139, matches |
+| gmk-camping-r3 | NovelKeys | WRONG_PRODUCT ("GMK Leftovers") | pinned `?variant=` Camping R3 Classic Base 135 is correct (as 2026-09-27) |
+
+I compared every row with yesterday's run (37714712242). Nothing else changed
+except these:
+- **gmk-thunder-god × proto[Typist]** now reads GBP 115.83, in stock, which
+  matches the store's Base Kit. The stale GBP 157 reported on 2026-10-08 has
+  **healed**.
+- **gmk-monochrome-r2** (9 listings, FunKeys among them) is no longer on the
+  on-sale list.
+
+Items still waiting on the owner, unchanged and not refiled:
+- gmk-2pack-add-on × Swagkeys (a switchkeys.com.au listing).
+- gmk-finer-things / gmk-cyl-finer-things-r2-keycaps (R1 row carrying R2
+  listings, Mecha MY + Mecha.store).
+- gmk-varenye listed under both Toro Studio and Toro Studios.
+- gh-116846 × iLumKB at a price for an opened-box unit.
