@@ -1598,6 +1598,38 @@ both the client-reported log and the resolution audit in the same run.
 > Thunder God `169 SGD`. No item failed verification and no fresh report needs a
 > fix, so no code change was required this run.
 
+> **2026-10-10 run — no new report; Self-heal watch empty on entry, nothing to
+> re-verify.** Price feed run 38062594204 (`?all=1`) returns **0 pending, 73
+> resolved** — a 1:1 match with the client-reported log, so **no new report** has
+> filed since the 2026-10-08 run (the most recent submission is still
+> **gmk-thunder-god × proto[Typist]**, 2026-10-08T01:55:58Z; every resolved row
+> carries `resolvedAt=2026-10-10T06:10:43.067Z`, the nightly 00:30 UTC scheduled
+> feed sweep that preceded this dispatch, which post-dates every submission).
+> Nothing is appended to the log.
+>
+> **Incoming Self-heal watch was empty** — the one prior item (gmk-thunder-god ×
+> proto[Typist], batch 13 / #210) was confirmed healed and cleared on the
+> 2026-10-09 run — so there was nothing to re-verify and no watched item failed
+> verification. No in-run fix was required. The prior resolutions all still read
+> correctly in the feed: gmk-thunder-god `115.83 GBP SCRAPED` (115.83 held across
+> the nightly scrape; the stale 157 did not return), gmk-vamp × Switchmod
+> `84.99 USD`, gmk-bent-r2 `150 USD`, gmk-arctic `145 USD`, gmk-tribal `175 USD`;
+> #194 Mekibo `165`/`145 USD`; #201 gmk-botanical-r2 `139 EUR`; #202 proto[Typist]
+> dcs `95`/`105.83 GBP`; `abc3021` Keebz/KeyBay `180`/`19`/`211 AUD` / `209 CAD`;
+> #153 Ktechs BRG R3 `139 SGD`, Thunder God `169 SGD`; the two SwiftCables `-extras`
+> cables (gmk-evil-dolch, gmk-aurora-polaris) still `current=null`.
+>
+> **Visitor inbox run 38062595696:** STORE_LINK 0, PRICE_REPORT 0, PHOTO_REPORT 0,
+> **17 `LISTING_FLAG`s + 1 FEEDBACK** — byte-for-byte the SAME open set already
+> triaged and reported to the owner (§4b); no new flags, nothing auto-resolvable
+> (`LISTING_FLAG` has no auto-resolution). No inbox action.
+>
+> **The three §1 owner items are unchanged and still correctly held:**
+> red-cyrillic-addon × Neo Macro (wrong variant; contested shared-picker vs
+> catalog-merge repair), gmk-2pack-add-on × Swagkeys (wrong vendor; VendorKit
+> reassignment), gmk-zm × SwitchKeys (relink judgment). No item failed verification
+> and no fresh report needs a fix, so no code change was required this run.
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _Three owner items this run._
