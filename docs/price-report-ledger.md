@@ -1630,6 +1630,60 @@ both the client-reported log and the resolution audit in the same run.
 > reassignment), gmk-zm × SwitchKeys (relink judgment). No item failed verification
 > and no fresh report needs a fix, so no code change was required this run.
 
+> **2026-10-11 run — two new stock-only self-heals filed by the deals audit;
+> both placed on the Self-heal watch.** Price feed run 38150317991 (`?all=1`)
+> returns **0 pending, 75 resolved** — the client-reported log stood at 73, so
+> **two new reports** have filed since the 2026-10-08 run, both logged
+> 2026-10-11T01:49 and both on **gmk-red-devils-r2**, filed by the released deals
+> audit batch 15 (#212, commit `2ba5197`):
+> - **× Oblotzky Industries** `current=115 EUR SCRAPED` — "site shows EUR 115 sold
+>   out, but `oblotzky.industries/products/gmk-cyl-red-devils-r2` 'Standard' EUR
+>   115 is available (group-buy; probe run 38103105361)".
+> - **× DeskHero** `current=170 CAD SCRAPED` — "site shows CAD 170 sold out, but
+>   `deskhero.ca/products/gmk-cyl-red-devils-keycaps` 'Standard Base' CAD 170 is
+>   available (probe run 38103105361). The same URL reads in stock on
+>   gmk-red-devils".
+>
+> **Both are stock-only self-heals, no code change.** The batch-15 probe that
+> filed them already established the mechanism: each store's own base variant
+> ("Standard" / "Standard Base") is `available=true` at the price the row already
+> stores (EUR 115, CAD 170 — both plausible GMK CYL base prices, neither
+> disputed), and only the tracker's availability display lagged behind. Per #153
+> the price pass is the sole authority for `inStock`, so the next availability
+> scrape flips the display in stock — exactly the shape of every prior
+> Oblotzky/iLumKB/DeskHero pre-order stock lag (gmk-2pack-add-on, gmk-hazakura,
+> gmk-masterpiece-r2 …). Neither is a `LINK_OVERRIDES` row (the Ktechs oscillation
+> cause, #153), neither recurs (first report for each (set, vendor) pair), and the
+> reported value is the correct base, so there is no scrape bug to trace. Both
+> reports already read **resolved** in the feed (`resolvedAt=2026-10-11T06:49:10.823Z`,
+> the nightly 00:30 UTC scheduled sweep, which post-dates the 01:49 submit) with
+> the correct price — but per routine step 2 a stock-only "resolved" is
+> provisional, so both are placed on the **Self-heal watch (§1b)** for the next
+> run to confirm the in-stock flip actually landed.
+>
+> **Incoming Self-heal watch was empty** (the one prior item, gmk-thunder-god ×
+> proto[Typist], was confirmed healed and cleared on the 2026-10-09 run), so there
+> was nothing to re-verify and no watched item failed verification. The prior
+> resolutions all still read correctly in the feed: gmk-thunder-god `115.83 GBP
+> SCRAPED`, gmk-vamp × Switchmod `84.99 USD`, gmk-bent-r2 `150 USD`, gmk-arctic
+> `145 USD`, gmk-tribal `175 USD`; #194 Mekibo `165`/`145 USD`; #201
+> gmk-botanical-r2 `139 EUR`; #202 proto[Typist] dcs `95`/`105.83 GBP`; `abc3021`
+> Keebz/KeyBay `180`/`19`/`211 AUD` / `209 CAD`; #153 Ktechs BRG R3 `139 SGD`,
+> Thunder God `196 SGD`; the two SwiftCables `-extras` cables (gmk-evil-dolch,
+> gmk-aurora-polaris) still `current=null`.
+>
+> **Visitor inbox run 38150319587:** STORE_LINK 0, PRICE_REPORT 0, PHOTO_REPORT 0,
+> **17 `LISTING_FLAG`s + 1 FEEDBACK** — byte-for-byte the SAME open set already
+> triaged and reported to the owner (§4b); no new flags, nothing auto-resolvable
+> (`LISTING_FLAG` has no auto-resolution). No inbox action.
+>
+> **The three §1 owner items are unchanged and still correctly held:**
+> red-cyrillic-addon × Neo Macro (wrong variant; contested shared-picker vs
+> catalog-merge repair), gmk-2pack-add-on × Swagkeys (wrong vendor; VendorKit
+> reassignment), gmk-zm × SwitchKeys (relink judgment). No item failed
+> verification and no fresh report needs a fix, so no code change was required
+> this run.
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _Three owner items this run._
@@ -1694,8 +1748,14 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-**Currently on the watch: _none_ — the one prior item was confirmed healed on the
-2026-10-09 run (below).**
+**Currently on the watch: 2 items (added 2026-10-11, batch 15 / #212)** — both
+stock-only self-heals on **gmk-red-devils-r2**, awaiting the 2026-10-12 run's
+confirmation that the in-stock flip landed and held across a nightly scrape:
+
+| set | vendor | flagged | reason | status |
+|---|---|---|---|---|
+| gmk-red-devils-r2 | Oblotzky Industries | 2026-10-11 | stock-only — site showed EUR 115 SOLD OUT, but the store's "Standard" EUR 115 is `available=true` (group-buy; batch-15 probe run 38103105361). Price correct & undisputed | feed `115 EUR SCRAPED`, `resolvedAt=2026-10-11T06:49:10.823Z` (post-dating the 01:49 submit). Price-pass owns `inStock` (#153); confirm the availability scrape flipped it in stock |
+| gmk-red-devils-r2 | DeskHero | 2026-10-11 | stock-only — site showed CAD 170 SOLD OUT, but the store's "Standard Base" CAD 170 is available (batch-15 probe run 38103105361); the same URL already reads in stock on the gmk-red-devils (R1) set. Price correct & undisputed | feed `170 CAD SCRAPED`, `resolvedAt=2026-10-11T06:49:10.823Z`. Same confirmation as above |
 
 The red-cyrillic-addon recurrence (§1) is an owner item, not a self-heal, so it is
 not watched; it is tracked in §1 and the client-reported log until the owner
@@ -1890,6 +1950,8 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-10-07 | gmk-evil-dolch | SwiftCables | 39.5 USD | "wrong product (deals audit 2026-10-07): swiftcables.net/products/gmk-evil-dolch-extras is 'GMK Evil Dolch Extras', a single-variant cable at USD 39.50, not the keycap base kit. Same listing already blocked for gmk-evil-dolch-r2; it now shows on gmk-evil-dolch as an in-stock deal (was 70)." (deals audit batch 12 / #209) | needs fix | ✅ resolved (`6e74210`; vendor-wide SwiftCables `-extras` block — per-set block did not hold) — on watch |
 | 2026-10-07 | gmk-aurora-polaris | SwiftCables | 45 USD | "wrong product (deals audit 2026-10-07): swiftcables.net/products/gmk-aurora-polaris-extras is 'GMK Aurora Polaris Extras', a single-variant SwiftCables cable at USD 45, not a keycap base kit; shown as an in-stock deal (was 75). Same shape as the evil-dolch-extras cable." (deals audit batch 12 / #209) | needs fix | ✅ resolved (`6e74210`; same vendor-wide `-extras` block; confirmed healed 2026-10-08 — feed `current=null`) |
 | 2026-10-08 | gmk-thunder-god | proto[Typist] | 115.83 GBP | "wrong price: site shows GBP 157 but the store's only base variant 'GMK Thunder God - Base Kit' is GBP 115.83, in stock (other variant: Novelties Kit 29.17). No variant on the page is 157." (deals audit batch 13 / #210) | self-healed (stale price) | ✅ resolved 2026-10-08 — 157 was a stale stored value; re-scrape landed the correct base `115.83 GBP SCRAPED` (not a wrong-variant case — 157 is not a current variant, picker-correct). **Confirmed healed 2026-10-09** (115.83 held across the nightly scrape; 157 did not return) |
+| 2026-10-11 | gmk-red-devils-r2 | Oblotzky Industries | 115 EUR | "Stock wrong: site shows EUR 115 sold out, but oblotzky.industries/products/gmk-cyl-red-devils-r2 'Standard' EUR 115 is available (group-buy; probe 2026-10-11, run 38103105361)." (deals audit batch 15 / #212) | self-healed (stock) | ✅ resolved 2026-10-11 — stock-only; 115 EUR correct & undisputed; feed `115 EUR SCRAPED`, `resolvedAt=2026-10-11T06:49:10.823Z`. Price-pass owns `inStock` (#153). On the Self-heal watch (§1b) to confirm the in-stock flip |
+| 2026-10-11 | gmk-red-devils-r2 | DeskHero | 170 CAD | "Stock wrong: site shows CAD 170 sold out, but deskhero.ca/products/gmk-cyl-red-devils-keycaps 'Standard Base' CAD 170 is available (probe 2026-10-11, run 38103105361). The same URL reads in stock on gmk-red-devils." (deals audit batch 15 / #212) | self-healed (stock) | ✅ resolved 2026-10-11 — stock-only; 170 CAD correct & undisputed; feed `170 CAD SCRAPED`, `resolvedAt=2026-10-11T06:49:10.823Z`. Price-pass owns `inStock` (#153). On the Self-heal watch (§1b) to confirm the in-stock flip |
 
 ## 4. Listing-flag triage (visitor inbox — `ListingReport`)
 
@@ -2012,6 +2074,8 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-10-07 | gmk-evil-dolch | SwiftCables | 39.5 USD | needs fix | **Wrong product (cable), fixed in-run (`6e74210`).** `swiftcables.net/products/gmk-evil-dolch-extras` is "GMK Evil Dolch Extras", a single "Default Title" cable at USD 39.50 (Vendor probe 37559225235), not the keycap base. The 39.5 is plausible so the base-kit picker cannot reject it and "extras" is an allowed base word, so the row re-stored the cable price every scrape — a never-heals, same as the 2026-08 gmk-evil-dolch-r2 × SwiftCables reports. That pair was blocked via `BLOCKED_VENDOR_SET_PAIRS` (`swiftcables::gmk-evil-dolch-r2`), but the block is keyed per set, so the SAME cable re-appeared on the R1 set `gmk-evil-dolch`. Fixed vendor-wide: `isBlockedVendorListing`/`ADDON_ONLY_VENDOR_SLUGS` in `src/lib/on-sale.ts` drop any SwiftCables listing whose product handle ends in `-extras`, enforced in both import halves (`discovery.ts`, `vendor-overrides.ts`) and purged every deploy (`purgeAddonOnlyVendorListings` in `db-setup.mjs`). Scoped so it only drops a cable: vendor slug (Switchmod's `gmk-vamp-extras` is a real keycap) + `-extras` handle (SwiftCables' `gmk-mika-keycaps-1` is a real keycap, kept). `test:on-sale` pins the predicate and all three enforcement points; full npm suite / tsc / lint clean. scrape.py needs no mirror (rows come via the KeycapLendar import, cleaned by the deploy purge). The deploy drops the row → unpriced → hidden on the released set. Filed by the deals audit batch 12 (#209). **Confirmed healed 2026-10-08** (feed run 37798782431: `current=null`, `resolvedAt=2026-10-08T06:27:25.847Z` — the deploy purge dropped the row and discovery did not relink it) | ✅ resolved (`6e74210`; confirmed 2026-10-08) |
 | 2026-10-07 | gmk-aurora-polaris | SwiftCables | 45 USD | needs fix | Same cause/fix as gmk-evil-dolch × SwiftCables: `swiftcables.net/products/gmk-aurora-polaris-extras` is "GMK Aurora Polaris Extras", a single-variant cable at USD 45 (was 75, probe 37559225235), not a keycap base. Covered by the same vendor-wide `-extras` block (`6e74210`). Filed by the deals audit batch 12 (#209). **Confirmed healed 2026-10-08** (feed `current=null`, same `resolvedAt`) | ✅ resolved (`6e74210`; confirmed 2026-10-08) |
 | 2026-10-08 | gmk-thunder-god | proto[Typist] | 115.83 GBP | self-healed (stale price) | **Stale price, self-healed — not a scrape bug.** The site showed a **stale GBP 157**; the store's only base variant, "GMK Thunder God - Base Kit", is **GBP 115.83, in stock** (other variant: Novelties Kit 29.17), confirmed by the batch-13 Vendor probe (run 37715214379). No variant on the page is 157, so this is **not** the #202 proto[Typist] wrong-variant shape: the picker classifies the literally-titled "Base Kit" as BASE and returns 115.83, and the JSON-LD/OG fallback would read the base or the cheapest variant (never 157) — there is no scrape mechanism that re-produces 157. The 157 was a stale stored value from an earlier scrape; a re-scrape after the 01:55 submit re-stored the correct base (feed reads `115.83 GBP SCRAPED`, `resolvedAt=2026-10-08T07:00:30.388Z`). First report for this (set, vendor) pair — no recurrence. Recommended base GBP 115.83 verified: store's plain in-stock "Base Kit", picker-selected, within `KIT_BOUNDS` (GBP [0, 320]). Filed by the deals audit batch 13 (#210). **Confirmed healed 2026-10-09** (feed run 37949947203: `current=115.83 GBP SCRAPED`; the nightly Refresh vendor prices run 37938067863 scraped between runs at 13:45 UTC and 115.83 held, 157 did not return) | ✅ resolved (self-healed; confirmed 2026-10-09) |
+| 2026-10-11 | gmk-red-devils-r2 | Oblotzky Industries | 115 EUR | self-healed (stock) | **Stock-only, no scrape bug.** Site showed EUR 115 SOLD OUT; the store's "Standard" base variant is EUR 115, `available=true` on the group-buy product, confirmed by the batch-15 Vendor probe (run 38103105361) that filed the report. Price 115 EUR is correct, undisputed, and a plausible GMK CYL base (within `KIT_BOUNDS`). The price pass is sole authority for `inStock` (#153), so the next availability scrape flips the display in stock. Not a `LINK_OVERRIDES` row (the Ktechs oscillation cause); first report for this (set, vendor) pair — no recurrence. Feed `115 EUR SCRAPED`, `resolvedAt=2026-10-11T06:49:10.823Z` (post-dating the 01:49 submit). No code change. Filed by the deals audit batch 15 (#212). On the Self-heal watch (§1b) for 2026-10-12 confirmation of the in-stock flip | ✅ resolved (self-healed; on watch) |
+| 2026-10-11 | gmk-red-devils-r2 | DeskHero | 170 CAD | self-healed (stock) | Same shape as the Oblotzky row. Site showed CAD 170 SOLD OUT; the store's "Standard Base" variant is CAD 170 and available (batch-15 probe run 38103105361); the same product URL already reads in stock on the gmk-red-devils (R1) set, so only this R2 row's availability display lagged. Price 170 CAD correct & undisputed (plausible GMK CYL base, within `KIT_BOUNDS`). Price-pass-owns-`inStock` (#153) availability scrape flips it. Feed `170 CAD SCRAPED`, `resolvedAt=2026-10-11T06:49:10.823Z`. No code change. Filed by the deals audit batch 15 (#212). On the Self-heal watch (§1b) for 2026-10-12 confirmation | ✅ resolved (self-healed; on watch) |
 
 ### Client-recommended values verified
 
@@ -2057,8 +2121,14 @@ uploaded 2 builds but the mai…") — left for the owner.
 
 ## Summary
 
-- **73 report submissions across ~57 listings** (full `?all=1` history, first
-  reconciled 2026-08-26; gmk-vamp × Switchmod added 2026-08-27; **1 added
+- **75 report submissions across ~58 listings** (full `?all=1` history, first
+  reconciled 2026-08-26; gmk-vamp × Switchmod added 2026-08-27; **2 added
+  2026-10-11** (batch 15, #212: gmk-red-devils-r2 × Oblotzky EUR 115 and ×
+  DeskHero CAD 170 — both stock-only self-heals, the site showed each base kit
+  sold out while the store's own "Standard"/"Standard Base" variant is available
+  at the correct price; price-pass owns `inStock` (#153), so the availability
+  scrape flips the display; both on the Self-heal watch for 2026-10-12
+  confirmation); **1 added
   2026-10-08** (batch 13, #210: gmk-thunder-god × proto[Typist] — a stale-price
   self-heal, the site's stale GBP 157 re-scraped to the correct in-stock base GBP
   115.83; not a wrong-variant case, 157 is not a current variant; confirmed healed
