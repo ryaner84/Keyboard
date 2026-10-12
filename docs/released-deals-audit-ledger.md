@@ -12,13 +12,13 @@ to the start.
 
 ## Cursor
 
-`after_slug` for the next run: **`gmk-cyl-finer-things-r2-keycaps`**
+`after_slug` for the next run: **`gmk-cyl-hyperfuse-origins-r3-keycaps`**
 
-The list held 51 on-sale sets on 2026-10-11 (gmk-red-devils and
-gmk-red-devils-r2 have joined it). That run covered the 39 sets after the
-previous cursor (`gmk-dots-r2 … gmk-zm`) and then wrapped to the top for 11 more
-(`dcs-dream-alert … gmk-cyl-finer-things-r2-keycaps`), so the next run starts at
-`gmk-cyl-hyperfuse-origins-r3-keycaps`.
+The list held 49 on-sale sets on 2026-10-12. That run covered the 38 sets after
+the previous cursor (`gmk-cyl-hyperfuse-origins-r3-keycaps … gmk-zm`) and then
+wrapped to the top for 12 more (`dcs-dream-alert …
+gmk-cyl-hyperfuse-origins-r3-keycaps`; with 49 sets, a 50-set batch is the whole
+list plus one overlap), so the next run starts at `gmk-dots-r2`.
 
 ## Runs
 
@@ -39,6 +39,7 @@ previous cursor (`gmk-dots-r2 … gmk-zm`) and then wrapped to the top for 11 mo
 | 2026-10-08 | gmk-finer-things … gmk-zm, wrap, dcs-dream-alert … gmk-cyl-hyperfuse-origins-r3-keycaps | 50 | 274 | 9 flagged → 1 confirmed | 1 (price-report button) | [37714709757](https://github.com/ryaner84/Keyboard/actions/runs/37714709757) + [37714712242](https://github.com/ryaner84/Keyboard/actions/runs/37714712242) (reports: [37715348211](https://github.com/ryaner84/Keyboard/actions/runs/37715348211)) |
 | 2026-10-09 | gmk-dots-r2 … gmk-zm, wrap, dcs-dream-alert … gmk-cyl-hyperfuse-origins-r3-keycaps | 50 | 268 | 7 flagged → 0 confirmed | 0 | [37871406474](https://github.com/ryaner84/Keyboard/actions/runs/37871406474) + [37871408463](https://github.com/ryaner84/Keyboard/actions/runs/37871408463) |
 | 2026-10-11 | gmk-dots-r2 … gmk-zm, wrap, dcs-dream-alert … gmk-cyl-finer-things-r2-keycaps | 50 | 273 | 10 flagged → 2 confirmed | 2 (price-report button) | [38102968570](https://github.com/ryaner84/Keyboard/actions/runs/38102968570) + [38102969858](https://github.com/ryaner84/Keyboard/actions/runs/38102969858) (reports: [38103135378](https://github.com/ryaner84/Keyboard/actions/runs/38103135378)) |
+| 2026-10-12 | gmk-cyl-hyperfuse-origins-r3-keycaps … gmk-zm, wrap, dcs-dream-alert … gmk-cyl-hyperfuse-origins-r3-keycaps | 50 | 266 | 9 flagged → 1 confirmed | 1 (price-report button) | [38193206548](https://github.com/ryaner84/Keyboard/actions/runs/38193206548) + [38193208134](https://github.com/ryaner84/Keyboard/actions/runs/38193208134) (reports: [38193575894](https://github.com/ryaner84/Keyboard/actions/runs/38193575894)) |
 
 ### 2026-09-26 findings
 
@@ -489,3 +490,34 @@ Items still waiting on the owner, unchanged and not refiled: gmk-2pack-add-on ×
 Swagkeys, gmk-finer-things / gmk-cyl-finer-things-r2-keycaps (Mecha MY +
 Mecha.store), gmk-varenye (Toro Studio + Toro Studios), and gh-116846 × iLumKB
 (opened-box price).
+
+### 2026-10-12 findings
+
+There are 49 sets on sale, so the wrap run
+([38193208134](https://github.com/ryaner84/Keyboard/actions/runs/38193208134))
+read the whole list: 266 listings, 9 flagged. The run after the cursor
+([38193206548](https://github.com/ryaner84/Keyboard/actions/runs/38193206548))
+read 38 of those sets again and gave the same verdict on every row. One flag is
+new, and the **Vendor probe**
+([38193477911](https://github.com/ryaner84/Keyboard/actions/runs/38193477911))
+confirmed it:
+
+| set | vendor | site | store | verdict | filed |
+|---|---|---|---|---|---|
+| gmk-red-devils-r2 | GEONWORKS | USD 115, in stock | `group-buy-gmk-cyl-red-devil` 302s to `geon.works/`; the plural handle 404s | dead link (front-door redirect), same shape as gmk-mothman × GEONWORKS on 2026-09-28 | price report |
+| gmk-red-devils-r2 | Aiglatson Studio | THB 4390 | Thai-script handle redirects to `gb-gmk-cyl-red-devils`, Standard (Base) 4390 | correct; stale handle in URL (as 2026-10-11) | — |
+| gmk-metropolis-r2 | NovelKeys | USD 70 (was 135), in stock | "Base" sold out; "Midnight Base" 70 available | site is right (as 2026-09-30) | — |
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+| gmk-wasabi-r2 / gmk-zm (SwitchKeys, Mekibo) / gmk-dots-r2 (NovelKeys) / gmk-botanical-r2 (Oblotzky) | — | — | renamed handles redirect to the same product and price | as 2026-10-09; stale handle in URL | — |
+
+The two stock reports filed on 2026-10-11 have **healed**. gmk-red-devils-r2 ×
+DeskHero (CAD 170) and × Oblotzky Industries (EUR 115) now read in stock, and
+both match the store. gmk-hazakura × DeskHero and × Mekibo pass because another
+base variant at the same price is in stock. Everything else matched the store
+on price, markdown and stock. gmk-varenye now lists only **Toro Studio**, so the
+duplicate Toro Studios row reported on 2026-09-28 has been merged.
+
+Items still waiting on the owner, unchanged and not refiled: gmk-2pack-add-on ×
+Swagkeys, gmk-finer-things / gmk-cyl-finer-things-r2-keycaps (Mecha MY +
+Mecha.store), gh-116846 × iLumKB (opened-box price), and the gmk-red-devils R1 row carrying the R2 group-buy
+listings.
