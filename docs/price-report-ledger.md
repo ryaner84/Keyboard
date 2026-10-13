@@ -1733,6 +1733,64 @@ both the client-reported log and the resolution audit in the same run.
 > verification and no fresh report needs a fix, so no code change was required
 > this run.
 
+> **2026-10-13 run — five new stock-only self-heals filed by the deals audit; the
+> one watch item CONFIRMED healed; no code change.** Price feed run 38419844744
+> (`?all=1`) returns **0 pending, 81 resolved** — the client-reported log stood at
+> 76, so **five new reports** have filed since the 2026-10-12 run, all logged
+> 2026-10-13T01:53 by the released deals audit batch 17 (#214, commit `07ce63c`):
+> - **gmk-red-devils-r2 × proto[Typist]** `86.67 GBP SCRAPED` — "site shows GBP
+>   86.67 SOLD OUT, but the live GB's 'GMK CYL Red Devils - Base Kit' GBP 86.67 is
+>   available (probe run 38334115158)".
+> - **gmk-red-devils-r2 × Keebz n Cables** `200 AUD SCRAPED` — "site shows AUD 200
+>   SOLD OUT, but the group buy's 'Standard (Base)' AUD 200 is available".
+> - **gmk-red-devils-r2 × iLumKB** `159 SGD SCRAPED` — "site shows SGD 159 SOLD
+>   OUT, but the live group buy's 'Standard (Base)' SGD 159 is available".
+> - **gmk-motif × Oblotzky Industries** `159 EUR SCRAPED` — "site shows EUR 159
+>   SOLD OUT, but the store's 'Base' variant EUR 159 is available (pre-order)".
+> - **gmk-hangulbeit-tkl × Mekibo** `145 USD SCRAPED` — "site shows USD 145 (was
+>   180) IN STOCK, but the store's only variant (Default Title, USD 145) is
+>   available=false — sold out".
+>
+> **All five are stock-only self-heals, no code change.** Each reporter's own probe
+> established that the stored price is the store's actual base-variant price
+> (86.67 GBP, 200 AUD, 159 SGD, 159 EUR, 145 USD — all plausible GMK CYL base
+> prices within `KIT_BOUNDS`, none disputed); only the availability display is out
+> of step, which the next availability scrape reconciles (#153 price-pass-owns-
+> `inStock`). The three gmk-red-devils-r2 rows and gmk-motif are the tracker
+> lagging *behind* the store (shown sold out, store has the base live); gmk-hangulbeit-tkl
+> is the reverse (tracker shows in stock, store sold out) — same stock-lag class,
+> opposite direction. None is a `LINK_OVERRIDES` row (the Ktechs oscillation
+> cause, #153), and each is the **first** report for its (set, vendor) pair, so
+> there is no recurrence signal and no scrape bug to trace. All five already read
+> **resolved** in the feed (a Refresh vendor prices scrape, run 38413449443, ran
+> 14:27–14:38 UTC between the submit and this dispatch); per routine step 2 a
+> stock-only "resolved" is provisional, so all five are placed on the **Self-heal
+> watch (§1b)** for the next run to confirm the availability flip landed.
+>
+> **Incoming Self-heal watch (1 item, added 2026-10-12) — CONFIRMED healed** and
+> moved to the resolution audit. gmk-red-devils-r2 × GEONWORKS reads `null USD
+> SCRAPED`, `resolvedAt=2026-10-13T06:57:18.715Z` (post-dating the 10-12T01:52
+> submit); the null held across the nightly 00:30 UTC scheduled sweep —
+> `isGoneRedirect` dead-link behaviour stable, row correctly hidden on the released
+> set, not relinked (identical to gmk-varenye × GEONWORKS). No watched item failed
+> verification. The prior resolutions all still read correctly in the feed:
+> gmk-thunder-god `115.83 GBP SCRAPED`, gmk-vamp × Switchmod `84.99 USD`,
+> gmk-bent-r2 `150 USD`, gmk-arctic `145 USD`, gmk-tribal `175 USD`; #153 Ktechs
+> BRG R3 `139 SGD`, Thunder God `196 SGD`; the two SwiftCables `-extras` cables
+> (gmk-evil-dolch, gmk-aurora-polaris) still `current=null`.
+>
+> **Visitor inbox run 38419860962:** STORE_LINK 0, PRICE_REPORT 0, PHOTO_REPORT 0,
+> **17 `LISTING_FLAG`s + 1 FEEDBACK** — byte-for-byte the SAME open set already
+> triaged and reported to the owner (§4b); no new flags, none a `wrong_price` flag,
+> nothing auto-resolvable (`LISTING_FLAG` has no auto-resolution). No inbox action.
+>
+> **The three §1 owner items are unchanged and still correctly held:**
+> red-cyrillic-addon × Neo Macro (wrong variant; contested shared-picker vs
+> catalog-merge repair), gmk-2pack-add-on × Swagkeys (wrong vendor; VendorKit
+> reassignment), gmk-zm × SwitchKeys (relink judgment). No item failed
+> verification and no fresh report needs a fix, so no code change was required
+> this run.
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _Three owner items this run._
@@ -1797,17 +1855,28 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-**Currently on the watch: 1 item (added 2026-10-12, batch 16 / #213)** — a
-dead-link self-heal on **gmk-red-devils-r2**, awaiting the 2026-10-13 run's
-confirmation that the null held across a nightly scrape:
+**Currently on the watch: 5 items (added 2026-10-13, batch 17 / #214)** — all
+stock-only self-heals filed by the released deals audit, awaiting the 2026-10-14
+run's confirmation that the availability flip held across a nightly scrape:
 
 | set | vendor | flagged | reason | status |
 |---|---|---|---|---|
-| gmk-red-devils-r2 | GEONWORKS | 2026-10-12 | dead link — `geon.works/products/group-buy-gmk-cyl-red-devil` 302s to the store front page and the plural handle 404s; site showed USD 115 in stock (batch-16 probe run 38193477911). No product to buy | feed `null USD SCRAPED`, `resolvedAt=2026-10-12T06:59:16.939Z` (post-dating the 01:52 submit). `isGoneRedirect` cleared the price to null and the row is hidden on the released set — the correct behaviour, identical to gmk-mothman/gmk-varenye × GEONWORKS. Confirm null holds across the nightly scrape |
+| gmk-red-devils-r2 | proto[Typist] | 2026-10-13 | stock-only — site showed GBP 86.67 SOLD OUT, but the live GB's "GMK CYL Red Devils - Base Kit" GBP 86.67 is `available=true` (batch-17 probe run 38334115158). Price correct & undisputed | feed `86.67 GBP SCRAPED`, resolved post-submit. Price-pass owns `inStock` (#153); confirm the in-stock flip holds across the nightly scrape |
+| gmk-red-devils-r2 | Keebz n Cables | 2026-10-13 | stock-only — site showed AUD 200 SOLD OUT, but the group buy's "Standard (Base)" AUD 200 is available (batch-17 probe run 38334115158). Price correct & undisputed | feed `200 AUD SCRAPED`, resolved post-submit. Confirm the in-stock flip holds |
+| gmk-red-devils-r2 | iLumKB | 2026-10-13 | stock-only — site showed SGD 159 SOLD OUT, but the live group buy's "Standard (Base)" SGD 159 is available (batch-17 probe run 38334115158). Price correct & undisputed | feed `159 SGD SCRAPED`, resolved post-submit. Confirm the in-stock flip holds |
+| gmk-motif | Oblotzky Industries | 2026-10-13 | stock-only pre-order lag — site showed EUR 159 SOLD OUT, but the store's "Base" variant EUR 159 is available (pre-order) (batch-17 probe run 38334115158). Price correct & undisputed | feed `159 EUR SCRAPED`, resolved post-submit. First report for gmk-motif. Confirm the in-stock flip holds |
+| gmk-hangulbeit-tkl | Mekibo | 2026-10-13 | stock-only (reverse) — site showed USD 145 (was 180) IN STOCK, but the store's only variant (Default Title, USD 145) is `available=false` SOLD OUT (batch-17 probe run 38334115158). Price correct & undisputed | feed `145 USD SCRAPED`, resolved post-submit. Tracker leads the store; confirm the next availability scrape marks the row sold out (#153) |
 
 The red-cyrillic-addon recurrence (§1) is an owner item, not a self-heal, so it is
 not watched; it is tracked in §1 and the client-reported log until the owner
 applies one of the two repairs.
+
+**Prior watch (added 2026-10-12, batch 16 / #213) — CONFIRMED healed on the
+2026-10-13 run and moved to the resolution audit:**
+
+| set | vendor | flagged | reason | confirmation (2026-10-13) |
+|---|---|---|---|---|
+| gmk-red-devils-r2 | GEONWORKS | 2026-10-12 | dead link — `geon.works/products/group-buy-gmk-cyl-red-devil` 302s to the store front page and the plural handle 404s; site showed USD 115 in stock (batch-16 probe run 38193477911). No product to buy | ✅ feed `null USD SCRAPED`, `resolvedAt=2026-10-13T06:57:18.715Z` (post-dating the 10-12T01:52 submit); the null held across the nightly 00:30 UTC scheduled sweep. `isGoneRedirect` dead-link behaviour stable, row correctly hidden on the released set, not relinked — identical to gmk-varenye × GEONWORKS, watched one run then confirmed |
 
 **Prior watch (added 2026-10-11, batch 15 / #212) — both CONFIRMED healed on the
 2026-10-12 run and moved to the resolution audit:**
@@ -2008,7 +2077,12 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-10-08 | gmk-thunder-god | proto[Typist] | 115.83 GBP | "wrong price: site shows GBP 157 but the store's only base variant 'GMK Thunder God - Base Kit' is GBP 115.83, in stock (other variant: Novelties Kit 29.17). No variant on the page is 157." (deals audit batch 13 / #210) | self-healed (stale price) | ✅ resolved 2026-10-08 — 157 was a stale stored value; re-scrape landed the correct base `115.83 GBP SCRAPED` (not a wrong-variant case — 157 is not a current variant, picker-correct). **Confirmed healed 2026-10-09** (115.83 held across the nightly scrape; 157 did not return) |
 | 2026-10-11 | gmk-red-devils-r2 | Oblotzky Industries | 115 EUR | "Stock wrong: site shows EUR 115 sold out, but oblotzky.industries/products/gmk-cyl-red-devils-r2 'Standard' EUR 115 is available (group-buy; probe 2026-10-11, run 38103105361)." (deals audit batch 15 / #212) | self-healed (stock) | ✅ resolved 2026-10-11 — stock-only; 115 EUR correct & undisputed; feed `115 EUR SCRAPED`, `resolvedAt=2026-10-11T06:49:10.823Z`. Price-pass owns `inStock` (#153). On the Self-heal watch (§1b) to confirm the in-stock flip |
 | 2026-10-11 | gmk-red-devils-r2 | DeskHero | 170 CAD | "Stock wrong: site shows CAD 170 sold out, but deskhero.ca/products/gmk-cyl-red-devils-keycaps 'Standard Base' CAD 170 is available (probe 2026-10-11, run 38103105361). The same URL reads in stock on gmk-red-devils." (deals audit batch 15 / #212) | self-healed (stock) | ✅ resolved 2026-10-11 — stock-only; 170 CAD correct & undisputed; feed `170 CAD SCRAPED`, `resolvedAt=2026-10-11T06:49:10.823Z`. Price-pass owns `inStock` (#153). **Confirmed healed 2026-10-12** (feed `170 CAD SCRAPED`, resolved post-submit; nightly scrape between runs, batch-16 audit saw it in stock) |
-| 2026-10-12 | gmk-red-devils-r2 | GEONWORKS | null USD | "Dead link: site shows USD 115 in stock, but geon.works/products/group-buy-gmk-cyl-red-devil 302s to the store front page (geon.works/), and the plural handle 404s. No product or price to buy (vendor probe run 38193477911)." (deals audit batch 16 / #213) | self-healed (dead link) | ✅ resolved 2026-10-12 — `isGoneRedirect` cleared price to null (feed `null USD SCRAPED`, `resolvedAt=2026-10-12T06:59:16.939Z`); row correctly hidden on the released set. Third GEONWORKS 302-to-front-page dead link of the same shape (after gmk-mothman, gmk-varenye). On the Self-heal watch (§1b) to confirm null holds |
+| 2026-10-12 | gmk-red-devils-r2 | GEONWORKS | null USD | "Dead link: site shows USD 115 in stock, but geon.works/products/group-buy-gmk-cyl-red-devil 302s to the store front page (geon.works/), and the plural handle 404s. No product or price to buy (vendor probe run 38193477911)." (deals audit batch 16 / #213) | self-healed (dead link) | ✅ resolved 2026-10-12 — `isGoneRedirect` cleared price to null (feed `null USD SCRAPED`, `resolvedAt=2026-10-12T06:59:16.939Z`); row correctly hidden on the released set. Third GEONWORKS 302-to-front-page dead link of the same shape (after gmk-mothman, gmk-varenye). On the Self-heal watch (§1b) to confirm null holds. **Confirmed healed 2026-10-13** (feed `null USD SCRAPED`, resolved post-submit; null held across the nightly scrape) |
+| 2026-10-13 | gmk-red-devils-r2 | proto[Typist] | 86.67 GBP | "Site shows GBP 86.67 SOLD OUT, but the live GB's 'GMK CYL Red Devils - Base Kit' GBP 86.67 is available — probe run 38334115158." (deals audit batch 17 / #214) | self-healed (stock) | ✅ resolved 2026-10-13 — stock-only; 86.67 GBP correct & undisputed; feed `86.67 GBP SCRAPED`, resolved post-submit. Price-pass owns `inStock` (#153). On the Self-heal watch (§1b) to confirm the in-stock flip |
+| 2026-10-13 | gmk-red-devils-r2 | Keebz n Cables | 200 AUD | "Site shows AUD 200 SOLD OUT, but the group buy's 'Standard (Base)' AUD 200 is available — probe run 38334115158." (deals audit batch 17 / #214) | self-healed (stock) | ✅ resolved 2026-10-13 — stock-only; 200 AUD correct & undisputed; feed `200 AUD SCRAPED`, resolved post-submit. On the Self-heal watch (§1b) |
+| 2026-10-13 | gmk-red-devils-r2 | iLumKB | 159 SGD | "Site shows SGD 159 SOLD OUT, but the live group buy's 'Standard (Base)' SGD 159 is available — probe run 38334115158." (deals audit batch 17 / #214) | self-healed (stock) | ✅ resolved 2026-10-13 — stock-only; 159 SGD correct & undisputed; feed `159 SGD SCRAPED`, resolved post-submit. On the Self-heal watch (§1b) |
+| 2026-10-13 | gmk-motif | Oblotzky Industries | 159 EUR | "Site shows EUR 159 SOLD OUT, but the store's 'Base' variant EUR 159 is available (pre-order) — probe run 38334115158." (deals audit batch 17 / #214) | self-healed (stock) | ✅ resolved 2026-10-13 — stock-only pre-order lag; 159 EUR correct & undisputed; feed `159 EUR SCRAPED`, resolved post-submit. First report for gmk-motif. On the Self-heal watch (§1b) |
+| 2026-10-13 | gmk-hangulbeit-tkl | Mekibo | 145 USD | "Site shows USD 145 (was 180) IN STOCK, but the store's only variant (Default Title, USD 145) is available=false — sold out (probe run 38334115158)." (deals audit batch 17 / #214) | self-healed (stock) | ✅ resolved 2026-10-13 — stock-only (reverse: tracker leads store); 145 USD correct & undisputed; feed `145 USD SCRAPED`, resolved post-submit. Next availability scrape marks it sold out (#153). On the Self-heal watch (§1b) |
 
 ## 4. Listing-flag triage (visitor inbox — `ListingReport`)
 
@@ -2133,7 +2207,12 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-10-08 | gmk-thunder-god | proto[Typist] | 115.83 GBP | self-healed (stale price) | **Stale price, self-healed — not a scrape bug.** The site showed a **stale GBP 157**; the store's only base variant, "GMK Thunder God - Base Kit", is **GBP 115.83, in stock** (other variant: Novelties Kit 29.17), confirmed by the batch-13 Vendor probe (run 37715214379). No variant on the page is 157, so this is **not** the #202 proto[Typist] wrong-variant shape: the picker classifies the literally-titled "Base Kit" as BASE and returns 115.83, and the JSON-LD/OG fallback would read the base or the cheapest variant (never 157) — there is no scrape mechanism that re-produces 157. The 157 was a stale stored value from an earlier scrape; a re-scrape after the 01:55 submit re-stored the correct base (feed reads `115.83 GBP SCRAPED`, `resolvedAt=2026-10-08T07:00:30.388Z`). First report for this (set, vendor) pair — no recurrence. Recommended base GBP 115.83 verified: store's plain in-stock "Base Kit", picker-selected, within `KIT_BOUNDS` (GBP [0, 320]). Filed by the deals audit batch 13 (#210). **Confirmed healed 2026-10-09** (feed run 37949947203: `current=115.83 GBP SCRAPED`; the nightly Refresh vendor prices run 37938067863 scraped between runs at 13:45 UTC and 115.83 held, 157 did not return) | ✅ resolved (self-healed; confirmed 2026-10-09) |
 | 2026-10-11 | gmk-red-devils-r2 | Oblotzky Industries | 115 EUR | self-healed (stock) | **Stock-only, no scrape bug.** Site showed EUR 115 SOLD OUT; the store's "Standard" base variant is EUR 115, `available=true` on the group-buy product, confirmed by the batch-15 Vendor probe (run 38103105361) that filed the report. Price 115 EUR is correct, undisputed, and a plausible GMK CYL base (within `KIT_BOUNDS`). The price pass is sole authority for `inStock` (#153), so the next availability scrape flips the display in stock. Not a `LINK_OVERRIDES` row (the Ktechs oscillation cause); first report for this (set, vendor) pair — no recurrence. Feed `115 EUR SCRAPED`, `resolvedAt=2026-10-11T06:49:10.823Z` (post-dating the 01:49 submit). No code change. Filed by the deals audit batch 15 (#212). **Confirmed healed 2026-10-12** (feed `115 EUR SCRAPED`, `resolvedAt=2026-10-12T06:16:54.015Z` post-dating the submit; a nightly Refresh vendor prices scrape ran between runs and the batch-16 deals audit independently saw it back in stock — the in-stock flip landed) | ✅ resolved (self-healed; confirmed 2026-10-12) |
 | 2026-10-11 | gmk-red-devils-r2 | DeskHero | 170 CAD | self-healed (stock) | Same shape as the Oblotzky row. Site showed CAD 170 SOLD OUT; the store's "Standard Base" variant is CAD 170 and available (batch-15 probe run 38103105361); the same product URL already reads in stock on the gmk-red-devils (R1) set, so only this R2 row's availability display lagged. Price 170 CAD correct & undisputed (plausible GMK CYL base, within `KIT_BOUNDS`). Price-pass-owns-`inStock` (#153) availability scrape flips it. Feed `170 CAD SCRAPED`, `resolvedAt=2026-10-11T06:49:10.823Z`. No code change. Filed by the deals audit batch 15 (#212). **Confirmed healed 2026-10-12** (feed `170 CAD SCRAPED`, `resolvedAt=2026-10-12T06:16:54.015Z`; nightly scrape between runs, batch-16 audit saw it in stock) | ✅ resolved (self-healed; confirmed 2026-10-12) |
-| 2026-10-12 | gmk-red-devils-r2 | GEONWORKS | null USD | self-healed (dead link) | `geon.works/products/group-buy-gmk-cyl-red-devil` 302s to `geon.works/` (front page, no product); the plural handle 404s. `isGoneRedirect` recognises the root-redirect, marks the row `DEAD_LINK` and clears the price; the feed reads `current=null USD SCRAPED`, `resolvedAt=2026-10-12T06:59:16.939Z` (post-dating the 01:52 submit). This is the **third** GEONWORKS 302-to-front-page dead link of the identical shape — after gmk-mothman (2026-09-28) and gmk-varenye (2026-10-02), both self-healed and above — GEONWORKS has retired its group-buy product URLs to its front page store-wide. The unpriced row is correctly hidden on the released set; the deals-rail "USD 115 in stock" the reporter saw is a stale point-in-time artifact cleared by scrape propagation. No code change — the price pass already handles the dead link correctly. First report for this (set, vendor) pair. **Owner note:** if GEONWORKS still sells these sets under new handles, a discovery relink / vendor-row review is an owner call (not a price-scrape bug). Filed by the deals audit batch 16 (#213). On the Self-heal watch (§1b) for 2026-10-13 confirmation that null holds | ✅ resolved (self-healed; on watch) |
+| 2026-10-12 | gmk-red-devils-r2 | GEONWORKS | null USD | self-healed (dead link) | `geon.works/products/group-buy-gmk-cyl-red-devil` 302s to `geon.works/` (front page, no product); the plural handle 404s. `isGoneRedirect` recognises the root-redirect, marks the row `DEAD_LINK` and clears the price; the feed reads `current=null USD SCRAPED`, `resolvedAt=2026-10-12T06:59:16.939Z` (post-dating the 01:52 submit). This is the **third** GEONWORKS 302-to-front-page dead link of the identical shape — after gmk-mothman (2026-09-28) and gmk-varenye (2026-10-02), both self-healed and above — GEONWORKS has retired its group-buy product URLs to its front page store-wide. The unpriced row is correctly hidden on the released set; the deals-rail "USD 115 in stock" the reporter saw is a stale point-in-time artifact cleared by scrape propagation. No code change — the price pass already handles the dead link correctly. First report for this (set, vendor) pair. **Owner note:** if GEONWORKS still sells these sets under new handles, a discovery relink / vendor-row review is an owner call (not a price-scrape bug). Filed by the deals audit batch 16 (#213). On the Self-heal watch (§1b) for 2026-10-13 confirmation that null holds. **Confirmed healed 2026-10-13** (feed `null USD SCRAPED`, `resolvedAt=2026-10-13T06:57:18.715Z` post-dating the 01:52 submit — the null held across the nightly 00:30 UTC scheduled sweep; identical to gmk-varenye × GEONWORKS, watched one run then confirmed) | ✅ resolved (self-healed; confirmed 2026-10-13) |
+| 2026-10-13 | gmk-red-devils-r2 | proto[Typist] | 86.67 GBP | self-healed (stock) | **Stock-only, no scrape bug.** Site showed GBP 86.67 SOLD OUT; the live GB's "GMK CYL Red Devils - Base Kit" is GBP 86.67, `available=true`, confirmed by the batch-17 Vendor probe (run 38334115158) that filed the report. Price 86.67 GBP (≈115 USD) is correct, undisputed, and a plausible GMK CYL base (within `KIT_BOUNDS`). The price pass is sole authority for `inStock` (#153), so the next availability scrape flips the display in stock. Not a `LINK_OVERRIDES` row (the Ktechs oscillation cause); first report for this (set, vendor) pair — no recurrence. Feed `86.67 GBP SCRAPED`, resolved post-submit. No code change. Filed by the deals audit batch 17 (#214). On the Self-heal watch (§1b) for 2026-10-14 confirmation | ✅ resolved (self-healed; on watch) |
+| 2026-10-13 | gmk-red-devils-r2 | Keebz n Cables | 200 AUD | self-healed (stock) | Same shape as the proto[Typist] row. Site showed AUD 200 SOLD OUT; the group buy's "Standard (Base)" is AUD 200 and `available=true` (batch-17 probe run 38334115158). Price 200 AUD (≈130 USD) correct & undisputed, a plausible GMK CYL base. Price-pass-owns-`inStock` (#153) availability scrape flips it. First report for this (set, vendor) pair. Feed `200 AUD SCRAPED`, resolved post-submit. No code change. Filed by the deals audit batch 17 (#214). On the Self-heal watch (§1b) | ✅ resolved (self-healed; on watch) |
+| 2026-10-13 | gmk-red-devils-r2 | iLumKB | 159 SGD | self-healed (stock) | Same shape. Site showed SGD 159 SOLD OUT; the live group buy's "Standard (Base)" is SGD 159 and `available=true` (batch-17 probe run 38334115158). Price 159 SGD (≈123 USD) correct & undisputed, a plausible GMK CYL base. First report for this (set, vendor) pair. Feed `159 SGD SCRAPED`, resolved post-submit. No code change. Filed by the deals audit batch 17 (#214). On the Self-heal watch (§1b) | ✅ resolved (self-healed; on watch) |
+| 2026-10-13 | gmk-motif | Oblotzky Industries | 159 EUR | self-healed (stock) | **Stock-only, no scrape bug.** Site showed EUR 159 SOLD OUT; the store's "Base" variant is EUR 159 and `available=true` (pre-order), confirmed by the batch-17 Vendor probe (run 38334115158). Price 159 EUR correct & undisputed (within `KIT_BOUNDS`'s USD-400-equivalent window). Pre-order availability lag, the established Oblotzky shape — price-pass-owns-`inStock` (#153) availability scrape flips it. First report for gmk-motif and for this (set, vendor) pair. Feed `159 EUR SCRAPED`, resolved post-submit. No code change. Filed by the deals audit batch 17 (#214). On the Self-heal watch (§1b) | ✅ resolved (self-healed; on watch) |
+| 2026-10-13 | gmk-hangulbeit-tkl | Mekibo | 145 USD | self-healed (stock) | **Stock-only, no scrape bug — reverse direction.** Site showed USD 145 (was 180) IN STOCK, but the store's only variant (Default Title, USD 145) is `available=false` — SOLD OUT (batch-17 probe run 38334115158). So the tracker's availability display leads the store rather than lagging it; the next availability scrape marks the row sold out (#153 price-pass-owns-`inStock`). Price 145 USD is correct and undisputed (the "was 180" is a markdown display, not a wrong variant). Not a wrong-variant/currency/product case — Mekibo's prior reports were gmk-teradrive/gmk-monarch bundle-vs-base (#194), a different set and cause; first report for gmk-hangulbeit-tkl and for this (set, vendor) pair. Feed `145 USD SCRAPED`, resolved post-submit. No code change. Filed by the deals audit batch 17 (#214). On the Self-heal watch (§1b) | ✅ resolved (self-healed; on watch) |
 
 ### Client-recommended values verified
 
