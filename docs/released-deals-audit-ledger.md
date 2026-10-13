@@ -12,13 +12,12 @@ to the start.
 
 ## Cursor
 
-`after_slug` for the next run: **`gmk-cyl-hyperfuse-origins-r3-keycaps`**
+`after_slug` for the next run: **`gmk-coral-r2`**
 
-The list held 49 on-sale sets on 2026-10-12. That run covered the 38 sets after
-the previous cursor (`gmk-cyl-hyperfuse-origins-r3-keycaps … gmk-zm`) and then
-wrapped to the top for 12 more (`dcs-dream-alert …
-gmk-cyl-hyperfuse-origins-r3-keycaps`; with 49 sets, a 50-set batch is the whole
-list plus one overlap), so the next run starts at `gmk-dots-r2`.
+The list held 52 on-sale sets on 2026-10-13. That run covered the 40 sets after
+the previous cursor (`gmk-dots-r2 … gmk-zm`) and then wrapped to the top for 10
+more (`dcs-dream-alert … gmk-coral-r2`), so the next run starts at
+`gmk-cyl-finer-things-r2-keycaps`.
 
 ## Runs
 
@@ -40,6 +39,7 @@ list plus one overlap), so the next run starts at `gmk-dots-r2`.
 | 2026-10-09 | gmk-dots-r2 … gmk-zm, wrap, dcs-dream-alert … gmk-cyl-hyperfuse-origins-r3-keycaps | 50 | 268 | 7 flagged → 0 confirmed | 0 | [37871406474](https://github.com/ryaner84/Keyboard/actions/runs/37871406474) + [37871408463](https://github.com/ryaner84/Keyboard/actions/runs/37871408463) |
 | 2026-10-11 | gmk-dots-r2 … gmk-zm, wrap, dcs-dream-alert … gmk-cyl-finer-things-r2-keycaps | 50 | 273 | 10 flagged → 2 confirmed | 2 (price-report button) | [38102968570](https://github.com/ryaner84/Keyboard/actions/runs/38102968570) + [38102969858](https://github.com/ryaner84/Keyboard/actions/runs/38102969858) (reports: [38103135378](https://github.com/ryaner84/Keyboard/actions/runs/38103135378)) |
 | 2026-10-12 | gmk-cyl-hyperfuse-origins-r3-keycaps … gmk-zm, wrap, dcs-dream-alert … gmk-cyl-hyperfuse-origins-r3-keycaps | 50 | 266 | 9 flagged → 1 confirmed | 1 (price-report button) | [38193206548](https://github.com/ryaner84/Keyboard/actions/runs/38193206548) + [38193208134](https://github.com/ryaner84/Keyboard/actions/runs/38193208134) (reports: [38193575894](https://github.com/ryaner84/Keyboard/actions/runs/38193575894)) |
+| 2026-10-13 | gmk-dots-r2 … gmk-zm, wrap, dcs-dream-alert … gmk-coral-r2 | 50 | 275 | 16 flagged → 5 confirmed | 5 (price-report button) | [38333731768](https://github.com/ryaner84/Keyboard/actions/runs/38333731768) + [38333734092](https://github.com/ryaner84/Keyboard/actions/runs/38333734092) (reports: [38334274629](https://github.com/ryaner84/Keyboard/actions/runs/38334274629)) |
 
 ### 2026-09-26 findings
 
@@ -521,3 +521,35 @@ Items still waiting on the owner, unchanged and not refiled: gmk-2pack-add-on ×
 Swagkeys, gmk-finer-things / gmk-cyl-finer-things-r2-keycaps (Mecha MY +
 Mecha.store), gh-116846 × iLumKB (opened-box price), and the gmk-red-devils R1 row carrying the R2 group-buy
 listings.
+
+### 2026-10-13 findings
+
+There are 52 sets on sale. The run after the cursor
+([38333731768](https://github.com/ryaner84/Keyboard/actions/runs/38333731768),
+40 sets, 220 listings) and the wrap run
+([38333734092](https://github.com/ryaner84/Keyboard/actions/runs/38333734092),
+50 sets, 275 listings) between them read the whole list and flagged 16 rows.
+Six were new, and the **Vendor probe**
+([38334115158](https://github.com/ryaner84/Keyboard/actions/runs/38334115158))
+confirmed five of them:
+
+| set | vendor | site | store | verdict | filed |
+|---|---|---|---|---|---|
+| gmk-hangulbeit-tkl | Mekibo | USD 145 (was 180), **in stock** | "GMK CYL Hangulbeit", only variant 145 **available=false** | stock: a sold-out deal shown as buyable | price report |
+| gmk-motif | Oblotzky Industries | EUR 159, **sold out** | "GMK CYL Motif" Base 159 **available** (tagged `pre-order`) | stock: the site hides a buyable pre-order | price report |
+| gmk-red-devils-r2 | iLumKB | SGD 159, **sold out** | "[Group Buy] GMK CYL Red Devils" Standard (Base) 159 **available** | stock: the same shape as DeskHero / Oblotzky on 2026-10-11 | price report |
+| gmk-red-devils-r2 | Keebz n Cables | AUD 200, **sold out** | "[Group-Buy] GMK CYL Red Devil R2" Standard (Base) 200 **available** | stock: same | price report |
+| gmk-red-devils-r2 | proto[Typist] | GBP 86.67, **sold out** | "(Group Buy) GMK CYL Red Devils" Base Kit 86.67 **available** | stock: same | price report |
+| gmk-metropolis-r2 | NovelKeys | USD 70 (was 135), in stock | "Base" sold out; "Midnight Base" 70 available | site is right (as 2026-09-30) | — |
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+| gmk-yuri-r2 / gmk-dots-r2 (NovelKeys), gmk-wasabi-r2 / gmk-zm (SwitchKeys), gmk-zm (Mekibo), gmk-botanical-r2 (Oblotzky), gmk-red-devils-r2 (Aiglatson) | — | — | renamed handles redirect to the same product and price | stale handle in URL (as before) | — |
+
+Everything else matched the store on price, markdown and stock. The red-devils
+stock rows keep recurring one vendor at a time (2 on 2026-10-11, 3 today), so
+the live CYL Red Devils group buy seems to be read as sold out between passes.
+That is worth a look if more vendors on that set are reported.
+
+Items still waiting on the owner, unchanged and not refiled: gmk-2pack-add-on ×
+Swagkeys, gmk-finer-things / gmk-cyl-finer-things-r2-keycaps (Mecha MY +
+Mecha.store), gh-116846 × iLumKB (opened-box price), and the gmk-red-devils R1
+row carrying the R2 group-buy listings.
