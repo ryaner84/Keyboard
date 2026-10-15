@@ -1827,6 +1827,34 @@ both the client-reported log and the resolution audit in the same run.
 > make on its own). The FEEDBACK is the same 2026-06-24 collection-display item,
 > left for the owner. The three open owner price items (§1) are unchanged.
 
+> **2026-10-15 run — no new report; the one watch item CONFIRMED HEALED; watch
+> now empty.** Price feed run 38758200510 (`?all=1`) returns **0 pending, 82
+> resolved** — a 1:1 match with the client-reported log (count unchanged from the
+> 2026-10-14 run), so **no new report** has filed; the most recent submission is
+> still **gmk-kitsune × KeyBay** (2026-10-14T01:53:01Z, batch 18 / #215) and
+> nothing is appended.
+>
+> **Incoming Self-heal watch (1 item, added 2026-10-14, batch 18 / #215) —
+> CONFIRMED healed** and moved to the resolution audit. **gmk-kitsune × KeyBay**
+> reads `209 CAD SCRAPED`, `resolvedAt=2026-10-15T04:58:29.534Z` (post-dating the
+> 01:53 submit) — the correct, undisputed 209 CAD held across the nightly
+> 00:30 UTC scheduled feed sweep (which stamped the 04:58 resolve). The complaint
+> was a reverse stock-only lag (tracker led the store showing in stock while the
+> store's only "Base" variant was sold out); the price pass owns `inStock`
+> (#153), the availability flip landed, and the price never moved. Not a
+> same-reason recurrence of the 2026-10-01 KeyBay wrong-price report on the same
+> listing (that was the geo-converted `.json` 158, fixed and holding at 209; a
+> different cause). No watched item failed verification, so **no in-run fix was
+> required.** The Self-heal watch is now empty.
+>
+> **Visitor inbox run 38758206034:** STORE_LINK 0, PRICE_REPORT 0, LISTING_FLAG
+> **17**, FEEDBACK 1, PHOTO_REPORT 0. The 17 flags are the SAME set already
+> triaged and reported to the owner (§4b) — id-for-id unchanged, no new flag,
+> nothing auto-resolvable (every one is a catalog/merge/GB-status/wrong-vendor
+> decision the review session does not make on its own). The FEEDBACK is the same
+> 2026-06-24 collection-display item, left for the owner. The three open owner
+> price items (§1) are unchanged.
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _Three owner items this run._
@@ -1891,17 +1919,20 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-**Currently on the watch: 1 item (added 2026-10-14, batch 18 / #215)** — a
-stock-only self-heal filed by the released deals audit, awaiting the 2026-10-15
-run's confirmation that the availability flip held across a nightly scrape:
-
-| set | vendor | flagged | reason | status |
-|---|---|---|---|---|
-| gmk-kitsune | KeyBay | 2026-10-14 | stock-only (reverse) — site shown IN STOCK, but the store's only variant ("Base", CAD 209) is `available=false` SOLD OUT at keybay.tech (batch-18 probe run 38497966590). Price 209 CAD correct & undisputed (matches the `abc3021` `.js` shelf-price fix; not a recurrence of the 2026-10-01 wrong-price report, which was the geo-converted `.json` 158) | feed `209 CAD SCRAPED`, `resolvedAt=2026-10-14T05:50:32.847Z` (post-submit). Tracker leads the store; confirm the next availability scrape marks the row sold out (#153 price-pass-owns-`inStock`) |
+**Currently on the watch: none.** The one prior item (gmk-kitsune × KeyBay,
+added 2026-10-14) was CONFIRMED healed on the 2026-10-15 run and moved to the
+resolution audit; no new self-heal was flagged this run, so the watch is empty.
 
 The red-cyrillic-addon recurrence (§1) is an owner item, not a self-heal, so it is
 not watched; it is tracked in §1 and the client-reported log until the owner
 applies one of the two repairs.
+
+**Prior watch (added 2026-10-14, batch 18 / #215) — CONFIRMED healed on the
+2026-10-15 run and moved to the resolution audit:**
+
+| set | vendor | flagged | reason | confirmation (2026-10-15) |
+|---|---|---|---|---|
+| gmk-kitsune | KeyBay | 2026-10-14 | stock-only (reverse) — site shown IN STOCK, but the store's only variant ("Base", CAD 209) is `available=false` SOLD OUT at keybay.tech (batch-18 probe run 38497966590). Price 209 CAD correct & undisputed | ✅ feed `209 CAD SCRAPED`, `resolvedAt=2026-10-15T04:58:29.534Z` (post-dating the 10-14T01:53 submit); the correct 209 CAD held across the nightly 00:30 UTC scheduled sweep. Tracker led the store; the availability flip landed (#153 price-pass-owns-`inStock`); price unchanged. Not a same-reason recurrence of the 2026-10-01 KeyBay wrong-price report (geo-converted `.json` 158, a different cause) |
 
 **Prior watch (added 2026-10-13, batch 17 / #214) — all five CONFIRMED healed on
 the 2026-10-14 run and moved to the resolution audit:**
@@ -2126,7 +2157,7 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-10-13 | gmk-red-devils-r2 | iLumKB | 159 SGD | "Site shows SGD 159 SOLD OUT, but the live group buy's 'Standard (Base)' SGD 159 is available — probe run 38334115158." (deals audit batch 17 / #214) | self-healed (stock) | ✅ resolved 2026-10-13 — stock-only; 159 SGD correct & undisputed; feed `159 SGD SCRAPED`, resolved post-submit. On the Self-heal watch (§1b) |
 | 2026-10-13 | gmk-motif | Oblotzky Industries | 159 EUR | "Site shows EUR 159 SOLD OUT, but the store's 'Base' variant EUR 159 is available (pre-order) — probe run 38334115158." (deals audit batch 17 / #214) | self-healed (stock) | ✅ resolved 2026-10-13 — stock-only pre-order lag; 159 EUR correct & undisputed; feed `159 EUR SCRAPED`, resolved post-submit. First report for gmk-motif. On the Self-heal watch (§1b) |
 | 2026-10-13 | gmk-hangulbeit-tkl | Mekibo | 145 USD | "Site shows USD 145 (was 180) IN STOCK, but the store's only variant (Default Title, USD 145) is available=false — sold out (probe run 38334115158)." (deals audit batch 17 / #214) | self-healed (stock) | ✅ resolved 2026-10-13 — stock-only (reverse: tracker leads store); 145 USD correct & undisputed; feed `145 USD SCRAPED`, resolved post-submit. Next availability scrape marks it sold out (#153). **Confirmed healed 2026-10-14** (feed `145 USD SCRAPED`, `resolvedAt=2026-10-14T05:10:18.024Z` post-submit; batch-18 commit records it healed) |
-| 2026-10-14 | gmk-kitsune | KeyBay | 209 CAD | "Stock wrong: shown in stock, but the store's only variant ('Base', CAD 209) is available=false (sold out) at keybay.tech/products/gmk-cyl-kitsune-keycpas. Price 209 is correct. Released deals audit 2026-10-14, vendor probe run 38497966590." (deals audit batch 18 / #215) | self-healed (stock) | ✅ resolved 2026-10-14 — stock-only (reverse: tracker leads store); 209 CAD correct & undisputed (matches the `abc3021` `.js` shelf-price fix; not a recurrence of the 2026-10-01 wrong-price report, a different cause); feed `209 CAD SCRAPED`, `resolvedAt=2026-10-14T05:50:32.847Z`. Next availability scrape marks it sold out (#153). On the Self-heal watch (§1b) |
+| 2026-10-14 | gmk-kitsune | KeyBay | 209 CAD | "Stock wrong: shown in stock, but the store's only variant ('Base', CAD 209) is available=false (sold out) at keybay.tech/products/gmk-cyl-kitsune-keycpas. Price 209 is correct. Released deals audit 2026-10-14, vendor probe run 38497966590." (deals audit batch 18 / #215) | self-healed (stock) | ✅ resolved 2026-10-14 — stock-only (reverse: tracker leads store); 209 CAD correct & undisputed (matches the `abc3021` `.js` shelf-price fix; not a recurrence of the 2026-10-01 wrong-price report, a different cause); feed `209 CAD SCRAPED`, `resolvedAt=2026-10-14T05:50:32.847Z`. Next availability scrape marks it sold out (#153). **Confirmed healed 2026-10-15** (209 CAD held across the nightly sweep, `resolvedAt=2026-10-15T04:58:29.534Z`) |
 
 ## 4. Listing-flag triage (visitor inbox — `ListingReport`)
 
@@ -2257,7 +2288,7 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-10-13 | gmk-red-devils-r2 | iLumKB | 159 SGD | self-healed (stock) | Same shape. Site showed SGD 159 SOLD OUT; the live group buy's "Standard (Base)" is SGD 159 and `available=true` (batch-17 probe run 38334115158). Price 159 SGD (≈123 USD) correct & undisputed, a plausible GMK CYL base. First report for this (set, vendor) pair. Feed `159 SGD SCRAPED`, resolved post-submit. No code change. Filed by the deals audit batch 17 (#214). **Confirmed healed 2026-10-14** (feed `159 SGD SCRAPED`, `resolvedAt=2026-10-14T05:10:18.024Z` post-submit; price correct and unchanged) | ✅ resolved (self-healed; confirmed 2026-10-14) |
 | 2026-10-13 | gmk-motif | Oblotzky Industries | 159 EUR | self-healed (stock) | **Stock-only, no scrape bug.** Site showed EUR 159 SOLD OUT; the store's "Base" variant is EUR 159 and `available=true` (pre-order), confirmed by the batch-17 Vendor probe (run 38334115158). Price 159 EUR correct & undisputed (within `KIT_BOUNDS`'s USD-400-equivalent window). Pre-order availability lag, the established Oblotzky shape — price-pass-owns-`inStock` (#153) availability scrape flips it. First report for gmk-motif and for this (set, vendor) pair. Feed `159 EUR SCRAPED`, resolved post-submit. No code change. Filed by the deals audit batch 17 (#214). **Confirmed healed 2026-10-14** (feed `159 EUR SCRAPED`, `resolvedAt=2026-10-14T05:10:18.024Z` post-submit; batch-18 commit independently records it healed; price correct and unchanged) | ✅ resolved (self-healed; confirmed 2026-10-14) |
 | 2026-10-13 | gmk-hangulbeit-tkl | Mekibo | 145 USD | self-healed (stock) | **Stock-only, no scrape bug — reverse direction.** Site showed USD 145 (was 180) IN STOCK, but the store's only variant (Default Title, USD 145) is `available=false` — SOLD OUT (batch-17 probe run 38334115158). So the tracker's availability display leads the store rather than lagging it; the next availability scrape marks the row sold out (#153 price-pass-owns-`inStock`). Price 145 USD is correct and undisputed (the "was 180" is a markdown display, not a wrong variant). Not a wrong-variant/currency/product case — Mekibo's prior reports were gmk-teradrive/gmk-monarch bundle-vs-base (#194), a different set and cause; first report for gmk-hangulbeit-tkl and for this (set, vendor) pair. Feed `145 USD SCRAPED`, resolved post-submit. No code change. Filed by the deals audit batch 17 (#214). **Confirmed healed 2026-10-14** (feed `145 USD SCRAPED`, `resolvedAt=2026-10-14T05:10:18.024Z` post-submit; batch-18 commit records it healed; price correct and unchanged) | ✅ resolved (self-healed; confirmed 2026-10-14) |
-| 2026-10-14 | gmk-kitsune | KeyBay | 209 CAD | self-healed (stock) | **Stock-only, no scrape bug — reverse direction.** Site shown IN STOCK, but the store's only variant ("Base", CAD 209) is `available=false` — SOLD OUT at `keybay.tech/products/gmk-cyl-kitsune-keycpas` (batch-18 Vendor probe run 38497966590). So the tracker's availability display leads the store; the next availability scrape marks the row sold out (#153 price-pass-owns-`inStock`). Price 209 CAD is correct and undisputed — it matches the `abc3021` `.js`-shelf-price fix that established 209 CAD for this listing on 2026-10-01 (within `KIT_BOUNDS`). **Not a same-reason recurrence:** the 2026-10-01 KeyBay report on this same listing (id `3575a5dd-…`) was a *wrong-price* case (the geo-converted `.json` served 158 to a US runner), now fixed and holding at 209; this is a different cause (stock). Feed `209 CAD SCRAPED`, `resolvedAt=2026-10-14T05:50:32.847Z` (post-dating the 01:53 submit). No code change. Filed by the deals audit batch 18 (#215). On the Self-heal watch (§1b) for 2026-10-15 confirmation | ✅ resolved (self-healed; on watch) |
+| 2026-10-14 | gmk-kitsune | KeyBay | 209 CAD | self-healed (stock) | **Stock-only, no scrape bug — reverse direction.** Site shown IN STOCK, but the store's only variant ("Base", CAD 209) is `available=false` — SOLD OUT at `keybay.tech/products/gmk-cyl-kitsune-keycpas` (batch-18 Vendor probe run 38497966590). So the tracker's availability display leads the store; the next availability scrape marks the row sold out (#153 price-pass-owns-`inStock`). Price 209 CAD is correct and undisputed — it matches the `abc3021` `.js`-shelf-price fix that established 209 CAD for this listing on 2026-10-01 (within `KIT_BOUNDS`). **Not a same-reason recurrence:** the 2026-10-01 KeyBay report on this same listing (id `3575a5dd-…`) was a *wrong-price* case (the geo-converted `.json` served 158 to a US runner), now fixed and holding at 209; this is a different cause (stock). Feed `209 CAD SCRAPED`, `resolvedAt=2026-10-14T05:50:32.847Z` (post-dating the 01:53 submit). No code change. Filed by the deals audit batch 18 (#215). **Confirmed healed 2026-10-15** (feed `209 CAD SCRAPED`, `resolvedAt=2026-10-15T04:58:29.534Z` post-dating the 01:53 submit; the correct 209 CAD held across the nightly 00:30 UTC scheduled sweep — the reverse stock flip landed and the price never moved) | ✅ resolved (self-healed; confirmed 2026-10-15) |
 
 ### Client-recommended values verified
 
@@ -2309,7 +2340,8 @@ uploaded 2 builds but the mai…") — left for the owner.
   self-heal, the tracker led the store showing in stock while the store's only
   "Base" variant CAD 209 is sold out; price 209 CAD correct and undisputed, a
   different cause from the 2026-10-01 wrong-price KeyBay report on the same
-  listing, so not a recurrence; on the Self-heal watch for 2026-10-15); **5 added
+  listing, so not a recurrence; CONFIRMED healed on the 2026-10-15 run, 209 CAD
+  held across the nightly sweep); **5 added
   2026-10-13** (batch 17, #214: three gmk-red-devils-r2 rows + gmk-motif +
   gmk-hangulbeit-tkl — all stock-only self-heals, all CONFIRMED healed on the
   2026-10-14 run); **2 added
