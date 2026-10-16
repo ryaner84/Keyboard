@@ -14,8 +14,8 @@ to the start.
 
 `after_slug` for the next run: **`gmk-zm`**
 
-The list held 46 on-sale sets on 2026-10-15, fewer than one batch, so the wrap
-run read all of them (`dcs-dream-alert … gmk-zm`). The next run wraps to the
+The list held 46 on-sale sets on 2026-10-16, fewer than one batch, so the wrap
+run read all of them (`dcs-chladni … gmk-zm`). The next run wraps to the
 start again; if the list grows past 50, it continues from the top.
 
 ## Runs
@@ -41,6 +41,7 @@ start again; if the list grows past 50, it continues from the top.
 | 2026-10-13 | gmk-dots-r2 … gmk-zm, wrap, dcs-dream-alert … gmk-coral-r2 | 50 | 275 | 16 flagged → 5 confirmed | 5 (price-report button) | [38333731768](https://github.com/ryaner84/Keyboard/actions/runs/38333731768) + [38333734092](https://github.com/ryaner84/Keyboard/actions/runs/38333734092) (reports: [38334274629](https://github.com/ryaner84/Keyboard/actions/runs/38334274629)) |
 | 2026-10-14 | gmk-cyl-finer-things-r2-keycaps … gmk-zm, wrap, dcs-dream-alert … gmk-dots-r2 | 50 | 254 | 8 flagged → 1 confirmed | 1 (price-report button) | [38497545086](https://github.com/ryaner84/Keyboard/actions/runs/38497545086) + [38497547404](https://github.com/ryaner84/Keyboard/actions/runs/38497547404) (reports: [38498078984](https://github.com/ryaner84/Keyboard/actions/runs/38498078984)) |
 | 2026-10-15 | dcs-dream-alert … gmk-zm (whole list; after-cursor run gmk-finer-things … gmk-zm overlaps) | 46 | 246 | 7 flagged + 1 unflagged → 0 confirmed | 0 | [38667514963](https://github.com/ryaner84/Keyboard/actions/runs/38667514963) + [38667512603](https://github.com/ryaner84/Keyboard/actions/runs/38667512603) |
+| 2026-10-16 | dcs-chladni … gmk-zm (whole list; the after-cursor run wrapped and read the same 46) | 46 | 241 | 13 flagged → 7 confirmed | 7 (price-report button) | [38836977571](https://github.com/ryaner84/Keyboard/actions/runs/38836977571) + [38836979998](https://github.com/ryaner84/Keyboard/actions/runs/38836979998) (reports: [38837349478](https://github.com/ryaner84/Keyboard/actions/runs/38837349478)) |
 
 ### 2026-09-26 findings
 
@@ -610,3 +611,50 @@ Items still waiting on the owner, unchanged and not refiled: gmk-2pack-add-on ×
 Swagkeys (a switchkeys.com.au listing), gmk-finer-things /
 gmk-cyl-finer-things-r2-keycaps (Mecha MY + Mecha.store), and gh-116846 ×
 iLumKB (opened-box price, SGD 79.5).
+
+### 2026-10-16 findings
+
+There are 46 sets on sale. Both runs read the whole list: 241 listings, 13
+flagged, and both runs gave the same verdict on every row. Seven flags are new,
+and they all have one cause. The **Vendor probe**
+([38837185355](https://github.com/ryaner84/Keyboard/actions/runs/38837185355))
+confirmed all seven, and they were filed through the price-report button
+([38837349478](https://github.com/ryaner84/Keyboard/actions/runs/38837349478)):
+
+| set | vendor | site | store (product.js, AUD) | verdict | filed |
+|---|---|---|---|---|---|
+| gmk-panda | SwitchKeys | AUD 142 (was 156), in stock | "Base Kit" **199.99** (was 219.99), in stock | wrong price | price report |
+| gmk-night-runner-r2 | SwitchKeys | AUD 141 (was 170), in stock | "Base Kit" **199** (was 239.99), in stock | wrong price | price report |
+| gmk-nightshade | SwitchKeys | AUD 156 (was 170), in stock | "Base Kit" **219.99** (was 239.99), in stock | wrong price | price report |
+| gmk-wasabi-r2 | SwitchKeys | AUD 141 (was 170), in stock | `gmk-wasabi-v2` "Wasabi Base" **199** (was 239.99), in stock | wrong price (on 2026-10-15 this row only had a stale handle) | price report |
+| gmk-masterpiece-r2 | SwitchKeys | AUD 198, sold out | "Base Kit (Value)" **279.99**, sold out | wrong price | price report |
+| gmk-relegendables | SwitchKeys | AUD 42, in stock | no variant is 42; the front-print variants are **59** | wrong price | price report |
+| gmk-2pack-add-on | Swagkeys (a switchkeys.com.au link) | **USD** 32 (was 36), in stock | "Default Title" **44.99** (was 49.99), in stock | wrong price and currency (the 2026-10-03 report filed it at AUD 44.99) | price report |
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+| gmk-yuri-r2 / gmk-dots-r2 (NovelKeys), gmk-zm (Mekibo), gmk-botanical-r2 (Oblotzky), gmk-finer-things (CannonKeys) | — | — | renamed handles redirect to the same product and price | stale handle in URL (as before) | — |
+
+**One cause behind all seven.** Every stored number is the store's `.json`
+price, which Shopify Markets converts for a US runner (×0.71, so it is really
+a USD amount). The real AUD shelf price comes from `product.js`. Both price
+halves are supposed to replace the `.json` price with the `.js` price (#203),
+and they did until 2026-10-15: that day's audit read these same rows at the
+correct AUD prices. So one pass after that read SwitchKeys while its `.js` did
+not answer (or did not match the variants), kept the converted `.json` prices,
+and stored them under the shop's AUD. The probe shows `/meta.json` saying AUD,
+and the unpinned `.json` gives the converted numbers. That means the
+`localization` cookie is the only thing keeping `.json` honest, and it did not
+hold for this store.
+
+This is not fixed here. The price pass logs no per-row detail, so the failing
+leg cannot be pinned down from here, and stores cannot be reached from the dev
+sandbox. Possible guard for the price-report review: when `.js` shelf prices
+are missing for a store whose `.json` can be localized, do not overwrite a
+stored price with a `.json` price that differs from it by a currency-rate
+factor. The reports re-queue these rows, so the next pass should heal them if
+`.js` answers. Watch for a same-store recurrence.
+
+Items still waiting on the owner, unchanged and not refiled: gmk-finer-things /
+gmk-cyl-finer-things-r2-keycaps (Mecha MY + Mecha.store) and gh-116846 ×
+iLumKB (opened-box price, SGD 79.5). gmk-2pack-add-on × Swagkeys is still
+waiting on the owner for the wrong vendor row, and it was refiled today because
+its price is now also wrong.
