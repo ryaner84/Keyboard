@@ -1855,9 +1855,120 @@ both the client-reported log and the resolution audit in the same run.
 > 2026-06-24 collection-display item, left for the owner. The three open owner
 > price items (§1) are unchanged.
 
+> **2026-10-16 run — seven new SwitchKeys geo-converted price reports (batch 20
+> / #217); a systematic wrong-price class whose root-cause repair is held for
+> owner (architecturally significant), all seven placed on the Self-heal watch.**
+> Price feed run 38921869977 (`?all=1`) returns **0 pending, 89 resolved** — up
+> from 82 on the 2026-10-15 run, so **seven new reports** have filed since, every
+> one from the **deals audit batch 20** (submitted 2026-10-16T01:51, filed via
+> run 38837349478; the batch-20 commit #217/`63efae8` only documented and filed
+> them — it shipped no code fix). All seven are the SAME systematic bug on
+> **switchkeys.com.au**: the store's `/products/<handle>.json` is geo-localized
+> by Shopify Markets and serves a datacenter/US runner a **×0.71 USD-equivalent
+> number stored under the shop's own AUD label**, instead of the un-localized
+> AUD shelf price the `.js` endpoint carries.
+>
+> | set | vendor | geo-converted (reported) | correct AUD (`.js` shelf) |
+> |---|---|---|---|
+> | gmk-panda | SwitchKeys | 142 | **199.99** |
+> | gmk-night-runner-r2 | SwitchKeys | 141 | **199** |
+> | gmk-nightshade | SwitchKeys | 156 | **219.99** |
+> | gmk-wasabi-r2 | SwitchKeys | 141 | **199** |
+> | gmk-masterpiece-r2 | SwitchKeys | 198 | **279.99** (sold out) |
+> | gmk-relegendables | SwitchKeys | 42 | **59** (front-print) |
+> | gmk-2pack-add-on | Swagkeys\* | 32 | **44.99** |
+>
+> \*the gmk-2pack row is also the open **wrong-vendor** owner item (§1): the
+> Swagkeys row carries SwitchKeys' listing; its price half is this geo-conversion.
+>
+> **Why this is `needs fix`, not a stock self-heal.** The reports are
+> wrong-price/currency — a systematic scrape class (routine step 3) — and
+> **gmk-wasabi-r2 × SwitchKeys is a confirmed recurrence**: a *false-positive* on
+> 2026-09-29 (stored 199 correct; the reporter saw the `.json` 143), wrong again
+> on 2026-10-16 (stored 141). A value that was right, went wrong, and is right
+> again is the oscillation routine step 2 names, not a heal. The feed currently
+> reads all seven at the **correct AUD shelf price**
+> (`199.99 / 199 / 219.99 / 199 / 279.99 / 59 / 44.99 AUD SCRAPED`) because a
+> Refresh-vendor-prices run (38895636907, 11:43 UTC) re-scraped them after the
+> report re-queue and the `.js` shelf override landed — a point-in-time correct
+> read, which for a wrong-price report is not proof of a heal.
+>
+> **Root cause (traced; both halves read).** SwitchKeys serves geo-converted
+> `.json` (×0.71) and correct AUD on `.js` with **matching variant IDs**
+> (reporter's probe run 38837185355: e.g. gmk-panda "Base Kit" id 39667114967145
+> = `.json` 142 / `.js` 199.99). Both price halves already carry the full
+> defence — `prices.ts` fetches `.json` with a `cart_currency=AUD;
+> localization=AU` cookie (lines 501-510) **and** applies the `.js` shelf override
+> (line 682, #203/`69451ae`); `scrape.py` repins AU localization (lines
+> 2247-2273) then applies `_apply_shelf_prices` (line 2284). AUD is in
+> `_CURRENCY_HOME_COUNTRY`, IDs and price units (`.json` major vs `.js` cents/100)
+> match. So the override stores the correct AUD **whenever `.js`/meta succeed** —
+> which the standalone probe confirms they do. The geo-converted number is stored
+> only when those auxiliary fetches are **transiently blocked during a full
+> multi-row run** (`refresh-prices`, 8 lanes): the main `.json` answers
+> (geo-converted), the `.js`/meta get throttled, and `prices.ts`'s catch (lines
+> 684-686) / scrape.py line 2281 keep the un-overridden `.json` number. Nothing
+> SwitchKeys-specific in code — an intermittent, store-side throttle on the whole
+> vendor's batch ("every SwitchKeys row changed the same way on 2026-10-15").
+>
+> **Held for owner — architecturally significant (routine step 4 exception).**
+> The reliable repair makes the pass refuse/preserve rather than store a
+> `.json`-only price it could not confirm via `.js`/localization — a change to
+> the **shared Shopify price-fetch fallback used by the whole roster**, in both
+> halves, with a genuine design choice (preserve-last-good / `PRICE_REFUSED` vs a
+> geo-conversion heuristic) and real downside: many legitimate stores serve only
+> `.json` (non-Markets, genuine currency), and refusing them would publish
+> **nothing** — the worse, silent failure mode (CLAUDE.md asymmetry). The exact
+> production trigger (which run/IP is throttled) cannot be reproduced from this
+> environment. Same class and same disposition as the gmk-bent-r2 × zFrontier
+> shared-fallback hold (2026-09-15). Recommended patch below; brought to the
+> owner rather than shipped speculatively.
+>
+> **Recommended patch (owner decision).** In both halves, when the chosen base
+> variant's price came from `.json` and the `.js` shelf fetch returned **no**
+> variant for it (a total `.js` miss) AND `/meta.json` gave a Markets-convertible
+> currency, treat the number as unconfirmed and **return null (preserve the last
+> good price)** rather than store it — gated so a store that answered `.js` for
+> *any* variant this origin/run is unaffected, keeping genuine `.json`-only
+> stores pricing. Pair with routing the `.js`/meta fetches through `HostThrottle`
+> so a busy run stops self-inflicting the block that triggers the fallback.
+>
+> **Disposition this run.** All seven are logged `needs fix` in §3 and the
+> resolution audit, listed as an open owner item in §1, and placed on the
+> **Self-heal watch (§1b)** — a revert to the ×0.71 value on the next run is the
+> oscillation confirmation and the trigger to ship the fix (owner-approved) then.
+> No code change shipped this run.
+>
+> **Visitor inbox run 38921874463:** STORE_LINK 0, PRICE_REPORT 0, LISTING_FLAG
+> **17**, FEEDBACK 1, PHOTO_REPORT 0 — the SAME 17 flags + 1 FEEDBACK already
+> triaged and reported to the owner (§4b), id-for-id unchanged, nothing new and
+> nothing auto-resolvable. **Incoming Self-heal watch was empty** (the 2026-10-15
+> run confirmed gmk-kitsune × KeyBay), so no prior item needed re-verification and
+> none failed. The three prior open owner price items (§1) are unchanged.
+
 ## 1. Open wrong-price reports (unresolved only)
 
-_Three owner items this run._
+_Four owner items this run: the new SwitchKeys geo-conversion class (7 listings,
+held — architecturally significant) plus the three prior._
+
+_**SwitchKeys geo-converted `.json` prices × 7** (new 2026-10-16, batch 20 /
+#217) — **systematic wrong-price/currency; root-cause repair held for owner
+(architecturally significant).** switchkeys.com.au serves a geo-localized
+`/products/<handle>.json` (≈ ×0.71 of the AUD shelf price) to a datacenter/US
+runner, stored under the shop's own AUD label; the un-localized AUD price is on
+`.js`. Both price halves already prefer the `.js` shelf price (#203) and pin AU
+localization, so the correct AUD stores whenever `.js`/meta succeed — but when
+those auxiliary fetches are throttled during a full multi-row run the geo-
+converted `.json` number is kept, which is how all seven rows went wrong on
+2026-10-15 at once. gmk-wasabi-r2 × SwitchKeys is a confirmed recurrence
+(false-positive 2026-09-29 → wrong 2026-10-16), i.e. an oscillation. The feed
+reads all seven CORRECT now (the 11:43 refresh re-applied the override), so there
+is nothing to fix at this instant; the durable repair hardens the shared
+roster-wide Shopify fallback (refuse/preserve an unconfirmed `.json` price) and
+carries real downside for legitimate `.json`-only stores — held for owner with
+the recommended patch in the 2026-10-16 run note. On the Self-heal watch (§1b);
+a revert next run ships the fix. The gmk-2pack row below is the same
+geo-conversion on its price half._
 
 _**gmk-black-snail---red-cyrillic-addon × Neo Macro** (new 2026-10-04, batch 9 /
 #206) — **wrong variant, recurrence of 2026-09-28; held for owner (architecturally
@@ -1919,9 +2030,26 @@ same listing was re-reported), reclassified **needs fix** and **fixed in that
 run** — the scheduler owns the fix (see routine step 2). A confirmed row moves
 to the resolution audit and drops out of this table.
 
-**Currently on the watch: none.** The one prior item (gmk-kitsune × KeyBay,
-added 2026-10-14) was CONFIRMED healed on the 2026-10-15 run and moved to the
-resolution audit; no new self-heal was flagged this run, so the watch is empty.
+**Currently on the watch: seven SwitchKeys geo-conversion rows (added
+2026-10-16, batch 20 / #217).** They read the CORRECT AUD shelf price in the
+feed this run (the 11:43 Refresh-vendor-prices re-scrape re-applied the `.js`
+override), but they are a systematic wrong-price class with a confirmed
+oscillation (gmk-wasabi-r2: false-positive 2026-09-29 → wrong 2026-10-16), so a
+point-in-time correct read is not proof of a heal. They are watched so a revert
+to the ×0.71 geo-converted value on the next run is caught and triggers the
+owner-approved fix. The root-cause repair is held for owner (architecturally
+significant — shared roster-wide Shopify fallback); see §1 and the 2026-10-16
+run note.
+
+| set | vendor | flagged | reason | watch for (next run) |
+|---|---|---|---|---|
+| gmk-panda | SwitchKeys | 2026-10-16 | geo-converted `.json` 142 stored vs `.js` shelf 199.99 AUD | feed holds **199.99 AUD** (not 142) |
+| gmk-night-runner-r2 | SwitchKeys | 2026-10-16 | geo `.json` 141 vs `.js` 199 | feed holds **199 AUD** (not 141) |
+| gmk-nightshade | SwitchKeys | 2026-10-16 | geo `.json` 156 vs `.js` 219.99 | feed holds **219.99 AUD** (not 156) |
+| gmk-wasabi-r2 | SwitchKeys | 2026-10-16 | geo `.json` 141 vs `.js` 199 (recurrence of 2026-09-29) | feed holds **199 AUD** (not 141) |
+| gmk-masterpiece-r2 | SwitchKeys | 2026-10-16 | geo `.json` 198 vs `.js` 279.99 (sold out) | feed holds **279.99 AUD** (not 198) |
+| gmk-relegendables | SwitchKeys | 2026-10-16 | geo `.json` 42 vs `.js` 59 (front-print base) | feed holds **59 AUD** (not 42) |
+| gmk-2pack-add-on | Swagkeys | 2026-10-16 | geo `.json` 32 vs `.js` 44.99 (also wrong-vendor, §1) | feed holds **44.99 AUD** (not 32) |
 
 The red-cyrillic-addon recurrence (§1) is an owner item, not a self-heal, so it is
 not watched; it is tracked in §1 and the client-reported log until the owner
@@ -2158,6 +2286,13 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-10-13 | gmk-motif | Oblotzky Industries | 159 EUR | "Site shows EUR 159 SOLD OUT, but the store's 'Base' variant EUR 159 is available (pre-order) — probe run 38334115158." (deals audit batch 17 / #214) | self-healed (stock) | ✅ resolved 2026-10-13 — stock-only pre-order lag; 159 EUR correct & undisputed; feed `159 EUR SCRAPED`, resolved post-submit. First report for gmk-motif. On the Self-heal watch (§1b) |
 | 2026-10-13 | gmk-hangulbeit-tkl | Mekibo | 145 USD | "Site shows USD 145 (was 180) IN STOCK, but the store's only variant (Default Title, USD 145) is available=false — sold out (probe run 38334115158)." (deals audit batch 17 / #214) | self-healed (stock) | ✅ resolved 2026-10-13 — stock-only (reverse: tracker leads store); 145 USD correct & undisputed; feed `145 USD SCRAPED`, resolved post-submit. Next availability scrape marks it sold out (#153). **Confirmed healed 2026-10-14** (feed `145 USD SCRAPED`, `resolvedAt=2026-10-14T05:10:18.024Z` post-submit; batch-18 commit records it healed) |
 | 2026-10-14 | gmk-kitsune | KeyBay | 209 CAD | "Stock wrong: shown in stock, but the store's only variant ('Base', CAD 209) is available=false (sold out) at keybay.tech/products/gmk-cyl-kitsune-keycpas. Price 209 is correct. Released deals audit 2026-10-14, vendor probe run 38497966590." (deals audit batch 18 / #215) | self-healed (stock) | ✅ resolved 2026-10-14 — stock-only (reverse: tracker leads store); 209 CAD correct & undisputed (matches the `abc3021` `.js` shelf-price fix; not a recurrence of the 2026-10-01 wrong-price report, a different cause); feed `209 CAD SCRAPED`, `resolvedAt=2026-10-14T05:50:32.847Z`. Next availability scrape marks it sold out (#153). **Confirmed healed 2026-10-15** (209 CAD held across the nightly sweep, `resolvedAt=2026-10-15T04:58:29.534Z`) |
+| 2026-10-16 | gmk-panda | SwitchKeys | 199.99 AUD | "Wrong price: site shows AUD 142 (was 156), but switchkeys.com.au/products/gmk-panda 'Base Kit' is AUD 199.99 (was 219.99), in stock. 142 is the geo-converted .json number (~x0.71, USD), not the AUD shelf price from product.js. Every SwitchKeys row changed the same way on 2026-10-15." (deals audit batch 20 / #217) | needs fix (geo-conversion; held for owner) | ⚠️ open owner item (§1) — switchkeys.com.au geo-localizes `.json` to a US runner (×0.71); feed reads the correct **199.99 AUD SCRAPED** this run (11:43 re-scrape re-applied the `.js` override), but it reverts to 142 whenever `.js`/meta are throttled on a full run. Root-cause repair is architecturally significant (shared roster-wide Shopify fallback) → held for owner with recommended patch. On the Self-heal watch (§1b) |
+| 2026-10-16 | gmk-night-runner-r2 | SwitchKeys | 199 AUD | "Wrong price: site shows AUD 141 (was 170), but the store's 'Base Kit' is AUD 199 (was 239.99), in stock. 141 is the geo-converted .json number, not the product.js shelf price." (deals audit batch 20 / #217) | needs fix (geo-conversion; held for owner) | ⚠️ open owner item (§1) — same SwitchKeys geo-conversion; `.js` Base Kit 199 AUD (id 39713339441257) vs geo `.json` 141. Feed reads **199 AUD SCRAPED** now; on the Self-heal watch (§1b) |
+| 2026-10-16 | gmk-nightshade | SwitchKeys | 219.99 AUD | "Wrong price: site shows AUD 156 (was 170), but the store's 'Base Kit' is AUD 219.99 (was 239.99), in stock. 156 is the geo-converted .json number, not the product.js shelf price." (deals audit batch 20 / #217) | needs fix (geo-conversion; held for owner) | ⚠️ open owner item (§1) — same SwitchKeys geo-conversion; `.js` Base Kit 219.99 AUD (id 39267339599977) vs geo `.json` 156. Feed reads **219.99 AUD SCRAPED** now; on the Self-heal watch (§1b) |
+| 2026-10-16 | gmk-wasabi-r2 | SwitchKeys | 199 AUD | "Wrong price: site shows AUD 141 (was 170), but switchkeys.com.au/products/gmk-wasabi-v2 'Wasabi Base' is AUD 199 (was 239.99), in stock. 141 is the geo-converted .json number, not the product.js shelf price." (deals audit batch 20 / #217) | needs fix (geo-conversion recurrence; held for owner) | ⚠️ open owner item (§1) — **recurrence** of the 2026-09-29 false-positive on this same (set, vendor): then stored 199 (correct) while the reporter saw the `.json` 143; now stored 141 (geo-converted) — the oscillation that proves the class is `needs fix`. `.js` Wasabi Base 199 AUD (id 39342148878441) vs geo `.json` 141. Feed reads **199 AUD SCRAPED** now; on the Self-heal watch (§1b) |
+| 2026-10-16 | gmk-masterpiece-r2 | SwitchKeys | 279.99 AUD | "Wrong price: site shows AUD 198 (sold out), but switchkeys.com.au/products/gmk-masterpiece 'Base Kit (Value)' is AUD 279.99 (sold out). 198 is the geo-converted .json number, not the product.js shelf price." (deals audit batch 20 / #217) | needs fix (geo-conversion; held for owner) | ⚠️ open owner item (§1) — same SwitchKeys geo-conversion; `.js` Base Kit (Value) 279.99 AUD (id 32303999811689, available=false) vs geo `.json` 198. Feed reads **279.99 AUD SCRAPED** now; on the Self-heal watch (§1b). 279.99 AUD ≈ 184 USD, within `KIT_BOUNDS` |
+| 2026-10-16 | gmk-relegendables | SwitchKeys | 59 AUD | "Wrong price: site shows AUD 42, but no variant costs 42. The store's front-print variants (CR BLACK / U9 BEIGE FRONT PRINT) are AUD 59 in product.js. 42 is the geo-converted .json number." (deals audit batch 20 / #217) | needs fix (geo-conversion; held for owner) | ⚠️ open owner item (§1) — same SwitchKeys geo-conversion; `.js` FRONT PRINT 59 AUD (id 39691778031721) vs geo `.json` 42. Feed reads **59 AUD SCRAPED** now; on the Self-heal watch (§1b) |
+| 2026-10-16 | gmk-2pack-add-on | Swagkeys | 44.99 AUD | "Wrong price and currency: site now shows USD 32 (was 36), but this link is SwitchKeys' switchkeys.com.au/products/gmk-2pack, which is AUD 44.99 (was 49.99), in stock. 32 is the geo-converted .json number. The 2026-10-03 wrong-vendor report on this row still applies." (deals audit batch 20 / #217) | needs fix (geo-conversion) + wrong vendor (both held for owner) | ⚠️ open owner item (§1) — two issues on one row: (a) the price half is the SwitchKeys geo-conversion (`.js` 44.99 AUD id 53681446781221 vs geo `.json` 32); feed reads **44.99 AUD SCRAPED** now, on the Self-heal watch (§1b). (b) the **wrong-vendor** attribution first reported 2026-10-03 still stands — the Swagkeys (KR) row carries SwitchKeys' AU listing; needs a VendorKit reassignment (catalog decision, owner) |
 
 ## 4. Listing-flag triage (visitor inbox — `ListingReport`)
 
@@ -2289,6 +2424,13 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-10-13 | gmk-motif | Oblotzky Industries | 159 EUR | self-healed (stock) | **Stock-only, no scrape bug.** Site showed EUR 159 SOLD OUT; the store's "Base" variant is EUR 159 and `available=true` (pre-order), confirmed by the batch-17 Vendor probe (run 38334115158). Price 159 EUR correct & undisputed (within `KIT_BOUNDS`'s USD-400-equivalent window). Pre-order availability lag, the established Oblotzky shape — price-pass-owns-`inStock` (#153) availability scrape flips it. First report for gmk-motif and for this (set, vendor) pair. Feed `159 EUR SCRAPED`, resolved post-submit. No code change. Filed by the deals audit batch 17 (#214). **Confirmed healed 2026-10-14** (feed `159 EUR SCRAPED`, `resolvedAt=2026-10-14T05:10:18.024Z` post-submit; batch-18 commit independently records it healed; price correct and unchanged) | ✅ resolved (self-healed; confirmed 2026-10-14) |
 | 2026-10-13 | gmk-hangulbeit-tkl | Mekibo | 145 USD | self-healed (stock) | **Stock-only, no scrape bug — reverse direction.** Site showed USD 145 (was 180) IN STOCK, but the store's only variant (Default Title, USD 145) is `available=false` — SOLD OUT (batch-17 probe run 38334115158). So the tracker's availability display leads the store rather than lagging it; the next availability scrape marks the row sold out (#153 price-pass-owns-`inStock`). Price 145 USD is correct and undisputed (the "was 180" is a markdown display, not a wrong variant). Not a wrong-variant/currency/product case — Mekibo's prior reports were gmk-teradrive/gmk-monarch bundle-vs-base (#194), a different set and cause; first report for gmk-hangulbeit-tkl and for this (set, vendor) pair. Feed `145 USD SCRAPED`, resolved post-submit. No code change. Filed by the deals audit batch 17 (#214). **Confirmed healed 2026-10-14** (feed `145 USD SCRAPED`, `resolvedAt=2026-10-14T05:10:18.024Z` post-submit; batch-18 commit records it healed; price correct and unchanged) | ✅ resolved (self-healed; confirmed 2026-10-14) |
 | 2026-10-14 | gmk-kitsune | KeyBay | 209 CAD | self-healed (stock) | **Stock-only, no scrape bug — reverse direction.** Site shown IN STOCK, but the store's only variant ("Base", CAD 209) is `available=false` — SOLD OUT at `keybay.tech/products/gmk-cyl-kitsune-keycpas` (batch-18 Vendor probe run 38497966590). So the tracker's availability display leads the store; the next availability scrape marks the row sold out (#153 price-pass-owns-`inStock`). Price 209 CAD is correct and undisputed — it matches the `abc3021` `.js`-shelf-price fix that established 209 CAD for this listing on 2026-10-01 (within `KIT_BOUNDS`). **Not a same-reason recurrence:** the 2026-10-01 KeyBay report on this same listing (id `3575a5dd-…`) was a *wrong-price* case (the geo-converted `.json` served 158 to a US runner), now fixed and holding at 209; this is a different cause (stock). Feed `209 CAD SCRAPED`, `resolvedAt=2026-10-14T05:50:32.847Z` (post-dating the 01:53 submit). No code change. Filed by the deals audit batch 18 (#215). **Confirmed healed 2026-10-15** (feed `209 CAD SCRAPED`, `resolvedAt=2026-10-15T04:58:29.534Z` post-dating the 01:53 submit; the correct 209 CAD held across the nightly 00:30 UTC scheduled sweep — the reverse stock flip landed and the price never moved) | ✅ resolved (self-healed; confirmed 2026-10-15) |
+| 2026-10-16 | gmk-panda | SwitchKeys | 199.99 AUD | needs fix (geo-conversion; held for owner) | **Systematic Shopify-Markets geo-conversion, root-cause repair held for owner (architecturally significant).** switchkeys.com.au serves `/products/gmk-panda.json` geo-localized to a US/datacenter runner — "Base Kit" = AUD 142 (≈ ×0.71) — while `.js` carries the un-localized AUD shelf price 199.99 (reporter probe run 38837185355: same id 39667114967145, available=true). Both price halves already prefer `.js` (#203/`69451ae`) and pin AU localization (`prices.ts` 501-510 + 682; `scrape.py` 2247-2273 + 2284), AUD ∈ `_CURRENCY_HOME_COUNTRY`, IDs/units match — so the correct AUD stores whenever `.js`/meta succeed. The geo-converted number lands only when those auxiliary fetches are transiently throttled during a full multi-row run (the main `.json` answers, the override does not apply); that is how all 7 SwitchKeys rows went wrong together on 2026-10-15. The feed reads **199.99 AUD SCRAPED** this run (11:43 Refresh re-scrape re-applied the override). The durable repair (refuse/preserve an unconfirmed `.json` price) touches the shared roster-wide Shopify fallback and would hide legitimate `.json`-only stores — same class/disposition as gmk-bent-r2 × zFrontier (2026-09-15); recommended patch in the 2026-10-16 run note. On the Self-heal watch (§1b) for next-run recurrence. 199.99 AUD ≈ 131 USD, within `KIT_BOUNDS`. Filed by the deals audit batch 20 (#217) | ⚠️ open owner item (held; on watch) |
+| 2026-10-16 | gmk-night-runner-r2 | SwitchKeys | 199 AUD | needs fix (geo-conversion; held for owner) | Same SwitchKeys geo-conversion. `.js` "Base Kit" AUD 199 (id 39713339441257, available=true) vs geo `.json` 141. Feed reads **199 AUD SCRAPED** this run. Root cause and disposition as the gmk-panda row above. On the Self-heal watch (§1b). Filed by the deals audit batch 20 (#217) | ⚠️ open owner item (held; on watch) |
+| 2026-10-16 | gmk-nightshade | SwitchKeys | 219.99 AUD | needs fix (geo-conversion; held for owner) | Same SwitchKeys geo-conversion. `.js` "Base Kit" AUD 219.99 (id 39267339599977, available=true) vs geo `.json` 156. Feed reads **219.99 AUD SCRAPED** this run. 219.99 AUD ≈ 144 USD, within `KIT_BOUNDS`. On the Self-heal watch (§1b). Filed by the deals audit batch 20 (#217) | ⚠️ open owner item (held; on watch) |
+| 2026-10-16 | gmk-wasabi-r2 | SwitchKeys | 199 AUD | needs fix (geo-conversion recurrence; held for owner) | Same SwitchKeys geo-conversion — and a **confirmed recurrence** on this (set, vendor): the 2026-09-29 report was a false positive (stored 199 correct; reporter saw the `.json` 143), and it is wrong again 2026-10-16 (stored 141). A value right→wrong→right is the oscillation routine step 2 names, which is why the whole class is `needs fix` and not a stock self-heal. `.js` "Wasabi Base" AUD 199 (id 39342148878441, available=true) vs geo `.json` 141. Feed reads **199 AUD SCRAPED** this run. On the Self-heal watch (§1b). Filed by the deals audit batch 20 (#217) | ⚠️ open owner item (held; on watch) |
+| 2026-10-16 | gmk-masterpiece-r2 | SwitchKeys | 279.99 AUD | needs fix (geo-conversion; held for owner) | Same SwitchKeys geo-conversion. `.js` "Base Kit (Value)" AUD 279.99 (id 32303999811689, available=false — sold out) vs geo `.json` 198. Feed reads **279.99 AUD SCRAPED** this run. 279.99 AUD ≈ 184 USD, within `KIT_BOUNDS` (headroom over the dearest known kit). On the Self-heal watch (§1b). Filed by the deals audit batch 20 (#217) | ⚠️ open owner item (held; on watch) |
+| 2026-10-16 | gmk-relegendables | SwitchKeys | 59 AUD | needs fix (geo-conversion; held for owner) | Same SwitchKeys geo-conversion on a front-print relegendables set: the base candidates are the FRONT PRINT kits — `.js` "CR BLACK-FRONT PRINT"/"U9 BEIGE-FRONT PRINT" AUD 59 (ids 39691778031721 / 39691778064489, available=true) vs geo `.json` 42. Feed reads **59 AUD SCRAPED** this run. On the Self-heal watch (§1b). Filed by the deals audit batch 20 (#217) | ⚠️ open owner item (held; on watch) |
+| 2026-10-16 | gmk-2pack-add-on | Swagkeys | 44.99 AUD | needs fix (geo-conversion) + wrong vendor (both held for owner) | Two issues on one row. (a) **Price half** — SwitchKeys geo-conversion: `.js` "Default Title" AUD 44.99 (id 53681446781221, available=true) vs geo `.json` 32; feed reads **44.99 AUD SCRAPED** this run; on the Self-heal watch (§1b) with the other six. (b) **Wrong vendor** — the Swagkeys (KR, swagkeys.com) row carries SwitchKeys' AU listing (switchkeys.com.au/products/gmk-2pack); first flagged 2026-10-03, still open. Needs a VendorKit reassignment to SwitchKeys (or a drop from Swagkeys) — a catalog/vendor-identity decision needing production DB access, no price-scrape code makes it. Both halves held for owner. Filed by the deals audit batch 20 (#217) | ⚠️ open owner item (held; on watch) |
 
 ### Client-recommended values verified
 
