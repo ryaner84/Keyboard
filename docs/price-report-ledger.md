@@ -1994,12 +1994,63 @@ both the client-reported log and the resolution audit in the same run.
 > No new product/vendor was recommended by a reporter this run (no new report), so
 > routine step 9 had nothing to verify.
 
+> **2026-10-18 run — no new report; the seven SwitchKeys geo-conversion watch
+> items showed NO revert across a second nightly scrape, so none failed
+> verification and nothing was fixed; all remain held for owner.** Price feed run
+> 39139102929 (`?all=1`) returns **0 pending, 89 resolved** — unchanged from the
+> 2026-10-17 run (89), so **no new price report** has filed since the batch-20
+> SwitchKeys submissions (2026-10-16T01:51, still the most recent submission). The
+> client-reported log is a 1:1 match with the feed, so nothing is appended.
+>
+> **Self-heal watch re-verification (routine step 2).** The seven SwitchKeys
+> geo-conversion rows (added 2026-10-16, batch 20 / #217; re-verified clean once
+> already on 2026-10-17) were re-checked against the full-history feed. **All seven
+> read the CORRECT AUD shelf price and did NOT revert** to the ×0.71 geo-converted
+> value; every one carries `resolvedAt=2026-10-18T04:53:59.343Z` — today's nightly
+> 00:30 UTC scheduled feed sweep — which post-dates the 2026-10-16T01:51 submit, so
+> the correct AUD held across a second nightly scrape between runs:
+>
+> | set | vendor | watched-for | this run (feed) |
+> |---|---|---|---|
+> | gmk-panda | SwitchKeys | 199.99 AUD (not geo 142) | ✅ **199.99 AUD SCRAPED**, no revert |
+> | gmk-night-runner-r2 | SwitchKeys | 199 AUD (not 141) | ✅ **199 AUD SCRAPED**, no revert |
+> | gmk-nightshade | SwitchKeys | 219.99 AUD (not 156) | ✅ **219.99 AUD SCRAPED**, no revert |
+> | gmk-wasabi-r2 | SwitchKeys | 199 AUD (not 141) | ✅ **199 AUD SCRAPED**, no revert |
+> | gmk-masterpiece-r2 | SwitchKeys | 279.99 AUD (not 198) | ✅ **279.99 AUD SCRAPED**, no revert |
+> | gmk-relegendables | SwitchKeys | 59 AUD (not 42) | ✅ **59 AUD SCRAPED**, no revert |
+> | gmk-2pack-add-on | Swagkeys | 44.99 AUD (not 32) | ✅ **44.99 AUD SCRAPED**, no revert |
+>
+> The newest commit on `main` — the deals-audit **batch 22** (#221, `7774c17`,
+> 2026-10-18) — independently re-read the whole released list and recorded "0 new
+> errors; SwitchKeys rows still correct", corroborating the no-revert signal from a
+> separate pass. **No watched item failed verification, so no in-run fix was
+> triggered.** They are NOT dropped from the watch: the class is a systematic
+> wrong-price/currency bug with a confirmed oscillation (gmk-wasabi-r2:
+> false-positive 2026-09-29 → wrong 2026-10-16), whose root cause is UNFIXED in code
+> and held for owner (architecturally significant — the shared roster-wide Shopify
+> `.json`/`.js` fallback; see the 2026-10-16 note for the traced cause and
+> recommended patch). Two consecutive clean reads across nightly sweeps are the
+> necessary-not-sufficient signal §1b records; a point-in-time correct read is not
+> proof of a heal for an oscillating value. They stay on the watch so a future revert
+> to the ×0.71 number is caught and triggers the owner-approved fix. No code change
+> shipped this run.
+>
+> **Visitor inbox run 39139104981:** STORE_LINK 0, PRICE_REPORT 0, LISTING_FLAG
+> **17**, FEEDBACK 1, PHOTO_REPORT 0 — the SAME 17 flags + 1 FEEDBACK already
+> triaged and reported to the owner (§4b), id-for-id unchanged by slug/issue/date
+> (1+1+2+4+2+1+2+1+1+1+1 = 17), nothing new and nothing auto-resolvable (every one
+> is a catalog/merge/GB-status/wrong-vendor decision the review session does not
+> make on its own). The FEEDBACK is the same 2026-06-24 collection-display item,
+> left for the owner. The four prior open owner price items (§1) are unchanged. No
+> new product/vendor was recommended by a reporter this run (no new report), so
+> routine step 9 had nothing to verify.
+
 ## 1. Open wrong-price reports (unresolved only)
 
 _Four owner items this run: the SwitchKeys geo-conversion class (7 listings,
 held — architecturally significant) plus the three prior. All seven SwitchKeys
-rows held the correct AUD shelf price this run (no revert; see the 2026-10-17
-run note)._
+rows held the correct AUD shelf price this run (no revert, 2nd consecutive clean
+read; see the 2026-10-18 run note)._
 
 _**SwitchKeys geo-converted `.json` prices × 7** (new 2026-10-16, batch 20 /
 #217) — **systematic wrong-price/currency; root-cause repair held for owner
@@ -2091,11 +2142,14 @@ owner-approved fix. The root-cause repair is held for owner (architecturally
 significant — shared roster-wide Shopify fallback); see §1 and the 2026-10-16
 run note.
 
-**2026-10-17 re-verification: all seven held the correct AUD shelf price and did
-NOT revert** — each carries `resolvedAt=2026-10-17T04:47:55.603Z` (today's nightly
-sweep), post-dating the 2026-10-16T01:51 submit, so the correct AUD survived a
-nightly scrape between runs. No revert → no fix triggered. They REMAIN on the
-watch (root cause unfixed, oscillating class), per the 2026-10-17 run note.
+**2026-10-18 re-verification (2nd consecutive clean read): all seven held the
+correct AUD shelf price and did NOT revert** — each carries
+`resolvedAt=2026-10-18T04:53:59.343Z` (today's nightly sweep), post-dating the
+2026-10-16T01:51 submit, so the correct AUD survived a second nightly scrape
+between runs. The deals-audit batch 22 (#221, `7774c17`) independently recorded
+"SwitchKeys rows still correct" the same day. No revert → no fix triggered. They
+REMAIN on the watch (root cause unfixed, oscillating class), per the 2026-10-18 run
+note. (2026-10-17 re-verification was the first clean read, `resolvedAt=2026-10-17T04:47:55.603Z`.)
 
 | set | vendor | flagged | reason | watch for (next run) |
 |---|---|---|---|---|
