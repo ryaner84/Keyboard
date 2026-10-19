@@ -14,7 +14,7 @@ to the start.
 
 `after_slug` for the next run: **`gmk-zm`**
 
-The list held 46 on-sale sets on 2026-10-18, fewer than one batch, so the run
+The list held 46 on-sale sets on 2026-10-19, fewer than one batch, so the run
 read all of them (`dcs-chladni … gmk-zm`). The next run wraps to the
 start again; if the list grows past 50, it continues from the top.
 
@@ -44,6 +44,7 @@ start again; if the list grows past 50, it continues from the top.
 | 2026-10-16 | dcs-chladni … gmk-zm (whole list; the after-cursor run wrapped and read the same 46) | 46 | 241 | 13 flagged → 7 confirmed | 7 (price-report button) | [38836977571](https://github.com/ryaner84/Keyboard/actions/runs/38836977571) + [38836979998](https://github.com/ryaner84/Keyboard/actions/runs/38836979998) (reports: [38837349478](https://github.com/ryaner84/Keyboard/actions/runs/38837349478)) |
 | 2026-10-17 | dcs-chladni … gmk-zm (whole list; the cursor sat at the end, so one run from the start) | 46 | 241 | 7 flagged → 0 confirmed | 0 | [38992297079](https://github.com/ryaner84/Keyboard/actions/runs/38992297079) |
 | 2026-10-18 | dcs-chladni … gmk-zm (whole list; the cursor sat at the end, so one run from the start) | 46 | 240 | 7 flagged → 0 confirmed | 0 | [39087720861](https://github.com/ryaner84/Keyboard/actions/runs/39087720861) |
+| 2026-10-19 | dcs-chladni … gmk-zm (whole list; the cursor sat at the end, so one run from the start) | 46 | 241 | 11 flagged → 3 confirmed | 3 (price-report button) | [39186926906](https://github.com/ryaner84/Keyboard/actions/runs/39186926906) (reports: [39187154870](https://github.com/ryaner84/Keyboard/actions/runs/39187154870)) |
 
 ### 2026-09-26 findings
 
@@ -713,3 +714,35 @@ Items still waiting on the owner, unchanged and not refiled: gmk-2pack-add-on ×
 Swagkeys (a switchkeys.com.au listing on the wrong vendor row), gmk-finer-things
 / gmk-cyl-finer-things-r2-keycaps (Mecha MY + Mecha.store), and gh-116846 ×
 iLumKB (opened-box price, SGD 79.5).
+
+### 2026-10-19 findings
+
+There are 46 sets on sale. The cursor (`gmk-zm`) was the last slug, so a single
+run from the start
+([39186926906](https://github.com/ryaner84/Keyboard/actions/runs/39186926906))
+read the whole list: 241 listings, 11 flagged. Eight are the known items. The
+other three are new, and all are the same kind: the site shows the listing
+**sold out**, but the store sells it. The **Vendor probe**
+([39187098457](https://github.com/ryaner84/Keyboard/actions/runs/39187098457))
+confirmed all three, and they were filed through the price-report button
+([39187154870](https://github.com/ryaner84/Keyboard/actions/runs/39187154870)):
+
+| set | vendor | site | store (product.js) | verdict | filed |
+|---|---|---|---|---|---|
+| gmk-2pack-add-on | Oblotzky Industries | EUR 32, **sold out** | `gmk-cyl-2-pack` "Default Title" 32.00, available (tagged pre-order) | stock | price report |
+| gmk-masterpiece-r2 | proto[Typist] | GBP 90.83, **sold out** | "Origin TKL Base Kit" 90.83 and "Roman Base Kit" 115.00, both available | stock | price report |
+| gmk-motif | DeskHero | CAD 244, **sold out** | `gmk-cyl-motif-r2-keycaps-pre-order` "Default Title" 244.00, available (pre-order) | stock | price report |
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+| gmk-yuri-r2 / gmk-dots-r2 (NovelKeys), gmk-dots-r2 / gmk-botanical-r2 (Oblotzky), gmk-wasabi-r2 (SwitchKeys), gmk-zm (Mekibo), gmk-finer-things (CannonKeys) | — | — | renamed handles redirect to the same product and price | stale handle in URL (as before) | — |
+
+All three rows were last written on 2026-10-18 and were not flagged in that
+day's audit, so a price pass on 2026-10-18 wrote `inStock = false` while the
+store's `.js` says the kit is available. Two of the three are pre-order
+products. Watch for whether they heal on the next pass, as the SwitchKeys rows
+did.
+
+The seven SwitchKeys rows healed on 2026-10-17 still carry the store's AUD
+shelf price (third clean day). Items still waiting on the owner, unchanged and
+not refiled: gmk-2pack-add-on × Swagkeys (a switchkeys.com.au listing on the
+wrong vendor row), gmk-finer-things / gmk-cyl-finer-things-r2-keycaps (Mecha MY
++ Mecha.store), and gh-116846 × iLumKB (opened-box price, SGD 79.5).
