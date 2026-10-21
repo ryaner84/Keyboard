@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
-import { calculateCollectionSales, unitMoneyLine } from "@/lib/collection-sales";
-import type { CollectionCatalogItem, CollectionItemDetails } from "@/types";
+import {
+  EMPTY_UNIT,
+  buildStatus,
+  calculateCollectionSales,
+  compareBuilds,
+  unitMoneyLine,
+} from "@/lib/collection-sales";
+import type { CollectionCatalogItem, CollectionItemDetails, CollectionUnit } from "@/types";
 
 // Rates are "units of X per 1 USD", matching convertCurrency's contract.
 const RATES: Record<string, number> = { USD: 1, SGD: 1.3, EUR: 0.9 };
@@ -438,5 +444,98 @@ const legacy = unitMoneyLine(
   withCode
 );
 assert.equal(legacy.paid, "USD 124", "one formatter falls back to itself");
+
+// ── compareBuilds: the Summary tab's build comparison ──────────────────────
+const unit = (patch: Partial<CollectionUnit>): CollectionUnit => ({ ...EMPTY_UNIT, ...patch });
+
+// Status precedence: sold beats condition; blank is NOT_SET, never UNBUILT.
+assert.equal(buildStatus({ isSold: true, condition: "UNBUILT" }), "SOLD");
+assert.equal(buildStatus({ isSold: false, condition: null }), "NOT_SET");
+assert.equal(buildStatus({ isSold: false, condition: "  " }), "NOT_SET", "a cleared select is not unbuilt");
+assert.equal(buildStatus({ isSold: false, condition: "GOOD" }), "BUILT");
+assert.equal(buildStatus({ isSold: false, condition: "PROJECT" }), "PROJECT");
+assert.equal(buildStatus({ isSold: false, condition: "MINT" }), "OTHER", "an unknown legacy code is kept, not guessed");
+
+// The 6× board the feature was asked for.
+const jane = compareBuilds(
+  [
+    unit({ condition: "EXCELLENT", color: "E-White", plateType: "Aluminium", mountType: "Gasket", pcbType: "Hotswap", layoutVariant: "WKL", switches: "Oil Kings", purchasePrice: 520, purchaseCurrency: "USD" }),
+    unit({ condition: "GOOD", color: "Navy", plateType: "aluminium ", mountType: "gasket", pcbType: "hotswap", layoutVariant: "WKL", switches: "oil  kings", purchasePrice: 700, purchaseCurrency: "SGD" }),
+    unit({ condition: "UNBUILT", color: "Black", plateType: "Brass", mountType: "Top mount", pcbType: "Hotswap", layoutVariant: "WKL" }),
+    unit({ condition: "PROJECT", plateType: "PC", mountType: "Gasket", pcbType: "Solder", layoutVariant: "WKL", switches: "Alpacas" }),
+    unit({ isSold: true, soldAt: "2025-06-01", condition: "EXCELLENT", plateType: "Aluminium", mountType: "Gasket", pcbType: "Hotswap", layoutVariant: "WKL" }),
+    unit({}),
+  ],
+  { fallbackCurrency: "SGD" }
+);
+assert.deepEqual(
+  { ...jane.tally },
+  { SOLD: 1, UNBUILT: 1, PROJECT: 1, BUILT: 2, NOT_SET: 1, OTHER: 0 }
+);
+assert.deepEqual(jane.upNext, [2, 3], "unbuilt before project, sold never listed");
+// Layout is WKL on 5 of 6 — blank on one is NOT shared, so it stays a column.
+assert.deepEqual(jane.sharedFields, []);
+assert.ok(jane.visibleFields.includes("layoutVariant"));
+assert.deepEqual(jane.unrecordedFields, ["keycaps"], "a field nobody recorded leaves the table");
+// Builds 1 and 2 match after normalisation; the sold build 5 is out of rotation.
+assert.equal(jane.duplicateGroups.length, 1);
+assert.deepEqual(jane.duplicateGroups[0].indexes, [0, 1]);
+assert.equal(jane.duplicateGroups[0].display, "Aluminium · Gasket · Hotswap · WKL", "lowest build's spelling");
+assert.equal(jane.duplicateGroups[0].sameSwitches, true, "'oil  kings' equals 'Oil Kings'");
+assert.equal(jane.rows[1].duplicateOf, 0);
+assert.equal(jane.rows[4].duplicateOf, null, "sold builds are never flagged");
+// Plates {Aluminium, Brass, PC} × mounts {Gasket, Top mount}, minus what exists.
+assert.deepEqual(jane.untriedPairings, [
+  { plate: "Aluminium", mount: "Top mount" },
+  { plate: "Brass", mount: "Gasket" },
+  { plate: "PC", mount: "Top mount" },
+]);
+assert.equal(jane.paidMixed, true, "USD and SGD on one column switches to ISO codes");
+assert.equal(jane.rows[5].empty, true);
+assert.equal(jane.rows[2].empty, false);
+assert.equal(jane.rows[4].soldYear, 2025);
+assert.equal(jane.rows[0].soldYear, null);
+
+// Shared: identical on EVERY build, sold included.
+const shared = compareBuilds([
+  unit({ pcbType: "Hotswap", plateType: "Alu" }),
+  unit({ pcbType: " hotswap", plateType: "Brass", isSold: true }),
+]);
+assert.deepEqual(shared.sharedFields, [{ field: "pcbType", display: "Hotswap" }]);
+assert.ok(!shared.visibleFields.includes("pcbType"));
+
+// Blanks never match blanks, so a half-recorded build is never a duplicate.
+const halfRecorded = compareBuilds([
+  unit({ condition: "GOOD", plateType: "Alu", mountType: "Gasket" }),
+  unit({ condition: "GOOD", plateType: "Alu", mountType: "Gasket", pcbType: "" }),
+]);
+assert.deepEqual(halfRecorded.duplicateGroups, [], "PCB must be recorded on both");
+
+// Three sealed boxes with the stock config noted are the same by definition.
+const sealed = compareBuilds([
+  unit({ condition: "UNBUILT", plateType: "Alu", mountType: "Gasket", pcbType: "Hotswap" }),
+  unit({ condition: "UNBUILT", plateType: "Alu", mountType: "Gasket", pcbType: "Hotswap" }),
+]);
+assert.deepEqual(sealed.duplicateGroups, [], "an all-unbuilt group is not reported");
+assert.deepEqual(sealed.untriedPairings, [], "one plate × one mount leaves nothing untried");
+
+// Layout is part of the key: blank only matches blank.
+const layouts = compareBuilds([
+  unit({ condition: "GOOD", plateType: "Alu", mountType: "Gasket", pcbType: "Hotswap", layoutVariant: "WK" }),
+  unit({ condition: "GOOD", plateType: "Alu", mountType: "Gasket", pcbType: "Hotswap", layoutVariant: "WKL" }),
+  unit({ condition: "GOOD", plateType: "Alu", mountType: "Gasket", pcbType: "Hotswap" }),
+]);
+assert.deepEqual(layouts.duplicateGroups, []);
+
+// A null purchase currency takes the Build tab's fallback, so one currency.
+const fallback = compareBuilds(
+  [unit({ purchasePrice: 100 }), unit({ purchasePrice: 120, purchaseCurrency: "sgd" })],
+  { fallbackCurrency: "SGD" }
+);
+assert.equal(fallback.rows[0].paid?.currency, "SGD");
+assert.equal(fallback.paidMixed, false);
+
+// Invalid dates give no year rather than NaN.
+assert.equal(compareBuilds([unit({ acquiredAt: "not a date" })]).rows[0].acquiredYear, null);
 
 console.log("collection sales P/L checks passed");

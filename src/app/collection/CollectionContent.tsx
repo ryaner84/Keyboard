@@ -21,9 +21,15 @@ import { dedupeKey } from "@/lib/set-name";
 import {
   assembleBuilds,
   calculateCollectionSales,
+  compareBuilds,
+  COMPARE_FIELDS,
+  COMPARE_FIELD_LABELS,
   unitMoneyLine,
   EMPTY_UNIT,
+  type BuildComparison,
+  type BuildComparisonRow,
   type CollectionSales,
+  type CompareField,
 } from "@/lib/collection-sales";
 import {
   createKeycapAcquisition,
@@ -555,6 +561,408 @@ function BuildSummary({
   );
 }
 
+// Short pill text for the comparison table; the full CONDITION_LABELS wording
+// ("Built · excellent") does not fit an 80px status column, so it rides in the
+// pill's title instead.
+const CONDITION_SHORT_LABELS: Record<string, string> = {
+  EXCELLENT: "Excellent",
+  GOOD: "Good",
+  FAIR: "Fair",
+};
+
+const STATUS_PILL_BASE =
+  "inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide";
+
+function BuildStatusCell({ row }: { row: BuildComparisonRow }) {
+  if (row.status === "NOT_SET") {
+    return <span className="text-[11px] text-gray-400 dark:text-gray-500">Not set</span>;
+  }
+  const code = row.conditionCode ?? "";
+  const pill =
+    row.status === "SOLD"
+      ? { text: "Sold", tone: "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300" }
+      : row.status === "UNBUILT"
+        ? {
+            text: "Unbuilt",
+            // Brand gold, not amber: amber already means "Hidden" in this file.
+            tone: "bg-[#faf6ed] text-[#80632f] ring-1 ring-[#ddcfb4] dark:bg-[#2a241a] dark:text-[#d5b779] dark:ring-[#4a3e29]",
+          }
+        : row.status === "PROJECT"
+          ? { text: "Project", tone: "border border-dashed border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-300" }
+          : {
+              text: row.status === "BUILT" ? "Built" : code,
+              tone: "bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300",
+            };
+  const sub =
+    row.status === "SOLD"
+      ? row.soldYear
+        ? String(row.soldYear)
+        : null
+      : row.status === "BUILT"
+        ? CONDITION_SHORT_LABELS[code] ?? null
+        : null;
+  return (
+    <span className="flex flex-col items-start gap-0.5">
+      <span
+        className={`${STATUS_PILL_BASE} ${pill.tone}`}
+        title={row.status === "SOLD" ? "Sold" : CONDITION_LABELS[code] || code}
+      >
+        {pill.text}
+      </span>
+      {sub && <span className="text-[10px] text-gray-400 dark:text-gray-500">{sub}</span>}
+    </span>
+  );
+}
+
+function SpecLine({ value, muted = false }: { value: string | null; muted?: boolean }) {
+  if (!value) {
+    return (
+      <span className="block">
+        <span aria-hidden className="text-gray-300 dark:text-gray-600">—</span>
+        <span className="sr-only">Not recorded</span>
+      </span>
+    );
+  }
+  return (
+    <span className={`block truncate ${muted ? "text-gray-400 dark:text-gray-500" : ""}`} title={value}>
+      {value}
+    </span>
+  );
+}
+
+function BuildNumberLinks({
+  indexes,
+  onOpenBuild,
+}: {
+  indexes: number[];
+  onOpenBuild: (index: number) => void;
+}) {
+  return (
+    <>
+      Build{" "}
+      {indexes.map((index, position) => (
+        <span key={index}>
+          {position > 0 && (position === indexes.length - 1 ? " & " : ", ")}
+          <button
+            type="button"
+            onClick={() => onOpenBuild(index)}
+            className="font-semibold text-gray-900 underline decoration-gray-300 underline-offset-2 hover:decoration-gray-600 dark:text-white dark:decoration-gray-600"
+          >
+            {index + 1}
+          </button>
+        </span>
+      ))}
+    </>
+  );
+}
+
+// "Compare builds" on the keyboard editor's Summary tab: every unit of one
+// board side by side, so the owner can see what is unbuilt, which plate/mount
+// combinations are already done and what has never been tried. All of it is
+// computed by compareBuilds (src/lib/collection-sales.ts) from the editor's
+// live drafts, so an edit in a Build tab shows here before saving. Read-only on
+// purpose: every field keeps one home, the Build tab, and a row opens it.
+function BuildComparisonPanel({
+  comparison,
+  hiddenBuilds,
+  isPublic,
+  onOpenBuild,
+}: {
+  comparison: BuildComparison;
+  hiddenBuilds: Set<number>;
+  isPublic: boolean;
+  onOpenBuild: (index: number) => void;
+}) {
+  const { rows, tally, upNext, visibleFields, sharedFields, unrecordedFields } = comparison;
+  const shown = (field: CompareField) => visibleFields.includes(field);
+  // Pairs share a column (two lines) so seven columns fit the modal; a pair
+  // whose fields both left the table takes no column at all.
+  const pcbFields = (["pcbType", "layoutVariant"] as const).filter(shown);
+  const dressFields = (["switches", "keycaps"] as const).filter(shown);
+  const pairLabel = (fields: readonly CompareField[]) =>
+    fields.map((field) => COMPARE_FIELD_LABELS[field]).join(" / ");
+  const structural = (["plateType", "mountType", "pcbType", "layoutVariant"] as const).filter(shown);
+  const formatPaid = (paid: { amount: number; currency: string }) =>
+    comparison.paidMixed
+      ? formatCurrencyWithCode(paid.amount, paid.currency)
+      : formatCurrency(paid.amount, paid.currency);
+
+  const tallyLine = [
+    `${rows.length} builds`,
+    tally.UNBUILT && `${tally.UNBUILT} unbuilt`,
+    tally.PROJECT && `${tally.PROJECT} project`,
+    tally.BUILT && `${tally.BUILT} built`,
+    tally.SOLD && `${tally.SOLD} sold`,
+    tally.OTHER && `${tally.OTHER} other`,
+    tally.NOT_SET && `${tally.NOT_SET} not set`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const hiddenIcon = (index: number) =>
+    hiddenBuilds.has(index) ? (
+      <span
+        className={isPublic ? "text-amber-600 dark:text-amber-300" : "text-gray-400 dark:text-gray-500"}
+        title={isPublic ? "Hidden from your public page" : "Stays hidden if you make this piece public"}
+      >
+        <BuildHiddenIcon />
+      </span>
+    ) : null;
+
+  const duplicateBadge = (row: BuildComparisonRow) =>
+    row.duplicateOf != null ? (
+      <span className="mt-0.5 inline-flex rounded-full border border-dashed border-gray-300 px-1.5 py-0.5 text-[9px] font-semibold text-gray-500 dark:border-gray-600 dark:text-gray-400">
+        Same as #{row.duplicateOf + 1}
+      </span>
+    ) : null;
+
+  const allUnrecorded = unrecordedFields.length === COMPARE_FIELDS.length;
+
+  return (
+    <section aria-label="Compare builds" className="space-y-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Compare builds</h3>
+        <p className="text-[11px] text-gray-400 dark:text-gray-500">
+          Only you see this · tap a build to edit it
+        </p>
+      </div>
+
+      <div className="space-y-1.5 text-[11px] leading-4 text-gray-600 dark:text-gray-300">
+        <p className="text-gray-500 dark:text-gray-400">{tallyLine}</p>
+        {upNext.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="font-semibold text-gray-900 dark:text-white">Up next</span>
+            {upNext.map((index) => (
+              <button
+                key={index}
+                type="button"
+                onClick={() => onOpenBuild(index)}
+                className="max-w-[10rem] truncate rounded-full border border-[#c9ab72] px-2.5 py-1 text-[11px] font-semibold text-[#80632f] hover:bg-[#f7f1e5] dark:text-[#d5b779] dark:hover:bg-[#2a241a]"
+              >
+                Build {index + 1}
+                {rows[index].color ? ` · ${rows[index].color}` : ""}
+              </button>
+            ))}
+          </div>
+        )}
+        {comparison.duplicateGroups.slice(0, 3).map((group) => (
+          <p key={group.indexes.join("-")}>
+            Same config on <BuildNumberLinks indexes={group.indexes} onOpenBuild={onOpenBuild} />:{" "}
+            {group.display}
+            {group.sameSwitches ? " · same switches too" : ""}
+          </p>
+        ))}
+        {comparison.duplicateGroups.length > 3 && (
+          <p className="text-gray-400">+{comparison.duplicateGroups.length - 3} more same-config groups</p>
+        )}
+        {comparison.untriedPairings.length > 0 && (
+          <p>
+            <span className="font-semibold text-gray-900 dark:text-white">Not on any build yet:</span>{" "}
+            {comparison.untriedPairings
+              .slice(0, 3)
+              .map((pair) => `${pair.plate} + ${pair.mount}`)
+              .join(" · ")}
+            {comparison.untriedPairings.length > 3 && ` · +${comparison.untriedPairings.length - 3} more`}
+          </p>
+        )}
+      </div>
+
+      {/* Desktop: a real table. Switched at md, not sm — between 640 and 720px
+          the modal's content box is only ~500px, so a 7-column table switched
+          at sm would overflow. The overflow wrapper is a safety net only. */}
+      <div className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 md:block">
+        <table className="w-full table-fixed text-[11px]">
+          <caption className="sr-only">Your builds compared</caption>
+          <colgroup>
+            <col className="w-[88px]" />
+            <col className="w-[80px]" />
+            {shown("plateType") && <col className="w-[80px]" />}
+            {shown("mountType") && <col className="w-[80px]" />}
+            {pcbFields.length > 0 && <col className="w-[80px]" />}
+            {dressFields.length > 0 && <col />}
+            <col className="w-[72px]" />
+          </colgroup>
+          <thead className="bg-gray-50 dark:bg-white/[0.03]">
+            <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+              <th scope="col" className="px-2.5 py-2">Build</th>
+              <th scope="col" className="px-2.5 py-2">Status</th>
+              {shown("plateType") && <th scope="col" className="px-2.5 py-2">Plate</th>}
+              {shown("mountType") && <th scope="col" className="px-2.5 py-2">Mount</th>}
+              {pcbFields.length > 0 && <th scope="col" className="px-2.5 py-2">{pairLabel(pcbFields)}</th>}
+              {dressFields.length > 0 && <th scope="col" className="px-2.5 py-2">{pairLabel(dressFields)}</th>}
+              <th scope="col" className="px-2.5 py-2 text-right">Paid</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const sold = row.status === "SOLD";
+              const cellTone = sold ? "text-gray-400 dark:text-gray-500" : "text-gray-700 dark:text-gray-300";
+              const dataColumns =
+                1 +
+                (shown("plateType") ? 1 : 0) +
+                (shown("mountType") ? 1 : 0) +
+                (pcbFields.length > 0 ? 1 : 0) +
+                (dressFields.length > 0 ? 1 : 0) +
+                1;
+              return (
+                <tr
+                  key={row.index}
+                  onClick={() => onOpenBuild(row.index)}
+                  className="cursor-pointer border-b border-gray-100 align-top last:border-b-0 hover:bg-gray-50 dark:border-white/[0.06] dark:hover:bg-white/[0.04]"
+                >
+                  <th scope="row" className="px-2.5 py-2 text-left font-normal">
+                    <button
+                      type="button"
+                      aria-label={`Open Build ${row.index + 1}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenBuild(row.index);
+                      }}
+                      className="w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9a7a42]/40"
+                    >
+                      <span className="flex items-center gap-1 font-semibold text-gray-900 dark:text-white">
+                        Build {row.index + 1}
+                        {hiddenIcon(row.index)}
+                      </span>
+                      {row.color && (
+                        <span className="block truncate text-gray-400 dark:text-gray-500" title={row.color}>
+                          {row.color}
+                        </span>
+                      )}
+                      {duplicateBadge(row)}
+                    </button>
+                  </th>
+                  {row.empty ? (
+                    <td colSpan={dataColumns} className="px-2.5 py-2 italic text-gray-400">
+                      No details yet — open Build {row.index + 1} to add them
+                    </td>
+                  ) : (
+                    <>
+                      <td className="px-2.5 py-2">
+                        <BuildStatusCell row={row} />
+                      </td>
+                      {shown("plateType") && (
+                        <td className={`px-2.5 py-2 ${cellTone}`}>
+                          <SpecLine value={row.specs.plateType} />
+                        </td>
+                      )}
+                      {shown("mountType") && (
+                        <td className={`px-2.5 py-2 ${cellTone}`}>
+                          <SpecLine value={row.specs.mountType} />
+                        </td>
+                      )}
+                      {pcbFields.length > 0 && (
+                        <td className={`px-2.5 py-2 ${cellTone}`}>
+                          {pcbFields.map((field, line) => (
+                            <SpecLine key={field} value={row.specs[field]} muted={line > 0} />
+                          ))}
+                        </td>
+                      )}
+                      {dressFields.length > 0 && (
+                        <td className={`px-2.5 py-2 ${cellTone}`}>
+                          {dressFields.map((field, line) => (
+                            <SpecLine key={field} value={row.specs[field]} muted={line > 0} />
+                          ))}
+                        </td>
+                      )}
+                      <td className={`px-2.5 py-2 text-right tabular-nums ${cellTone}`}>
+                        {row.paid ? (
+                          <span className="block truncate" title={formatCurrencyWithCode(row.paid.amount, row.paid.currency)}>
+                            {formatPaid(row.paid)}
+                          </span>
+                        ) : (
+                          <SpecLine value={null} />
+                        )}
+                        {row.acquiredYear && (
+                          <span className="block text-[10px] text-gray-400 dark:text-gray-500">{row.acquiredYear}</span>
+                        )}
+                      </td>
+                    </>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Phone: one full-width tap target per build, values in a fixed order
+          so the blocks line up by position. No sideways scroll at 375px. */}
+      <ol className="space-y-1.5 md:hidden">
+        {rows.map((row) => {
+          const sold = row.status === "SOLD";
+          const structuralLine = structural.map((field) => row.specs[field] ?? "—").join(" · ");
+          const dressLine = dressFields
+            .map((field) => row.specs[field])
+            .filter(Boolean)
+            .join(" · ");
+          return (
+            <li key={row.index}>
+              <button
+                type="button"
+                aria-label={`Open Build ${row.index + 1}`}
+                onClick={() => onOpenBuild(row.index)}
+                className="w-full rounded-xl bg-gray-50 px-3 py-2 text-left text-[11px] leading-4 hover:bg-gray-100 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]"
+              >
+                <span className="flex items-center gap-1.5">
+                  <span className="shrink-0 font-semibold text-gray-900 dark:text-white">Build {row.index + 1}</span>
+                  {row.color && (
+                    <span className="min-w-0 truncate text-gray-400 dark:text-gray-500">{row.color}</span>
+                  )}
+                  {hiddenIcon(row.index)}
+                  <span className="ml-auto shrink-0">
+                    {!row.empty && <BuildStatusCell row={row} />}
+                  </span>
+                </span>
+                {row.empty ? (
+                  <span className="mt-0.5 block italic text-gray-400">No details yet — tap to add</span>
+                ) : (
+                  <>
+                    {structural.length > 0 && (
+                      <span className={`mt-0.5 block truncate ${sold ? "text-gray-400 dark:text-gray-500" : "text-gray-700 dark:text-gray-300"}`}>
+                        {structuralLine}
+                      </span>
+                    )}
+                    {dressLine && (
+                      <span className="block truncate text-gray-400 dark:text-gray-500">{dressLine}</span>
+                    )}
+                  </>
+                )}
+                {duplicateBadge(row)}
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+
+      {(sharedFields.length > 0 || unrecordedFields.length > 0) && (
+        <div className="space-y-1 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+          {allUnrecorded ? (
+            <p>Record plate, mount and PCB on each Build tab to compare builds here.</p>
+          ) : (
+            <>
+              {sharedFields.length > 0 && (
+                <p>
+                  <span className="font-semibold text-gray-700 dark:text-gray-200">Same on every build:</span>{" "}
+                  {sharedFields
+                    .map((shared) => `${COMPARE_FIELD_LABELS[shared.field]} ${shared.display}`)
+                    .join(" · ")}
+                </p>
+              )}
+              {unrecordedFields.length > 0 && (
+                <p>
+                  Not recorded on any build:{" "}
+                  {unrecordedFields.map((field) => COMPARE_FIELD_LABELS[field]).join(", ")}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 // The sale half of a unit's record, shared by the keyboard build editor and
 // the keycap purchase editor so both capture a sale identically.
 //
@@ -589,6 +997,7 @@ function PieceSummaryPanel({
   onShowSoldStatusChange,
   pieceHasSale = false,
   showPerUnitVisibility = true,
+  overview,
 }: {
   blurbTitle: string;
   blurbBody: string;
@@ -611,6 +1020,10 @@ function PieceSummaryPanel({
   // purchase is a separate transaction and owns its own visibility, so those
   // switches live in the Purchase tabs instead.
   showPerUnitVisibility?: boolean;
+  // Full-width block between the blurb/stepper row and the visibility
+  // switches — the keyboard editor's "Compare builds". Keycaps pass nothing,
+  // so their Summary is unchanged.
+  overview?: React.ReactNode;
 }) {
   return (
     <div className="space-y-6">
@@ -631,6 +1044,8 @@ function PieceSummaryPanel({
         </div>
         {children}
       </div>
+
+      {overview}
 
       {showPerUnitVisibility && onShowPurchasePriceChange && (
       <CheckRow
@@ -4266,6 +4681,9 @@ function KeyboardCollectionItemEditor({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // The scrolling body, so opening a build from the Summary comparison lands
+  // at the top of its form rather than partway down it.
+  const bodyRef = useRef<HTMLDivElement>(null);
   const purchaseCurrencies = useMemo(() => {
     const options = [...DISPLAY_CURRENCIES];
     const savedCurrencies = new Set(
@@ -4312,6 +4730,22 @@ function KeyboardCollectionItemEditor({
   function updateBuild(index: number, patch: Partial<CollectionUnit>) {
     setBuilds((prev) => prev.map((b, i) => (i === index ? { ...b, ...patch } : b)));
   }
+
+  function openBuild(index: number) {
+    setActiveBuild(index);
+    bodyRef.current?.scrollTo({ top: 0 });
+  }
+
+  // From the live drafts, sliced exactly as submit() saves them, so an edit in
+  // a Build tab or a stepper change shows here before saving. The fallback is
+  // the currency the Build tab's picker shows for a build with none recorded.
+  const comparison = useMemo(
+    () =>
+      compareBuilds(builds.slice(0, form.quantity), {
+        fallbackCurrency: purchaseCurrencies[0]?.code || "USD",
+      }),
+    [builds, form.quantity, purchaseCurrencies]
+  );
 
   async function submit() {
     setBusy(true);
@@ -4371,7 +4805,7 @@ function KeyboardCollectionItemEditor({
         <p className="mt-1 text-sm text-gray-500">Add the details that make this build yours.</p>
       </div>
 
-      <div className="max-h-[68vh] space-y-6 overflow-y-auto px-5 py-6 dark:text-white sm:px-7">
+      <div ref={bodyRef} className="max-h-[68vh] space-y-6 overflow-y-auto px-5 py-6 dark:text-white sm:px-7">
         {/* Per-build details. With multiple units each build keeps its own
             photo, color, switches, keycaps and condition. */}
         <div className="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
@@ -4406,7 +4840,17 @@ function KeyboardCollectionItemEditor({
           {onSummary ? (
             <PieceSummaryPanel
               blurbTitle="One record per physical build"
-              blurbBody="Use the Build tabs below to record a different date, price, currency, photo, and specification for every unit."
+              blurbBody="Use the Build tabs above to record a different date, price, currency, photo, and specification for every unit."
+              overview={
+                comparison.rows.length >= 2 ? (
+                  <BuildComparisonPanel
+                    comparison={comparison}
+                    hiddenBuilds={hiddenBuilds}
+                    isPublic={form.isPublic}
+                    onOpenBuild={openBuild}
+                  />
+                ) : undefined
+              }
               unitNoun="builds"
               isPublic={form.isPublic}
               onIsPublicChange={(isPublic) => setForm({ ...form, isPublic })}

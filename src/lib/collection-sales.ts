@@ -396,3 +396,228 @@ export function unitMoneyLine(
   }
   return { paid, sold, gain };
 }
+
+// ── Build comparison ──────────────────────────────────────────────────────
+//
+// The keyboard editor's Summary tab compares every unit of one board side by
+// side so the owner can decide what to build next. Everything here is derived
+// from the CollectionUnit drafts already in the editor — no new data — and it
+// is pure so the rules below are tested rather than eyeballed.
+//
+// Matching is deliberately literal: trim, collapse whitespace, lower-case.
+// "Alu" and "Aluminium" stay two values. That can MISS a match (a column that
+// fails to collapse, a duplicate left unflagged) but it can never INVENT one,
+// and a wrong "these two builds are the same" on someone's own record is the
+// worse error. BuildFields writes "" when an input is cleared, so blank means
+// null, "" or whitespace — never a value two cleared fields share.
+
+export type BuildStatus = "SOLD" | "UNBUILT" | "PROJECT" | "BUILT" | "NOT_SET" | "OTHER";
+
+// Structural config first (what makes a build "different"), then its dress.
+export const COMPARE_FIELDS = [
+  "plateType",
+  "mountType",
+  "pcbType",
+  "layoutVariant",
+  "switches",
+  "keycaps",
+] as const;
+export type CompareField = (typeof COMPARE_FIELDS)[number];
+
+export const COMPARE_FIELD_LABELS: Record<CompareField, string> = {
+  plateType: "Plate",
+  mountType: "Mount",
+  pcbType: "PCB",
+  layoutVariant: "Layout",
+  switches: "Switches",
+  keycaps: "Keycaps",
+};
+
+export function normSpec(value: string | null | undefined): string {
+  return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function displaySpec(value: string | null | undefined): string | null {
+  const shown = (value ?? "").trim().replace(/\s+/g, " ");
+  return shown || null;
+}
+
+function yearOf(value: Date | string | null | undefined): number | null {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? null : new Date(time).getFullYear();
+}
+
+// Sold outranks condition — a sold unbuilt unit is gone, not a candidate. An
+// empty condition is "not set", NEVER unbuilt: guessing that an unrecorded
+// unit is still boxed would put it on the Up next list.
+export function buildStatus(build: Pick<CollectionUnit, "isSold" | "condition">): BuildStatus {
+  if (build.isSold === true) return "SOLD";
+  const condition = (build.condition ?? "").trim();
+  if (!condition) return "NOT_SET";
+  if (condition === "UNBUILT") return "UNBUILT";
+  if (condition === "PROJECT") return "PROJECT";
+  if (condition === "EXCELLENT" || condition === "GOOD" || condition === "FAIR") return "BUILT";
+  return "OTHER";
+}
+
+export interface BuildComparisonRow {
+  index: number;
+  status: BuildStatus;
+  conditionCode: string | null;
+  color: string | null;
+  specs: Record<CompareField, string | null>;
+  // Lowest-index build of a reported same-config group, set on the others.
+  duplicateOf: number | null;
+  // Nothing recorded at all — rendered as one "No details yet" cell.
+  empty: boolean;
+  paid: { amount: number; currency: string } | null;
+  acquiredYear: number | null;
+  soldYear: number | null;
+}
+
+export interface BuildComparison {
+  rows: BuildComparisonRow[];
+  tally: Record<BuildStatus, number>;
+  // Unbuilt first, then project builds, each in build order. Never sold.
+  upNext: number[];
+  visibleFields: CompareField[];
+  sharedFields: Array<{ field: CompareField; display: string }>;
+  unrecordedFields: CompareField[];
+  duplicateGroups: Array<{ indexes: number[]; display: string; sameSwitches: boolean }>;
+  untriedPairings: Array<{ plate: string; mount: string }>;
+  // More than one currency among priced rows: show ISO codes on every row,
+  // because en-SG renders both SGD and USD as "$".
+  paidMixed: boolean;
+}
+
+export function compareBuilds(
+  builds: CollectionUnit[],
+  { fallbackCurrency = "USD" }: { fallbackCurrency?: string } = {}
+): BuildComparison {
+  const rows: BuildComparisonRow[] = builds.map((build, index) => {
+    const status = buildStatus(build);
+    const specs = Object.fromEntries(
+      COMPARE_FIELDS.map((field) => [field, displaySpec(build[field])])
+    ) as Record<CompareField, string | null>;
+    const color = displaySpec(build.color);
+    // The Build tab's currency picker shows fallbackCurrency for a null
+    // currency, so the table must too or the two disagree about one price.
+    const paid =
+      build.purchasePrice != null && Number.isFinite(build.purchasePrice)
+        ? {
+            amount: build.purchasePrice,
+            currency: (build.purchaseCurrency ?? "").trim().toUpperCase() || fallbackCurrency,
+          }
+        : null;
+    return {
+      index,
+      status,
+      conditionCode: (build.condition ?? "").trim() || null,
+      color,
+      specs,
+      duplicateOf: null,
+      empty:
+        status === "NOT_SET" &&
+        paid === null &&
+        color === null &&
+        COMPARE_FIELDS.every((field) => specs[field] === null),
+      paid,
+      acquiredYear: yearOf(build.acquiredAt),
+      soldYear: status === "SOLD" ? yearOf(build.soldAt) : null,
+    };
+  });
+
+  const tally: Record<BuildStatus, number> = {
+    SOLD: 0, UNBUILT: 0, PROJECT: 0, BUILT: 0, NOT_SET: 0, OTHER: 0,
+  };
+  for (const row of rows) tally[row.status] += 1;
+
+  const upNext = [
+    ...rows.filter((row) => row.status === "UNBUILT").map((row) => row.index),
+    ...rows.filter((row) => row.status === "PROJECT").map((row) => row.index),
+  ];
+
+  // A field is SHARED when every build (sold included — hiding a sold unit's
+  // different value would lose information) records the same value, and
+  // UNRECORDED when no build records it. Both leave the table: a column of
+  // identical values or of dashes compares nothing.
+  const sharedFields: BuildComparison["sharedFields"] = [];
+  const unrecordedFields: CompareField[] = [];
+  const visibleFields: CompareField[] = [];
+  for (const field of COMPARE_FIELDS) {
+    const values = builds.map((build) => normSpec(build[field]));
+    if (values.every((value) => value === "")) unrecordedFields.push(field);
+    else if (values.every((value) => value !== "" && value === values[0]))
+      sharedFields.push({ field, display: rows[0].specs[field] as string });
+    else visibleFields.push(field);
+  }
+
+  // Same structural config: plate, mount AND PCB must all be recorded (a blank
+  // never matches a blank), layout joins the key with blank matching only
+  // blank. Sold builds are out of the rotation, so they are skipped. A group
+  // made only of unbuilt units is not reported — three sealed boxes with the
+  // stock plate noted are the same by definition, not a decision.
+  const groups = new Map<string, number[]>();
+  for (const row of rows) {
+    if (row.status === "SOLD") continue;
+    const build = builds[row.index];
+    const plate = normSpec(build.plateType);
+    const mount = normSpec(build.mountType);
+    const pcb = normSpec(build.pcbType);
+    if (!plate || !mount || !pcb) continue;
+    const key = [plate, mount, pcb, normSpec(build.layoutVariant)].join("|");
+    groups.set(key, [...(groups.get(key) ?? []), row.index]);
+  }
+  const duplicateGroups: BuildComparison["duplicateGroups"] = [];
+  Array.from(groups.values()).forEach((indexes) => {
+    if (indexes.length < 2) return;
+    if (indexes.every((i) => rows[i].status === "UNBUILT")) return;
+    const lead = rows[indexes[0]].specs;
+    const switches = indexes.map((i) => normSpec(builds[i].switches));
+    duplicateGroups.push({
+      indexes,
+      display: [lead.plateType, lead.mountType, lead.pcbType, lead.layoutVariant]
+        .filter(Boolean)
+        .join(" · "),
+      sameSwitches: switches[0] !== "" && switches.every((value) => value === switches[0]),
+    });
+    for (const i of indexes.slice(1)) rows[i].duplicateOf = indexes[0];
+  });
+  duplicateGroups.sort((a, b) => a.indexes[0] - b.indexes[0]);
+
+  // Plate × mount pairings this board has never carried, from its OWN history
+  // only (sold and unbuilt units count as done/planned). Never from the
+  // generic suggestion lists: those know nothing about what this case takes.
+  const plates: Array<{ key: string; display: string }> = [];
+  const mounts: Array<{ key: string; display: string }> = [];
+  const done = new Set<string>();
+  for (const row of rows) {
+    const build = builds[row.index];
+    const plate = normSpec(build.plateType);
+    const mount = normSpec(build.mountType);
+    if (!plate || !mount) continue;
+    if (!plates.some((p) => p.key === plate)) plates.push({ key: plate, display: row.specs.plateType as string });
+    if (!mounts.some((m) => m.key === mount)) mounts.push({ key: mount, display: row.specs.mountType as string });
+    done.add(`${plate}|${mount}`);
+  }
+  const untriedPairings: BuildComparison["untriedPairings"] = [];
+  for (const plate of plates)
+    for (const mount of mounts)
+      if (!done.has(`${plate.key}|${mount.key}`))
+        untriedPairings.push({ plate: plate.display, mount: mount.display });
+
+  const currencies = new Set(rows.flatMap((row) => (row.paid ? [row.paid.currency] : [])));
+
+  return {
+    rows,
+    tally,
+    upNext,
+    visibleFields,
+    sharedFields,
+    unrecordedFields,
+    duplicateGroups,
+    untriedPairings,
+    paidMixed: currencies.size > 1,
+  };
+}
