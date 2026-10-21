@@ -442,11 +442,19 @@ function displaySpec(value: string | null | undefined): string | null {
   return shown || null;
 }
 
+// UTC, like everything else that reads these dates: the Build tab's date input
+// writes "2025-01-01", which parses as UTC midnight, and shows it back through
+// toISOString. A local-time year read the same value as 2024 west of UTC.
 function yearOf(value: Date | string | null | undefined): number | null {
   if (!value) return null;
   const time = new Date(value).getTime();
-  return Number.isNaN(time) ? null : new Date(time).getFullYear();
+  return Number.isNaN(time) ? null : new Date(time).getUTCFullYear();
 }
+
+// Keys for grouping free text. normSpec never produces "\u0000", so no value a
+// user can type ("Gasket|Top") can make two different configs share a key —
+// joining on "|" could, which is exactly the invented match this avoids.
+const specKey = (...parts: string[]) => parts.join("\u0000");
 
 // Sold outranks condition — a sold unbuilt unit is gone, not a candidate. An
 // empty condition is "not set", NEVER unbuilt: guessing that an unrecorded
@@ -510,6 +518,7 @@ export function compareBuilds(
             currency: (build.purchaseCurrency ?? "").trim().toUpperCase() || fallbackCurrency,
           }
         : null;
+    const acquiredYear = yearOf(build.acquiredAt);
     return {
       index,
       status,
@@ -517,13 +526,20 @@ export function compareBuilds(
       color,
       specs,
       duplicateOf: null,
+      // "No details yet" must be literally true: a date, photo or note is a
+      // detail even though none of them is compared, and the card's
+      // BuildSummary already counts them.
       empty:
         status === "NOT_SET" &&
         paid === null &&
         color === null &&
+        acquiredYear === null &&
+        !displaySpec(build.imageUrl) &&
+        !displaySpec(build.buildDetails) &&
+        !displaySpec(build.notes) &&
         COMPARE_FIELDS.every((field) => specs[field] === null),
       paid,
-      acquiredYear: yearOf(build.acquiredAt),
+      acquiredYear,
       soldYear: status === "SOLD" ? yearOf(build.soldAt) : null,
     };
   });
@@ -566,7 +582,7 @@ export function compareBuilds(
     const mount = normSpec(build.mountType);
     const pcb = normSpec(build.pcbType);
     if (!plate || !mount || !pcb) continue;
-    const key = [plate, mount, pcb, normSpec(build.layoutVariant)].join("|");
+    const key = specKey(plate, mount, pcb, normSpec(build.layoutVariant));
     groups.set(key, [...(groups.get(key) ?? []), row.index]);
   }
   const duplicateGroups: BuildComparison["duplicateGroups"] = [];
@@ -599,12 +615,12 @@ export function compareBuilds(
     if (!plate || !mount) continue;
     if (!plates.some((p) => p.key === plate)) plates.push({ key: plate, display: row.specs.plateType as string });
     if (!mounts.some((m) => m.key === mount)) mounts.push({ key: mount, display: row.specs.mountType as string });
-    done.add(`${plate}|${mount}`);
+    done.add(specKey(plate, mount));
   }
   const untriedPairings: BuildComparison["untriedPairings"] = [];
   for (const plate of plates)
     for (const mount of mounts)
-      if (!done.has(`${plate.key}|${mount.key}`))
+      if (!done.has(specKey(plate.key, mount.key)))
         untriedPairings.push({ plate: plate.display, mount: mount.display });
 
   const currencies = new Set(rows.flatMap((row) => (row.paid ? [row.paid.currency] : [])));

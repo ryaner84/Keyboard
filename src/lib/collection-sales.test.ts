@@ -535,6 +535,40 @@ const fallback = compareBuilds(
 assert.equal(fallback.rows[0].paid?.currency, "SGD");
 assert.equal(fallback.paidMixed, false);
 
+// Review fixes.
+// A "|" in free text can't fake a match or hide a pairing.
+const pipes = compareBuilds([
+  unit({ condition: "GOOD", plateType: "Alu", mountType: "Gasket|Top", pcbType: "Hotswap" }),
+  unit({ condition: "GOOD", plateType: "Alu", mountType: "Gasket", pcbType: "Top|Hotswap" }),
+]);
+assert.deepEqual(pipes.duplicateGroups, [], "different configs never share a key");
+const pipePairs = compareBuilds([
+  unit({ plateType: "A|B", mountType: "C" }),
+  unit({ plateType: "A", mountType: "X" }),
+  unit({ plateType: "Y", mountType: "B|C" }),
+]);
+assert.ok(
+  pipePairs.untriedPairings.some((pair) => pair.plate === "A" && pair.mount === "B|C"),
+  "A + B|C is untried and must be listed"
+);
+// A build whose only record is a date, photo or note is not "No details yet".
+assert.equal(compareBuilds([unit({ acquiredAt: "2024-03-01" }), unit({})]).rows[0].empty, false);
+assert.equal(compareBuilds([unit({ notes: "lube pending" }), unit({})]).rows[0].empty, false);
+assert.equal(compareBuilds([unit({ imageUrl: "data:image/png;base64,x" }), unit({})]).rows[0].empty, false);
+// Years are read in UTC, like the Build tab's date input, in every timezone.
+{
+  const savedTz = process.env.TZ;
+  process.env.TZ = "America/New_York";
+  const ny = compareBuilds([
+    unit({ acquiredAt: "2025-01-01", condition: "GOOD" }),
+    unit({ isSold: true, soldAt: "2025-01-01T00:00:00.000Z" }),
+  ]);
+  if (savedTz === undefined) delete process.env.TZ;
+  else process.env.TZ = savedTz;
+  assert.equal(ny.rows[0].acquiredYear, 2025, "Jan 1 is not the previous year west of UTC");
+  assert.equal(ny.rows[1].soldYear, 2025);
+}
+
 // Invalid dates give no year rather than NaN.
 assert.equal(compareBuilds([unit({ acquiredAt: "not a date" })]).rows[0].acquiredYear, null);
 

@@ -774,13 +774,16 @@ function BuildComparisonPanel({
         <table className="w-full table-fixed text-[11px]">
           <caption className="sr-only">Your builds compared</caption>
           <colgroup>
-            <col className="w-[88px]" />
+            <col className="w-[84px]" />
             <col className="w-[80px]" />
-            {shown("plateType") && <col className="w-[80px]" />}
-            {shown("mountType") && <col className="w-[80px]" />}
-            {pcbFields.length > 0 && <col className="w-[80px]" />}
+            {shown("plateType") && <col className="w-[76px]" />}
+            {shown("mountType") && <col className="w-[76px]" />}
+            {pcbFields.length > 0 && <col className="w-[76px]" />}
             {dressFields.length > 0 && <col />}
-            <col className="w-[72px]" />
+            {/* Wide enough for "SGD 1,250" / "JP¥120,000", and the amount may
+                wrap rather than truncate: a cut-off price is unreadable on a
+                tablet, where the title tooltip can't be reached. */}
+            <col className="w-[92px]" />
           </colgroup>
           <thead className="bg-gray-50 dark:bg-white/[0.03]">
             <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-gray-400">
@@ -867,7 +870,7 @@ function BuildComparisonPanel({
                       )}
                       <td className={`px-2.5 py-2 text-right tabular-nums ${cellTone}`}>
                         {row.paid ? (
-                          <span className="block truncate" title={formatCurrencyWithCode(row.paid.amount, row.paid.currency)}>
+                          <span className="block break-words" title={formatCurrencyWithCode(row.paid.amount, row.paid.currency)}>
                             {formatPaid(row.paid)}
                           </span>
                         ) : (
@@ -892,10 +895,11 @@ function BuildComparisonPanel({
         {rows.map((row) => {
           const sold = row.status === "SOLD";
           const structuralLine = structural.map((field) => row.specs[field] ?? "—").join(" · ");
-          const dressLine = dressFields
-            .map((field) => row.specs[field])
-            .filter(Boolean)
-            .join(" · ");
+          // Same slots as the structural line: dropping a blank switches value
+          // would move the keycaps into the switches position.
+          const dressLine = dressFields.some((field) => row.specs[field])
+            ? dressFields.map((field) => row.specs[field] ?? "—").join(" · ")
+            : "";
           return (
             <li key={row.index}>
               <button
