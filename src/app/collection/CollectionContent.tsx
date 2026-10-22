@@ -20,6 +20,8 @@ import {
 import { dedupeKey } from "@/lib/set-name";
 import {
   assembleBuilds,
+  BUILD_NAME_MAX,
+  buildLabel,
   calculateCollectionSales,
   compareBuilds,
   COMPARE_FIELDS,
@@ -83,6 +85,7 @@ const EMPTY_DETAILS: CollectionItemDetails = {
   plateType: null,
   mountType: null,
   pcbType: null,
+  buildName: null,
   layoutVariant: null,
   buildDetails: null,
   notes: null,
@@ -508,7 +511,7 @@ function BuildSummary({
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={build.imageUrl || (fallbackImageUrl as string)}
-          alt={`Build ${index + 1}`}
+          alt={buildLabel(build, index)}
           // An owner's photo is an arbitrary crop, so contain it; a catalog
           // render is pre-framed and fills the square properly.
           className={`h-12 w-12 shrink-0 rounded-lg bg-gray-100 dark:bg-gray-800 ${
@@ -522,8 +525,8 @@ function BuildSummary({
       )}
       <div className="min-w-0">
         <div className="flex items-center gap-1.5">
-          <p className="text-[11px] font-semibold text-gray-900 dark:text-white">
-            Build {index + 1}
+          <p className="min-w-0 truncate text-[11px] font-semibold text-gray-900 dark:text-white">
+            {buildLabel(build, index)}
           </p>
           {sold && (
             <span className="inline-flex items-center rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">
@@ -632,14 +635,15 @@ function SpecLine({ value, muted = false }: { value: string | null; muted?: bool
 
 function BuildNumberLinks({
   indexes,
+  labels,
   onOpenBuild,
 }: {
   indexes: number[];
+  labels: string[];
   onOpenBuild: (index: number) => void;
 }) {
   return (
     <>
-      Build{" "}
       {indexes.map((index, position) => (
         <span key={index}>
           {position > 0 && (position === indexes.length - 1 ? " & " : ", ")}
@@ -648,7 +652,7 @@ function BuildNumberLinks({
             onClick={() => onOpenBuild(index)}
             className="font-semibold text-gray-900 underline decoration-gray-300 underline-offset-2 hover:decoration-gray-600 dark:text-white dark:decoration-gray-600"
           >
-            {index + 1}
+            {labels[index]}
           </button>
         </span>
       ))}
@@ -711,8 +715,8 @@ function BuildComparisonPanel({
 
   const duplicateBadge = (row: BuildComparisonRow) =>
     row.duplicateOf != null ? (
-      <span className="mt-0.5 inline-flex rounded-full border border-dashed border-gray-300 px-1.5 py-0.5 text-[9px] font-semibold text-gray-500 dark:border-gray-600 dark:text-gray-400">
-        Same as #{row.duplicateOf + 1}
+      <span className="mt-0.5 inline-block max-w-full truncate rounded-full border border-dashed border-gray-300 px-1.5 py-0.5 text-[9px] font-semibold text-gray-500 dark:border-gray-600 dark:text-gray-400">
+        Same as {rows[row.duplicateOf].label}
       </span>
     ) : null;
 
@@ -739,7 +743,7 @@ function BuildComparisonPanel({
                 onClick={() => onOpenBuild(index)}
                 className="max-w-[10rem] truncate rounded-full border border-[#c9ab72] px-2.5 py-1 text-[11px] font-semibold text-[#80632f] hover:bg-[#f7f1e5] dark:text-[#d5b779] dark:hover:bg-[#2a241a]"
               >
-                Build {index + 1}
+                {rows[index].label}
                 {rows[index].color ? ` · ${rows[index].color}` : ""}
               </button>
             ))}
@@ -747,7 +751,11 @@ function BuildComparisonPanel({
         )}
         {comparison.duplicateGroups.slice(0, 3).map((group) => (
           <p key={group.indexes.join("-")}>
-            Same config on <BuildNumberLinks indexes={group.indexes} onOpenBuild={onOpenBuild} />:{" "}
+            Same config on <BuildNumberLinks
+              indexes={group.indexes}
+              labels={rows.map((row) => row.label)}
+              onOpenBuild={onOpenBuild}
+            />:{" "}
             {group.display}
             {group.sameSwitches ? " · same switches too" : ""}
           </p>
@@ -774,11 +782,12 @@ function BuildComparisonPanel({
         <table className="w-full table-fixed text-[11px]">
           <caption className="sr-only">Your builds compared</caption>
           <colgroup>
-            <col className="w-[84px]" />
-            <col className="w-[80px]" />
-            {shown("plateType") && <col className="w-[76px]" />}
-            {shown("mountType") && <col className="w-[76px]" />}
-            {pcbFields.length > 0 && <col className="w-[76px]" />}
+            {/* Wider than the spec columns: it carries the owner's build name. */}
+            <col className="w-[104px]" />
+            <col className="w-[76px]" />
+            {shown("plateType") && <col className="w-[72px]" />}
+            {shown("mountType") && <col className="w-[72px]" />}
+            {pcbFields.length > 0 && <col className="w-[72px]" />}
             {dressFields.length > 0 && <col />}
             {/* Wide enough for "SGD 1,250" / "JP¥120,000", and the amount may
                 wrap rather than truncate: a cut-off price is unreadable on a
@@ -816,15 +825,15 @@ function BuildComparisonPanel({
                   <th scope="row" className="px-2.5 py-2 text-left font-normal">
                     <button
                       type="button"
-                      aria-label={`Open Build ${row.index + 1}`}
+                      aria-label={`Open ${row.label}`}
                       onClick={(event) => {
                         event.stopPropagation();
                         onOpenBuild(row.index);
                       }}
                       className="w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9a7a42]/40"
                     >
-                      <span className="flex items-center gap-1 font-semibold text-gray-900 dark:text-white">
-                        Build {row.index + 1}
+                      <span className="flex min-w-0 items-center gap-1 font-semibold text-gray-900 dark:text-white">
+                        <span className="truncate" title={row.label}>{row.label}</span>
                         {hiddenIcon(row.index)}
                       </span>
                       {row.color && (
@@ -837,7 +846,7 @@ function BuildComparisonPanel({
                   </th>
                   {row.empty ? (
                     <td colSpan={dataColumns} className="px-2.5 py-2 italic text-gray-400">
-                      No details yet — open Build {row.index + 1} to add them
+                      No details yet — open {row.label} to add them
                     </td>
                   ) : (
                     <>
@@ -904,12 +913,12 @@ function BuildComparisonPanel({
             <li key={row.index}>
               <button
                 type="button"
-                aria-label={`Open Build ${row.index + 1}`}
+                aria-label={`Open ${row.label}`}
                 onClick={() => onOpenBuild(row.index)}
                 className="w-full rounded-xl bg-gray-50 px-3 py-2 text-left text-[11px] leading-4 hover:bg-gray-100 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]"
               >
                 <span className="flex items-center gap-1.5">
-                  <span className="shrink-0 font-semibold text-gray-900 dark:text-white">Build {row.index + 1}</span>
+                  <span className="min-w-0 truncate font-semibold text-gray-900 dark:text-white">{row.label}</span>
                   {row.color && (
                     <span className="min-w-0 truncate text-gray-400 dark:text-gray-500">{row.color}</span>
                   )}
@@ -1743,6 +1752,7 @@ function CurrencyCombobox({
 
 function BuildFields({
   build,
+  index,
   fallbackImage,
   purchaseCurrencies,
   onChange,
@@ -1751,6 +1761,8 @@ function BuildFields({
   showSoldStatus,
 }: {
   build: CollectionUnit;
+  // Position, for the "Build N" a blank name falls back to.
+  index: number;
   fallbackImage: string | null;
   purchaseCurrencies: PurchaseCurrencyOption[];
   onChange: (patch: Partial<CollectionUnit>) => void;
@@ -1763,6 +1775,21 @@ function BuildFields({
 }) {
   return (
     <div className="space-y-4">
+      {/* First, because it names everything below it — and the tab, the
+          card, Compare builds and the public page all read it. Blank keeps
+          the positional "Build N". */}
+      <Field label="Build name">
+        <input
+          value={build.buildName || ""}
+          onChange={(event) => onChange({ buildName: event.target.value })}
+          placeholder={`Build ${index + 1} — e.g. Daily driver, Brass build`}
+          maxLength={BUILD_NAME_MAX}
+          className={inputClass}
+        />
+        <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500">
+          Shown wherever this build is labelled, including your public page if the build is shown there.
+        </p>
+      </Field>
       <div className="rounded-xl border border-[#ddcfb4] bg-[#faf7f0] p-4 dark:border-[#4a3e29] dark:bg-[#211d16]">
         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#80632f] dark:text-[#d5b779]">
           Purchase record
@@ -3951,7 +3978,7 @@ function KeyboardCollectionCard({
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={imageUrl}
-      alt={multiBuild ? `${item.name}, Build ${visibleBuildIndex + 1}` : item.name}
+      alt={multiBuild ? `${item.name}, ${buildLabel(activeBuild, visibleBuildIndex)}` : item.name}
       // Desaturated only when EVERY unit is gone. Greying a card because one of
       // three sold would misrepresent a piece the owner still has.
       className={`absolute inset-0 h-full w-full transition duration-500 group-hover:scale-[1.025] ${
@@ -4071,8 +4098,11 @@ function KeyboardCollectionCard({
               </svg>
             </button>
             <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/65 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-lg backdrop-blur">
-              <span>
-                Build {visibleBuildIndex + 1} of {builds.length}
+              {/* A named build keeps its position too: "Daily driver · 3 of 6". */}
+              <span className="max-w-[14rem] truncate">
+                {activeBuild?.buildName?.trim()
+                  ? `${buildLabel(activeBuild, visibleBuildIndex)} · ${visibleBuildIndex + 1} of ${builds.length}`
+                  : `Build ${visibleBuildIndex + 1} of ${builds.length}`}
               </span>
               {activeBuildHidden && (
                 <span className="flex items-center gap-1 text-amber-200">
@@ -4563,7 +4593,9 @@ function describeKeycapPairing(pairing: KeycapPairing, keyboards: CollectionCata
   if (!pairing) return null;
   if (pairing.kind === "free_text") return pairing.label;
   const keyboard = keyboards.find((item) => item.slug === pairing.keyboardSlug);
-  return keyboard ? `${keyboard.name} · Build ${pairing.buildIndex + 1}` : "Keyboard build needs relinking";
+  if (!keyboard) return "Keyboard build needs relinking";
+  const build = assembleBuilds(keyboard.collection)[pairing.buildIndex];
+  return `${keyboard.name} · ${buildLabel(build, pairing.buildIndex)}`;
 }
 
 function EmptyCollectionState({
@@ -4776,6 +4808,7 @@ function KeyboardCollectionItemEditor({
         plateType: first.plateType || null,
         mountType: first.mountType || null,
         pcbType: first.pcbType || null,
+        buildName: first.buildName || null,
         layoutVariant: first.layoutVariant || null,
         buildDetails: first.buildDetails || null,
         notes: first.notes || null,
@@ -4825,18 +4858,19 @@ function KeyboardCollectionItemEditor({
             >
               Summary
             </button>
-            {builds.map((_, index) => (
+            {builds.map((build, index) => (
               <button
                 key={index}
                 type="button"
                 onClick={() => setActiveBuild(index)}
+                title={buildLabel(build, index)}
                 className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
                   !onSummary && activeBuild === index
                     ? "bg-gray-950 text-white dark:bg-white dark:text-gray-950"
                     : "border border-gray-200 text-gray-500 hover:text-gray-900 dark:border-gray-700 dark:text-gray-400 dark:hover:text-white"
                 }`}
               >
-                Build {index + 1}
+                <span className="block max-w-[10rem] truncate">{buildLabel(build, index)}</span>
               </button>
             ))}
           </div>
@@ -4908,6 +4942,7 @@ function KeyboardCollectionItemEditor({
           <>
           <BuildFields
             build={builds[activeBuild] || EMPTY_UNIT}
+            index={activeBuild}
             fallbackImage={activeBuild === 0 ? catalogImage : null}
             purchaseCurrencies={purchaseCurrencies}
             onChange={(patch) => updateBuild(activeBuild, patch)}
@@ -4927,7 +4962,7 @@ function KeyboardCollectionItemEditor({
                     return next;
                   })
                 }
-                title={`Show Build ${activeBuild + 1} on your public page`}
+                title={`Show ${buildLabel(builds[activeBuild], activeBuild)} on your public page`}
                 description={
                   form.isPublic
                     ? "This piece is displayed publicly — unchecked builds stay private while the rest is shown."
@@ -5286,7 +5321,7 @@ function KeycapCollectionEditor({
           <div className="mt-5"><FieldBlock label="Photo"><PhotoUploadField value={active.imageUrl} fallback={catalogImage} kind="keycap" photoSource={active.photoSource} onPhotoSourceChange={(photoSource) => updatePurchase(activePurchase, { photoSource })} onChange={(imageUrl) => updatePurchase(activePurchase, { imageUrl })} onError={setError} /></FieldBlock></div>
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <Field label="Paired keyboard"><select value={pairingValue} onChange={(event) => setPairing(event.target.value)} className={inputClass}><option value="">Not linked</option>{ownedKeyboards.flatMap((keyboard) => assembleBuilds(keyboard.collection).map((_, buildIndex) => <option key={`${keyboard.slug}-${buildIndex}`} value={`${keyboard.slug}|${buildIndex}`}>{keyboard.name} - Build {buildIndex + 1}</option>))}<option value="free-text">Another keyboard (free text)</option></select></Field>
+            <Field label="Paired keyboard"><select value={pairingValue} onChange={(event) => setPairing(event.target.value)} className={inputClass}><option value="">Not linked</option>{ownedKeyboards.flatMap((keyboard) => assembleBuilds(keyboard.collection).map((build, buildIndex) => <option key={`${keyboard.slug}-${buildIndex}`} value={`${keyboard.slug}|${buildIndex}`}>{keyboard.name} - {buildLabel(build, buildIndex)}</option>))}<option value="free-text">Another keyboard (free text)</option></select></Field>
             {active.pairing?.kind === "free_text" ? <Field label="Keyboard name"><input value={active.pairing.label} onChange={(event) => updatePurchase(activePurchase, { pairing: { kind: "free_text", label: event.target.value, showPublic: active.pairing?.showPublic === true } })} placeholder="e.g. Silver Alice build" className={inputClass} /></Field> : <div className="rounded-xl bg-gray-50 px-4 py-3 text-[11px] leading-4 text-gray-500 dark:bg-white/[0.04] dark:text-gray-400">Pairing is optional. Link an owned build or keep a free-text note for a board not in this collection.</div>}
           </div>
           {active.pairing && <div className="mt-4"><CheckRow checked={active.pairing.showPublic} onChange={(showPublic) => updatePurchase(activePurchase, { pairing: { ...active.pairing!, showPublic } as KeycapPairing })} title="Show this pairing publicly" description="Only explicit pairings are shown to visitors. A linked keyboard must also be publicly visible." /></div>}

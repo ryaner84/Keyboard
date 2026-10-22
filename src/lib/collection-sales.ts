@@ -32,6 +32,7 @@ export const EMPTY_UNIT: CollectionUnit = {
   plateType: null,
   mountType: null,
   pcbType: null,
+  buildName: null,
   layoutVariant: null,
   buildDetails: null,
   notes: null,
@@ -58,6 +59,7 @@ export function assembleBuilds(c: CollectionItemDetails): CollectionUnit[] {
     plateType: c.plateType,
     mountType: c.mountType,
     pcbType: c.pcbType,
+    buildName: c.buildName,
     layoutVariant: c.layoutVariant,
     buildDetails: c.buildDetails,
     notes: c.notes,
@@ -251,7 +253,7 @@ export function calculateCollectionSales(
           ? keycapPurchasePhoto(keycapUnit, normalizeImageUrl(item.imageUrl))
           : buildUnit.imageUrl || normalizeImageUrl(item.imageUrl),
         isKeycap,
-        unitLabel: isKeycap ? `Purchase ${index + 1}` : `Build ${index + 1}`,
+        unitLabel: isKeycap ? `Purchase ${index + 1}` : buildLabel(buildUnit, index),
         soldAt: unit.soldAt ? new Date(unit.soldAt).toISOString() : null,
         cost,
         recovered: saleAmount,
@@ -433,6 +435,18 @@ export const COMPARE_FIELD_LABELS: Record<CompareField, string> = {
   keycaps: "Keycaps",
 };
 
+// What a build is called everywhere it is labelled: the owner's own name when
+// they gave one, otherwise its position. One helper so the tab, the card, the
+// comparison and the public page can never disagree about a build's name.
+export const BUILD_NAME_MAX = 60;
+export function buildLabel(
+  build: { buildName?: string | null } | null | undefined,
+  index: number
+): string {
+  const name = (build?.buildName ?? "").trim().replace(/\s+/g, " ");
+  return name || `Build ${index + 1}`;
+}
+
 export function normSpec(value: string | null | undefined): string {
   return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -471,6 +485,8 @@ export function buildStatus(build: Pick<CollectionUnit, "isSold" | "condition">)
 
 export interface BuildComparisonRow {
   index: number;
+  // buildLabel: the owner's name for the build, or "Build N".
+  label: string;
   status: BuildStatus;
   conditionCode: string | null;
   color: string | null;
@@ -521,6 +537,7 @@ export function compareBuilds(
     const acquiredYear = yearOf(build.acquiredAt);
     return {
       index,
+      label: buildLabel(build, index),
       status,
       conditionCode: (build.condition ?? "").trim() || null,
       color,
@@ -534,6 +551,7 @@ export function compareBuilds(
         paid === null &&
         color === null &&
         acquiredYear === null &&
+        !displaySpec(build.buildName) &&
         !displaySpec(build.imageUrl) &&
         !displaySpec(build.buildDetails) &&
         !displaySpec(build.notes) &&

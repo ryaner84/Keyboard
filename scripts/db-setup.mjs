@@ -1261,7 +1261,8 @@ async function ensureBuildSpecColumns(client) {
        ADD COLUMN IF NOT EXISTS "plateType" text,
        ADD COLUMN IF NOT EXISTS "mountType" text,
        ADD COLUMN IF NOT EXISTS "pcbType" text,
-       ADD COLUMN IF NOT EXISTS "layoutVariant" text`
+       ADD COLUMN IF NOT EXISTS "layoutVariant" text,
+       ADD COLUMN IF NOT EXISTS "buildName" text`
     );
   } catch (err) {
     console.warn(`[db-setup] build spec columns setup skipped: ${err.message}`);

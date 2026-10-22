@@ -345,6 +345,10 @@ model TrackerItem {
   // Not `layout`: GroupBuy.layout is the catalog's FORM FACTOR ("65%"),
   // this is which variant of it the owner has.
   layoutVariant     String?
+  // The owner's own name for build 1 ("Daily driver", "Brass build"). Builds
+  // 2..N keep theirs in the `units` JSON. Blank means "Build N" — see
+  // buildLabel in src/lib/collection-sales.ts.
+  buildName         String?
   buildDetails      String?
   notes             String?
   displayOrder      Int       @default(0)

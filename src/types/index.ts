@@ -148,6 +148,7 @@ export interface CollectionUnit {
   plateType: string | null;
   mountType: string | null;
   pcbType: string | null;
+  buildName: string | null;
   layoutVariant: string | null;
   buildDetails: string | null;
   notes: string | null;
@@ -247,6 +248,7 @@ export interface CollectionItemDetails {
   plateType: string | null;
   mountType: string | null;
   pcbType: string | null;
+  buildName: string | null;
   layoutVariant: string | null;
   buildDetails: string | null;
   notes: string | null;

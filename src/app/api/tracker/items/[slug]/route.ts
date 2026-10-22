@@ -70,6 +70,7 @@ export async function PATCH(
     plateType?: string | null;
     mountType?: string | null;
     pcbType?: string | null;
+    buildName?: string | null;
     layoutVariant?: string | null;
     buildDetails?: string | null;
     notes?: string | null;
@@ -150,6 +151,7 @@ export async function PATCH(
   if ("plateType" in body) data.plateType = cleanOptionalText(body.plateType, 160);
   if ("mountType" in body) data.mountType = cleanOptionalText(body.mountType, 160);
   if ("pcbType" in body) data.pcbType = cleanOptionalText(body.pcbType, 160);
+  if ("buildName" in body) data.buildName = cleanOptionalText(body.buildName, 60);
   if ("layoutVariant" in body) data.layoutVariant = cleanOptionalText(body.layoutVariant, 160);
   if ("buildDetails" in body) data.buildDetails = cleanOptionalText(body.buildDetails, 500);
   if ("notes" in body) data.notes = cleanOptionalText(body.notes, 1000);
@@ -266,6 +268,7 @@ export async function PATCH(
       plateType: updated.plateType,
       mountType: updated.mountType,
       pcbType: updated.pcbType,
+      buildName: updated.buildName,
       layoutVariant: updated.layoutVariant,
       buildDetails: updated.buildDetails,
       notes: updated.notes,
@@ -336,6 +339,7 @@ function cleanUnit(u: unknown): CollectionUnit {
     plateType: cleanOptionalText(o.plateType, 160),
     mountType: cleanOptionalText(o.mountType, 160),
     pcbType: cleanOptionalText(o.pcbType, 160),
+    buildName: cleanOptionalText(o.buildName, 60),
     layoutVariant: cleanOptionalText(o.layoutVariant, 160),
     buildDetails: cleanOptionalText(o.buildDetails, 500),
     notes: cleanOptionalText(o.notes, 1000),

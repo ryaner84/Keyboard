@@ -52,6 +52,7 @@ export async function GET() {
         plateType: item.plateType,
         mountType: item.mountType,
         pcbType: item.pcbType,
+        buildName: item.buildName,
         layoutVariant: item.layoutVariant,
         buildDetails: item.buildDetails,
         notes: item.notes,
