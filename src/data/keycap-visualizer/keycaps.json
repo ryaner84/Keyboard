@@ -1,0 +1,104 @@
+{
+  "keycaps": [
+    {
+      "id": "gmk-olivia",
+      "name": "GMK Olivia++",
+      "family": "GMK",
+      "profile": "cherry",
+      "slug": "gmk-olivia",
+      "dateAdded": "2026-10-22",
+      "colorSource": "tracker-image",
+      "colors": { "alpha": "#E8E2DE", "mod": "#2B2828", "accent": "#E3AFA0", "alphaLegend": "#2B2828", "modLegend": "#E3AFA0" }
+    },
+    {
+      "id": "gmk-botanical",
+      "name": "GMK Botanical",
+      "family": "GMK",
+      "profile": "cherry",
+      "slug": "gmk-botanical",
+      "dateAdded": "2026-10-22",
+      "colorSource": "tracker-image",
+      "colors": { "alpha": "#E3E4E1", "mod": "#57605B", "accent": "#3A4440", "alphaLegend": "#57605B", "modLegend": "#C9D1CC" }
+    },
+    {
+      "id": "gmk-8008",
+      "name": "GMK 8008",
+      "family": "GMK",
+      "profile": "cherry",
+      "slug": "gmk-8008",
+      "dateAdded": "2026-10-22",
+      "colorSource": "tracker-image",
+      "colors": { "alpha": "#9DA1AE", "mod": "#2B313C", "accent": "#E8306A", "alphaLegend": "#2B313C", "modLegend": "#E8306A" }
+    },
+    {
+      "id": "gmk-laser",
+      "name": "GMK Laser",
+      "family": "GMK",
+      "profile": "cherry",
+      "slug": "gmk-laser",
+      "dateAdded": "2026-10-22",
+      "colorSource": "tracker-image",
+      "colors": { "alpha": "#3B1F8F", "mod": "#150E3A", "accent": "#E8264F", "alphaLegend": "#35D3E6", "modLegend": "#35D3E6" }
+    },
+    {
+      "id": "gmk-cyl-wob",
+      "name": "GMK CYL WoB",
+      "family": "GMK",
+      "profile": "cherry",
+      "slug": "gmk-cyl-wob-white-on-black-keycaps",
+      "dateAdded": "2026-10-22",
+      "colorSource": "known-colorway",
+      "colors": { "alpha": "#222322", "mod": "#222322", "accent": "#3A3B3B", "alphaLegend": "#F2F2F0", "modLegend": "#F2F2F0" }
+    },
+    {
+      "id": "gmk-nord",
+      "name": "GMK Nord",
+      "family": "GMK",
+      "profile": "cherry",
+      "slug": "gmk-nord",
+      "dateAdded": "2026-10-22",
+      "colorSource": "tracker-image",
+      "colors": { "alpha": "#4A5368", "mod": "#2F3444", "accent": "#3E4A63", "alphaLegend": "#D8DEE9", "modLegend": "#88C0D0" }
+    },
+    {
+      "id": "gmk-red-samurai",
+      "name": "GMK Red Samurai",
+      "family": "GMK",
+      "profile": "cherry",
+      "slug": "gmk-red-samurai",
+      "dateAdded": "2026-10-22",
+      "colorSource": "tracker-image",
+      "colors": { "alpha": "#6B1F2B", "mod": "#2E2B2E", "accent": "#B98A57", "alphaLegend": "#D8B88A", "modLegend": "#D8B88A" }
+    },
+    {
+      "id": "gmk-serika",
+      "name": "GMK Serika",
+      "family": "GMK",
+      "profile": "cherry",
+      "slug": "gmk-serika",
+      "dateAdded": "2026-10-22",
+      "colorSource": "tracker-image",
+      "colors": { "alpha": "#E6E3D6", "mod": "#2E2D29", "accent": "#F2C523", "alphaLegend": "#2E2D29", "modLegend": "#F2C523" }
+    },
+    {
+      "id": "dcs-cream-cheese-green-r3",
+      "name": "DCS Cream Cheese and Green R3",
+      "family": "SP DCS",
+      "profile": "dcs",
+      "slug": "gh-126397",
+      "dateAdded": "2026-10-22",
+      "colorSource": "tracker-image",
+      "colors": { "alpha": "#EAE2D6", "mod": "#D6C9B6", "accent": "#4C6B2F", "alphaLegend": "#4A4038", "modLegend": "#4A4038" }
+    },
+    {
+      "id": "dcs-dolch",
+      "name": "DCS Dolch",
+      "family": "SP DCS",
+      "profile": "dcs",
+      "slug": "gh-126770",
+      "dateAdded": "2026-10-22",
+      "colorSource": "known-colorway",
+      "colors": { "alpha": "#5A5E62", "mod": "#3E4246", "accent": "#1BA5A0", "alphaLegend": "#E8E8E6", "modLegend": "#E8E8E6" }
+    }
+  ]
+}

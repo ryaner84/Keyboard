@@ -95,6 +95,10 @@ jobs:
         if: always()
         run: npm run test:on-sale
 
+      - name: keycap-visualizer
+        if: always()
+        run: npm run test:keycap-visualizer
+
       - name: http-json
         if: always()
         run: npm run test:http-json

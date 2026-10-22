@@ -1,0 +1,18 @@
+{
+  "queue": [
+    { "name": "Glorious GMMK Pro", "layout": "75" },
+    { "name": "Wooting 80HE", "layout": "tkl" },
+    { "name": "Keychron V1 Max", "layout": "75" },
+    { "name": "Mode Sonnet", "layout": "75" },
+    { "name": "NuPhy Air75 V2", "layout": "75" },
+    { "name": "Keychron Q2 Max", "layout": "65" },
+    { "name": "Keychron Q6 Max", "layout": "full" },
+    { "name": "Leopold FC750R", "layout": "tkl" },
+    { "name": "Akko MOD007B", "layout": "65" },
+    { "name": "Ducky One 3 TKL", "layout": "tkl" },
+    { "name": "Mode Envoy", "layout": "65" },
+    { "name": "Keychron K2 Max", "layout": "75" },
+    { "name": "Wooting Two HE", "layout": "full" },
+    { "name": "Qwertykeys Neo65", "layout": "65" }
+  ]
+}

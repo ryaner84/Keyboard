@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Twenty-four suites, all of which should pass before pushing:
+Twenty-five suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -41,6 +41,7 @@ npm run test:collection-import
 npm run test:keycap-collection
 npm run test:collection-sales
 npm run test:on-sale
+npm run test:keycap-visualizer
 npm run test:http-json
 npm run test:home-cache
 npm run test:vendor-urls
@@ -88,6 +89,15 @@ Run them locally before pushing anyway; the gate is a backstop, not a substitute
 "Collecting page data" with a `No database configuration found` error. That
 failure is environmental, not a code problem — `✓ Compiled successfully`
 above it is the signal that matters.
+
+## Keycap visualizer
+
+`/visualize` (nav: Visualize; "Visualize on a keyboard" on set pages) draws a
+set on a keyboard from `src/data/keycap-visualizer/`. Those files hold only
+colors and keyboard finishes — names, status and links come from the tracker
+row by slug. Two daily routines grow them one set / one keyboard at a time;
+their steps live in `docs/keycap-visualizer-routine.md`, and
+`test:keycap-visualizer` guards the data they edit.
 
 ## Keycap identity
 

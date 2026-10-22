@@ -53,6 +53,18 @@ const NAV_ITEMS = [
     ),
   },
   {
+    href: "/visualize",
+    label: "Visualize",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9 9 0 1 1 9-9c0 1.7-1.3 3-3 3h-1.8a1.7 1.7 0 0 0-1.2 2.9 1.7 1.7 0 0 1-1.2 2.9H12z" />
+        <circle cx="7.5" cy="11.5" r="1" fill="currentColor" stroke="none" />
+        <circle cx="10.5" cy="7.5" r="1" fill="currentColor" stroke="none" />
+        <circle cx="15" cy="8" r="1" fill="currentColor" stroke="none" />
+      </svg>
+    ),
+  },
+  {
     href: "/timeline",
     label: "Timeline",
     icon: (
@@ -81,7 +93,7 @@ export function MobileNav() {
       className="fixed bottom-0 left-0 right-0 z-50 sm:hidden bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm border-t border-gray-200 dark:border-gray-800"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
-      <div className="grid grid-cols-6 h-14">
+      <div className="grid grid-cols-7 h-14">
         {NAV_ITEMS.map((item) => {
           const active =
             pathname === item.href ||
