@@ -19,7 +19,9 @@ interface Look {
   caseName: string;
 }
 
-type Step = "keyboard" | "keycaps" | "case" | "packs";
+// Board first, then its finish (a sub-option of the board, never a step of its
+// own), then keycaps — the order a collector actually decides in.
+type Step = "keyboard" | "keycaps" | "packs";
 type Family = "All" | "GMK" | "SP DCS";
 
 const KEYBOARDS = keyboardData.keyboards as VisualizerKeyboard[];
@@ -30,11 +32,26 @@ const NEW_DAYS = 7;
 const STORAGE_KEY = "kbv-compare";
 
 const STEPS: Array<{ value: Step; label: string; emoji: string }> = [
-  { value: "keyboard", label: "Keyboard", emoji: "⌨️" },
-  { value: "keycaps", label: "Keycaps", emoji: "🎨" },
-  { value: "case", label: "Case finish", emoji: "🪵" },
-  { value: "packs", label: "Design packs", emoji: "✨" },
+  { value: "keyboard", label: "1 · Keyboard & finish", emoji: "⌨️" },
+  { value: "keycaps", label: "2 · Keycaps", emoji: "🎨" },
+  { value: "packs", label: "Or start from a pack", emoji: "✨" },
 ];
+
+function channels(hex: string) {
+  const n = parseInt(hex.slice(1), 16);
+  return [n >> 16, (n >> 8) & 255, n & 255];
+}
+
+// A pack names a case color, but a listed board only comes in its official
+// finishes — so on a listed board a pack picks the closest real finish.
+function closestFinish(finishes: Finish[], hex: string): Finish {
+  const [r, g, b] = channels(hex);
+  const dist = (f: Finish) => {
+    const [r2, g2, b2] = channels(f.hex);
+    return (r - r2) ** 2 + (g - g2) ** 2 + (b - b2) ** 2;
+  };
+  return finishes.reduce((best, f) => (dist(f) < dist(best) ? f : best));
+}
 
 const findBoard = (id: string) => KEYBOARDS.find((b) => b.id === id) ?? GENERIC.find((b) => b.id === id);
 const finishesFor = (b: VisualizerKeyboard) => b.finishes ?? GENERIC_FINISHES;
@@ -76,7 +93,7 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
     caseHex: first.finishes![0].hex,
     caseName: first.finishes![0].name,
   });
-  const [step, setStep] = useState<Step>("keycaps");
+  const [step, setStep] = useState<Step>("keyboard");
   const [family, setFamily] = useState<Family>("All");
   const [query, setQuery] = useState("");
   const [hexInput, setHexInput] = useState("");
@@ -239,28 +256,105 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
                 <div key={group.title}>
                   <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">{group.title}</p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                    {group.list.map((b) => (
-                      <button key={b.id} onClick={() => chooseBoard(b)} className={card(b.id === look.board)}>
-                        <div className="rounded-xl bg-gray-50 dark:bg-gray-800 p-2">
-                          <KeyboardRender
-                            layout={b.layout}
-                            colors={caps.colors}
-                            profile={caps.profile}
-                            caseHex={b.finishes ? b.finishes[0].hex : look.caseHex}
-                            legends={false}
-                            shadow={false}
-                          />
-                        </div>
-                        <span className="flex items-center justify-between gap-1">
-                          <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">{b.name}</span>
-                          {isNew(b.dateAdded) && <span className="text-[10px] font-bold text-emerald-600">NEW</span>}
-                        </span>
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                          {LAYOUTS[b.layout].label} · {b.finishes ? `${b.finishes.length} finishes` : "any case color"}
-                        </span>
-                      </button>
-                    ))}
+                    {group.list.map((b) => {
+                      const selected = b.id === look.board;
+                      return (
+                        <button key={b.id} onClick={() => chooseBoard(b)} className={card(selected)}>
+                          <div className="rounded-xl bg-gray-50 dark:bg-gray-800 p-2">
+                            <KeyboardRender
+                              layout={b.layout}
+                              colors={caps.colors}
+                              profile={caps.profile}
+                              caseHex={selected ? look.caseHex : b.finishes ? b.finishes[0].hex : look.caseHex}
+                              legends={false}
+                              shadow={false}
+                            />
+                          </div>
+                          <span className="flex items-center justify-between gap-1">
+                            <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">{b.name}</span>
+                            {isNew(b.dateAdded) && <span className="text-[10px] font-bold text-emerald-600">NEW</span>}
+                          </span>
+                          <span className="flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
+                            {LAYOUTS[b.layout].label}
+                            {b.finishes ? (
+                              <span className="flex -space-x-1" aria-label={`${b.finishes.length} finishes`}>
+                                {b.finishes.map((f) => (
+                                  <span key={f.hex} className="w-3.5 h-3.5 rounded-full ring-2 ring-white dark:ring-gray-900" style={{ background: f.hex }} />
+                                ))}
+                              </span>
+                            ) : (
+                              <span>any color</span>
+                            )}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
+                  {group.list.some((b) => b.id === look.board) && (
+                    <div className="mt-3 rounded-2xl border border-indigo-100 dark:border-indigo-900 bg-indigo-50/50 dark:bg-indigo-950/30 p-4">
+                      <div className="flex items-baseline justify-between flex-wrap gap-2 mb-3">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {board.finishes ? `${board.name} — choose a finish` : `${board.name} — choose a case color`}
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          {board.finishes ? "Official finishes only" : "Presets or any HEX color"}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-4">
+                        {finishesFor(board).map((f) => {
+                          const active = f.hex.toLowerCase() === look.caseHex.toLowerCase();
+                          return (
+                            <button
+                              key={f.hex}
+                              onClick={() => {
+                                setLook({ ...look, caseHex: f.hex, caseName: f.name });
+                                setPack(null);
+                              }}
+                              className="flex flex-col items-center gap-1.5 w-20 text-center group"
+                            >
+                              <span className={`rounded-full p-0.5 transition ${active ? "ring-2 ring-indigo-500" : "group-hover:scale-105"}`}>
+                                <SwatchDot colors={[f.hex]} />
+                              </span>
+                              <span className={`text-xs ${active ? "font-semibold text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400"}`}>{f.name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {!board.finishes && (
+                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                          <input
+                            type="color"
+                            value={look.caseHex}
+                            onChange={(e) => setLook({ ...look, caseHex: e.target.value, caseName: finishName(board, e.target.value) })}
+                            aria-label="Pick a custom case color"
+                            className="w-10 h-10 rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent cursor-pointer"
+                          />
+                          <input
+                            value={hexInput}
+                            onChange={(e) => {
+                              setHexInput(e.target.value);
+                              setHexError("");
+                            }}
+                            onKeyDown={(e) => e.key === "Enter" && applyHex()}
+                            placeholder="#1E1F22"
+                            maxLength={7}
+                            aria-label="Custom case color HEX code"
+                            className="w-28 px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm uppercase text-gray-900 dark:text-white focus:outline-none focus:border-indigo-400"
+                          />
+                          <button onClick={applyHex} className="px-3 py-2 rounded-xl text-sm font-semibold border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:border-indigo-400">
+                            Apply
+                          </button>
+                          {hexError && <span className="text-sm text-red-600">{hexError}</span>}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => setStep("keycaps")}
+                        className="mt-4 px-4 py-2 rounded-xl text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-sm"
+                      >
+                        Next: choose keycaps →
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -314,60 +408,13 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
             </div>
           )}
 
-          {step === "case" && (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">
-                {board.finishes ? `${board.name} finishes` : "Case colors"}
-              </p>
-              <div className="flex flex-wrap gap-4">
-                {finishesFor(board).map((f) => {
-                  const active = f.hex.toLowerCase() === look.caseHex.toLowerCase();
-                  return (
-                    <button
-                      key={f.hex}
-                      onClick={() => {
-                        setLook({ ...look, caseHex: f.hex, caseName: f.name });
-                        setPack(null);
-                      }}
-                      className="flex flex-col items-center gap-1.5 w-20 text-center group"
-                    >
-                      <span className={`rounded-full p-0.5 transition ${active ? "ring-2 ring-indigo-500" : "group-hover:scale-105"}`}>
-                        <SwatchDot colors={[f.hex]} />
-                      </span>
-                      <span className={`text-xs ${active ? "font-semibold text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400"}`}>{f.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="mt-5 flex flex-wrap items-center gap-2">
-                <input
-                  type="color"
-                  value={look.caseHex}
-                  onChange={(e) => setLook({ ...look, caseHex: e.target.value, caseName: finishName(board, e.target.value) })}
-                  aria-label="Pick a custom case color"
-                  className="w-10 h-10 rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent cursor-pointer"
-                />
-                <input
-                  value={hexInput}
-                  onChange={(e) => {
-                    setHexInput(e.target.value);
-                    setHexError("");
-                  }}
-                  onKeyDown={(e) => e.key === "Enter" && applyHex()}
-                  placeholder="#1E1F22"
-                  maxLength={7}
-                  aria-label="Custom case color HEX code"
-                  className="w-28 px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm uppercase text-gray-900 dark:text-white focus:outline-none focus:border-indigo-400"
-                />
-                <button onClick={applyHex} className="px-3 py-2 rounded-xl text-sm font-semibold border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:border-indigo-400">
-                  Apply
-                </button>
-                {hexError && <span className="text-sm text-red-600">{hexError}</span>}
-              </div>
-            </div>
-          )}
-
           {step === "packs" && (
+            <div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                {board.finishes
+                  ? `A pack sets the keycaps and picks the closest ${board.name} finish.`
+                  : "A pack sets the keycaps and the case color."}
+              </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               {packs.map((p) => {
                 const s = sets.find((x) => x.id === p.keycap)!;
@@ -375,7 +422,8 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
                   <button
                     key={p.id}
                     onClick={() => {
-                      setLook({ ...look, keycap: p.keycap, caseHex: p.caseHex, caseName: p.caseName });
+                      const finish = board.finishes ? closestFinish(board.finishes, p.caseHex) : { hex: p.caseHex, name: p.caseName };
+                      setLook({ ...look, keycap: p.keycap, caseHex: finish.hex, caseName: finish.name });
                       setPack(p.id);
                     }}
                     className={card(pack === p.id)}
@@ -393,6 +441,7 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
                   </button>
                 );
               })}
+            </div>
             </div>
           )}
         </div>
