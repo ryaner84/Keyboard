@@ -54,6 +54,16 @@
         { "name": "Silver", "hex": "#C6C7C9" },
         { "name": "Sakura pink", "hex": "#E8B8C3" }
       ]
+    },
+    {
+      "id": "glorious-gmmk-pro",
+      "name": "Glorious GMMK Pro",
+      "layout": "75",
+      "dateAdded": "2026-10-23",
+      "finishes": [
+        { "name": "Black Slate", "hex": "#26272A" },
+        { "name": "White Ice", "hex": "#C9CBCE" }
+      ]
     }
   ],
   "generic": [

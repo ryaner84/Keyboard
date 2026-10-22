@@ -99,6 +99,16 @@
       "dateAdded": "2026-10-22",
       "colorSource": "known-colorway",
       "colors": { "alpha": "#5A5E62", "mod": "#3E4246", "accent": "#1BA5A0", "alphaLegend": "#E8E8E6", "modLegend": "#E8E8E6" }
+    },
+    {
+      "id": "gmk-tokyo-nights-r2",
+      "name": "GMK Tokyo Nights R2",
+      "family": "GMK",
+      "profile": "cherry",
+      "slug": "gmk-tokyo-nights-r2",
+      "dateAdded": "2026-10-23",
+      "colorSource": "tracker-image",
+      "colors": { "alpha": "#1E1F21", "mod": "#18181A", "accent": "#9FD5C3", "alphaLegend": "#7CC9B4", "modLegend": "#8B63B9" }
     }
   ]
 }

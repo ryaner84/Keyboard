@@ -92,6 +92,9 @@ def colors(slug, out):
 
 
 if __name__ == "__main__":
+    # Set names carry non-ASCII ("GMK CYL Splash 鲤鱼王"), which a Windows
+    # console codepage can't print.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("candidates")
