@@ -350,7 +350,6 @@ function PublicCollectionCard({
       />
     );
   }
-  const acquiredYear = item.acquiredAt?.getFullYear();
   const specs = [
     item.groupBuy.layout,
     item.groupBuy.mountingStyle,
@@ -368,7 +367,25 @@ function PublicCollectionCard({
   const builds = assemblePublicBuilds(item)
     .map((build, originalIndex) => ({ build, originalIndex }))
     .filter(({ originalIndex }) => !hiddenBuilds.has(originalIndex));
+  // Every hidden: nothing of this piece is the public's to see.
+  if (builds.length === 0) return null;
   const multiBuild = builds.length > 1;
+  // EVERYTHING below reads the VISIBLE builds, never the record's top-level
+  // item.* columns. Those columns are build 1, and build 1 may be the one the
+  // owner hid: with builds 1-2 and only build 2 shown, the single-build path
+  // used to publish build 1's colour, specs, price, sale and notes while
+  // build 2's own details never appeared.
+  const solo = multiBuild ? null : builds[0].build;
+  const yearOf = (value: string | null) => {
+    if (!value) return null;
+    const time = new Date(value).getTime();
+    return Number.isNaN(time) ? null : new Date(time).getUTCFullYear();
+  };
+  const visibleYears = builds
+    .map(({ build }) => yearOf(build.acquiredAt))
+    .filter((year): year is number => year != null);
+  // Earliest visible build, so "Collected" never dates a hidden unit.
+  const acquiredYear = visibleYears.length > 0 ? Math.min(...visibleYears) : null;
   // Never surface the scraped showcase source in a saved board's name.
   const setName = cleanDisplayName(item.groupBuy.name);
 
@@ -411,53 +428,55 @@ function PublicCollectionCard({
         )}
         <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
           {[
-            item.condition ? formatCondition(item.condition) : null,
+            // Condition is per build: one visible build states its own, and a
+            // multi-build card shows each build's in its row instead.
+            solo?.condition ? formatCondition(solo.condition) : null,
             acquiredYear ? `Collected ${acquiredYear}` : null,
           ]
             .filter(Boolean)
             .join(" · ") || "From the private collection"}
         </p>
 
-        {!multiBuild &&
+        {solo &&
           (specs.length > 0 ||
-            item.switches ||
-            item.keycaps ||
-            item.plateType ||
-            item.mountType ||
-            item.pcbType ||
-            item.layoutVariant ||
-            item.color) && (
+            solo.switches ||
+            solo.keycaps ||
+            solo.plateType ||
+            solo.mountType ||
+            solo.pcbType ||
+            solo.layoutVariant ||
+            solo.color) && (
           <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-gray-100 pt-5 dark:border-white/10">
             {specs.length > 0 && <PublicSpec label="Format" value={specs.join(" · ")} />}
-            {item.color && <PublicSpec label="Colour" value={item.color} />}
-            {item.switches && <PublicSpec label="Switches" value={item.switches} />}
-            {item.keycaps && <PublicSpec label="Keycaps" value={item.keycaps} />}
-            {item.plateType && <PublicSpec label="Plate" value={item.plateType} />}
-            {item.mountType && <PublicSpec label="Mount" value={item.mountType} />}
-            {item.pcbType && <PublicSpec label="PCB" value={item.pcbType} />}
-            {item.layoutVariant && <PublicSpec label="Layout" value={item.layoutVariant} />}
-            {item.showPurchasePrice && item.purchasePrice != null && (
+            {solo.color && <PublicSpec label="Colour" value={solo.color} />}
+            {solo.switches && <PublicSpec label="Switches" value={solo.switches} />}
+            {solo.keycaps && <PublicSpec label="Keycaps" value={solo.keycaps} />}
+            {solo.plateType && <PublicSpec label="Plate" value={solo.plateType} />}
+            {solo.mountType && <PublicSpec label="Mount" value={solo.mountType} />}
+            {solo.pcbType && <PublicSpec label="PCB" value={solo.pcbType} />}
+            {solo.layoutVariant && <PublicSpec label="Layout" value={solo.layoutVariant} />}
+            {item.showPurchasePrice && solo.purchasePrice != null && (
               <PublicSpec
-                label={item.quantity > 1 ? "Price per unit" : "Acquired for"}
-                value={`${item.purchaseCurrency || "USD"} ${item.purchasePrice.toLocaleString()}`}
+                label="Acquired for"
+                value={`${solo.purchaseCurrency || "USD"} ${solo.purchasePrice.toLocaleString()}`}
               />
             )}
             {/* Two independent gates: showSoldStatus reveals THAT it sold,
                 showPurchasePrice reveals FOR HOW MUCH. Enabling sold status
                 must never publish a figure the owner kept private. */}
-            {item.showSoldStatus && item.isSold && (
+            {item.showSoldStatus && solo.isSold && (
               <PublicSpec
                 label="Sold"
                 value={
                   [
-                    item.soldAt
-                      ? new Date(item.soldAt).toLocaleDateString("en-SG", {
+                    solo.soldAt
+                      ? new Date(solo.soldAt).toLocaleDateString("en-SG", {
                           month: "short",
                           year: "numeric",
                         })
                       : "Yes",
-                    item.showPurchasePrice && item.soldPrice != null
-                      ? `${item.soldCurrency || item.purchaseCurrency || "USD"} ${item.soldPrice.toLocaleString()}`
+                    item.showPurchasePrice && solo.soldPrice != null
+                      ? `${solo.soldCurrency || solo.purchaseCurrency || "USD"} ${solo.soldPrice.toLocaleString()}`
                       : null,
                   ]
                     .filter(Boolean)
@@ -467,9 +486,9 @@ function PublicCollectionCard({
             )}
           </dl>
         )}
-        {!multiBuild && item.buildDetails && (
+        {solo?.buildDetails && (
           <p className="mt-5 border-t border-gray-100 pt-5 text-sm leading-6 text-gray-600 dark:border-white/10 dark:text-gray-300">
-            {item.buildDetails}
+            {solo.buildDetails}
           </p>
         )}
 
