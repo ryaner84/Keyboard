@@ -2251,12 +2251,17 @@ both the client-reported log and the resolution audit in the same run.
 
 _Four owner items this run (unchanged): the SwitchKeys geo-conversion class (7
 listings, held — architecturally significant) plus the three prior. All seven
-SwitchKeys rows held the correct AUD shelf price this run (no revert, 5th
-consecutive clean read; see the 2026-10-21 run note). One new price report filed
-this run — gmk-masterpiece-r2 × iLumKB, a stock-only pre-order-lag self-heal
-(recurrence of 2026-10-06), on the Self-heal watch (§1b), no code fix applies
-(feed 0 pending / 93 resolved). No new listing flags (inbox 17 flags, all the
-same owner items of §4b)._
+SwitchKeys rows held the correct AUD shelf price this run (no revert, **6th
+consecutive clean read**; see the 2026-10-22 run note in §1b). The 2026-10-21
+watch item — gmk-masterpiece-r2 × iLumKB — was **confirmed healed** this run
+(feed `159 SGD SCRAPED`, `resolvedAt=2026-10-22T05:10:08.167Z` post-dating the
+2026-10-21T01:52 submit; no 3rd iLumKB recurrence) and moved to the resolution
+audit. One new price report filed this run — gmk-masterpiece-r2 × Oblotzky
+Industries, a stock-only pre-order-lag self-heal (recurrence of 2026-09-30,
+which was confirmed healed 2026-10-01, so genuine store-side pre-order flux, not
+a code oscillation), on the Self-heal watch (§1b), no code fix applies (feed 0
+pending / 94 resolved). No new listing flags (inbox 17 flags, all the same owner
+items of §4b)._
 
 _**SwitchKeys geo-converted `.json` prices × 7** (new 2026-10-16, batch 20 /
 #217) — **systematic wrong-price/currency; root-cause repair held for owner
@@ -2339,8 +2344,10 @@ to the resolution audit and drops out of this table.
 
 **Currently on the watch: seven SwitchKeys geo-conversion rows (added
 2026-10-16, batch 20 / #217), plus one new stock-lag self-heal
-(gmk-masterpiece-r2 × iLumKB, added 2026-10-21, batch 25 / #224 — see the
-2026-10-21 row below the table).** The seven SwitchKeys rows read the CORRECT AUD shelf price in the
+(gmk-masterpiece-r2 × Oblotzky Industries, added 2026-10-22, batch 26 / #225 —
+see the 2026-10-22 row below the table). The 2026-10-21 watch item
+(gmk-masterpiece-r2 × iLumKB) was CONFIRMED healed on the 2026-10-22 run and
+moved to the resolution audit.** The seven SwitchKeys rows read the CORRECT AUD shelf price in the
 feed this run, but they are a systematic wrong-price class with a confirmed
 oscillation (gmk-wasabi-r2: false-positive 2026-09-29 → wrong 2026-10-16), so a
 point-in-time correct read is not proof of a heal. They are watched so a revert
@@ -2368,13 +2375,34 @@ post-dating the 2026-10-16T01:51 submit, so the correct AUD survived a fifth
 nightly scrape. No revert → no fix triggered. They REMAIN on the watch (root
 cause unfixed, oscillating class, held for owner).
 
-**New this run: gmk-masterpiece-r2 × iLumKB (added 2026-10-21, batch 25 /
-#224)** — a stock-only pre-order-lag self-heal, recurrence of the 2026-10-06
-report, auto-resolved post-submit (`resolvedAt=2026-10-21T05:44:18.925Z`). Not
-in `LINK_OVERRIDES`; price 159 SGD correct and undisputed; genuine store-side
-pre-order flux (see §3 / resolution audit). Watched with extra attention for
-2026-10-22 — a 3rd stock report escalates to `needs fix` (catalog decision,
-owner; no scraper fix applies).
+**2026-10-22 re-verification (6th consecutive clean read): all seven held the
+correct AUD shelf price and did NOT revert** — each carries
+`resolvedAt=2026-10-22T05:10:08.167Z` (today's nightly 00:30 UTC sweep),
+post-dating the 2026-10-16T01:51 submit, so the correct AUD survived a sixth
+nightly scrape (feed reads 199.99 / 199 / 219.99 / 199 / 279.99 / 59 / 44.99 AUD
+respectively). No revert → no fix triggered. They REMAIN on the watch (root
+cause unfixed, oscillating class, held for owner).
+
+**Confirmed healed this run: gmk-masterpiece-r2 × iLumKB (added 2026-10-21,
+batch 25 / #224)** — the 2026-10-21T01:52 report is resolved
+`resolvedAt=2026-10-22T05:10:08.167Z` (today's nightly sweep, post-submit), feed
+reads `159 SGD SCRAPED`, price correct and unchanged, and there was **no 3rd
+iLumKB recurrence** this run. Genuine store-side pre-order flux, not a code
+oscillation (the 2026-10-06 instance had been confirmed healed 2026-10-07). ✅
+Dropped from the watch, moved to the resolution audit.
+
+**New this run: gmk-masterpiece-r2 × Oblotzky Industries (added 2026-10-22,
+batch 26 / #225)** — a stock-only pre-order-lag self-heal, recurrence of the
+2026-09-30 report (which was confirmed healed 2026-10-01, so it healed between →
+genuine store-side pre-order availability flux, not a code oscillation),
+auto-resolved post-submit (`resolvedAt=2026-10-22T05:46:02.757Z`). Not in
+`LINK_OVERRIDES`; price **119 EUR** is the correct Origin Base kit and undisputed
+(Roman Base 139 is a dearer variant the picker correctly does not pick); the
+price pass owns `inStock` one-directionally (#153), so the next availability
+scrape flips it back in stock. Watched with extra attention for 2026-10-23 — a
+3rd stock report on this row escalates to `needs fix`, whose only lever is a
+catalog decision (delink the pre-order Oblotzky listing), since no scraper fix
+can stop the store toggling its pre-order variant's availability.
 
 | set | vendor | flagged | reason | watch for (next run) |
 |---|---|---|---|---|
@@ -2385,7 +2413,7 @@ owner; no scraper fix applies).
 | gmk-masterpiece-r2 | SwitchKeys | 2026-10-16 | geo `.json` 198 vs `.js` 279.99 (sold out) | feed holds **279.99 AUD** (not 198) |
 | gmk-relegendables | SwitchKeys | 2026-10-16 | geo `.json` 42 vs `.js` 59 (front-print base) | feed holds **59 AUD** (not 42) |
 | gmk-2pack-add-on | Swagkeys | 2026-10-16 | geo `.json` 32 vs `.js` 44.99 (also wrong-vendor, §1) | feed holds **44.99 AUD** (not 32) |
-| gmk-masterpiece-r2 | iLumKB | 2026-10-21 | stock-only pre-order lag — site SOLD OUT vs store Origin Base 159 SGD available (recurrence of 2026-10-06) | feed resolves, **159 SGD** held, no 3rd recurrence |
+| gmk-masterpiece-r2 | Oblotzky Industries | 2026-10-22 | stock-only pre-order lag — site SOLD OUT vs store Origin Base 119 EUR available (recurrence of 2026-09-30) | feed resolves, **119 EUR** held, no 3rd recurrence |
 
 The red-cyrillic-addon recurrence (§1) is an owner item, not a self-heal, so it is
 not watched; it is tracked in §1 and the client-reported log until the owner
@@ -2644,7 +2672,8 @@ _None — all client-recommended values have been verified (see audit below)._
 | 2026-10-19 | gmk-motif | DeskHero | 244 CAD | "Deals audit batch 23: site shows CAD 244 SOLD OUT, but the store's product.js (gmk-cyl-motif-r2-keycaps-pre-order, 'Default Title' 244.00) reports available=true (pre-order). Stock is wrong. Probe run 39187098457." (deals audit batch 23 / #222) | self-healed (stock) | ✅ resolved 2026-10-19 — stock-only pre-order lag; 244 CAD correct & undisputed (probe run 39276455063 `.js` "Default Title" 244.00 available=true); feed `244 CAD SCRAPED`, `resolvedAt=2026-10-19T05:45:24.371Z` post-submit. Price-pass owns `inStock` (#153). First report for this (set, vendor). On the Self-heal watch (§1b) — **confirmed healed 2026-10-20** (held across the nightly scrape, `resolvedAt=2026-10-20T05:05:39.096Z`), dropped from watch |
 | 2026-10-19 | gmk-masterpiece-r2 | proto[Typist] | 90.83 GBP | "Deals audit batch 23: site shows GBP 90.83 SOLD OUT, but the store's product.js ('GMK Masterpiece R2 - Origin TKL Base Kit' 90.83, and 'Roman Base Kit' 115.00) reports available=true. Stock is wrong. Probe run 39187098457." (deals audit batch 23 / #222) | self-healed (stock) | ✅ resolved 2026-10-19 — stock-only; 90.83 GBP is the correct Origin TKL base kit & undisputed (probe run 39276455063 `.js` base available=true, Roman Base 115 also available); feed `90.83 GBP SCRAPED`, `resolvedAt=2026-10-19T05:45:24.371Z` post-submit. First proto[Typist] report for this set. On the Self-heal watch (§1b) — **confirmed healed 2026-10-20** (held across a re-scrape, `resolvedAt=2026-10-19T15:12:59.919Z`), dropped from watch |
 | 2026-10-19 | gmk-2pack-add-on | Oblotzky Industries | 32 EUR | "Deals audit batch 23: site shows EUR 32 SOLD OUT, but the store's product.js (gmk-cyl-2-pack, 'Default Title' 32.00) reports available=true (pre-order open). Stock is wrong. Probe run 39187098457." (deals audit batch 23 / #222) | self-healed (stock; recurrence of 2026-10-03) | ✅ resolved 2026-10-19 — stock-only pre-order lag; 32 EUR correct & undisputed (probe run 39276455063 `.js` "Default Title" 32.00 available=true); feed `32 EUR SCRAPED`, `resolvedAt=2026-10-19T05:45:24.371Z` post-submit. **Recurrence of the 2026-10-03 stock report** on this row (id cmrz6kzz5000g04l1k542bahc), but batch 22 (#221, 2026-10-18) recorded it clean → healed between, genuine pre-order flux not a code oscillation; not in `LINK_OVERRIDES`. On the Self-heal watch (§1b) with extra attention — **confirmed healed 2026-10-20** (held across the nightly scrape, `resolvedAt=2026-10-20T05:05:39.096Z`), dropped from watch; recurrence record kept in §3, a 3rd report escalates to `needs fix` |
-| 2026-10-21 | gmk-masterpiece-r2 | iLumKB | 159 SGD | "Stock is wrong: site shows SGD 159 SOLD OUT, but the store's Origin Base variant (159 SGD, id 42466709536850) is available=true on the [Pre-Order] GMK CYL Masterpiece R2 product (probe run 39529619329). Price is correct. Recurrence of the 2026-10-06 stock report. (deals audit batch 25)" | self-healed (stock; recurrence of 2026-10-06) | ✅ resolved 2026-10-21 — stock-only pre-order lag; 159 SGD is the correct Origin Base kit & undisputed; feed `159 SGD SCRAPED`, `resolvedAt=2026-10-21T05:44:18.925Z` post-submit (2026-10-21T01:52 submit). **Recurrence of the 2026-10-06 stock report** on this exact listing (id cmq585usv027pb17d5xrwdmk0; the 2026-10-06 instance was confirmed healed 2026-10-07, so it healed between — genuine pre-order availability flux, not a code oscillation). Not in `LINK_OVERRIDES`; price pass owns `inStock` one-directionally (#153). On the Self-heal watch (§1b) with extra attention — a 3rd stock report on this row escalates to `needs fix`, whose only lever is a catalog decision (delink the pre-order iLumKB listing), since no scraper fix can stop the store toggling its pre-order variant's availability |
+| 2026-10-21 | gmk-masterpiece-r2 | iLumKB | 159 SGD | "Stock is wrong: site shows SGD 159 SOLD OUT, but the store's Origin Base variant (159 SGD, id 42466709536850) is available=true on the [Pre-Order] GMK CYL Masterpiece R2 product (probe run 39529619329). Price is correct. Recurrence of the 2026-10-06 stock report. (deals audit batch 25)" | self-healed (stock; recurrence of 2026-10-06) | ✅ resolved 2026-10-21 — stock-only pre-order lag; 159 SGD is the correct Origin Base kit & undisputed; feed `159 SGD SCRAPED`, `resolvedAt=2026-10-21T05:44:18.925Z` post-submit (2026-10-21T01:52 submit). **Recurrence of the 2026-10-06 stock report** on this exact listing (id cmq585usv027pb17d5xrwdmk0; the 2026-10-06 instance was confirmed healed 2026-10-07, so it healed between — genuine pre-order availability flux, not a code oscillation). Not in `LINK_OVERRIDES`; price pass owns `inStock` one-directionally (#153). On the Self-heal watch (§1b) with extra attention — a 3rd stock report on this row escalates to `needs fix`, whose only lever is a catalog decision (delink the pre-order iLumKB listing), since no scraper fix can stop the store toggling its pre-order variant's availability. **Confirmed healed 2026-10-22** (feed `159 SGD SCRAPED`, `resolvedAt=2026-10-22T05:10:08.167Z` post-submit; no 3rd iLumKB recurrence), dropped from watch |
+| 2026-10-22 | gmk-masterpiece-r2 | Oblotzky Industries | 119 EUR | "Stock wrong: site shows EUR 119 SOLD OUT, but the store's product (oblotzky.industries/products/gmk-cyl-masterpiece-r2) has variant 'Origin Base' EUR 119.00 available=true (Roman Base 139 also available). Checked 2026-10-22 by the released deals audit (run 39707683937, probe 39708102464)." (deals audit batch 26 / #225) | self-healed (stock; recurrence of 2026-09-30) | ✅ resolved 2026-10-22 — stock-only pre-order lag; 119 EUR is the correct Origin Base kit & undisputed (Roman Base 139 is a dearer variant the picker correctly does not pick); feed `119 EUR SCRAPED`, `resolvedAt=2026-10-22T05:46:02.757Z` post-submit (2026-10-22T01:53 submit). **Recurrence of the 2026-09-30 stock report** on this listing (id cmq585usp027mb17dvclhj7u5; the 2026-09-30 instance was confirmed healed 2026-10-01, and the 2026-07-18 pre-order-link report earlier still, so it healed between — genuine pre-order availability flux, not a code oscillation). Not in `LINK_OVERRIDES`; price pass owns `inStock` one-directionally (#153). On the Self-heal watch (§1b) with extra attention — a 3rd stock report on this row escalates to `needs fix`, whose only lever is a catalog decision (delink the pre-order Oblotzky listing), since no scraper fix can stop the store toggling its pre-order variant's availability |
 
 ## 4. Listing-flag triage (visitor inbox — `ListingReport`)
 
@@ -2786,7 +2815,8 @@ uploaded 2 builds but the mai…") — left for the owner.
 | 2026-10-19 | gmk-motif | DeskHero | 244 CAD | self-healed (stock) | Stock-only: deals audit batch 23 saw the tracker SOLD OUT while deskhero.ca's `product.js` has the base kit available (pre-order). Probe run 39276455063 read the `.js` shelf endpoint — "Default Title" 244.00 CAD, `available=true`, tags ["Keycaps","Pre-order"]. The stored 244 CAD is the correct shelf price (the geo `.json` served the runner 174 — NOT stored, so the `.js`/localization override landed; this is NOT the SwitchKeys geo bug). Price undisputed; purely availability. Price pass owns `inStock` one-directionally (#153), next scrape flips it. Not in `LINK_OVERRIDES` → no Ktechs-style re-assertion cause. First report for this (set, vendor) | ✅ resolved (self-healed, probe-confirmed); **confirmed healed 2026-10-20** (held across the nightly scrape), dropped from watch |
 | 2026-10-19 | gmk-masterpiece-r2 | proto[Typist] | 90.83 GBP | self-healed (stock) | Stock-only: deals audit batch 23 saw SOLD OUT while prototypist.net's `product.js` has the base available. Probe run 39276455063 `.js`: "GMK Masterpiece R2 - Origin TKL Base Kit" 90.83 GBP `available=true`, "Roman Base Kit" 115.00 `available=true` (plus spacebars/numpad subkits). Stored 90.83 GBP = the Origin TKL base kit, a correct base (the geo `.json` served 124/157 — not stored). Reporter disputed only stock, not price. #153 inStock ownership heals the display; not in `LINK_OVERRIDES`. First proto[Typist] report for this set | ✅ resolved (self-healed, probe-confirmed); **confirmed healed 2026-10-20** (held across a re-scrape), dropped from watch |
 | 2026-10-19 | gmk-2pack-add-on | Oblotzky Industries | 32 EUR | self-healed (stock; recurrence) | Stock-only pre-order lag: deals audit batch 23 saw SOLD OUT while oblotzky.industries' `product.js` has the base available (pre-order). Probe run 39276455063 `.js`: "Default Title" 32.00 EUR `available=true`, tags ["pre-order"]. Stored 32 EUR correct (geo `.json` 26.89 not stored). **Recurrence of the 2026-10-03 stock report** on this exact row (id cmrz6kzz5000g04l1k542bahc) — but the deals-audit batch 22 (#221, 2026-10-18) recorded this listing clean, so it healed after 2026-10-03 and the sold-out/available discrepancy reappeared: genuine pre-order stock flux + scrape lag, not a code-caused oscillation. Not in `LINK_OVERRIDES` (the one proven false-stock-heal cause). Watched with extra attention; a third stock report or the stored value going actually wrong escalates it to `needs fix` | ✅ resolved (self-healed, probe-confirmed); **confirmed healed 2026-10-20** (held across the nightly scrape), dropped from watch; recurrence record kept in §3 |
-| 2026-10-21 | gmk-masterpiece-r2 | iLumKB | 159 SGD | self-healed (stock; recurrence) | Stock-only pre-order lag: deals audit batch 25 (#224) saw the tracker SOLD OUT while ilumkb.com's `[Pre-Order] GMK CYL Masterpiece R2` has its "Origin Base" variant (159 SGD, id 42466709536850) `available=true` (probe run 39529619329). The stored 159 SGD IS that Origin Base kit — a correct base, undisputed by the reporter ("Price is correct"). **Recurrence of the 2026-10-06 stock report** on this exact listing (id cmq585usv027pb17d5xrwdmk0); that instance was confirmed healed 2026-10-07, so the sold-out/available discrepancy reappeared and self-resolved again (feed `resolvedAt=2026-10-21T05:44:18.925Z`, post-submit). Genuine store-side pre-order availability flux + one-scrape lag, not a code-caused oscillation: the price pass owns `inStock` one-directionally (#153) and the listing is NOT in `LINK_OVERRIDES` (the one proven false-stock-heal cause; confirmed absent — iLumKB carries only a region/currency mapping + seeded vendor row). No scraper code change applies — the store toggles the pre-order variant's availability and we track it on the next availability scrape. Watched with extra attention; a 3rd stock report escalates to `needs fix`, whose only lever is a catalog decision (delink the pre-order listing), which needs production DB access → owner. (A 2026-07-18 pre-order-link complaint on the same listing resolved earlier as a link issue.) | ✅ resolved (self-healed, probe-confirmed via batch 25); on the Self-heal watch (§1b) for 2026-10-22 confirmation |
+| 2026-10-21 | gmk-masterpiece-r2 | iLumKB | 159 SGD | self-healed (stock; recurrence) | Stock-only pre-order lag: deals audit batch 25 (#224) saw the tracker SOLD OUT while ilumkb.com's `[Pre-Order] GMK CYL Masterpiece R2` has its "Origin Base" variant (159 SGD, id 42466709536850) `available=true` (probe run 39529619329). The stored 159 SGD IS that Origin Base kit — a correct base, undisputed by the reporter ("Price is correct"). **Recurrence of the 2026-10-06 stock report** on this exact listing (id cmq585usv027pb17d5xrwdmk0); that instance was confirmed healed 2026-10-07, so the sold-out/available discrepancy reappeared and self-resolved again (feed `resolvedAt=2026-10-21T05:44:18.925Z`, post-submit). Genuine store-side pre-order availability flux + one-scrape lag, not a code-caused oscillation: the price pass owns `inStock` one-directionally (#153) and the listing is NOT in `LINK_OVERRIDES` (the one proven false-stock-heal cause; confirmed absent — iLumKB carries only a region/currency mapping + seeded vendor row). No scraper code change applies — the store toggles the pre-order variant's availability and we track it on the next availability scrape. Watched with extra attention; a 3rd stock report escalates to `needs fix`, whose only lever is a catalog decision (delink the pre-order listing), which needs production DB access → owner. (A 2026-07-18 pre-order-link complaint on the same listing resolved earlier as a link issue.) | ✅ resolved (self-healed, probe-confirmed via batch 25); **confirmed healed 2026-10-22** (feed `159 SGD SCRAPED`, `resolvedAt=2026-10-22T05:10:08.167Z` post-submit; no 3rd iLumKB recurrence), dropped from watch |
+| 2026-10-22 | gmk-masterpiece-r2 | Oblotzky Industries | 119 EUR | self-healed (stock; recurrence) | Stock-only pre-order lag: deals audit batch 26 (#225) saw the tracker SOLD OUT while oblotzky.industries/products/gmk-cyl-masterpiece-r2 has its "Origin Base" variant 119.00 EUR `available=true` (Roman Base 139.00 also available; probe 39708102464, audit run 39707683937). The stored 119 EUR IS that Origin Base kit — a correct base, undisputed by the reporter ("Price is correct"); the dearer Roman Base 139 is not picked, so no wrong-variant issue. **Recurrence of the 2026-09-30 stock report** on this exact listing (id cmq585usp027mb17dvclhj7u5); that instance was confirmed healed 2026-10-01 (and a 2026-07-18 pre-order-link complaint earlier still), so the sold-out/available discrepancy reappeared and self-resolved again (feed `resolvedAt=2026-10-22T05:46:02.757Z`, post-submit). Genuine store-side pre-order availability flux + one-scrape lag, not a code-caused oscillation: the price pass owns `inStock` one-directionally (#153) and the listing is NOT in `LINK_OVERRIDES` (the one proven false-stock-heal cause). No scraper code change applies — the store toggles the pre-order variant's availability and we track it on the next availability scrape. Watched with extra attention; a 3rd stock report escalates to `needs fix`, whose only lever is a catalog decision (delink the pre-order listing), which needs production DB access → owner | ✅ resolved (self-healed, probe-confirmed via batch 26); on the Self-heal watch (§1b) for 2026-10-23 confirmation |
 
 ### Client-recommended values verified
 
