@@ -6,6 +6,8 @@ import backlog from "@/data/keycap-visualizer/keyboard-backlog.json";
 import {
   LAYOUTS,
   accentLegend,
+  availableOptions,
+  buildLayout,
   catalogProblems,
   layoutKeys,
   type DesignPack,
@@ -43,15 +45,35 @@ assert.match(problems, /pack "orphan" points at missing keycap/);
 assert.match(problems, /unknown layout "40"/);
 assert.match(problems, /keyboard "odd" needs at least one finish/);
 
-// --- Layouts: every row of a board lines up to the same width ---
+// --- Layouts: every option of every board lines up to the same width ---
 const expectedWidth: Record<LayoutId, number> = { "60": 15, "65": 16, "75": 16, tkl: 18.25, full: 22.5 };
 for (const id of Object.keys(LAYOUTS) as LayoutId[]) {
-  const { keys, width } = layoutKeys(LAYOUTS[id]);
-  assert.equal(width, expectedWidth[id], `${id} is ${expectedWidth[id]}u wide`);
-  const rows = new Map<number, number>();
-  for (const k of keys) rows.set(k.y, Math.max(rows.get(k.y) ?? 0, k.x + k.w));
-  rows.forEach((end, y) => assert.ok(end <= width, `${id} row at y=${y} fits inside the case`));
-  assert.equal(keys.filter((k) => k.legend === "Esc").length, 1, `${id} has exactly one Esc`);
+  const opts = availableOptions(id);
+  for (const bottom of opts.bottom) {
+    for (const fRow of opts.fRow.length ? opts.fRow : (["F12"] as const)) {
+      const name = `${id} ${bottom} ${fRow}`;
+      const { keys, width } = layoutKeys(buildLayout(id, { bottom, fRow }));
+      assert.equal(width, expectedWidth[id], `${name} is ${expectedWidth[id]}u wide`);
+      const rows = new Map<number, number>();
+      for (const k of keys) rows.set(k.y, Math.max(rows.get(k.y) ?? 0, k.x + k.w));
+      rows.forEach((end, y) => assert.equal(end <= width, true, `${name} row at y=${y} fits inside the case`));
+      assert.equal(keys.filter((k) => k.legend === "Esc").length, 1, `${name} has exactly one Esc`);
+      if (fRow === "F13") assert.ok(keys.some((k) => k.legend === "F13"), `${name} has F13`);
+      if (bottom === "WKL") assert.ok(!keys.some((k) => k.legend === "Win"), `${name} has no Win keys`);
+    }
+  }
+}
+assert.deepEqual(availableOptions("65").bottom, ["WK", "WKL"], "HHKB is a 60% layout only");
+assert.deepEqual(availableOptions("60").fRow, [], "no F-row options without an F-row");
+const hhkb = layoutKeys(buildLayout("60", { bottom: "HHKB" })).keys;
+assert.ok(hhkb.some((k) => k.legend === "Fn") && hhkb.some((k) => k.legend === "|"), "HHKB has split shift and | on the number row");
+assert.equal(layoutKeys(buildLayout("65", { bottom: "HHKB" })).keys.length, layoutKeys(buildLayout("65")).keys.length, "an option a form factor can't take falls back to the default");
+
+// Listed boards only offer options their layout can take.
+for (const b of catalog.keyboards) {
+  const opts = availableOptions(b.layout);
+  for (const v of b.options?.bottom ?? []) assert.ok(opts.bottom.includes(v), `${b.name}: ${v} fits a ${b.layout}`);
+  for (const v of b.options?.fRow ?? []) assert.ok(opts.fRow.includes(v), `${b.name}: ${v} fits a ${b.layout}`);
 }
 
 // --- Accent legends pick the most readable set color ---

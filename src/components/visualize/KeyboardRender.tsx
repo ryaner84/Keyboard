@@ -1,59 +1,108 @@
-import { LAYOUTS, accentLegend, isLight, layoutKeys, mix, type KeycapColors, type LayoutId } from "@/lib/keycap-visualizer";
+import { useId } from "react";
+import { accentLegend, buildLayout, isLight, layoutKeys, mix, type KeycapColors, type LayoutId, type LayoutOptions } from "@/lib/keycap-visualizer";
 
 const U = 40; // pixels per key unit
-const PAD = 16; // case border around the keys
+const SIDE = 22; // case bezel left/right
+const TOP = 24; // case bezel above the keys
+const BOTTOM = 30; // case bezel below the keys
+const FRONT = 18; // visible height of the case's front face
 
 interface KeyboardRenderProps {
   layout: LayoutId;
+  options?: Partial<LayoutOptions>;
   colors: KeycapColors;
   profile: "cherry" | "dcs";
   caseHex: string;
   legends?: boolean;
   shadow?: boolean;
+  /** Tilt the board back like a product shot. For the stage, not thumbnails. */
+  tilt?: boolean;
   label?: string;
 }
 
-// Draws a keyboard as SVG so it stays sharp from a thumbnail up to the stage.
-export function KeyboardRender({ layout, colors, profile, caseHex, legends = true, shadow = true, label }: KeyboardRenderProps) {
-  const { keys, width, height } = layoutKeys(LAYOUTS[layout]);
+// Draws a keyboard the way a product render looks rather than as a flat
+// diagram: sculpted caps (front wall, dished top, row-by-row height), a case
+// with a lit chamfer and a visible front face, the plate well tinted by the
+// finish, and a soft studio shadow. SVG, so it stays sharp at any size.
+export function KeyboardRender({ layout, options, colors, profile, caseHex, legends = true, shadow = true, tilt = false, label }: KeyboardRenderProps) {
+  const id = useId().replace(/:/g, "");
+  const { keys, width, height } = layoutKeys(buildLayout(layout, options));
   const fill = { a: colors.alpha, m: colors.mod, x: colors.accent };
   const ink = { a: colors.alphaLegend, m: colors.modLegend, x: accentLegend(colors) };
   const dcs = profile === "dcs";
-  const W = width * U + PAD * 2;
-  const H = height * U + PAD * 2;
-  const floor = shadow ? 34 : 0;
+  const W = width * U + SIDE * 2;
+  const H = height * U + TOP + BOTTOM;
+  const floor = shadow ? 40 : 4;
   const lightCase = isLight(caseHex);
+  const rowOf = (y: number) => Math.round(y);
 
-  return (
-    <svg viewBox={`0 0 ${W} ${H + floor}`} className="w-full h-auto block" role="img" aria-label={label}>
-      {shadow && (
-        <>
-          <defs>
-            <filter id="kbv-floor" x="-20%" y="-200%" width="140%" height="500%">
-              <feGaussianBlur stdDeviation="10" />
-            </filter>
-          </defs>
-          <ellipse cx={W / 2} cy={H + 10} rx={W * 0.46} ry={14} fill="rgba(17,24,39,.28)" filter="url(#kbv-floor)" />
-        </>
-      )}
-      <rect x={0} y={6} width={W} height={H} rx={18} fill={mix(caseHex, "black", lightCase ? 0.16 : 0.35)} />
+  const svg = (
+    <svg viewBox={`-6 -4 ${W + 12} ${H + FRONT + floor}`} className="w-full h-auto block" role="img" aria-label={label}>
+      <defs>
+        <linearGradient id={`${id}-case`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#fff" stopOpacity={lightCase ? 0.35 : 0.16} />
+          <stop offset="0.35" stopColor="#fff" stopOpacity="0" />
+          <stop offset="1" stopColor="#000" stopOpacity={lightCase ? 0.1 : 0.22} />
+        </linearGradient>
+        <linearGradient id={`${id}-front`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#fff" stopOpacity="0.12" />
+          <stop offset="1" stopColor="#000" stopOpacity="0.35" />
+        </linearGradient>
+        <linearGradient id={`${id}-well`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#000" stopOpacity="0.45" />
+          <stop offset="0.12" stopColor="#000" stopOpacity="0.1" />
+          <stop offset="1" stopColor="#000" stopOpacity="0" />
+        </linearGradient>
+        <linearGradient id={`${id}-wall`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#000" stopOpacity="0" />
+          <stop offset="1" stopColor="#000" stopOpacity="0.3" />
+        </linearGradient>
+        <radialGradient id={`${id}-dish`} cx="0.45" cy="0.4" r="0.7">
+          <stop offset="0" stopColor="#fff" stopOpacity="0.2" />
+          <stop offset="0.7" stopColor="#fff" stopOpacity="0.04" />
+          <stop offset="1" stopColor="#000" stopOpacity="0.08" />
+        </radialGradient>
+        {shadow && (
+          <filter id={`${id}-blur`} x="-20%" y="-100%" width="140%" height="300%">
+            <feGaussianBlur stdDeviation="12" />
+          </filter>
+        )}
+      </defs>
+
+      {shadow && <ellipse cx={W / 2} cy={H + FRONT + 4} rx={W * 0.5} ry={18} fill="rgba(17,24,39,.35)" filter={`url(#${id}-blur)`} />}
+
+      {/* Case: front face, top surface, lit chamfer */}
+      <rect x={0} y={FRONT} width={W} height={H} rx={18} fill={mix(caseHex, "black", lightCase ? 0.18 : 0.3)} />
+      <rect x={0} y={FRONT} width={W} height={H} rx={18} fill={`url(#${id}-front)`} />
       <rect x={0} y={0} width={W} height={H} rx={18} fill={caseHex} />
-      <rect x={1.5} y={1.5} width={W - 3} height={H - 3} rx={17} fill="none" stroke={mix(caseHex, "white", lightCase ? 0.5 : 0.1)} strokeOpacity={0.5} />
-      <rect x={PAD - 4} y={PAD - 4} width={width * U + 8} height={height * U + 8} rx={6} fill={mix(caseHex, "black", 0.55)} />
+      <rect x={0} y={0} width={W} height={H} rx={18} fill={`url(#${id}-case)`} />
+      <rect x={1} y={1} width={W - 2} height={H - 2} rx={17} fill="none" stroke="#fff" strokeOpacity={lightCase ? 0.7 : 0.28} strokeWidth={1.5} />
+
+      {/* Plate well: the finish, in shadow */}
+      <rect x={SIDE - 5} y={TOP - 5} width={width * U + 10} height={height * U + 10} rx={8} fill={mix(caseHex, "black", lightCase ? 0.22 : 0.45)} />
+      <rect x={SIDE - 5} y={TOP - 5} width={width * U + 10} height={height * U + 10} rx={8} fill={`url(#${id}-well)`} />
+
       {keys.map((k, i) => {
-        const x = PAD + k.x * U + 1.5;
-        const y = PAD + k.y * U + 1.5;
+        const x = SIDE + k.x * U + 1.5;
+        const y = TOP + k.y * U + 1.5;
         const w = k.w * U - 3;
         const h = k.h * U - 3;
         const base = fill[k.group];
-        const inset = dcs ? 4 : 5;
+        // Lower rows sit taller in a sculpted profile, so more front wall shows.
+        const wall = (dcs ? 7 : 8) + Math.min(rowOf(k.y), 5) * (dcs ? 0.8 : 1.1);
+        const inset = dcs ? 4 : 4.5;
+        const topW = w - inset * 2;
+        const topH = h - 2 - wall;
         const small = k.legend.length > 1;
         return (
           <g key={i}>
-            <rect x={x} y={y} width={w} height={h} rx={5} fill={mix(base, "black", isLight(base) ? 0.16 : 0.3)} />
-            <rect x={x + inset} y={y + 2} width={w - inset * 2} height={h - (dcs ? 8 : 10)} rx={dcs ? 5 : 4} fill={base} />
+            <rect x={x} y={y} width={w} height={h} rx={5} fill={mix(base, "black", isLight(base) ? 0.1 : 0.2)} />
+            <rect x={x} y={y} width={w} height={h} rx={5} fill={`url(#${id}-wall)`} />
+            <rect x={x + inset} y={y + 2} width={topW} height={topH} rx={dcs ? 5 : 4} fill={base} />
+            <rect x={x + inset} y={y + 2} width={topW} height={topH} rx={dcs ? 5 : 4} fill={`url(#${id}-dish)`} />
+            <line x1={x + inset + 3} y1={y + 2.6} x2={x + inset + topW - 3} y2={y + 2.6} stroke="#fff" strokeOpacity={0.35} strokeWidth={0.8} />
             {legends && k.legend && (
-              <text x={x + inset + 4} y={y + (small ? 13 : 15)} fontSize={small ? 8.5 : 11} fontWeight={600} fill={ink[k.group]} fontFamily="ui-sans-serif, system-ui, sans-serif">
+              <text x={x + inset + 4} y={y + (small ? 12.5 : 14.5)} fontSize={small ? 8.5 : 11} fontWeight={600} fill={ink[k.group]} fontFamily="ui-sans-serif, system-ui, sans-serif">
                 {k.legend}
               </text>
             )}
@@ -61,5 +110,12 @@ export function KeyboardRender({ layout, colors, profile, caseHex, legends = tru
         );
       })}
     </svg>
+  );
+
+  if (!tilt) return svg;
+  return (
+    <div style={{ perspective: "1600px" }}>
+      <div style={{ transform: "rotateX(24deg)", transformOrigin: "50% 100%" }}>{svg}</div>
+    </div>
   );
 }

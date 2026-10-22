@@ -46,6 +46,7 @@
       "id": "kbdfans-tofu65",
       "name": "KBDfans Tofu65 2.0",
       "layout": "65",
+      "options": { "bottom": ["WK", "WKL"] },
       "dateAdded": "2026-10-22",
       "finishes": [
         { "name": "E-white", "hex": "#EFEEEA" },
