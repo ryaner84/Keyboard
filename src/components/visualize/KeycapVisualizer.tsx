@@ -6,7 +6,18 @@ import keyboardData from "@/data/keycap-visualizer/keyboards.json";
 import packData from "@/data/keycap-visualizer/packs.json";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { KeyboardRender } from "./KeyboardRender";
-import { HEX, LAYOUTS, type DesignPack, type Finish, type KeycapSet, type VisualizerKeyboard } from "@/lib/keycap-visualizer";
+import {
+  HEX,
+  LAYOUTS,
+  availableOptions,
+  type BottomRow,
+  type DesignPack,
+  type FRow,
+  type Finish,
+  type KeycapSet,
+  type LayoutOptions,
+  type VisualizerKeyboard,
+} from "@/lib/keycap-visualizer";
 import type { GBStatus } from "@/types";
 
 /** A visualizer colorway joined with its tracker row (status, display name). */
@@ -17,6 +28,7 @@ interface Look {
   keycap: string;
   caseHex: string;
   caseName: string;
+  options?: Partial<LayoutOptions>;
 }
 
 // Board first, then its finish (a sub-option of the board, never a step of its
@@ -55,6 +67,21 @@ function closestFinish(finishes: Finish[], hex: string): Finish {
 
 const findBoard = (id: string) => KEYBOARDS.find((b) => b.id === id) ?? GENERIC.find((b) => b.id === id);
 const finishesFor = (b: VisualizerKeyboard) => b.finishes ?? GENERIC_FINISHES;
+// Layout options a board can be shown in. A listed board offers only what it
+// ships in (default first); a generic layout offers everything its form factor takes.
+function optionsFor(b: VisualizerKeyboard): { bottom: BottomRow[]; fRow: FRow[] } {
+  const all = availableOptions(b.layout);
+  if (!b.finishes) return all;
+  const fit = <T,>(list: T[] | undefined, allowed: T[], fallback: T[]) => (list ?? fallback).filter((v) => allowed.includes(v));
+  return { bottom: fit(b.options?.bottom, all.bottom, ["WK"]), fRow: fit(b.options?.fRow, all.fRow, all.fRow.length ? ["F12"] : []) };
+}
+const defaultOptions = (b: VisualizerKeyboard): Partial<LayoutOptions> => {
+  const o = optionsFor(b);
+  return { bottom: o.bottom[0], fRow: o.fRow[0] };
+};
+const optionsLabel = (b: VisualizerKeyboard, o?: Partial<LayoutOptions>) =>
+  [o?.bottom ?? "WK", availableOptions(b.layout).fRow.length ? o?.fRow ?? "F12" : null].filter(Boolean).join(" · ");
+
 const isNew = (date?: string) => !!date && (Date.now() - new Date(date).getTime()) / 864e5 <= NEW_DAYS;
 
 function finishName(board: VisualizerKeyboard, hex: string) {
@@ -92,6 +119,7 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
     keycap: (sets.find((s) => s.slug === initialSlug) ?? sets[0])?.id ?? "",
     caseHex: first.finishes![0].hex,
     caseName: first.finishes![0].name,
+    options: defaultOptions(first),
   });
   const [step, setStep] = useState<Step>("keyboard");
   const [family, setFamily] = useState<Family>("All");
@@ -136,7 +164,7 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
   const chooseBoard = (b: VisualizerKeyboard) => {
     const finishes = finishesFor(b);
     const keep = finishes.find((f) => f.hex.toLowerCase() === look.caseHex.toLowerCase());
-    setLook({ ...look, board: b.id, caseHex: keep?.hex ?? finishes[0].hex, caseName: keep?.name ?? finishes[0].name });
+    setLook({ ...look, board: b.id, caseHex: keep?.hex ?? finishes[0].hex, caseName: keep?.name ?? finishes[0].name, options: defaultOptions(b) });
     setPack(null);
   };
 
@@ -190,7 +218,7 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
         <div className="rounded-2xl border border-gray-100 dark:border-gray-800 bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-950 overflow-hidden">
           <div className="px-4 sm:px-8 pt-6 pb-4 text-center">
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-              {board.name} · {LAYOUTS[board.layout].label}
+              {board.name} · {LAYOUTS[board.layout].label} · {optionsLabel(board, look.options)}
             </p>
             <h3 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight mt-1">{caps.name}</h3>
             <div className="flex items-center justify-center gap-2 mt-2 min-h-[26px]">
@@ -207,9 +235,11 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
             <div className="max-w-4xl mx-auto mt-5 transition-opacity">
               <KeyboardRender
                 layout={board.layout}
+                options={look.options}
                 colors={caps.colors}
                 profile={caps.profile}
                 caseHex={look.caseHex}
+                tilt
                 label={`${caps.name} on ${board.name}`}
               />
             </div>
@@ -263,6 +293,7 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
                           <div className="rounded-xl bg-gray-50 dark:bg-gray-800 p-2">
                             <KeyboardRender
                               layout={b.layout}
+                              options={selected ? look.options : defaultOptions(b)}
                               colors={caps.colors}
                               profile={caps.profile}
                               caseHex={selected ? look.caseHex : b.finishes ? b.finishes[0].hex : look.caseHex}
@@ -294,12 +325,48 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
                     <div className="mt-3 rounded-2xl border border-indigo-100 dark:border-indigo-900 bg-indigo-50/50 dark:bg-indigo-950/30 p-4">
                       <div className="flex items-baseline justify-between flex-wrap gap-2 mb-3">
                         <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                          {board.finishes ? `${board.name} — choose a finish` : `${board.name} — choose a case color`}
+                          {board.name} — choose layout and {board.finishes ? "finish" : "case color"}
                         </p>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                          {board.finishes ? "Official finishes only" : "Presets or any HEX color"}
+                          {board.finishes ? "Only what this board ships in" : "Any layout option, presets or any HEX color"}
                         </p>
                       </div>
+                      {(() => {
+                        const opts = optionsFor(board);
+                        const groups: Array<{ key: keyof LayoutOptions; label: string; values: string[] }> = [
+                          { key: "bottom", label: "Bottom row", values: opts.bottom },
+                          { key: "fRow", label: "Function row", values: opts.fRow },
+                        ];
+                        const choosable = groups.filter((g) => g.values.length > 1);
+                        if (!choosable.length) {
+                          return (
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                              Layout: ships as <span className="font-semibold text-gray-700 dark:text-gray-200">{optionsLabel(board, look.options)}</span>
+                            </p>
+                          );
+                        }
+                        return (
+                          <div className="flex flex-wrap gap-x-6 gap-y-3 mb-4">
+                            {choosable.map((g) => (
+                              <div key={g.key}>
+                                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">{g.label}</p>
+                                <div className="inline-flex rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-1 gap-1">
+                                  {g.values.map((v) => (
+                                    <button
+                                      key={v}
+                                      onClick={() => setLook({ ...look, options: { ...look.options, [g.key]: v } })}
+                                      className={pill((look.options?.[g.key] ?? g.values[0]) === v)}
+                                    >
+                                      {v}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">{board.finishes ? "Finish" : "Case color"}</p>
                       <div className="flex flex-wrap gap-4">
                         {finishesFor(board).map((f) => {
                           const active = f.hex.toLowerCase() === look.caseHex.toLowerCase();
@@ -466,6 +533,7 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
                     <div className="rounded-xl bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 p-3">
                       <KeyboardRender
                         layout={b.layout}
+                        options={sameBoard ? look.options : l.options}
                         colors={s.colors}
                         profile={s.profile}
                         caseHex={sameBoard ? look.caseHex : l.caseHex}
@@ -477,7 +545,7 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
                       <div className="min-w-0">
                         <p className="font-semibold text-gray-900 dark:text-white truncate">{s.name}</p>
                         <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                          {b.name} · {sameBoard ? look.caseName : l.caseName}
+                          {b.name} · {optionsLabel(b, sameBoard ? look.options : l.options)} · {sameBoard ? look.caseName : l.caseName}
                         </p>
                       </div>
                       {s.status && <StatusBadge status={s.status} size="sm" />}

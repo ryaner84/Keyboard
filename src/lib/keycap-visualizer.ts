@@ -54,6 +54,8 @@ export interface VisualizerKeyboard {
   layout: LayoutId;
   dateAdded?: string;
   finishes?: Finish[];
+  /** Layout options this board ships in, default first. Omitted = defaults only (generic layouts allow every option). */
+  options?: { bottom?: BottomRow[]; fRow?: FRow[] };
 }
 
 export interface DesignPack {
@@ -66,41 +68,90 @@ export interface DesignPack {
 }
 
 const alphas = (chars: string): KeySpec[] => chars.split("").map((c) => [1, "a", c]);
-const fRow = (from: number): KeySpec[] =>
-  Array.from({ length: 4 }, (_, i) => [1, from === 5 ? "a" : "m", `F${from + i}`]);
-const numberRow = (): RowItem[] => [[1, "x", "Esc"], ...alphas("1234567890-="), [2, "m", "Backspace"]];
-const tabRow = (): RowItem[] => [[1.5, "m", "Tab"], ...alphas("QWERTYUIOP[]"), [1.5, "m", "\\"]];
-const capsRow = (): RowItem[] => [[1.75, "m", "Caps"], ...alphas("ASDFGHJKL;'"), [2.25, "x", "Enter"]];
+const fKeys = (from: number, to: number): KeySpec[] =>
+  Array.from({ length: to - from + 1 }, (_, i) => [1, (from + i) >= 5 && (from + i) <= 8 ? "a" : "m", `F${from + i}`]);
 // Boards with an F-row move Esc up there, so their number row starts with ~.
 const tilde: KeySpec = [1, "m", "~"];
 
-const sixty: Row[] = [
-  numberRow(),
-  tabRow(),
-  capsRow(),
-  [[2.25, "m", "Shift"], ...alphas("ZXCVBNM,./"), [2.75, "m", "Shift"]],
-  [[1.25, "m", "Ctrl"], [1.25, "m", "Win"], [1.25, "m", "Alt"], [6.25, "a", ""], [1.25, "m", "Alt"], [1.25, "m", "Win"], [1.25, "m", "Menu"], [1.25, "m", "Ctrl"]],
-];
+// Layout options, named the way the collection pages (and secondhand
+// listings) name them. The first value of each is the default.
+export const BOTTOM_ROWS = ["WK", "WKL", "HHKB"] as const;
+export const F_ROWS = ["F12", "F13"] as const;
+export type BottomRow = (typeof BOTTOM_ROWS)[number];
+export type FRow = (typeof F_ROWS)[number];
+export interface LayoutOptions {
+  bottom: BottomRow;
+  fRow: FRow;
+}
+export const DEFAULT_OPTIONS: LayoutOptions = { bottom: "WK", fRow: "F12" };
 
-const sixtyFive: Row[] = [
-  [...numberRow(), [1, "m", "Del"]],
-  [...tabRow(), [1, "m", "PgUp"]],
-  [...capsRow(), [1, "m", "PgDn"]],
-  [[2.25, "m", "Shift"], ...alphas("ZXCVBNM,./"), [1.75, "m", "Shift"], [1, "x", "↑"], [1, "m", "End"]],
-  [[1.25, "m", "Ctrl"], [1.25, "m", "Win"], [1.25, "m", "Alt"], [6.25, "a", ""], [1, "m", "Alt"], [1, "m", "Fn"], [1, "m", "Ctrl"], [1, "x", "←"], [1, "x", "↓"], [1, "x", "→"]],
-];
+/** Which options a form factor can take at all: HHKB is a 60% layout, and only boards with an F-row have F12/F13. */
+export function availableOptions(id: LayoutId): { bottom: BottomRow[]; fRow: FRow[] } {
+  return {
+    bottom: id === "60" ? [...BOTTOM_ROWS] : ["WK", "WKL"],
+    fRow: id === "60" || id === "65" ? [] : [...F_ROWS],
+  };
+}
 
-const seventyFive: Row[] = [
-  [[1, "x", "Esc"], 0.5, ...fRow(1), 0.5, ...fRow(5), 0.5, ...fRow(9), 0.5, [1, "m", "Del"]],
-  { gap: 0.25 },
-  ...sixtyFive.map((row, i) => {
-    const items = row as RowItem[];
-    if (i > 2) return items;
-    const copy = items.slice(0, -1);
-    if (i === 0) copy[0] = tilde;
-    return [...copy, [1, "m", ["Home", "PgUp", "PgDn"][i]] as KeySpec];
-  }),
-];
+// Rows 1–4 of the alpha block, 15u wide. HHKB moves | and ~ onto the number
+// row, shrinks Backspace to 1.5u, puts Control where Caps is and splits right
+// Shift for Fn.
+function alphaBlock(bottom: BottomRow, fRowAbove: boolean): RowItem[][] {
+  if (bottom === "HHKB") {
+    return [
+      [[1, "x", "Esc"], ...alphas("1234567890-="), [1, "m", "|"], [1, "m", "~"]],
+      [[1.5, "m", "Tab"], ...alphas("QWERTYUIOP[]"), [1.5, "m", "BS"]],
+      [[1.75, "m", "Ctrl"], ...alphas("ASDFGHJKL;'"), [2.25, "x", "Enter"]],
+      [[2.25, "m", "Shift"], ...alphas("ZXCVBNM,./"), [1.75, "m", "Shift"], [1, "m", "Fn"]],
+    ];
+  }
+  return [
+    [fRowAbove ? tilde : [1, "x", "Esc"], ...alphas("1234567890-="), [2, "m", "Backspace"]],
+    [[1.5, "m", "Tab"], ...alphas("QWERTYUIOP[]"), [1.5, "m", "\\"]],
+    [[1.75, "m", "Caps"], ...alphas("ASDFGHJKL;'"), [2.25, "x", "Enter"]],
+    [[2.25, "m", "Shift"], ...alphas("ZXCVBNM,./"), [2.75, "m", "Shift"]],
+  ];
+}
+
+// The 15u bottom row of a 60% (also the left of TKL and full size).
+function bottom60(bottom: BottomRow): RowItem[] {
+  if (bottom === "HHKB") return [1.5, [1, "m", "Alt"], [1.5, "m", "◇"], [7, "a", ""], [1.5, "m", "◇"], [1, "m", "Alt"], 1.5];
+  if (bottom === "WKL") return [[1.5, "m", "Ctrl"], 1, [1.5, "m", "Alt"], [7, "a", ""], [1.5, "m", "Alt"], 1, [1.5, "m", "Ctrl"]];
+  return [[1.25, "m", "Ctrl"], [1.25, "m", "Win"], [1.25, "m", "Alt"], [6.25, "a", ""], [1.25, "m", "Alt"], [1.25, "m", "Win"], [1.25, "m", "Menu"], [1.25, "m", "Ctrl"]];
+}
+
+// 65% and 75%: the 13u left of the bottom row beside the arrow cluster.
+function bottom65(bottom: BottomRow): RowItem[] {
+  const arrows: KeySpec[] = [[1, "x", "←"], [1, "x", "↓"], [1, "x", "→"]];
+  if (bottom === "WKL") return [[1.5, "m", "Ctrl"], 1, [1.5, "m", "Alt"], [7, "a", ""], [1.5, "m", "Alt"], 0.5, ...arrows];
+  return [[1.25, "m", "Ctrl"], [1.25, "m", "Win"], [1.25, "m", "Alt"], [6.25, "a", ""], [1, "m", "Alt"], [1, "m", "Fn"], [1, "m", "Ctrl"], ...arrows];
+}
+
+function sixtyFiveRows(o: LayoutOptions, fRowAbove: boolean): Row[] {
+  const [r1, r2, r3] = alphaBlock("WK", fRowAbove);
+  const right = fRowAbove ? ["Home", "PgUp", "PgDn"] : ["Del", "PgUp", "PgDn"];
+  return [
+    [...r1, [1, "m", right[0]]],
+    [...r2, [1, "m", right[1]]],
+    [...r3, [1, "m", right[2]]],
+    [[2.25, "m", "Shift"], ...alphas("ZXCVBNM,./"), [1.75, "m", "Shift"], [1, "x", "↑"], [1, "m", "End"]],
+    bottom65(o.bottom),
+  ];
+}
+
+// The F-row of a 75%: F12 spaces three blocks of four; F13 fills the gaps
+// with a thirteenth key, as on most 75% F13 boards.
+function fRow75(f: FRow): RowItem[] {
+  if (f === "F13") return [[1, "x", "Esc"], ...fKeys(1, 13), [1, "m", "Del"]];
+  return [[1, "x", "Esc"], 0.5, ...fKeys(1, 4), 0.5, ...fKeys(5, 8), 0.5, ...fKeys(9, 12), 0.5, [1, "m", "Del"]];
+}
+
+// The 18.25u F-row of TKL and full size, cluster keys included.
+function fRowTkl(f: FRow): RowItem[] {
+  const cluster: RowItem[] = [0.25, [1, "m", "PrtSc"], [1, "m", "ScrLk"], [1, "m", "Pause"]];
+  if (f === "F13") return [[1, "x", "Esc"], 0.25, ...fKeys(1, 4), 0.25, ...fKeys(5, 8), 0.25, ...fKeys(9, 12), 0.25, ...fKeys(13, 13), ...cluster];
+  return [[1, "x", "Esc"], 1, ...fKeys(1, 4), 0.5, ...fKeys(5, 8), 0.5, ...fKeys(9, 12), ...cluster];
+}
 
 const navCluster: RowItem[][] = [
   [[1, "m", "Ins"], [1, "m", "Home"], [1, "m", "PgUp"]],
@@ -110,12 +161,6 @@ const navCluster: RowItem[][] = [
   [[1, "x", "←"], [1, "x", "↓"], [1, "x", "→"]],
 ];
 
-const tklFRow: RowItem[] = [[1, "x", "Esc"], 1, ...fRow(1), 0.5, ...fRow(5), 0.5, ...fRow(9), 0.25, [1, "m", "PrtSc"], [1, "m", "ScrLk"], [1, "m", "Pause"]];
-const tklMain: RowItem[][] = sixty.map((row, i) => {
-  const items = row as RowItem[];
-  return [...(i === 0 ? [tilde, ...items.slice(1)] : items), 0.25, ...navCluster[i]];
-});
-
 const numpad: RowItem[][] = [
   [[1, "m", "Num"], [1, "m", "/"], [1, "m", "*"], [1, "m", "-"]],
   [...alphas("789"), [1, "m", "+", 2]],
@@ -124,15 +169,41 @@ const numpad: RowItem[][] = [
   [[2, "a", "0"], [1, "a", "."], 1],
 ];
 
+function tklMain(o: LayoutOptions): RowItem[][] {
+  return [...alphaBlock("WK", true), bottom60(o.bottom)].map((row, i) => [...row, 0.25, ...navCluster[i]]);
+}
+
+const LABELS: Record<LayoutId, string> = { "60": "60%", "65": "65%", "75": "75%", tkl: "TKL", full: "Full size" };
+
+/** The keys of a form factor with the given options. Options a form factor can't take fall back to the default. */
+export function buildLayout(id: LayoutId, options: Partial<LayoutOptions> = {}): Layout {
+  const allowed = availableOptions(id);
+  const o: LayoutOptions = {
+    bottom: allowed.bottom.includes(options.bottom as BottomRow) ? (options.bottom as BottomRow) : "WK",
+    fRow: allowed.fRow.includes(options.fRow as FRow) ? (options.fRow as FRow) : "F12",
+  };
+  const label = LABELS[id];
+  switch (id) {
+    case "60":
+      return { label, rows: [...alphaBlock(o.bottom, false), bottom60(o.bottom)] };
+    case "65":
+      return { label, rows: sixtyFiveRows(o, false) };
+    case "75":
+      return { label, rows: [fRow75(o.fRow), { gap: 0.25 }, ...sixtyFiveRows(o, true)] };
+    case "tkl":
+      return { label, rows: [fRowTkl(o.fRow), { gap: 0.25 }, ...tklMain(o)] };
+    case "full":
+      return { label, rows: [[...fRowTkl(o.fRow), 4.25], { gap: 0.25 }, ...tklMain(o).map((row, i) => [...row, 0.25, ...numpad[i]])] };
+  }
+}
+
+/** Default-option layouts, for labels and anything that doesn't care about options. */
 export const LAYOUTS: Record<LayoutId, Layout> = {
-  "60": { label: "60%", rows: sixty },
-  "65": { label: "65%", rows: sixtyFive },
-  "75": { label: "75%", rows: seventyFive },
-  tkl: { label: "TKL", rows: [tklFRow, { gap: 0.25 }, ...tklMain] },
-  full: {
-    label: "Full size",
-    rows: [[...tklFRow, 4.25], { gap: 0.25 }, ...tklMain.map((row, i) => [...row, 0.25, ...numpad[i]])],
-  },
+  "60": buildLayout("60"),
+  "65": buildLayout("65"),
+  "75": buildLayout("75"),
+  tkl: buildLayout("tkl"),
+  full: buildLayout("full"),
 };
 
 export function layoutKeys(layout: Layout): { keys: PlacedKey[]; width: number; height: number } {
