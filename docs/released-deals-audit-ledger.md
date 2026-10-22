@@ -14,7 +14,7 @@ to the start.
 
 `after_slug` for the next run: **`gmk-zm`**
 
-The list held 44 on-sale sets on 2026-10-21, fewer than one batch, so the run
+The list held 44 on-sale sets on 2026-10-22, fewer than one batch, so the run
 read all of them (`dcs-chladni … gmk-zm`). The next run wraps to the
 start again; if the list grows past 50, it continues from the top.
 
@@ -47,6 +47,7 @@ start again; if the list grows past 50, it continues from the top.
 | 2026-10-19 | dcs-chladni … gmk-zm (whole list; the cursor sat at the end, so one run from the start) | 46 | 241 | 11 flagged → 3 confirmed | 3 (price-report button) | [39186926906](https://github.com/ryaner84/Keyboard/actions/runs/39186926906) (reports: [39187154870](https://github.com/ryaner84/Keyboard/actions/runs/39187154870)) |
 | 2026-10-20 | dcs-chladni … gmk-zm (whole list; the cursor sat at the end, so one run from the start) | 45 | 232 | 8 flagged → 0 confirmed | 0 | [39355365349](https://github.com/ryaner84/Keyboard/actions/runs/39355365349) |
 | 2026-10-21 | dcs-chladni … gmk-zm (whole list; the cursor sat at the end, so one run from the start) | 44 | 231 | 9 flagged → 1 confirmed | 1 (price-report button) | [39529299083](https://github.com/ryaner84/Keyboard/actions/runs/39529299083) (reports: [39529762462](https://github.com/ryaner84/Keyboard/actions/runs/39529762462)) |
+| 2026-10-22 | dcs-chladni … gmk-zm (whole list; the cursor sat at the end, so one run from the start) | 44 | 233 | 9 flagged → 1 confirmed | 1 (price-report button) | [39707683937](https://github.com/ryaner84/Keyboard/actions/runs/39707683937) (reports: [39708249986](https://github.com/ryaner84/Keyboard/actions/runs/39708249986)) |
 
 ### 2026-09-26 findings
 
@@ -799,6 +800,36 @@ day). This is the second time gmk-masterpiece-r2 × iLumKB has gone sold out
 while the pre-order is buyable. Like the batch-23 rows, it looks like a price
 pass wrote `inStock = false` while the store's `.js` says the variant is
 available.
+
+Items still waiting on the owner, unchanged and not refiled: gmk-2pack-add-on ×
+Swagkeys (a switchkeys.com.au listing on the wrong vendor row; its price and
+stock are right), gmk-finer-things / gmk-cyl-finer-things-r2-keycaps (Mecha MY
++ Mecha.store), and gh-116846 × iLumKB (opened-box price, SGD 79.5).
+
+### 2026-10-22 findings
+
+There are 44 sets on sale (the same as yesterday). The cursor (`gmk-zm`) was
+the last slug, so a single run from the start
+([39707683937](https://github.com/ryaner84/Keyboard/actions/runs/39707683937))
+read the whole list: 233 listings, 9 flagged. Eight are the known items. The
+ninth is new today. The **Vendor probe**
+([39708102464](https://github.com/ryaner84/Keyboard/actions/runs/39708102464))
+confirmed it, and it was filed through the price-report button
+([39708249986](https://github.com/ryaner84/Keyboard/actions/runs/39708249986)):
+
+| set | vendor | site | store (product.js) | verdict | filed |
+|---|---|---|---|---|---|
+| gmk-masterpiece-r2 | Oblotzky Industries | EUR 119, **sold out** | `gmk-cyl-masterpiece-r2`: Origin Base 119.00 **available** (Roman Base 139 also available; only the deskmats are sold out) | stock: the site hides a kit you can buy | price report |
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+| gmk-yuri-r2 / gmk-dots-r2 (NovelKeys), gmk-dots-r2 / gmk-botanical-r2 (Oblotzky), gmk-wasabi-r2 (SwitchKeys), gmk-zm (Mekibo), gmk-finer-things (CannonKeys) | — | — | renamed handles redirect to the same product and price | stale handle in URL (as before) | — |
+
+Everything else matched the store on price, markdown and stock. Yesterday's
+report has **healed**: gmk-masterpiece-r2 × iLumKB now reads SGD 159 in stock,
+matching the store. gmk-masterpiece-r2 is now the set with the most stock
+reports: proto[Typist] (2026-10-19), iLumKB (2026-10-06, 2026-10-21) and now
+Oblotzky. Every one was a buyable pre-order or base kit shown sold out, then
+healed by the next price pass. That points to the price pass sometimes reading
+this product's variants as unavailable, not to the stores.
 
 Items still waiting on the owner, unchanged and not refiled: gmk-2pack-add-on ×
 Swagkeys (a switchkeys.com.au listing on the wrong vendor row; its price and
