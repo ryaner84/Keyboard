@@ -22,6 +22,9 @@ real sets) and runs in CI.
 1. Start from an up-to-date `main`: `git switch main && git pull`.
 2. Branch: `visualizer/keycap-<slug>` or `visualizer/keyboard-<id>`.
 3. Make the one change the routine describes. One set or one keyboard per run.
+   Add the entry by editing the file in place, in the style of its existing
+   entries. Never load and re-serialize the whole JSON: that reformats every
+   line, and the PR diff can no longer be reviewed.
 4. `npm run test:keycap-visualizer` and `npx tsc --noEmit` must pass.
 5. Commit, push, open a PR **ready for review** (never draft), and squash-merge
    once CI is green, as `CLAUDE.md` says. Title: `Visualizer: add <name>`.
