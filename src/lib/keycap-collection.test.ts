@@ -20,6 +20,7 @@ const baseDetails: CollectionItemDetails = {
   plateType: null,
   mountType: null,
   pcbType: null,
+  buildName: null,
   layoutVariant: null,
   buildDetails: null,
   notes: "Legacy purchase",

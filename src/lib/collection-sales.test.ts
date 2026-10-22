@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   EMPTY_UNIT,
+  buildLabel,
   buildStatus,
   calculateCollectionSales,
   compareBuilds,
@@ -25,6 +26,7 @@ const BASE_COLLECTION: CollectionItemDetails = {
   plateType: null,
   mountType: null,
   pcbType: null,
+  buildName: null,
   layoutVariant: null,
   buildDetails: null,
   notes: null,
@@ -122,6 +124,7 @@ const twoBuilds = calculateCollectionSales(
           plateType: null,
           mountType: null,
           pcbType: null,
+          buildName: null,
           layoutVariant: null,
           buildDetails: null,
           notes: null,
@@ -568,6 +571,17 @@ assert.equal(compareBuilds([unit({ imageUrl: "data:image/png;base64,x" }), unit(
   assert.equal(ny.rows[0].acquiredYear, 2025, "Jan 1 is not the previous year west of UTC");
   assert.equal(ny.rows[1].soldYear, 2025);
 }
+
+// Build names: the owner's name wins, blank falls back to the position.
+assert.equal(buildLabel(unit({ buildName: "Daily driver" }), 2), "Daily driver");
+assert.equal(buildLabel(unit({ buildName: "  Brass   build " }), 0), "Brass build", "trimmed and collapsed");
+assert.equal(buildLabel(unit({ buildName: "   " }), 4), "Build 5", "whitespace is no name");
+assert.equal(buildLabel(unit({ buildName: null }), 0), "Build 1");
+assert.equal(buildLabel(undefined, 1), "Build 2", "a missing build still has a label");
+const named = compareBuilds([unit({ buildName: "Daily driver" }), unit({})]);
+assert.equal(named.rows[0].label, "Daily driver");
+assert.equal(named.rows[1].label, "Build 2");
+assert.equal(named.rows[0].empty, false, "a named build is not 'No details yet'");
 
 // Invalid dates give no year rather than NaN.
 assert.equal(compareBuilds([unit({ acquiredAt: "not a date" })]).rows[0].acquiredYear, null);

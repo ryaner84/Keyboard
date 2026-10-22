@@ -18,6 +18,7 @@ import {
   collectionPosterPath,
   collectionSharePath,
 } from "@/lib/collection-share";
+import { buildLabel } from "@/lib/collection-sales";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +56,7 @@ const getPublicCollection = cache(async (slug: string) =>
           plateType: true,
           mountType: true,
           pcbType: true,
+          buildName: true,
           layoutVariant: true,
           buildDetails: true,
           color: true,
@@ -190,8 +192,15 @@ export default async function PublicCollectionPage({
         ? (item.hiddenBuilds as unknown[]).map((value) => Number(value))
         : []
     );
+    // Each SHOWN build's label rides in the same map under "slug|index"
+    // (a slug never contains "|"), so a keycap paired to it can name it the
+    // way the keyboard card does without threading a second map through.
+    const builds = assemblePublicBuilds(item);
     for (let index = 0; index < Math.max(1, item.quantity || 1); index++) {
-      if (!hidden.has(index)) publicKeyboardBuilds.add(`${item.groupBuy.slug}|${index}`);
+      if (hidden.has(index)) continue;
+      const key = `${item.groupBuy.slug}|${index}`;
+      publicKeyboardBuilds.add(key);
+      publicKeyboardNames.set(key, buildLabel(builds[index], index));
     }
   }
 
@@ -303,6 +312,7 @@ function PublicCollectionCard({
     plateType: string | null;
     mountType: string | null;
     pcbType: string | null;
+    buildName: string | null;
     layoutVariant: string | null;
     buildDetails: string | null;
     color: string | null;
@@ -369,6 +379,7 @@ function PublicCollectionCard({
     imageUrl: build.imageUrl || groupImage,
     isCustom: Boolean(build.imageUrl),
     buildIndex: originalIndex,
+    label: buildLabel(build, originalIndex),
   }));
 
   return (
@@ -523,6 +534,7 @@ function PublicKeycapCollectionCard({
     imageUrl: keycapPurchasePhoto(purchase, catalogImage),
     isCustom: purchase.photoSource === "CUSTOM" && Boolean(purchase.imageUrl),
     buildIndex: index,
+    label: `Purchase ${index + 1}`,
   }));
   const isCustom = isCustomSlug(item.groupBuy.slug);
 
@@ -608,7 +620,7 @@ function PublicKeycapCollectionCard({
                   ))}
                 </div>
                 {specs.length > 0 && <p className="mt-2 text-[11px] leading-4 text-gray-500 dark:text-gray-400">{specs.join(" · ")}</p>}
-                {pairing && <p className="mt-1 text-[11px] leading-4 text-[#80632f] dark:text-[#d5b779]">Paired with {pairing}</p>}
+                {pairing && <p className="mt-1 text-[11px] leading-4 text-[#80632f] [overflow-wrap:anywhere] dark:text-[#d5b779]">Paired with {pairing}</p>}
               </div>
             );
           })}
@@ -644,6 +656,7 @@ function publicKeycapAcquisitions(item: {
     plateType: null,
     mountType: null,
     pcbType: null,
+    buildName: null,
     layoutVariant: null,
     buildDetails: null,
     notes: null,
@@ -677,7 +690,8 @@ function publicKeycapPairing(
   const key = `${pairing.keyboardSlug}|${pairing.buildIndex}`;
   if (!publicKeyboardBuilds.has(key)) return null;
   const name = publicKeyboardNames.get(pairing.keyboardSlug);
-  return name ? `${name} · Build ${pairing.buildIndex + 1}` : null;
+  if (!name) return null;
+  return `${name} · ${publicKeyboardNames.get(key) ?? `Build ${pairing.buildIndex + 1}`}`;
 }
 
 function PublicCollectionFilter({
@@ -720,6 +734,7 @@ type PublicBuildShape = {
   plateType: string | null;
   mountType: string | null;
   pcbType: string | null;
+  buildName: string | null;
   layoutVariant: string | null;
   buildDetails: string | null;
   imageUrl: string | null;
@@ -746,6 +761,7 @@ function assemblePublicBuilds(item: {
   plateType: string | null;
   mountType: string | null;
   pcbType: string | null;
+  buildName: string | null;
   layoutVariant: string | null;
   buildDetails: string | null;
   customImageUrl: string | null;
@@ -768,6 +784,7 @@ function assemblePublicBuilds(item: {
     plateType: item.plateType,
     mountType: item.mountType,
     pcbType: item.pcbType,
+    buildName: item.buildName,
     layoutVariant: item.layoutVariant,
     buildDetails: item.buildDetails,
     imageUrl: item.customImageUrl,
@@ -799,6 +816,7 @@ function assemblePublicBuilds(item: {
         plateType: (u?.plateType as string) ?? null,
         mountType: (u?.mountType as string) ?? null,
         pcbType: (u?.pcbType as string) ?? null,
+        buildName: (u?.buildName as string) ?? null,
         layoutVariant: (u?.layoutVariant as string) ?? null,
         buildDetails: (u?.buildDetails as string) ?? null,
         imageUrl: (u?.imageUrl as string) ?? null,
@@ -823,6 +841,7 @@ function assemblePublicBuilds(item: {
       plateType: null,
       mountType: null,
       pcbType: null,
+      buildName: null,
       layoutVariant: null,
       buildDetails: null,
       imageUrl: null,
@@ -894,7 +913,7 @@ function PublicBuild({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={build.imageUrl || (fallbackImageUrl as string)}
-            alt={`Build ${index + 1}`}
+            alt={buildLabel(build, index)}
             className={`h-full w-full rounded-lg bg-gray-100 dark:bg-gray-800 ${
               build.imageUrl ? "object-contain" : "object-cover"
             }`}
@@ -907,7 +926,7 @@ function PublicBuild({
               collectionSlug={collectionSlug}
               trackerItemId={trackerItemId}
               buildIndex={index}
-              label={`${label}, build ${index + 1}`}
+              label={`${label}, ${buildLabel(build, index)}`}
               className="absolute -bottom-1.5 -right-1.5 !h-6 !w-6"
             />
           )}
@@ -919,7 +938,7 @@ function PublicBuild({
       )}
       <div className="min-w-0">
         <p className="flex items-center gap-1.5 text-xs font-semibold text-gray-900 dark:text-white">
-          Build {index + 1}
+          <span className="min-w-0 truncate">{buildLabel(build, index)}</span>
           {soldPublicly && (
             <span className="inline-flex items-center rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">
               Sold
