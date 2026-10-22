@@ -22,8 +22,8 @@ interface KeyboardRenderProps {
 
 // Draws a keyboard the way a product render looks rather than as a flat
 // diagram: sculpted caps (front wall, dished top, row-by-row height), a case
-// with a lit chamfer and a visible front face, the plate well tinted by the
-// finish, and a soft studio shadow. SVG, so it stays sharp at any size.
+// with a lit chamfer and a visible front face, one case color from the edge to
+// the keys (bezel and opening are the same part), and a soft studio shadow. SVG, so it stays sharp at any size.
 export function KeyboardRender({ layout, options, colors, profile, caseHex, legends = true, shadow = true, tilt = false, label }: KeyboardRenderProps) {
   const id = useId().replace(/:/g, "");
   const { keys, width, height } = layoutKeys(buildLayout(layout, options));
@@ -40,17 +40,16 @@ export function KeyboardRender({ layout, options, colors, profile, caseHex, lege
     <svg viewBox={`-6 -4 ${W + 12} ${H + FRONT + floor}`} className="w-full h-auto block" role="img" aria-label={label}>
       <defs>
         <linearGradient id={`${id}-case`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#fff" stopOpacity={lightCase ? 0.35 : 0.16} />
-          <stop offset="0.35" stopColor="#fff" stopOpacity="0" />
-          <stop offset="1" stopColor="#000" stopOpacity={lightCase ? 0.1 : 0.22} />
+          <stop offset="0" stopColor="#fff" stopOpacity={lightCase ? 0.14 : 0.08} />
+          <stop offset="0.3" stopColor="#fff" stopOpacity="0" />
+          <stop offset="1" stopColor="#000" stopOpacity={lightCase ? 0.05 : 0.1} />
         </linearGradient>
         <linearGradient id={`${id}-front`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#fff" stopOpacity="0.12" />
           <stop offset="1" stopColor="#000" stopOpacity="0.35" />
         </linearGradient>
         <linearGradient id={`${id}-well`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#000" stopOpacity="0.45" />
-          <stop offset="0.12" stopColor="#000" stopOpacity="0.1" />
+          <stop offset="0" stopColor="#000" stopOpacity="0.22" />
           <stop offset="1" stopColor="#000" stopOpacity="0" />
         </linearGradient>
         <linearGradient id={`${id}-wall`} x1="0" y1="0" x2="0" y2="1">
@@ -78,9 +77,11 @@ export function KeyboardRender({ layout, options, colors, profile, caseHex, lege
       <rect x={0} y={0} width={W} height={H} rx={18} fill={`url(#${id}-case)`} />
       <rect x={1} y={1} width={W - 2} height={H - 2} rx={17} fill="none" stroke="#fff" strokeOpacity={lightCase ? 0.7 : 0.28} strokeWidth={1.5} />
 
-      {/* Plate well: the finish, in shadow */}
-      <rect x={SIDE - 5} y={TOP - 5} width={width * U + 10} height={height * U + 10} rx={8} fill={mix(caseHex, "black", lightCase ? 0.22 : 0.45)} />
-      <rect x={SIDE - 5} y={TOP - 5} width={width * U + 10} height={height * U + 10} rx={8} fill={`url(#${id}-well)`} />
+      {/* Opening the keys sit in. It is the same anodized case as the bezel,
+          so it keeps the case color: only a hairline edge and a short shadow
+          under the top lip mark where the keys drop below it. */}
+      <rect x={SIDE - 5} y={TOP - 5} width={width * U + 10} height={10} rx={4} fill={`url(#${id}-well)`} />
+      <rect x={SIDE - 5} y={TOP - 5} width={width * U + 10} height={height * U + 10} rx={8} fill="none" stroke="#000" strokeOpacity={lightCase ? 0.14 : 0.35} strokeWidth={1} />
 
       {keys.map((k, i) => {
         const x = SIDE + k.x * U + 1.5;
