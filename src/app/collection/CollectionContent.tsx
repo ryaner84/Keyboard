@@ -650,7 +650,7 @@ function BuildNumberLinks({
           <button
             type="button"
             onClick={() => onOpenBuild(index)}
-            className="font-semibold text-gray-900 underline decoration-gray-300 underline-offset-2 hover:decoration-gray-600 dark:text-white dark:decoration-gray-600"
+            className="font-semibold text-gray-900 underline decoration-gray-300 underline-offset-2 [overflow-wrap:anywhere] hover:decoration-gray-600 dark:text-white dark:decoration-gray-600"
           >
             {labels[index]}
           </button>
@@ -3358,7 +3358,7 @@ function SalesReturnsCard({
                 <p className="truncate text-xs font-semibold text-gray-900 dark:text-white">
                   {result.name}
                 </p>
-                <p className="mt-0.5 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+                <p className="mt-0.5 text-[11px] leading-4 text-gray-500 [overflow-wrap:anywhere] dark:text-gray-400">
                   {[
                     result.unitLabel,
                     result.soldAt
@@ -4097,20 +4097,31 @@ function KeyboardCollectionCard({
                 />
               </svg>
             </button>
-            <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/65 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-lg backdrop-blur">
-              {/* A named build keeps its position too: "Daily driver · 3 of 6". */}
-              <span className="max-w-[14rem] truncate">
-                {activeBuild?.buildName?.trim()
-                  ? `${buildLabel(activeBuild, visibleBuildIndex)} · ${visibleBuildIndex + 1} of ${builds.length}`
-                  : `Build ${visibleBuildIndex + 1} of ${builds.length}`}
-              </span>
+            <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-2 rounded-full bg-black/65 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-lg backdrop-blur">
+              {/* A named build keeps its position too: "Daily driver · 3 of 6".
+                  Two spans so only the NAME truncates — the count is how the
+                  owner knows where they are, and the pill is pointer-events-
+                  none, so a cut-off count could not be recovered. The pill is
+                  capped at the card's width so a long name can't clip it. */}
+              {activeBuild?.buildName?.trim() ? (
+                <>
+                  <span className="min-w-0 truncate">{buildLabel(activeBuild, visibleBuildIndex)}</span>
+                  <span className="shrink-0 whitespace-nowrap">
+                    · {visibleBuildIndex + 1} of {builds.length}
+                  </span>
+                </>
+              ) : (
+                <span className="shrink-0 whitespace-nowrap">
+                  Build {visibleBuildIndex + 1} of {builds.length}
+                </span>
+              )}
               {activeBuildHidden && (
-                <span className="flex items-center gap-1 text-amber-200">
+                <span className="flex shrink-0 items-center gap-1 text-amber-200">
                   <BuildHiddenIcon />
                   Hidden
                 </span>
               )}
-              <span className="flex gap-1">
+              <span className="flex shrink-0 gap-1">
                 {builds.map((_, index) => {
                   const dotHidden = showBuildVisibility && hiddenSet.has(index);
                   return (
@@ -4475,7 +4486,7 @@ function KeycapCollectionCard({
             </div>
             <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
               {active.quantity > 1 && <span>{active.quantity} identical copies</span>}
-              {pairingLabel && <span>Paired with {pairingLabel}</span>}
+              {pairingLabel && <span className="min-w-0 [overflow-wrap:anywhere]">Paired with {pairingLabel}</span>}
               {active.notes && <span className="line-clamp-1">{active.notes}</span>}
             </div>
           </div>
@@ -6099,8 +6110,10 @@ function CheckRow({
 }) {
   return (
     <label className="flex cursor-pointer items-start justify-between gap-4">
-      <span>
-        <span className="block text-sm font-semibold text-gray-900 dark:text-white">{title}</span>
+      {/* min-w-0 + anywhere-wrap: a title can carry a build name, which may
+          be one long word, and must never push the switch off-screen. */}
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold text-gray-900 [overflow-wrap:anywhere] dark:text-white">{title}</span>
         <span className="mt-1 block text-xs leading-5 text-gray-500 dark:text-gray-400">
           {description}
         </span>

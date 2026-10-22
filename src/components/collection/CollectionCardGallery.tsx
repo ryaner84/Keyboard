@@ -14,6 +14,10 @@ export interface GallerySlide {
   isCustom: boolean;
   // Index of the build within the item (build 1 = 0) — used for reporting.
   buildIndex: number;
+  // What this slide is called: buildLabel for a keyboard build (the owner's
+  // name, or "Build N"), "Purchase N" for keycaps. Supplied by the page so the
+  // gallery and the build rows under it name a build the same way.
+  label: string;
 }
 
 // Top-of-card image area for a public collection piece. When a piece has more
@@ -58,7 +62,7 @@ export function CollectionCardGallery({
           src={current.imageUrl}
           alt={
             hasMultiple
-              ? `${setName}, ${recordLabel} ${current.buildIndex + 1}`
+              ? `${setName}, ${current.label}`
               : setName
           }
           className={`absolute inset-0 h-full w-full transition duration-700 group-hover:scale-[1.03] ${
@@ -132,7 +136,7 @@ export function CollectionCardGallery({
               <button
                 key={slide.buildIndex}
                 type="button"
-                aria-label={`Show ${recordLabel} ${slide.buildIndex + 1}`}
+                aria-label={`Show ${slide.label}`}
                 aria-current={index === active}
                 onClick={(event) => {
                   event.preventDefault();
@@ -154,7 +158,7 @@ export function CollectionCardGallery({
           collectionSlug={collectionSlug}
           trackerItemId={trackerItemId}
           buildIndex={current.buildIndex}
-          label={`${setName}, ${recordLabel} ${current.buildIndex + 1}`}
+          label={`${setName}, ${current.label}`}
           className="absolute bottom-4 right-4"
         />
       )}

@@ -379,6 +379,7 @@ function PublicCollectionCard({
     imageUrl: build.imageUrl || groupImage,
     isCustom: Boolean(build.imageUrl),
     buildIndex: originalIndex,
+    label: buildLabel(build, originalIndex),
   }));
 
   return (
@@ -533,6 +534,7 @@ function PublicKeycapCollectionCard({
     imageUrl: keycapPurchasePhoto(purchase, catalogImage),
     isCustom: purchase.photoSource === "CUSTOM" && Boolean(purchase.imageUrl),
     buildIndex: index,
+    label: `Purchase ${index + 1}`,
   }));
   const isCustom = isCustomSlug(item.groupBuy.slug);
 
@@ -618,7 +620,7 @@ function PublicKeycapCollectionCard({
                   ))}
                 </div>
                 {specs.length > 0 && <p className="mt-2 text-[11px] leading-4 text-gray-500 dark:text-gray-400">{specs.join(" · ")}</p>}
-                {pairing && <p className="mt-1 text-[11px] leading-4 text-[#80632f] dark:text-[#d5b779]">Paired with {pairing}</p>}
+                {pairing && <p className="mt-1 text-[11px] leading-4 text-[#80632f] [overflow-wrap:anywhere] dark:text-[#d5b779]">Paired with {pairing}</p>}
               </div>
             );
           })}
