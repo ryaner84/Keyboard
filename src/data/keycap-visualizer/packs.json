@@ -1,0 +1,9 @@
+{
+  "packs": [
+    { "id": "pastel", "name": "Pastel pack", "description": "Soft salmon pinks on a pink case", "keycap": "gmk-olivia", "caseHex": "#EAB9C4", "caseName": "Sakura pink" },
+    { "id": "night-drive", "name": "Night drive pack", "description": "Synthwave purples on navy", "keycap": "gmk-laser", "caseHex": "#22314B", "caseName": "Midnight navy" },
+    { "id": "studio", "name": "Studio pack", "description": "Muted greys and greens on white", "keycap": "gmk-botanical", "caseHex": "#EFEEEA", "caseName": "Chalk white" },
+    { "id": "dojo", "name": "Dojo pack", "description": "Maroon and gold on walnut", "keycap": "gmk-red-samurai", "caseHex": "#6B4A33", "caseName": "Walnut" },
+    { "id": "cafe", "name": "Café pack", "description": "Cream DCS with a green accent", "keycap": "dcs-cream-cheese-green-r3", "caseHex": "#9DB09A", "caseName": "Sage green" }
+  ]
+}

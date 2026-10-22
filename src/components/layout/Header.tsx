@@ -73,6 +73,7 @@ export function Header() {
   const navLinks = [
     { href: "/showcase", label: "Showcase" },
     { href: "/released", label: "Bargain" },
+    { href: "/visualize", label: "Visualize" },
     { href: "/timeline", label: "Timeline" },
     { href: "/collection", label: "My Collection" },
   ];

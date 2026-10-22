@@ -1,0 +1,74 @@
+{
+  "keyboards": [
+    {
+      "id": "keychron-q1-max",
+      "name": "Keychron Q1 Max",
+      "layout": "75",
+      "dateAdded": "2026-10-22",
+      "finishes": [
+        { "name": "Carbon black", "hex": "#1F2023" },
+        { "name": "Shell white", "hex": "#E9E7E2" },
+        { "name": "Silver grey", "hex": "#B9BBBE" }
+      ]
+    },
+    {
+      "id": "wooting-60he-plus",
+      "name": "Wooting 60HE+",
+      "layout": "60",
+      "dateAdded": "2026-10-22",
+      "finishes": [
+        { "name": "Matte black", "hex": "#1B1B1D" },
+        { "name": "Frost white", "hex": "#ECECEA" }
+      ]
+    },
+    {
+      "id": "nuphy-halo75-v2",
+      "name": "NuPhy Halo75 V2",
+      "layout": "75",
+      "dateAdded": "2026-10-22",
+      "finishes": [
+        { "name": "Ionic white", "hex": "#E6E4DF" },
+        { "name": "Obsidian black", "hex": "#232427" }
+      ]
+    },
+    {
+      "id": "keychron-q3",
+      "name": "Keychron Q3",
+      "layout": "tkl",
+      "dateAdded": "2026-10-22",
+      "finishes": [
+        { "name": "Carbon black", "hex": "#1F2023" },
+        { "name": "Silver grey", "hex": "#B9BBBE" },
+        { "name": "Navy blue", "hex": "#24324D" }
+      ]
+    },
+    {
+      "id": "kbdfans-tofu65",
+      "name": "KBDfans Tofu65 2.0",
+      "layout": "65",
+      "dateAdded": "2026-10-22",
+      "finishes": [
+        { "name": "E-white", "hex": "#EFEEEA" },
+        { "name": "Black", "hex": "#1C1C1E" },
+        { "name": "Silver", "hex": "#C6C7C9" },
+        { "name": "Sakura pink", "hex": "#E8B8C3" }
+      ]
+    }
+  ],
+  "generic": [
+    { "id": "generic-60", "name": "Any 60% keyboard", "layout": "60" },
+    { "id": "generic-65", "name": "Any 65% keyboard", "layout": "65" },
+    { "id": "generic-75", "name": "Any 75% keyboard", "layout": "75" },
+    { "id": "generic-tkl", "name": "Any TKL keyboard", "layout": "tkl" },
+    { "id": "generic-full", "name": "Any full-size keyboard", "layout": "full" }
+  ],
+  "genericFinishes": [
+    { "name": "Carbon black", "hex": "#1E1F22" },
+    { "name": "Space silver", "hex": "#C8C9CB" },
+    { "name": "Chalk white", "hex": "#EFEEEA" },
+    { "name": "Midnight navy", "hex": "#22314B" },
+    { "name": "Sakura pink", "hex": "#EAB9C4" },
+    { "name": "Sage green", "hex": "#9DB09A" },
+    { "name": "Walnut", "hex": "#6B4A33" }
+  ]
+}

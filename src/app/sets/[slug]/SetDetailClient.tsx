@@ -13,7 +13,10 @@ import { useCurrency } from "@/hooks/useCurrency";
 import { useTrackedSets } from "@/hooks/useTrackedSets";
 import { convertCurrency, formatCurrency } from "@/lib/currency-utils";
 import { priceFreshness } from "@/lib/utils";
+import visualizerKeycaps from "@/data/keycap-visualizer/keycaps.json";
 import type { Region, VendorKitWithDetails } from "@/types";
+
+const VISUALIZER_SLUGS = new Set(visualizerKeycaps.keycaps.map((k) => k.slug));
 
 interface Kit {
   id: string;
@@ -154,6 +157,15 @@ export function SetDetailClient({ groupBuy }: Props) {
         >
           {groupBuy.productType === "KEYBOARD" ? "Add to collection" : "Collect this keycap set"}
         </Link>
+
+        {VISUALIZER_SLUGS.has(groupBuy.slug) && (
+          <Link
+            href={`/visualize?set=${encodeURIComponent(groupBuy.slug)}`}
+            className="flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950 dark:text-indigo-300"
+          >
+            🎨 Visualize on a keyboard
+          </Link>
+        )}
 
         <SharePosterButton
           slug={groupBuy.slug}
