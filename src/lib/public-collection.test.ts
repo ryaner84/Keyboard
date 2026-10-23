@@ -197,6 +197,10 @@ for (const [path, pattern] of [
 const itemRoute = read("src/app/api/tracker/items/[slug]/route.ts");
 assert.match(itemRoute, /if \(othersHoldingIt === 0\) \{\s*await prisma\.groupBuy\.delete/, "a custom piece's GroupBuy is deleted only when nobody else holds it");
 assert.doesNotMatch(read("scripts/visitor-inbox-ci.mjs"), /maskEmail|r\.email/, "no visitor email in public Actions logs");
+const inbox = read("scripts/visitor-inbox-ci.mjs");
+assert.doesNotMatch(inbox, /r\.subject/, "no feedback message text in public Actions logs");
+assert.doesNotMatch(inbox, /PHOTO_REPORT[^\n]*\n[^\n]*notes=/, "no photo-report notes in public Actions logs");
+assert.match(read("src/lib/collection-photo.ts"), /!Array\.isArray\(keycapAcquisitions\) \|\| keycapAcquisitions\.length === 0/, "an empty purchase list reads as the legacy photo, as the page shows it");
 
 // The import matcher composes its slug filters with AND — two spreads that
 // both set `slug` silently dropped the custom-piece exclusion.
