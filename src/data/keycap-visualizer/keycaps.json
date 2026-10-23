@@ -7,7 +7,7 @@
       "profile": "cherry",
       "slug": "gmk-olivia",
       "dateAdded": "2026-10-22",
-      "colorSource": "tracker-image",
+      "colorSource": "kit-diagram",
       "colors": { "alpha": "#E8E2DE", "mod": "#2B2828", "accent": "#E3AFA0", "alphaLegend": "#2B2828", "modLegend": "#E3AFA0" }
     },
     {
@@ -17,8 +17,8 @@
       "profile": "cherry",
       "slug": "gmk-botanical",
       "dateAdded": "2026-10-22",
-      "colorSource": "tracker-image",
-      "colors": { "alpha": "#E3E4E1", "mod": "#57605B", "accent": "#3A4440", "alphaLegend": "#57605B", "modLegend": "#C9D1CC" }
+      "colorSource": "kit-diagram",
+      "colors": { "alpha": "#E6EBEC", "mod": "#57605B", "accent": "#8E9E9D", "alphaLegend": "#57605B", "modLegend": "#8E9E9D", "accentLegend": "#57605B" }
     },
     {
       "id": "gmk-8008",
@@ -27,7 +27,7 @@
       "profile": "cherry",
       "slug": "gmk-8008",
       "dateAdded": "2026-10-22",
-      "colorSource": "tracker-image",
+      "colorSource": "kit-diagram",
       "colors": { "alpha": "#9DA1AE", "mod": "#2B313C", "accent": "#E8306A", "alphaLegend": "#2B313C", "modLegend": "#E8306A" }
     },
     {
@@ -37,8 +37,9 @@
       "profile": "cherry",
       "slug": "gmk-laser",
       "dateAdded": "2026-10-22",
-      "colorSource": "tracker-image",
-      "colors": { "alpha": "#3B1F8F", "mod": "#150E3A", "accent": "#E8264F", "alphaLegend": "#35D3E6", "modLegend": "#35D3E6" }
+      "colorSource": "kit-diagram",
+      "colors": { "alpha": "#3B1F8F", "mod": "#2B2456", "accent": "#E8264F", "alphaLegend": "#35D3E6", "modLegend": "#E5307A" },
+      "placement": { "esc": "m", "enter": "m" }
     },
     {
       "id": "gmk-cyl-wob",
@@ -47,8 +48,8 @@
       "profile": "cherry",
       "slug": "gmk-cyl-wob-white-on-black-keycaps",
       "dateAdded": "2026-10-22",
-      "colorSource": "known-colorway",
-      "colors": { "alpha": "#222322", "mod": "#222322", "accent": "#3A3B3B", "alphaLegend": "#F2F2F0", "modLegend": "#F2F2F0" }
+      "colorSource": "kit-diagram",
+      "colors": { "alpha": "#222322", "mod": "#222322", "accent": "#222322", "alphaLegend": "#F2F2F0", "modLegend": "#F2F2F0" }
     },
     {
       "id": "gmk-nord",
@@ -57,8 +58,9 @@
       "profile": "cherry",
       "slug": "gmk-nord",
       "dateAdded": "2026-10-22",
-      "colorSource": "tracker-image",
-      "colors": { "alpha": "#4A5368", "mod": "#2F3444", "accent": "#3E4A63", "alphaLegend": "#D8DEE9", "modLegend": "#88C0D0" }
+      "colorSource": "kit-diagram",
+      "colors": { "alpha": "#4A5368", "mod": "#2F3444", "accent": "#2F3444", "alphaLegend": "#8A9FAD", "modLegend": "#8A9FAD" },
+      "placement": { "esc": "m", "enter": "m" }
     },
     {
       "id": "gmk-red-samurai",
@@ -67,8 +69,8 @@
       "profile": "cherry",
       "slug": "gmk-red-samurai",
       "dateAdded": "2026-10-22",
-      "colorSource": "tracker-image",
-      "colors": { "alpha": "#6B1F2B", "mod": "#2E2B2E", "accent": "#B98A57", "alphaLegend": "#D8B88A", "modLegend": "#D8B88A" }
+      "colorSource": "kit-diagram",
+      "colors": { "alpha": "#6B1F2B", "mod": "#2E2B2E", "accent": "#B98A57", "alphaLegend": "#B9975B", "modLegend": "#B9975B", "accentLegend": "#6B1F2B" }
     },
     {
       "id": "gmk-serika",
@@ -77,8 +79,8 @@
       "profile": "cherry",
       "slug": "gmk-serika",
       "dateAdded": "2026-10-22",
-      "colorSource": "tracker-image",
-      "colors": { "alpha": "#E6E3D6", "mod": "#2E2D29", "accent": "#F2C523", "alphaLegend": "#2E2D29", "modLegend": "#F2C523" }
+      "colorSource": "kit-diagram",
+      "colors": { "alpha": "#E6E3D6", "mod": "#F2C523", "accent": "#2E2D29", "alphaLegend": "#2E2D29", "modLegend": "#2E2D29", "accentLegend": "#E6E3D6" }
     },
     {
       "id": "dcs-cream-cheese-green-r3",
@@ -87,8 +89,9 @@
       "profile": "dcs",
       "slug": "gh-126397",
       "dateAdded": "2026-10-22",
-      "colorSource": "tracker-image",
-      "colors": { "alpha": "#EAE2D6", "mod": "#D6C9B6", "accent": "#4C6B2F", "alphaLegend": "#4A4038", "modLegend": "#4A4038" }
+      "colorSource": "kit-diagram",
+      "colors": { "alpha": "#EAE2D6", "mod": "#53702F", "accent": "#B2362D", "alphaLegend": "#53702F", "modLegend": "#EAE2D6" },
+      "placement": { "esc": "m", "enter": "m" }
     },
     {
       "id": "dcs-dolch",
@@ -97,8 +100,9 @@
       "profile": "dcs",
       "slug": "gh-126770",
       "dateAdded": "2026-10-22",
-      "colorSource": "known-colorway",
-      "colors": { "alpha": "#5A5E62", "mod": "#3E4246", "accent": "#1BA5A0", "alphaLegend": "#E8E8E6", "modLegend": "#E8E8E6" }
+      "colorSource": "kit-diagram",
+      "colors": { "alpha": "#5F5C52", "mod": "#333430", "accent": "#1F9687", "alphaLegend": "#E5E4DF", "modLegend": "#E5E4DF" },
+      "placement": { "esc": "m", "enter": "m" }
     },
     {
       "id": "gmk-tokyo-nights-r2",
@@ -107,8 +111,9 @@
       "profile": "cherry",
       "slug": "gmk-tokyo-nights-r2",
       "dateAdded": "2026-10-23",
-      "colorSource": "tracker-image",
-      "colors": { "alpha": "#1E1F21", "mod": "#18181A", "accent": "#9FD5C3", "alphaLegend": "#7CC9B4", "modLegend": "#8B63B9" }
+      "colorSource": "kit-diagram",
+      "colors": { "alpha": "#1E1F21", "mod": "#1E1F21", "accent": "#774A84", "alphaLegend": "#7CC9B4", "modLegend": "#8B5A9A", "accentLegend": "#7CC9B4" },
+      "placement": { "arrows": "x" }
     }
   ]
 }

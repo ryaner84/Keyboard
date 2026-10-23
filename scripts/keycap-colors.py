@@ -1,10 +1,10 @@
 """Helper for the daily keycap visualizer routine (docs/keycap-visualizer-routine.md).
 
-  python scripts/keycap-colors.py candidates
+  python3 scripts/keycap-colors.py candidates
       GMK and SP DCS sets on the live tracker that have a picture but are not
       in src/data/keycap-visualizer/keycaps.json yet, newest first.
 
-  python scripts/keycap-colors.py colors <slug> [--out DIR]
+  python3 scripts/keycap-colors.py colors <slug> [--out DIR]
       Downloads that set's tracker pictures into DIR and prints each one's
       dominant colors, largest share first.
 
@@ -19,7 +19,14 @@ import tempfile
 import urllib.parse
 import urllib.request
 
-from PIL import Image
+try:
+    from PIL import Image
+except ImportError as e:  # the cloud image ships a broken Pillow under /usr/local
+    sys.exit(
+        f"Pillow is not importable here ({e}).\n"
+        "Run with the system Python (/usr/bin/python3 scripts/keycap-colors.py ...), "
+        "or install it: python3 -m pip install -r scripts/requirements-visualizer.txt"
+    )
 
 SITE = "https://keyboard-six-tau.vercel.app"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -38,12 +45,16 @@ def catalog_slugs():
         return {k["slug"] for k in json.load(f)["keycaps"]}
 
 
-def tracker_sets(maker, pages=3):
-    for page in range(1, pages + 1):
+def tracker_sets(maker):
+    # EVERY page. This used to stop at three pages (the newest 150 sets per
+    # maker), so 441 older GMK sets could never be offered at all.
+    page = 1
+    while True:
         data = get_json("/api/group-buys", {"type": "KEYCAPS", "maker": maker, "sort": "date-desc", "limit": 50, "page": page})
         yield from data["data"]
-        if page * 50 >= data["total"]:
+        if page * 50 >= data["total"] or not data["data"]:
             break
+        page += 1
 
 
 def candidates():
@@ -72,7 +83,10 @@ def dominant_colors(path, count=8):
 def colors(slug, out):
     data = get_json(f"/api/group-buys/{urllib.parse.quote(slug)}", {})
     gb = data.get("data", data)
-    urls = list(dict.fromkeys([u for u in [gb.get("imageUrl"), *(gb.get("images") or [])] if u]))[:4]
+    # All of a set's pictures (bounded), not the first four: the flat kit
+    # diagram — the one picture whose colours can be read without guessing —
+    # is often further down a gmk.net gallery.
+    urls = list(dict.fromkeys([u for u in [gb.get("imageUrl"), *(gb.get("images") or [])] if u]))[:16]
     if not urls:
         sys.exit(f"{slug} has no pictures on the tracker")
     print(f"{gb.get('name', slug)}  ({len(urls)} pictures)")

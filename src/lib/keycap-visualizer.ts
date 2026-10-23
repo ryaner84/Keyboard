@@ -30,7 +30,19 @@ export interface KeycapColors {
   accent: string;
   alphaLegend: string;
   modLegend: string;
+  /** Legend on the accent keys, when the set says so (Serika's light-on-dark Esc). Omitted = whichever set color reads best. */
+  accentLegend?: string;
 }
+
+/**
+ * The keys base kits disagree on. Every set in the catalog was checked against
+ * its official kit diagram: Esc and Enter are accent caps and the arrows mod
+ * caps on most, but Laser, Nord and Dolch ship a mod Esc and Enter, and Tokyo
+ * Nights R2 ships accent arrows. Omitted = that standard.
+ */
+export type PlacementKey = "esc" | "enter" | "arrows";
+export type Placement = Partial<Record<PlacementKey, KeyGroup>>;
+export const PLACEMENT_KEYS: PlacementKey[] = ["esc", "enter", "arrows"];
 
 export interface KeycapSet {
   id: string;
@@ -39,8 +51,10 @@ export interface KeycapSet {
   profile: "cherry" | "dcs";
   slug: string;
   dateAdded: string;
-  colorSource: "tracker-image" | "known-colorway";
+  /** kit-diagram: placement and colors checked against the set's official base-kit diagram. */
+  colorSource: "tracker-image" | "known-colorway" | "kit-diagram";
   colors: KeycapColors;
+  placement?: Placement;
 }
 
 export interface Finish {
@@ -68,10 +82,15 @@ export interface DesignPack {
 }
 
 const alphas = (chars: string): KeySpec[] => chars.split("").map((c) => [1, "a", c]);
+// GMK's base kits (and SP's) put F1–F4 and F9–F12 on the alpha color and
+// F5–F8 on the mod color — checked against the official kit diagrams of
+// every set in the catalog, which all agree. F13 and beyond are mods.
+const fGroup = (n: number): KeyGroup => ((n >= 1 && n <= 4) || (n >= 9 && n <= 12) ? "a" : "m");
 const fKeys = (from: number, to: number): KeySpec[] =>
-  Array.from({ length: to - from + 1 }, (_, i) => [1, (from + i) >= 5 && (from + i) <= 8 ? "a" : "m", `F${from + i}`]);
-// Boards with an F-row move Esc up there, so their number row starts with ~.
-const tilde: KeySpec = [1, "m", "~"];
+  Array.from({ length: to - from + 1 }, (_, i) => [1, fGroup(from + i), `F${from + i}`]);
+// Boards with an F-row move Esc up there, so their number row starts with ~ —
+// an alpha cap, like the rest of the number row and the 1.5u backslash.
+const tilde: KeySpec = [1, "a", "~"];
 
 // Layout options, named the way the collection pages (and secondhand
 // listings) name them. The first value of each is the default.
@@ -99,7 +118,7 @@ export function availableOptions(id: LayoutId): { bottom: BottomRow[]; fRow: FRo
 function alphaBlock(bottom: BottomRow, fRowAbove: boolean): RowItem[][] {
   if (bottom === "HHKB") {
     return [
-      [[1, "x", "Esc"], ...alphas("1234567890-="), [1, "m", "|"], [1, "m", "~"]],
+      [[1, "x", "Esc"], ...alphas("1234567890-="), [1, "a", "|"], [1, "a", "~"]],
       [[1.5, "m", "Tab"], ...alphas("QWERTYUIOP[]"), [1.5, "m", "BS"]],
       [[1.75, "m", "Ctrl"], ...alphas("ASDFGHJKL;'"), [2.25, "x", "Enter"]],
       [[2.25, "m", "Shift"], ...alphas("ZXCVBNM,./"), [1.75, "m", "Shift"], [1, "m", "Fn"]],
@@ -107,7 +126,7 @@ function alphaBlock(bottom: BottomRow, fRowAbove: boolean): RowItem[][] {
   }
   return [
     [fRowAbove ? tilde : [1, "x", "Esc"], ...alphas("1234567890-="), [2, "m", "Backspace"]],
-    [[1.5, "m", "Tab"], ...alphas("QWERTYUIOP[]"), [1.5, "m", "\\"]],
+    [[1.5, "m", "Tab"], ...alphas("QWERTYUIOP[]"), [1.5, "a", "\\"]],
     [[1.75, "m", "Caps"], ...alphas("ASDFGHJKL;'"), [2.25, "x", "Enter"]],
     [[2.25, "m", "Shift"], ...alphas("ZXCVBNM,./"), [2.75, "m", "Shift"]],
   ];
@@ -121,8 +140,13 @@ function bottom60(bottom: BottomRow): RowItem[] {
 }
 
 // 65% and 75%: the 13u left of the bottom row beside the arrow cluster.
+// Arrows are mod caps in a base kit; accent arrows, where a set has them, are
+// an alternate in the extras rather than what the kit diagram shows.
+const ARROWS: KeySpec[] = [[1, "m", "←"], [1, "m", "↓"], [1, "m", "→"]];
+const UP: KeySpec = [1, "m", "↑"];
+
 function bottom65(bottom: BottomRow): RowItem[] {
-  const arrows: KeySpec[] = [[1, "x", "←"], [1, "x", "↓"], [1, "x", "→"]];
+  const arrows = ARROWS;
   if (bottom === "WKL") return [[1.5, "m", "Ctrl"], 1, [1.5, "m", "Alt"], [7, "a", ""], [1.5, "m", "Alt"], 0.5, ...arrows];
   return [[1.25, "m", "Ctrl"], [1.25, "m", "Win"], [1.25, "m", "Alt"], [6.25, "a", ""], [1, "m", "Alt"], [1, "m", "Fn"], [1, "m", "Ctrl"], ...arrows];
 }
@@ -134,7 +158,7 @@ function sixtyFiveRows(o: LayoutOptions, fRowAbove: boolean): Row[] {
     [...r1, [1, "m", right[0]]],
     [...r2, [1, "m", right[1]]],
     [...r3, [1, "m", right[2]]],
-    [[2.25, "m", "Shift"], ...alphas("ZXCVBNM,./"), [1.75, "m", "Shift"], [1, "x", "↑"], [1, "m", "End"]],
+    [[2.25, "m", "Shift"], ...alphas("ZXCVBNM,./"), [1.75, "m", "Shift"], UP, [1, "m", "End"]],
     bottom65(o.bottom),
   ];
 }
@@ -157,8 +181,8 @@ const navCluster: RowItem[][] = [
   [[1, "m", "Ins"], [1, "m", "Home"], [1, "m", "PgUp"]],
   [[1, "m", "Del"], [1, "m", "End"], [1, "m", "PgDn"]],
   [3],
-  [1, [1, "x", "↑"], 1],
-  [[1, "x", "←"], [1, "x", "↓"], [1, "x", "→"]],
+  [1, UP, 1],
+  [...ARROWS],
 ];
 
 const numpad: RowItem[][] = [
@@ -205,6 +229,18 @@ export const LAYOUTS: Record<LayoutId, Layout> = {
   tkl: buildLayout("tkl"),
   full: buildLayout("full"),
 };
+
+const ARROW_LEGENDS = new Set(["←", "↑", "↓", "→"]);
+
+/** A layout's keys with a set's own placement applied (numpad Enter follows Enter). */
+export function placeKeys(keys: PlacedKey[], placement?: Placement): PlacedKey[] {
+  if (!placement) return keys;
+  return keys.map((k) => {
+    const slot: PlacementKey | null = k.legend === "Esc" ? "esc" : k.legend === "Enter" ? "enter" : ARROW_LEGENDS.has(k.legend) ? "arrows" : null;
+    const group = slot ? placement[slot] : undefined;
+    return group ? { ...k, group } : k;
+  });
+}
 
 export function layoutKeys(layout: Layout): { keys: PlacedKey[]; width: number; height: number } {
   const keys: PlacedKey[] = [];
@@ -254,8 +290,9 @@ export function mix(hex: string, target: "white" | "black", amount: number): str
   return `rgb(${r},${g},${b})`;
 }
 
-/** Accent keys have no legend color of their own, so borrow whichever set color reads best on them. */
+/** The set's own accent legend, else whichever set color reads best on the accent keys. */
 export function accentLegend(c: KeycapColors): string {
+  if (c.accentLegend) return c.accentLegend;
   const bg = luma(c.accent);
   return [c.modLegend, c.alphaLegend, c.mod, c.alpha].reduce((best, x) =>
     Math.abs(luma(x) - bg) > Math.abs(luma(best) - bg) ? x : best
@@ -292,6 +329,10 @@ export function catalogProblems(catalog: {
     }
     for (const part of ["alpha", "mod", "accent", "alphaLegend", "modLegend"] as const) {
       if (!k.colors?.[part]) problems.push(`keycap "${k.id}" is missing the ${part} color`);
+    }
+    for (const [slot, group] of Object.entries(k.placement ?? {})) {
+      if (!PLACEMENT_KEYS.includes(slot as PlacementKey)) problems.push(`keycap "${k.id}": placement "${slot}" is not one of ${PLACEMENT_KEYS.join(", ")}`);
+      if (!["a", "m", "x"].includes(group as string)) problems.push(`keycap "${k.id}": placement ${slot} must be "a", "m" or "x"`);
     }
   }
   const slugs = catalog.keycaps.map((k) => k.slug);

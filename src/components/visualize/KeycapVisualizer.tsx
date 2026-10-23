@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import keyboardData from "@/data/keycap-visualizer/keyboards.json";
 import packData from "@/data/keycap-visualizer/packs.json";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { KeyboardRender } from "./KeyboardRender";
+import type { StageView } from "./keyboard-scene";
 import {
   HEX,
   LAYOUTS,
@@ -42,6 +44,26 @@ const GENERIC_FINISHES: Finish[] = keyboardData.genericFinishes;
 const MAX_COMPARE = 3;
 const NEW_DAYS = 7;
 const STORAGE_KEY = "kbv-compare";
+const RENDER_KEY = "kbv-render";
+
+// three.js is fetched only when someone switches to 3D, and never on the server.
+const Keyboard3D = dynamic(() => import("./Keyboard3D"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full aspect-[2/1] grid place-items-center text-sm text-gray-400">Loading 3D…</div>
+  ),
+});
+
+type RenderMode = "classic" | "3d";
+
+/** WebGL2 at all — software rendering included, since the board is drawn once, not animated. */
+function canRender3D(): boolean {
+  try {
+    return !!document.createElement("canvas").getContext("webgl2");
+  } catch {
+    return false;
+  }
+}
 
 const STEPS: Array<{ value: Step; label: string; emoji: string }> = [
   { value: "keyboard", label: "1 · Keyboard & finish", emoji: "⌨️" },
@@ -130,6 +152,33 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
   const [saved, setSaved] = useState<Look[]>([]);
   const [sameBoard, setSameBoard] = useState(false);
   const [notice, setNotice] = useState("");
+  // Classic (SVG) stays the default; 3D is opt-in, remembered per browser,
+  // and can be linked to with ?render=3d.
+  const [webgl, setWebgl] = useState(false);
+  const [render, setRender] = useState<RenderMode>("classic");
+  const [view, setView] = useState<StageView>("angle");
+
+  useEffect(() => {
+    const ok = canRender3D();
+    setWebgl(ok);
+    if (!ok) return;
+    let wanted: string | null = new URLSearchParams(window.location.search).get("render");
+    try {
+      wanted ??= localStorage.getItem(RENDER_KEY);
+    } catch {
+      // storage unavailable: classic unless the link asks for 3D
+    }
+    if (wanted === "3d") setRender("3d");
+  }, []);
+
+  const chooseRender = (mode: RenderMode) => {
+    setRender(mode);
+    try {
+      localStorage.setItem(RENDER_KEY, mode);
+    } catch {
+      // storage unavailable: the choice lasts for this visit only
+    }
+  };
 
   useEffect(() => {
     try {
@@ -232,18 +281,59 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
                 </span>
               )}
             </div>
+            {webgl && (
+              <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">
+                <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/70 p-0.5 gap-0.5" role="group" aria-label="Render style">
+                  {(["classic", "3d"] as const).map((m) => (
+                    <button key={m} onClick={() => chooseRender(m)} aria-pressed={render === m} className={pill(render === m)}>
+                      {m === "classic" ? "Classic" : "3D (beta)"}
+                    </button>
+                  ))}
+                </div>
+                {render === "3d" && (
+                  <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/70 p-0.5 gap-0.5" role="group" aria-label="Camera">
+                    {(["angle", "top"] as const).map((v) => (
+                      <button key={v} onClick={() => setView(v)} aria-pressed={view === v} className={pill(view === v)}>
+                        {v === "angle" ? "Angled" : "Top-down"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="max-w-4xl mx-auto mt-5 transition-opacity">
-              <KeyboardRender
-                layout={board.layout}
-                options={look.options}
-                colors={caps.colors}
-                profile={caps.profile}
-                caseHex={look.caseHex}
-                tilt
-                label={`${caps.name} on ${board.name}`}
-              />
+              {render === "3d" ? (
+                <Keyboard3D
+                  layout={board.layout}
+                  options={look.options}
+                  colors={caps.colors}
+                  placement={caps.placement}
+                  profile={caps.profile}
+                  caseHex={look.caseHex}
+                  caseName={look.caseName}
+                  view={view}
+                  label={`${caps.name} on ${board.name}, 3D preview`}
+                  onError={() => {
+                    setRender("classic");
+                    setNotice("3D isn't available here — showing the classic view");
+                  }}
+                />
+              ) : (
+                <KeyboardRender
+                  layout={board.layout}
+                  options={look.options}
+                  colors={caps.colors}
+                  placement={caps.placement}
+                  profile={caps.profile}
+                  caseHex={look.caseHex}
+                  tilt
+                  label={`${caps.name} on ${board.name}`}
+                />
+              )}
             </div>
-            <p className="text-xs text-gray-400 mt-2">{look.caseName} case · colors are a close preview</p>
+            <p className="text-xs text-gray-400 mt-2">
+              {look.caseName} case · colors are a close preview{render === "3d" && view === "angle" ? " · drag to turn the board" : ""}
+            </p>
           </div>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 sm:px-6 py-3 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800">
             <div className="min-w-0">
@@ -295,6 +385,7 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
                               layout={b.layout}
                               options={selected ? look.options : defaultOptions(b)}
                               colors={caps.colors}
+                              placement={caps.placement}
                               profile={caps.profile}
                               caseHex={selected ? look.caseHex : b.finishes ? b.finishes[0].hex : look.caseHex}
                               legends={false}
@@ -535,6 +626,7 @@ export function KeycapVisualizer({ sets, initialSlug }: { sets: VisualizerSet[];
                         layout={b.layout}
                         options={sameBoard ? look.options : l.options}
                         colors={s.colors}
+                        placement={s.placement}
                         profile={s.profile}
                         caseHex={sameBoard ? look.caseHex : l.caseHex}
                         shadow={false}
