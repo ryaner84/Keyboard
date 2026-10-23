@@ -66,8 +66,11 @@ export function collectionPhotoAtRecord(
   if (String(productType).toUpperCase() === "KEYBOARD") {
     return collectionPhotoAtBuild(customImageUrl, units, recordIndex);
   }
-  if (!Array.isArray(keycapAcquisitions)) {
-    // Older keycap records used the build-one photo slot.
+  if (!Array.isArray(keycapAcquisitions) || keycapAcquisitions.length === 0) {
+    // Older keycap records used the build-one photo slot. An EMPTY list reads
+    // the same way — normalizeKeycapAcquisitions and the page show that
+    // legacy photo for [] too, so refusing it here left a reportable photo on
+    // the page that the endpoint would not take reports for.
     return recordIndex === 0 ? cleanCollectionPhoto(customImageUrl) : null;
   }
   const acquisition = keycapAcquisitions[recordIndex];

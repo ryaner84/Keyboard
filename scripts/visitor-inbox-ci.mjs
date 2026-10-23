@@ -169,32 +169,36 @@ try {
     "FEEDBACK",
     () =>
       client.query(`
-        SELECT id, subject, "submittedAt"
+        SELECT id, "submittedAt"
           FROM "Feedback"
          WHERE "resolvedAt" IS NULL
          ORDER BY "submittedAt" DESC
          LIMIT 100
       `),
     (r) =>
-      // No email, not even masked: this repo is PUBLIC, so its Actions logs
-      // are readable by anyone, and the feedback form promises the address is
-      // "never shared". Look the sender up by id in the database to reply.
-      `FEEDBACK | ${day(r.submittedAt)} | subject="${brief(r.subject)}" | id=${r.id}`
+      // Neither the email nor the message: this repo is PUBLIC, so its
+      // Actions logs are readable by anyone. A visitor writing to the site
+      // owner is not writing to the internet — read the message, and the
+      // address to reply to, by id in the database (Feedback table).
+      `FEEDBACK | ${day(r.submittedAt)} | id=${r.id}`
   );
 
   total += await section(
     "PHOTO_REPORT",
     () =>
       client.query(`
-        SELECT id, "collectionSlug", "issueType", notes, "submittedAt"
+        SELECT id, "collectionSlug", "issueType", "submittedAt"
           FROM "CollectionPhotoReport"
          WHERE "resolvedAt" IS NULL
          ORDER BY "submittedAt" DESC
          LIMIT 100
       `),
     (r) =>
+      // No notes: they are a visitor's words about someone else's photo, and
+      // these logs are public. The issue type is enough to triage; read the
+      // notes by id in the database (CollectionPhotoReport).
       `PHOTO_REPORT | ${day(r.submittedAt)} | collection=${r.collectionSlug} | ` +
-      `issue=${r.issueType} | notes="${brief(r.notes)}" | id=${r.id}`
+      `issue=${r.issueType} | id=${r.id}`
   );
 
   console.log(
