@@ -3,6 +3,7 @@ import sharp from "sharp";
 import { prisma } from "@/lib/prisma";
 import { normalizeImageUrl } from "@/lib/utils";
 import { buildPosterModel, posterVersion } from "@/lib/public-collection";
+import { HIDDEN_SLUGS } from "@/lib/showcase";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -126,6 +127,8 @@ export async function GET(
         where: {
           inCollection: true,
           isPublic: true,
+          // Same rule as the public page: a privacy-pulled board never shows.
+          groupBuy: { slug: { notIn: HIDDEN_SLUGS } },
         },
         orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
         select: {

@@ -41,6 +41,36 @@ export function buildPhotoAt(customImageUrl: unknown, units: unknown, index: num
 
 // ── Keycaps ─────────────────────────────────────────────────────────────────
 
+// The STORED indexes of a keycap set's public purchases, in order. A set with
+// no per-purchase records reads as its one legacy purchase (index 0), exactly
+// as normalizeKeycapAcquisitions synthesises it; normalizeOne never drops an
+// entry and maps isPublic as `!== false`, so these line up with it.
+export function publicPurchaseIndexes(keycapAcquisitions: unknown): number[] {
+  if (!Array.isArray(keycapAcquisitions) || keycapAcquisitions.length === 0) return [0];
+  return keycapAcquisitions
+    .slice(0, 50)
+    .map((entry, index) => ({ entry: (entry ?? {}) as Record<string, unknown>, index }))
+    .filter(({ entry }) => entry.isPublic !== false)
+    .map(({ index }) => index);
+}
+
+// A visitor only ever sees PUBLIC positions ("Build 1", "Purchase 2") — the
+// page sends nothing else to the browser, because a stored index says how many
+// hidden builds or private purchases sit ahead of a public one. The photo-
+// report endpoint maps the position back to the stored record here, on the
+// server. null means "no such public record".
+export function storedIndexForPublicPosition(
+  item: { productType: string; quantity: number | null; hiddenBuilds: unknown; keycapAcquisitions: unknown },
+  position: number
+): number | null {
+  if (!Number.isInteger(position) || position < 0) return null;
+  const indexes =
+    item.productType === "KEYBOARD"
+      ? visibleBuildIndexes(item.quantity, item.hiddenBuilds)
+      : publicPurchaseIndexes(item.keycapAcquisitions);
+  return indexes[position] ?? null;
+}
+
 export function hasPublicKeycapPurchase(value: unknown) {
   if (!Array.isArray(value) || value.length === 0) return true;
   return value.some((acquisition) => {

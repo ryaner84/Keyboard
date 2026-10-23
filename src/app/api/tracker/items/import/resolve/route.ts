@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getTrackerSessionUser } from "@/lib/tracker-auth";
-import { HIDDEN_SLUGS, notCustomWhere } from "@/lib/showcase";
+import { CUSTOM_SLUG_PREFIX, HIDDEN_SLUGS, notCustomWhere } from "@/lib/showcase";
 import {
   buildKeycapSetIndex,
   resolveSetName,
@@ -55,8 +55,24 @@ export async function POST(req: NextRequest) {
   const sets = await prisma.groupBuy.findMany({
     where: {
       productType: "KEYCAPS",
-      ...notCustomWhere,
-      ...(HIDDEN_SLUGS.length > 0 ? { slug: { notIn: HIDDEN_SLUGS } } : {}),
+      // AND, never two spreads: both fragments set `slug`, so the second
+      // spread replaced the first and the custom-piece exclusion vanished —
+      // every user's private custom pieces were in the match index, and a row
+      // whose name matched one came back with its name and slug.
+      // The importer's OWN custom pieces stay matchable, so re-importing a
+      // sheet that lists one doesn't mint a duplicate.
+      AND: [
+        {
+          OR: [
+            notCustomWhere,
+            {
+              slug: { startsWith: CUSTOM_SLUG_PREFIX },
+              trackerItems: { some: { userId: user.id } },
+            },
+          ],
+        },
+        ...(HIDDEN_SLUGS.length > 0 ? [{ slug: { notIn: HIDDEN_SLUGS } }] : []),
+      ],
     },
     select: {
       slug: true,

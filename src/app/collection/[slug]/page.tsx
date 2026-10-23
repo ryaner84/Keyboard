@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { normalizeImageUrl } from "@/lib/utils";
-import { cleanDisplayName, isCustomSlug } from "@/lib/showcase";
+import { cleanDisplayName, HIDDEN_SLUGS, isCustomSlug } from "@/lib/showcase";
 import { getSiteUrl } from "@/lib/site-url";
 import {
   KEYCAP_CONDITION_LABELS,
@@ -37,6 +37,9 @@ const getPublicCollection = cache(async (slug: string) =>
         where: {
           inCollection: true,
           isPublic: true,
+          // A board pulled from the site for privacy stays in its owner's
+          // private collection but never reaches a public page.
+          groupBuy: { slug: { notIn: HIDDEN_SLUGS } },
         },
         orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
         select: {
@@ -348,10 +351,12 @@ function PublicCollectionCard({
   // exclude — keep the original index on each visible build so photo reports
   // still reference the right unit.
   const hiddenBuilds = hiddenBuildSet(item.hiddenBuilds);
-  // `position` is the build's place among the VISIBLE builds, which is what an
-  // unnamed build is called here ("Build 1" with the real build 1 hidden):
-  // numbering by the original index would tell a visitor that hidden builds
-  // exist, how many, and where. originalIndex stays for photo reports only.
+  // `position` is the build's place among the VISIBLE builds. It is the ONLY
+  // index that reaches the browser — the label of an unnamed build ("Build 1"
+  // with the real build 1 hidden), React keys, and photo reports (the report
+  // endpoint maps it back to the stored build on the server). The original
+  // index would tell a visitor that hidden builds exist, how many, and where;
+  // it never leaves this function.
   const builds = assemblePublicBuilds(item)
     .map((build, originalIndex) => ({ build, originalIndex }))
     .filter(({ originalIndex }) => !hiddenBuilds.has(originalIndex))
@@ -381,10 +386,10 @@ function PublicCollectionCard({
   // One gallery slide per build. A build with its own uploaded photo shows that
   // (and can be reported); a build without one falls back to the shared render.
   const groupImage = normalizeImageUrl(item.groupBuy.imageUrl);
-  const slides = builds.map(({ build, originalIndex, position }) => ({
+  const slides = builds.map(({ build, position }) => ({
     imageUrl: build.imageUrl || groupImage,
     isCustom: Boolean(build.imageUrl),
-    buildIndex: originalIndex,
+    buildIndex: position,
     label: buildLabel(build, position),
   }));
 
@@ -483,11 +488,10 @@ function PublicCollectionCard({
 
         {multiBuild && (
           <div className="mt-5 space-y-3 border-t border-gray-100 pt-5 dark:border-white/10">
-            {builds.map(({ build, originalIndex, position }) => (
+            {builds.map(({ build, position }) => (
               <PublicBuild
-                key={originalIndex}
+                key={position}
                 build={build}
-                index={originalIndex}
                 position={position}
                 fallbackImageUrl={groupImage}
                 collectionSlug={collectionSlug}
@@ -542,7 +546,9 @@ function PublicKeycapCollectionCard({
   const slides = purchases.map((purchase, index) => ({
     imageUrl: keycapPurchasePhoto(purchase, catalogImage),
     isCustom: purchase.photoSource === "CUSTOM" && Boolean(purchase.imageUrl),
-    buildIndex: purchase.rawIndex,
+    // Public position, as for keyboard builds: the stored index would reveal
+    // how many private purchases sit ahead of this one.
+    buildIndex: index,
     label: `Purchase ${index + 1}`,
   }));
   const isCustom = isCustomSlug(item.groupBuy.slug);
@@ -686,13 +692,7 @@ function publicKeycapAcquisitions(item: {
       ? item.keycapAcquisitions
       : null,
   } as CollectionItemDetails;
-  // rawIndex is the purchase's place in the STORED list (normalizeOne never
-  // drops an entry, so positions line up), which is what the photo-report API
-  // indexes. The position after this filter is not: with a private purchase
-  // ahead of it, a report on "Purchase 1" landed on a different purchase.
-  return normalizeKeycapAcquisitions(details)
-    .map((purchase, rawIndex) => ({ ...purchase, rawIndex }))
-    .filter((purchase) => purchase.isPublic);
+  return normalizeKeycapAcquisitions(details).filter((purchase) => purchase.isPublic);
 }
 
 function publicKeycapPairing(
@@ -871,7 +871,6 @@ function assemblePublicBuilds(item: {
 
 function PublicBuild({
   build,
-  index,
   position,
   fallbackImageUrl = null,
   collectionSlug,
@@ -881,9 +880,8 @@ function PublicBuild({
   showSoldStatus = false,
 }: {
   build: PublicBuildShape;
-  // ORIGINAL build index — for the photo-report API only, never shown.
-  index: number;
-  // Place among the VISIBLE builds; what an unnamed build is called.
+  // Place among the VISIBLE builds: what an unnamed build is called, and what
+  // a photo report sends (the endpoint maps it to the stored build).
   position: number;
   // The shared catalog render, shown when this build has no photo of its own.
   // The gallery above already falls back this way for every slide; the rows
@@ -940,11 +938,11 @@ function PublicBuild({
           {/* Only an OWNER-UPLOADED photo can be reported — a catalog render
               belongs to the set, not to this collection, so offering to flag
               it would send a report nobody can act on. */}
-          {index > 0 && build.imageUrl && (
+          {position > 0 && build.imageUrl && (
             <ReportPhotoButton
               collectionSlug={collectionSlug}
               trackerItemId={trackerItemId}
-              buildIndex={index}
+              buildIndex={position}
               label={`${label}, ${buildLabel(build, position)}`}
               className="absolute -bottom-1.5 -right-1.5 !h-6 !w-6"
             />

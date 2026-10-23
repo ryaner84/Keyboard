@@ -5,7 +5,7 @@ import { Prisma } from "@/generated/prisma";
 import { getTrackerSessionUser } from "@/lib/tracker-auth";
 import { CUSTOM_SLUG_PREFIX } from "@/lib/showcase";
 import { cleanKeycapAcquisition } from "@/lib/keycap-acquisition-server";
-import { getTrackerSnapshot, notSomeoneElsesCustomPiece } from "@/lib/tracker-data";
+import { attachableGroupBuyWhere, getTrackerSnapshot } from "@/lib/tracker-data";
 import {
   IMPORT_MAX_ROWS,
   type CommitImportResponse,
@@ -120,9 +120,10 @@ export async function POST(req: NextRequest) {
         if (!slug) throw new Error("No set chosen for this row");
       }
 
-      // Never someone else's custom piece: see notSomeoneElsesCustomPiece.
+      // Never someone else's custom piece or a privacy-pulled board: see
+      // attachableGroupBuyWhere.
       const groupBuy = await prisma.groupBuy.findFirst({
-        where: { slug, ...notSomeoneElsesCustomPiece(user.id) },
+        where: { slug, ...attachableGroupBuyWhere(user.id) },
         select: { id: true, productType: true },
       });
       if (!groupBuy) throw new Error("That set is no longer in the catalog");
@@ -156,7 +157,11 @@ export async function POST(req: NextRequest) {
         // but never public. Writing the batch default onto it re-published
         // sets the owner had kept private — with their existing purchases and
         // any price they had ticked — just because a spreadsheet listed them.
-        isPublic: existing?.inCollection ? existing.isPublic && isPublic : isPublic,
+        // `!created`: a custom piece minted by THIS request is not one the
+        // owner already had — it was just inserted with the column's default
+        // (private), and reading that back as "their choice" saved every new
+        // custom piece private even with "keep all private" off.
+        isPublic: existing?.inCollection && !created ? existing.isPublic && isPublic : isPublic,
         showPurchasePrice: SHOW_PURCHASE_PRICE,
         keycapAcquisitions: next as unknown as Prisma.InputJsonValue,
       };
