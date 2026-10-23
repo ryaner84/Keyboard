@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getSiteUrl } from "@/lib/site-url";
+import { isCustomSlug, isHiddenSlug } from "@/lib/showcase";
 import { COUNTRY_BY_CODE, DEFAULT_COUNTRY } from "@/data/countries";
 import type { Metadata } from "next";
 
@@ -19,6 +20,7 @@ interface PageProps {
 
 export async function generateMetadata({ params, searchParams }: PageProps): Promise<Metadata> {
   const { slug } = await params;
+  if (isHiddenSlug(slug) || isCustomSlug(slug)) return { title: "Not Found" };
   const { country: rawCountry = "SG", currency: rawCurrency } = await searchParams;
   const country = rawCountry.toUpperCase();
   const countryInfo = COUNTRY_BY_CODE[country] ?? DEFAULT_COUNTRY;
@@ -66,6 +68,10 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
 
 export default async function SharePage({ params, searchParams }: PageProps) {
   const { slug } = await params;
+  // Same guard as /sets/[slug]: a board pulled for privacy (HIDDEN_SLUGS) or
+  // an owner's custom off-catalog piece has no public page, so none of the
+  // routes that render a set by slug may serve it either.
+  if (isHiddenSlug(slug) || isCustomSlug(slug)) notFound();
   const { country: rawCountry = "SG", currency: rawCurrency } = await searchParams;
   const country = rawCountry.toUpperCase();
   const countryInfo = COUNTRY_BY_CODE[country] ?? DEFAULT_COUNTRY;

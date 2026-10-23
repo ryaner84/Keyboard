@@ -14,12 +14,16 @@ export default function ReportPhotoButton({
   collectionSlug,
   trackerItemId,
   buildIndex,
+  photoHash,
   label,
   className = "",
 }: {
   collectionSlug: string;
   trackerItemId: string;
+  // Public position of the photo, and the fingerprint of the photo itself —
+  // the endpoint refuses a report whose position now holds a different photo.
   buildIndex: number;
+  photoHash: string;
   label: string;
   className?: string;
 }) {
@@ -40,6 +44,7 @@ export default function ReportPhotoButton({
           collectionSlug,
           trackerItemId,
           buildIndex,
+          photoHash,
           issueType: reason,
           notes,
         }),

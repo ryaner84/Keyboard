@@ -1,6 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import { CUSTOM_SLUG_PREFIX, HIDDEN_SLUGS } from "@/lib/showcase";
 
 export interface TrackerSnapshot {
   lastStatus: string;
@@ -86,9 +87,38 @@ export function trackerSnapshotFromGroupBuy(
   };
 }
 
-export async function getGroupBuyForTracking(slug: string) {
-  return prisma.groupBuy.findUnique({
-    where: { slug },
+// A custom (off-catalog) piece is one owner's private record that happens to
+// live in the GroupBuy table — not a catalog set anyone may add. Its slug is
+// unguessable but PUBLIC once the piece is shown, and DELETE on a custom slug
+// removes the whole GroupBuy (cascading to every TrackerItem on it), so letting
+// a second user attach to it let any signed-in user delete someone else's
+// piece. Every path that attaches a user to a GroupBuy by slug excludes custom
+// pieces another user already holds.
+export function notSomeoneElsesCustomPiece(userId: string) {
+  return {
+    NOT: {
+      slug: { startsWith: CUSTOM_SLUG_PREFIX },
+      trackerItems: { some: { userId: { not: userId } } },
+    },
+  };
+}
+
+// What a user may attach to by slug: never someone else's custom piece, and
+// never a board pulled from the site for privacy (HIDDEN_SLUGS) — it has no
+// set page, and attaching it would put it back on a public collection page.
+// One AND key, so spreading this into a `where` can't collide with `slug`.
+export function attachableGroupBuyWhere(userId: string) {
+  return {
+    AND: [
+      notSomeoneElsesCustomPiece(userId),
+      ...(HIDDEN_SLUGS.length > 0 ? [{ slug: { notIn: HIDDEN_SLUGS } }] : []),
+    ],
+  };
+}
+
+export async function getGroupBuyForTracking(slug: string, userId: string) {
+  return prisma.groupBuy.findFirst({
+    where: { slug, ...attachableGroupBuyWhere(userId) },
     include: trackerCatalogInclude,
   });
 }
@@ -132,7 +162,7 @@ export async function syncTrackerSlugsForUser({
   const normalizedSlugs = Array.from(new Set(slugs.map(String).filter(Boolean))).slice(0, 200);
   const [groupBuys, rates] = await Promise.all([
     prisma.groupBuy.findMany({
-      where: { slug: { in: normalizedSlugs } },
+      where: { slug: { in: normalizedSlugs }, ...attachableGroupBuyWhere(userId) },
       include: {
         kits: { include: { vendorKits: { include: { vendor: true } } } },
         devUpdates: { orderBy: { postedAt: "desc" }, take: 1 },

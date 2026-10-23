@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { normalizeImageUrl } from "@/lib/utils";
-import { cleanDisplayName, isCustomSlug } from "@/lib/showcase";
+import { cleanDisplayName, HIDDEN_SLUGS, isCustomSlug } from "@/lib/showcase";
 import { getSiteUrl } from "@/lib/site-url";
 import {
   KEYCAP_CONDITION_LABELS,
@@ -19,6 +19,13 @@ import {
   collectionSharePath,
 } from "@/lib/collection-share";
 import { buildLabel } from "@/lib/collection-sales";
+import {
+  buildPosterModel,
+  hiddenBuildSet,
+  photoFingerprint,
+  posterVersion,
+  visibleBuildIndexes,
+} from "@/lib/public-collection";
 
 export const dynamic = "force-dynamic";
 
@@ -32,11 +39,13 @@ const getPublicCollection = cache(async (slug: string) =>
       displayName: true,
       collectionTitle: true,
       collectionBio: true,
-      updatedAt: true,
       items: {
         where: {
           inCollection: true,
           isPublic: true,
+          // A board pulled from the site for privacy stays in its owner's
+          // private collection but never reaches a public page.
+          groupBuy: { slug: { notIn: HIDDEN_SLUGS } },
         },
         orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
         select: {
@@ -65,7 +74,6 @@ const getPublicCollection = cache(async (slug: string) =>
           units: true,
           hiddenBuilds: true,
           keycapAcquisitions: true,
-          updatedAt: true,
           groupBuy: {
             select: {
               id: true,
@@ -105,12 +113,13 @@ export async function generateMetadata({
     `Explore ${owner}'s curated keyboard and keycap collection.`;
   const siteUrl = getSiteUrl();
   const canonicalUrl = `${siteUrl}/collection/${slug}`;
-  const latestUpdate = Math.max(
-    collection.updatedAt.getTime(),
-    ...collection.items.map((item) => item.updatedAt.getTime())
-  );
   const pageUrl = `${siteUrl}${collectionSharePath(slug)}`;
-  const posterUrl = `${siteUrl}${collectionPosterPath(slug, latestUpdate.toString(36))}`;
+  // The cache token is a hash of exactly what the poster draws, built by the
+  // same function the poster renders from. It used to be the latest updatedAt
+  // across the owner and their public items — the owner's last activity to
+  // the millisecond, published in every link preview, and able to fall back
+  // onto an older cached poster that still showed a piece since hidden.
+  const posterUrl = `${siteUrl}${collectionPosterPath(slug, posterVersion(buildPosterModel(collection)))}`;
 
   return {
     title,
@@ -160,15 +169,7 @@ export default async function PublicCollectionPage({
     if (item.groupBuy.productType !== "KEYBOARD") {
       return publicKeycapAcquisitions(item).length > 0;
     }
-    const qty = Math.max(1, item.quantity || 1);
-    const hidden = new Set(
-      Array.isArray(item.hiddenBuilds)
-        ? (item.hiddenBuilds as unknown[]).map((n) => Number(n))
-        : []
-    );
-    let visible = 0;
-    for (let i = 0; i < qty; i++) if (!hidden.has(i)) visible++;
-    return visible > 0;
+    return visibleBuildIndexes(item.quantity, item.hiddenBuilds).length > 0;
   });
   const category = type === "keyboards" || type === "keycaps" ? type : "all";
   const visibleItems = allVisibleItems.filter((item) =>
@@ -187,21 +188,17 @@ export default async function PublicCollectionPage({
   for (const item of allVisibleItems) {
     if (item.groupBuy.productType !== "KEYBOARD") continue;
     publicKeyboardNames.set(item.groupBuy.slug, cleanDisplayName(item.groupBuy.name));
-    const hidden = new Set(
-      Array.isArray(item.hiddenBuilds)
-        ? (item.hiddenBuilds as unknown[]).map((value) => Number(value))
-        : []
-    );
     // Each SHOWN build's label rides in the same map under "slug|index"
     // (a slug never contains "|"), so a keycap paired to it can name it the
     // way the keyboard card does without threading a second map through.
+    // Unnamed builds are numbered by position among the VISIBLE builds, as on
+    // the card — the original number would say how many are hidden.
     const builds = assemblePublicBuilds(item);
-    for (let index = 0; index < Math.max(1, item.quantity || 1); index++) {
-      if (hidden.has(index)) continue;
+    visibleBuildIndexes(item.quantity, item.hiddenBuilds).forEach((index, position) => {
       const key = `${item.groupBuy.slug}|${index}`;
       publicKeyboardBuilds.add(key);
-      publicKeyboardNames.set(key, buildLabel(builds[index], index));
-    }
+      publicKeyboardNames.set(key, buildLabel(builds[index], position));
+    });
   }
 
   return (
@@ -350,7 +347,6 @@ function PublicCollectionCard({
       />
     );
   }
-  const acquiredYear = item.acquiredAt?.getFullYear();
   const specs = [
     item.groupBuy.layout,
     item.groupBuy.mountingStyle,
@@ -360,26 +356,48 @@ function PublicCollectionCard({
   // multi-unit piece. hiddenBuilds holds the 0-based ORIGINAL build indexes to
   // exclude — keep the original index on each visible build so photo reports
   // still reference the right unit.
-  const hiddenBuilds = new Set(
-    Array.isArray(item.hiddenBuilds)
-      ? (item.hiddenBuilds as unknown[]).map((n) => Number(n))
-      : []
-  );
+  const hiddenBuilds = hiddenBuildSet(item.hiddenBuilds);
+  // `position` is the build's place among the VISIBLE builds. It is the ONLY
+  // index that reaches the browser — the label of an unnamed build ("Build 1"
+  // with the real build 1 hidden), React keys, and photo reports (the report
+  // endpoint maps it back to the stored build on the server). The original
+  // index would tell a visitor that hidden builds exist, how many, and where;
+  // it never leaves this function.
   const builds = assemblePublicBuilds(item)
     .map((build, originalIndex) => ({ build, originalIndex }))
-    .filter(({ originalIndex }) => !hiddenBuilds.has(originalIndex));
+    .filter(({ originalIndex }) => !hiddenBuilds.has(originalIndex))
+    .map((entry, position) => ({ ...entry, position }));
+  // Every hidden: nothing of this piece is the public's to see.
+  if (builds.length === 0) return null;
   const multiBuild = builds.length > 1;
+  // EVERYTHING below reads the VISIBLE builds, never the record's top-level
+  // item.* columns. Those columns are build 1, and build 1 may be the one the
+  // owner hid: with builds 1-2 and only build 2 shown, the single-build path
+  // used to publish build 1's colour, specs, price, sale and notes while
+  // build 2's own details never appeared.
+  const solo = multiBuild ? null : builds[0].build;
+  const yearOf = (value: string | null) => {
+    if (!value) return null;
+    const time = new Date(value).getTime();
+    return Number.isNaN(time) ? null : new Date(time).getUTCFullYear();
+  };
+  const visibleYears = builds
+    .map(({ build }) => yearOf(build.acquiredAt))
+    .filter((year): year is number => year != null);
+  // Earliest visible build, so "Collected" never dates a hidden unit.
+  const acquiredYear = visibleYears.length > 0 ? Math.min(...visibleYears) : null;
   // Never surface the scraped showcase source in a saved board's name.
   const setName = cleanDisplayName(item.groupBuy.name);
 
   // One gallery slide per build. A build with its own uploaded photo shows that
   // (and can be reported); a build without one falls back to the shared render.
   const groupImage = normalizeImageUrl(item.groupBuy.imageUrl);
-  const slides = builds.map(({ build, originalIndex }) => ({
+  const slides = builds.map(({ build, position }) => ({
     imageUrl: build.imageUrl || groupImage,
     isCustom: Boolean(build.imageUrl),
-    buildIndex: originalIndex,
-    label: buildLabel(build, originalIndex),
+    buildIndex: position,
+    photoHash: build.imageUrl ? photoFingerprint(build.imageUrl) : null,
+    label: buildLabel(build, position),
   }));
 
   return (
@@ -411,53 +429,55 @@ function PublicCollectionCard({
         )}
         <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
           {[
-            item.condition ? formatCondition(item.condition) : null,
+            // Condition is per build: one visible build states its own, and a
+            // multi-build card shows each build's in its row instead.
+            solo?.condition ? formatCondition(solo.condition) : null,
             acquiredYear ? `Collected ${acquiredYear}` : null,
           ]
             .filter(Boolean)
             .join(" · ") || "From the private collection"}
         </p>
 
-        {!multiBuild &&
+        {solo &&
           (specs.length > 0 ||
-            item.switches ||
-            item.keycaps ||
-            item.plateType ||
-            item.mountType ||
-            item.pcbType ||
-            item.layoutVariant ||
-            item.color) && (
+            solo.switches ||
+            solo.keycaps ||
+            solo.plateType ||
+            solo.mountType ||
+            solo.pcbType ||
+            solo.layoutVariant ||
+            solo.color) && (
           <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-gray-100 pt-5 dark:border-white/10">
             {specs.length > 0 && <PublicSpec label="Format" value={specs.join(" · ")} />}
-            {item.color && <PublicSpec label="Colour" value={item.color} />}
-            {item.switches && <PublicSpec label="Switches" value={item.switches} />}
-            {item.keycaps && <PublicSpec label="Keycaps" value={item.keycaps} />}
-            {item.plateType && <PublicSpec label="Plate" value={item.plateType} />}
-            {item.mountType && <PublicSpec label="Mount" value={item.mountType} />}
-            {item.pcbType && <PublicSpec label="PCB" value={item.pcbType} />}
-            {item.layoutVariant && <PublicSpec label="Layout" value={item.layoutVariant} />}
-            {item.showPurchasePrice && item.purchasePrice != null && (
+            {solo.color && <PublicSpec label="Colour" value={solo.color} />}
+            {solo.switches && <PublicSpec label="Switches" value={solo.switches} />}
+            {solo.keycaps && <PublicSpec label="Keycaps" value={solo.keycaps} />}
+            {solo.plateType && <PublicSpec label="Plate" value={solo.plateType} />}
+            {solo.mountType && <PublicSpec label="Mount" value={solo.mountType} />}
+            {solo.pcbType && <PublicSpec label="PCB" value={solo.pcbType} />}
+            {solo.layoutVariant && <PublicSpec label="Layout" value={solo.layoutVariant} />}
+            {item.showPurchasePrice && solo.purchasePrice != null && (
               <PublicSpec
-                label={item.quantity > 1 ? "Price per unit" : "Acquired for"}
-                value={`${item.purchaseCurrency || "USD"} ${item.purchasePrice.toLocaleString()}`}
+                label="Acquired for"
+                value={`${solo.purchaseCurrency || "USD"} ${solo.purchasePrice.toLocaleString()}`}
               />
             )}
             {/* Two independent gates: showSoldStatus reveals THAT it sold,
                 showPurchasePrice reveals FOR HOW MUCH. Enabling sold status
                 must never publish a figure the owner kept private. */}
-            {item.showSoldStatus && item.isSold && (
+            {item.showSoldStatus && solo.isSold && (
               <PublicSpec
                 label="Sold"
                 value={
                   [
-                    item.soldAt
-                      ? new Date(item.soldAt).toLocaleDateString("en-SG", {
+                    solo.soldAt
+                      ? new Date(solo.soldAt).toLocaleDateString("en-SG", {
                           month: "short",
                           year: "numeric",
                         })
                       : "Yes",
-                    item.showPurchasePrice && item.soldPrice != null
-                      ? `${item.soldCurrency || item.purchaseCurrency || "USD"} ${item.soldPrice.toLocaleString()}`
+                    item.showPurchasePrice && solo.soldPrice != null
+                      ? `${solo.soldCurrency || solo.purchaseCurrency || "USD"} ${solo.soldPrice.toLocaleString()}`
                       : null,
                   ]
                     .filter(Boolean)
@@ -467,19 +487,19 @@ function PublicCollectionCard({
             )}
           </dl>
         )}
-        {!multiBuild && item.buildDetails && (
+        {solo?.buildDetails && (
           <p className="mt-5 border-t border-gray-100 pt-5 text-sm leading-6 text-gray-600 dark:border-white/10 dark:text-gray-300">
-            {item.buildDetails}
+            {solo.buildDetails}
           </p>
         )}
 
         {multiBuild && (
           <div className="mt-5 space-y-3 border-t border-gray-100 pt-5 dark:border-white/10">
-            {builds.map(({ build, originalIndex }) => (
+            {builds.map(({ build, position }) => (
               <PublicBuild
-                key={originalIndex}
+                key={position}
                 build={build}
-                index={originalIndex}
+                position={position}
                 fallbackImageUrl={groupImage}
                 collectionSlug={collectionSlug}
                 trackerItemId={item.id}
@@ -533,6 +553,12 @@ function PublicKeycapCollectionCard({
   const slides = purchases.map((purchase, index) => ({
     imageUrl: keycapPurchasePhoto(purchase, catalogImage),
     isCustom: purchase.photoSource === "CUSTOM" && Boolean(purchase.imageUrl),
+    photoHash:
+      purchase.photoSource === "CUSTOM" && purchase.imageUrl
+        ? photoFingerprint(purchase.imageUrl)
+        : null,
+    // Public position, as for keyboard builds: the stored index would reveal
+    // how many private purchases sit ahead of this one.
     buildIndex: index,
     label: `Purchase ${index + 1}`,
   }));
@@ -856,7 +882,7 @@ function assemblePublicBuilds(item: {
 
 function PublicBuild({
   build,
-  index,
+  position,
   fallbackImageUrl = null,
   collectionSlug,
   trackerItemId,
@@ -865,7 +891,9 @@ function PublicBuild({
   showSoldStatus = false,
 }: {
   build: PublicBuildShape;
-  index: number;
+  // Place among the VISIBLE builds: what an unnamed build is called, and what
+  // a photo report sends (the endpoint maps it to the stored build).
+  position: number;
   // The shared catalog render, shown when this build has no photo of its own.
   // The gallery above already falls back this way for every slide; the rows
   // did not, so a build could appear photographed in one and blank in the other.
@@ -913,7 +941,7 @@ function PublicBuild({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={build.imageUrl || (fallbackImageUrl as string)}
-            alt={buildLabel(build, index)}
+            alt={buildLabel(build, position)}
             className={`h-full w-full rounded-lg bg-gray-100 dark:bg-gray-800 ${
               build.imageUrl ? "object-contain" : "object-cover"
             }`}
@@ -921,12 +949,13 @@ function PublicBuild({
           {/* Only an OWNER-UPLOADED photo can be reported — a catalog render
               belongs to the set, not to this collection, so offering to flag
               it would send a report nobody can act on. */}
-          {index > 0 && build.imageUrl && (
+          {position > 0 && build.imageUrl && (
             <ReportPhotoButton
               collectionSlug={collectionSlug}
               trackerItemId={trackerItemId}
-              buildIndex={index}
-              label={`${label}, ${buildLabel(build, index)}`}
+              buildIndex={position}
+              photoHash={photoFingerprint(build.imageUrl)}
+              label={`${label}, ${buildLabel(build, position)}`}
               className="absolute -bottom-1.5 -right-1.5 !h-6 !w-6"
             />
           )}
@@ -938,7 +967,7 @@ function PublicBuild({
       )}
       <div className="min-w-0">
         <p className="flex items-center gap-1.5 text-xs font-semibold text-gray-900 dark:text-white">
-          <span className="min-w-0 truncate">{buildLabel(build, index)}</span>
+          <span className="min-w-0 truncate">{buildLabel(build, position)}</span>
           {soldPublicly && (
             <span className="inline-flex items-center rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">
               Sold

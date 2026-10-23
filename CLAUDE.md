@@ -28,7 +28,7 @@ instead. It is also why a branch needs `--force-with-lease` after its PR merges.
 
 ## Tests
 
-Twenty-five suites, all of which should pass before pushing:
+Twenty-six suites, all of which should pass before pushing:
 
 ```
 python3 -m unittest discover -s scraper/tests     # mirrors CI exactly
@@ -41,6 +41,7 @@ npm run test:collection-import
 npm run test:keycap-collection
 npm run test:collection-sales
 npm run test:on-sale
+npm run test:public-collection
 npm run test:keycap-visualizer
 npm run test:http-json
 npm run test:home-cache

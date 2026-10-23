@@ -375,8 +375,8 @@ export function ImportKeycapsModal({
                 onChange={(event) => setAllPrivate(event.target.checked)}
                 className="h-4 w-4 rounded border-gray-300"
               />
-              Keep all imported sets private (they are added to your public display by default;
-              purchase prices always stay hidden)
+              Keep all imported sets private (new sets are added to your public display by default;
+              sets you already own keep their current visibility, and imported prices stay hidden)
             </label>
           </div>
 

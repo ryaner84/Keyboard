@@ -6,6 +6,8 @@ import {
   trackerIpHash,
 } from "@/lib/tracker-auth";
 import { collectionPhotoAtRecord } from "@/lib/collection-photo";
+import { storedIndexForPublicPosition } from "@/lib/public-collection";
+import { HIDDEN_SLUGS } from "@/lib/showcase";
 
 export const dynamic = "force-dynamic";
 
@@ -25,16 +27,23 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const collectionSlug = String(body?.collectionSlug ?? "").trim().slice(0, 200);
   const trackerItemId = String(body?.trackerItemId ?? "").trim().slice(0, 200);
-  const buildIndex = Number(body?.buildIndex);
+  // The page sends the photo's PUBLIC position ("Build 1", "Purchase 2"),
+  // never a stored index — that would tell a visitor how many hidden builds or
+  // private purchases sit ahead of it. It is mapped to the stored record below.
+  const publicPosition = Number(body?.buildIndex);
+  // The fingerprint of the photo the visitor saw (photoFingerprint). Required:
+  // a position alone can point at a different photo by now.
+  const seenPhotoHash = String(body?.photoHash ?? "").trim().toLowerCase();
   const issueType = String(body?.issueType ?? "").trim();
   const notes = String(body?.notes ?? "").trim().slice(0, 1000);
 
   if (
     !collectionSlug ||
     !trackerItemId ||
-    !Number.isInteger(buildIndex) ||
-    buildIndex < 0 ||
-    buildIndex > 98 ||
+    !Number.isInteger(publicPosition) ||
+    publicPosition < 0 ||
+    publicPosition > 98 ||
+    !/^[0-9a-f]{64}$/.test(seenPhotoHash) ||
     !ISSUE_TYPES.has(issueType)
   ) {
     return NextResponse.json({ error: "Invalid report" }, { status: 400 });
@@ -45,6 +54,7 @@ export async function POST(req: NextRequest) {
       id: trackerItemId,
       inCollection: true,
       isPublic: true,
+      groupBuy: { slug: { notIn: HIDDEN_SLUGS } },
       user: {
         collectionSlug,
         collectionPublished: true,
@@ -54,12 +64,31 @@ export async function POST(req: NextRequest) {
       id: true,
       customImageUrl: true,
       units: true,
+      quantity: true,
+      hiddenBuilds: true,
       keycapAcquisitions: true,
       groupBuy: { select: { productType: true } },
     },
   });
   if (!item) {
     return NextResponse.json({ error: "Photo is no longer public" }, { status: 404 });
+  }
+  // Only a PUBLIC record can be reached: a hidden build or private purchase
+  // has no public position, so it answers exactly like a missing photo.
+  // Without this the endpoint confirmed whether a hidden build carried an
+  // uploaded photo and accepted reports against a photo nobody can see. The
+  // report row stores the resolved STORED index, as it always has.
+  const buildIndex = storedIndexForPublicPosition(
+    {
+      productType: item.groupBuy.productType,
+      quantity: item.quantity,
+      hiddenBuilds: item.hiddenBuilds,
+      keycapAcquisitions: item.keycapAcquisitions,
+    },
+    publicPosition
+  );
+  if (buildIndex == null) {
+    return NextResponse.json({ error: "Photo is no longer available" }, { status: 404 });
   }
 
   const photo = collectionPhotoAtRecord(
@@ -71,6 +100,16 @@ export async function POST(req: NextRequest) {
   );
   if (!photo) {
     return NextResponse.json({ error: "Photo is no longer available" }, { status: 404 });
+  }
+  const imageHash = createHash("sha256").update(photo).digest("hex");
+  // The owner hid, un-hid or replaced a photo after the visitor loaded the
+  // page, so this position now holds a different photo than the one reported.
+  // Refuse rather than file the report against a photo nobody flagged.
+  if (imageHash !== seenPhotoHash) {
+    return NextResponse.json(
+      { error: "This photo has changed — reload the page and try again." },
+      { status: 409 }
+    );
   }
 
   const [reporter, ipHash] = await Promise.all([
@@ -98,7 +137,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const imageHash = createHash("sha256").update(photo).digest("hex");
   if (identityFilters.length > 0) {
     const duplicate = await prisma.collectionPhotoReport.findFirst({
       where: {

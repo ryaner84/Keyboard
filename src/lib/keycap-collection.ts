@@ -158,7 +158,13 @@ export function normalizeKeycapAcquisitions(
 ): KeycapAcquisition[] {
   const inherited = {
     showPurchasePrice: details.showPurchasePrice === true,
-    showSoldStatus: details.showSoldStatus === true,
+    // A purchase's own sale switch publishes the sale AMOUNT by itself, but the
+    // record-wide rule it inherits from needed BOTH switches for an amount
+    // ("sold status on, prices off" = sold, but not for how much). Inheriting
+    // the sale switch alone therefore published, on the first save in this
+    // editor, an amount the owner had kept private. Inherit it only when the
+    // old rule would also have shown the amount.
+    showSoldStatus: details.showSoldStatus === true && details.showPurchasePrice === true,
   };
   if (Array.isArray(details.keycapAcquisitions) && details.keycapAcquisitions.length > 0) {
     return details.keycapAcquisitions

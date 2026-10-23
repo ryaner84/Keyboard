@@ -59,14 +59,6 @@ function day(ts) {
   return new Date(ts).toISOString().slice(0, 10);
 }
 
-// Lightly mask a reporter email so the log isn't a plaintext address dump,
-// while still letting the owner recognise / reply to the sender.
-function maskEmail(email) {
-  const [user = "", domain = ""] = String(email).split("@");
-  const head = user.slice(0, 2);
-  return `${head}${user.length > 2 ? "***" : ""}@${domain}`;
-}
-
 // Print one category section; never let a missing table/column abort the rest.
 async function section(label, runQuery, format) {
   try {
@@ -177,15 +169,17 @@ try {
     "FEEDBACK",
     () =>
       client.query(`
-        SELECT id, email, subject, "submittedAt"
+        SELECT id, subject, "submittedAt"
           FROM "Feedback"
          WHERE "resolvedAt" IS NULL
          ORDER BY "submittedAt" DESC
          LIMIT 100
       `),
     (r) =>
-      `FEEDBACK | ${day(r.submittedAt)} | from=${maskEmail(r.email)} | ` +
-      `subject="${brief(r.subject)}" | id=${r.id}`
+      // No email, not even masked: this repo is PUBLIC, so its Actions logs
+      // are readable by anyone, and the feedback form promises the address is
+      // "never shared". Look the sender up by id in the database to reply.
+      `FEEDBACK | ${day(r.submittedAt)} | subject="${brief(r.subject)}" | id=${r.id}`
   );
 
   total += await section(
