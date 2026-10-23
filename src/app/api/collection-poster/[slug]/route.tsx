@@ -2,6 +2,7 @@ import { ImageResponse } from "next/og";
 import sharp from "sharp";
 import { prisma } from "@/lib/prisma";
 import { normalizeImageUrl } from "@/lib/utils";
+import { buildPosterModel } from "@/lib/public-collection";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,35 +10,6 @@ export const maxDuration = 30;
 
 const WIDTH = 800;
 const HEIGHT = 420;
-
-const KNOWN_BRANDS: Array<[RegExp, string]> = [
-  [/\bkeycult\b/i, "Keycult"],
-  [/\btgr\b/i, "TGR"],
-  [/\bmatrix(?:\s*lab)?\b/i, "Matrix Lab"],
-  [/\bgeon(?:works)?\b/i, "Geon"],
-  [/\bowlab\b/i, "OwLab"],
-  [/\brama(?:\s*works)?\b/i, "RAMA"],
-  [/\bmode(?:\s*designs)?\b/i, "Mode"],
-  [/\bsinga\b/i, "Singa"],
-  [/\bmonokei\b/i, "MONOKEI"],
-  [/\bangry\s*miao\b/i, "Angry Miao"],
-  [/\bqwertykeys\b/i, "Qwertykeys"],
-  [/\bkbd\s*fans\b|\bkbdfans\b/i, "KBDfans"],
-  [/\bpercent(?:\s*studio)?\b/i, "Percent Studio"],
-  [/\bnorbauer\b|\bnorbaforce\b/i, "Norbauer"],
-  [/\bsmith\s*(?:\+|&|and)\s*rune\b/i, "Smith + Rune"],
-  [/\bcannon\s*keys\b|\bcannonkeys\b/i, "CannonKeys"],
-  [/\bai03\b/i, "ai03"],
-];
-
-type CollectionGroupBuy = {
-  name: string;
-  designer: string;
-  imageUrl: string | null;
-  productType: string;
-  layout: string | null;
-  vendorName: string | null;
-};
 
 function posterThumbnailUrl(rawUrl: string): string {
   try {
@@ -136,92 +108,6 @@ async function createGalleryDataUri(
   }
 }
 
-function inferLayout(groupBuy: CollectionGroupBuy): string {
-  const text = `${groupBuy.layout ?? ""} ${groupBuy.name}`.toLowerCase();
-  if (/\b(?:f13\s*)?tkl\b|\b80%\b/.test(text)) return "TKL";
-  if (/\b(?:full[\s-]?size|100%|104[\s-]?key)\b/.test(text)) return "Full-size";
-  if (/\b1800\b/.test(text)) return "1800";
-  if (/\b96%\b/.test(text)) return "96%";
-  if (/\b75%\b|\b75[\s-]?key\b/.test(text)) return "75%";
-  if (/\b70%\b/.test(text)) return "70%";
-  if (/\b65%\b|\b6[568][\s-]?key\b/.test(text)) return "65%";
-  if (/\bhhkb\b/.test(text)) return "HHKB";
-  if (/\b60%\b|\b60[\s-]?key\b/.test(text)) return "60%";
-  if (/\b50%\b/.test(text)) return "50%";
-  if (/\b4[05]%\b|\b40s\b/.test(text)) return "40%";
-  if (/\balice\b|\barisu\b/.test(text)) return "Alice";
-  if (/\bsplit\b/.test(text)) return "Split";
-  if (/\bortho(?:linear)?\b/.test(text)) return "Ortho";
-  return "Other";
-}
-
-function inferBrand(groupBuy: CollectionGroupBuy): string | null {
-  const haystack = `${groupBuy.name} ${groupBuy.designer}`;
-  const known = KNOWN_BRANDS.find(([pattern]) => pattern.test(haystack));
-  if (known) return known[1];
-
-  const designer = groupBuy.designer
-    .replace(/\b(?:community group buy|independent design)\b/gi, "")
-    .split(/\s+(?:x|×|by)\s+|\||,/i)[0]
-    .replace(/^\s*(?:\[.*?\]\s*)+/, "")
-    .trim();
-
-  if (designer && designer.length <= 24) return designer;
-  return null;
-}
-
-function rankedCounts(
-  values: Array<string | null>,
-  limit: number
-): Array<{ label: string; count: number }> {
-  const counts = new Map<string, number>();
-  for (const value of values) {
-    if (!value) continue;
-    counts.set(value, (counts.get(value) ?? 0) + 1);
-  }
-  return Array.from(counts.entries())
-    .map(([label, count]) => ({ label, count }))
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
-    .slice(0, limit);
-}
-
-function posterItemImage(item: {
-  customImageUrl: string | null;
-  keycapAcquisitions: unknown;
-  groupBuy: CollectionGroupBuy;
-}) {
-  if (item.groupBuy.productType === "KEYBOARD") {
-    return item.customImageUrl || item.groupBuy.imageUrl;
-  }
-  if (Array.isArray(item.keycapAcquisitions)) {
-    const visible = item.keycapAcquisitions.find((acquisition) => {
-      const data = (acquisition ?? {}) as Record<string, unknown>;
-      return data.isPublic !== false && data.photoSource === "CUSTOM" && typeof data.imageUrl === "string";
-    }) as Record<string, unknown> | undefined;
-    if (visible?.imageUrl && typeof visible.imageUrl === "string") return visible.imageUrl;
-  }
-  return item.customImageUrl || item.groupBuy.imageUrl;
-}
-
-function countKeycapKitCopies(value: unknown, legacyQuantity: number) {
-  if (!Array.isArray(value) || value.length === 0) return Math.max(1, legacyQuantity || 1);
-  return value.reduce((total, acquisition) => {
-    const data = (acquisition ?? {}) as Record<string, unknown>;
-    if (data.isPublic === false) return total;
-    const kits = Array.isArray(data.kits) && data.kits.length > 0 ? data.kits.length : 1;
-    const quantity = Math.max(1, Math.min(99, Number(data.quantity) || 1));
-    return total + kits * quantity;
-  }, 0);
-}
-
-function hasPublicKeycapPurchase(value: unknown) {
-  if (!Array.isArray(value) || value.length === 0) return true;
-  return value.some((acquisition) => {
-    const data = (acquisition ?? {}) as Record<string, unknown>;
-    return data.isPublic !== false;
-  });
-}
-
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ slug: string }> }
@@ -246,6 +132,9 @@ export async function GET(
           customImageUrl: true,
           quantity: true,
           hiddenBuilds: true,
+          // Builds 2..N carry their own photos; the poster must be able to
+          // draw a VISIBLE build's photo when build 1 is hidden.
+          units: true,
           keycapAcquisitions: true,
           groupBuy: {
             select: {
@@ -264,47 +153,11 @@ export async function GET(
 
   if (!collection) return new Response("Not found", { status: 404 });
 
-  const owner = collection.displayName || "Keyboard collector";
-  const title = collection.collectionTitle || `${owner}'s collection`;
-  const displayedItems = collection.items.filter((item) => {
-    if (item.groupBuy.productType !== "KEYBOARD") {
-      return hasPublicKeycapPurchase(item.keycapAcquisitions);
-    }
-    const hidden = new Set(
-      Array.isArray(item.hiddenBuilds)
-        ? item.hiddenBuilds.map((index) => Number(index))
-        : []
-    );
-    return Array.from({ length: Math.max(1, item.quantity || 1) }).some(
-      (_, index) => !hidden.has(index)
-    );
-  });
-  const keyboards = displayedItems
-    .filter((item) => item.groupBuy.productType === "KEYBOARD")
-    .map((item) => item.groupBuy);
-  const keycapItems = displayedItems.filter(
-    (item) => item.groupBuy.productType !== "KEYBOARD"
-  );
-  const keycapCount = keycapItems.length;
-  const keycapKitCopies = keycapItems.reduce(
-    (total, item) => total + countKeycapKitCopies(item.keycapAcquisitions, item.quantity),
-    0
-  );
-  const layoutCounts = rankedCounts(keyboards.map(inferLayout), 5);
-  const brandCounts = rankedCounts(keyboards.map(inferBrand), 5);
-  const keycapMix =
-    keycapCount > 0
-      ? [
-          { label: "Keycap sets", count: keycapCount },
-          { label: "Kit copies", count: keycapKitCopies },
-        ]
-      : [];
-  // Preserve the collector's display order across BOTH item types. Earlier
-  // posters always filled the gallery with boards first, hiding keycap photos.
-  const candidates = displayedItems.slice(0, 5).map((item) => ({
-    groupBuy: item.groupBuy,
-    imageUrl: posterItemImage(item),
-  }));
+  // Everything drawn below comes from the shared, tested model — see
+  // src/lib/public-collection.ts for what a visitor may see and why.
+  const model = buildPosterModel(collection);
+  const { owner, title, keycapCount, layoutCounts, brandCounts, keycapMix } = model;
+  const candidates = model.imageUrls.map((imageUrl) => ({ imageUrl }));
   const imageBuffers = await Promise.all(
     candidates.map(async (item) => {
       const url = normalizeImageUrl(item.imageUrl);
@@ -404,7 +257,7 @@ export async function GET(
                 fontWeight: 700,
               }}
             >
-              {keyboards.length}
+              {model.keyboards}
             </span>
             <span
               style={{
@@ -417,7 +270,7 @@ export async function GET(
                 textTransform: "uppercase",
               }}
             >
-              keyboard{keyboards.length === 1 ? "" : "s"}
+              keyboard{model.keyboards === 1 ? "" : "s"}
             </span>
           </div>
           <div
@@ -428,7 +281,7 @@ export async function GET(
               fontSize: 10,
             }}
           >
-            {displayedItems.length} displayed
+            {model.displayed} displayed
             {keycapCount > 0
               ? ` · ${keycapCount} keycap set${keycapCount === 1 ? "" : "s"}`
               : ""}
@@ -529,8 +382,8 @@ export async function GET(
           }}
         >
           <span style={{ display: "flex" }}>
-            {collection.collectionBio
-              ? collection.collectionBio.slice(0, 72)
+            {model.bio
+              ? model.bio.slice(0, 72)
               : "A collector's personal keyboard and keycap archive"}
           </span>
           <span

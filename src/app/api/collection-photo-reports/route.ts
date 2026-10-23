@@ -6,6 +6,7 @@ import {
   trackerIpHash,
 } from "@/lib/tracker-auth";
 import { collectionPhotoAtRecord } from "@/lib/collection-photo";
+import { visibleBuildIndexes } from "@/lib/public-collection";
 
 export const dynamic = "force-dynamic";
 
@@ -54,12 +55,24 @@ export async function POST(req: NextRequest) {
       id: true,
       customImageUrl: true,
       units: true,
+      quantity: true,
+      hiddenBuilds: true,
       keycapAcquisitions: true,
       groupBuy: { select: { productType: true } },
     },
   });
   if (!item) {
     return NextResponse.json({ error: "Photo is no longer public" }, { status: 404 });
+  }
+  // A hidden build (or one past the record's quantity) is not on the public
+  // page, so it answers exactly like a missing photo. Without this the
+  // endpoint confirmed whether a hidden build carried an uploaded photo, and
+  // accepted moderation reports against a photo nobody can see.
+  if (
+    item.groupBuy.productType === "KEYBOARD" &&
+    !visibleBuildIndexes(item.quantity, item.hiddenBuilds).includes(buildIndex)
+  ) {
+    return NextResponse.json({ error: "Photo is no longer available" }, { status: 404 });
   }
 
   const photo = collectionPhotoAtRecord(

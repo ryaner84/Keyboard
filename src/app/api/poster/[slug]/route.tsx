@@ -2,7 +2,7 @@ import { ImageResponse } from "next/og";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { STATUS_LABELS, normalizeImageUrl } from "@/lib/utils";
-import { cleanDisplayName } from "@/lib/showcase";
+import { cleanDisplayName, isCustomSlug, isHiddenSlug } from "@/lib/showcase";
 import { getSiteUrl } from "@/lib/site-url";
 import QRCode from "qrcode";
 import type { GBStatus } from "@/generated/prisma";
@@ -126,6 +126,12 @@ export async function GET(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   const { slug } = await params;
+  // Same guard as /sets/[slug]: a board pulled for privacy (HIDDEN_SLUGS) or
+  // an owner's custom off-catalog piece has no public page, so none of the
+  // routes that render a set by slug may serve it either.
+  if (isHiddenSlug(slug) || isCustomSlug(slug)) {
+    return new Response("Not found", { status: 404 });
+  }
   const country = (req.nextUrl.searchParams.get("country") ?? "SG").toUpperCase();
   const currency = req.nextUrl.searchParams.get("currency") ?? "SGD";
   const region = COUNTRY_TO_REGION[country] ?? "OTHER";

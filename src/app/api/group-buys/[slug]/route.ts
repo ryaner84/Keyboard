@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { verifyAdminToken } from "@/lib/auth";
+import { isCustomSlug, isHiddenSlug } from "@/lib/showcase";
 import { PURCHASABLE_VENDOR_KIT_WHERE } from "@/lib/import/manufacturer-vendors";
 import type { Region } from "@/generated/prisma";
 
@@ -10,6 +11,15 @@ export async function GET(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   const { slug } = await params;
+  // Same guard as /sets/[slug]: a board pulled for privacy (HIDDEN_SLUGS) or
+  // an owner's custom off-catalog piece has no public page, so this JSON — the
+  // whole row, gallery included — is for the admin only.
+  if (isHiddenSlug(slug) || isCustomSlug(slug)) {
+    const token = (await cookies()).get("admin_session")?.value;
+    if (!token || !verifyAdminToken(token)) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+  }
   const region = (req.nextUrl.searchParams.get("region") ?? "SG") as Region;
 
   const groupBuy = await prisma.groupBuy.findUnique({

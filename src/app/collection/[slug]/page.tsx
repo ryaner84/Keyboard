@@ -19,6 +19,7 @@ import {
   collectionSharePath,
 } from "@/lib/collection-share";
 import { buildLabel } from "@/lib/collection-sales";
+import { buildPosterModel, hiddenBuildSet, posterVersion, visibleBuildIndexes } from "@/lib/public-collection";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,6 @@ const getPublicCollection = cache(async (slug: string) =>
       displayName: true,
       collectionTitle: true,
       collectionBio: true,
-      updatedAt: true,
       items: {
         where: {
           inCollection: true,
@@ -65,7 +65,6 @@ const getPublicCollection = cache(async (slug: string) =>
           units: true,
           hiddenBuilds: true,
           keycapAcquisitions: true,
-          updatedAt: true,
           groupBuy: {
             select: {
               id: true,
@@ -105,12 +104,13 @@ export async function generateMetadata({
     `Explore ${owner}'s curated keyboard and keycap collection.`;
   const siteUrl = getSiteUrl();
   const canonicalUrl = `${siteUrl}/collection/${slug}`;
-  const latestUpdate = Math.max(
-    collection.updatedAt.getTime(),
-    ...collection.items.map((item) => item.updatedAt.getTime())
-  );
   const pageUrl = `${siteUrl}${collectionSharePath(slug)}`;
-  const posterUrl = `${siteUrl}${collectionPosterPath(slug, latestUpdate.toString(36))}`;
+  // The cache token is a hash of exactly what the poster draws, built by the
+  // same function the poster renders from. It used to be the latest updatedAt
+  // across the owner and their public items — the owner's last activity to
+  // the millisecond, published in every link preview, and able to fall back
+  // onto an older cached poster that still showed a piece since hidden.
+  const posterUrl = `${siteUrl}${collectionPosterPath(slug, posterVersion(buildPosterModel(collection)))}`;
 
   return {
     title,
@@ -160,15 +160,7 @@ export default async function PublicCollectionPage({
     if (item.groupBuy.productType !== "KEYBOARD") {
       return publicKeycapAcquisitions(item).length > 0;
     }
-    const qty = Math.max(1, item.quantity || 1);
-    const hidden = new Set(
-      Array.isArray(item.hiddenBuilds)
-        ? (item.hiddenBuilds as unknown[]).map((n) => Number(n))
-        : []
-    );
-    let visible = 0;
-    for (let i = 0; i < qty; i++) if (!hidden.has(i)) visible++;
-    return visible > 0;
+    return visibleBuildIndexes(item.quantity, item.hiddenBuilds).length > 0;
   });
   const category = type === "keyboards" || type === "keycaps" ? type : "all";
   const visibleItems = allVisibleItems.filter((item) =>
@@ -187,21 +179,17 @@ export default async function PublicCollectionPage({
   for (const item of allVisibleItems) {
     if (item.groupBuy.productType !== "KEYBOARD") continue;
     publicKeyboardNames.set(item.groupBuy.slug, cleanDisplayName(item.groupBuy.name));
-    const hidden = new Set(
-      Array.isArray(item.hiddenBuilds)
-        ? (item.hiddenBuilds as unknown[]).map((value) => Number(value))
-        : []
-    );
     // Each SHOWN build's label rides in the same map under "slug|index"
     // (a slug never contains "|"), so a keycap paired to it can name it the
     // way the keyboard card does without threading a second map through.
+    // Unnamed builds are numbered by position among the VISIBLE builds, as on
+    // the card — the original number would say how many are hidden.
     const builds = assemblePublicBuilds(item);
-    for (let index = 0; index < Math.max(1, item.quantity || 1); index++) {
-      if (hidden.has(index)) continue;
+    visibleBuildIndexes(item.quantity, item.hiddenBuilds).forEach((index, position) => {
       const key = `${item.groupBuy.slug}|${index}`;
       publicKeyboardBuilds.add(key);
-      publicKeyboardNames.set(key, buildLabel(builds[index], index));
-    }
+      publicKeyboardNames.set(key, buildLabel(builds[index], position));
+    });
   }
 
   return (
@@ -359,14 +347,15 @@ function PublicCollectionCard({
   // multi-unit piece. hiddenBuilds holds the 0-based ORIGINAL build indexes to
   // exclude — keep the original index on each visible build so photo reports
   // still reference the right unit.
-  const hiddenBuilds = new Set(
-    Array.isArray(item.hiddenBuilds)
-      ? (item.hiddenBuilds as unknown[]).map((n) => Number(n))
-      : []
-  );
+  const hiddenBuilds = hiddenBuildSet(item.hiddenBuilds);
+  // `position` is the build's place among the VISIBLE builds, which is what an
+  // unnamed build is called here ("Build 1" with the real build 1 hidden):
+  // numbering by the original index would tell a visitor that hidden builds
+  // exist, how many, and where. originalIndex stays for photo reports only.
   const builds = assemblePublicBuilds(item)
     .map((build, originalIndex) => ({ build, originalIndex }))
-    .filter(({ originalIndex }) => !hiddenBuilds.has(originalIndex));
+    .filter(({ originalIndex }) => !hiddenBuilds.has(originalIndex))
+    .map((entry, position) => ({ ...entry, position }));
   // Every hidden: nothing of this piece is the public's to see.
   if (builds.length === 0) return null;
   const multiBuild = builds.length > 1;
@@ -392,11 +381,11 @@ function PublicCollectionCard({
   // One gallery slide per build. A build with its own uploaded photo shows that
   // (and can be reported); a build without one falls back to the shared render.
   const groupImage = normalizeImageUrl(item.groupBuy.imageUrl);
-  const slides = builds.map(({ build, originalIndex }) => ({
+  const slides = builds.map(({ build, originalIndex, position }) => ({
     imageUrl: build.imageUrl || groupImage,
     isCustom: Boolean(build.imageUrl),
     buildIndex: originalIndex,
-    label: buildLabel(build, originalIndex),
+    label: buildLabel(build, position),
   }));
 
   return (
@@ -494,11 +483,12 @@ function PublicCollectionCard({
 
         {multiBuild && (
           <div className="mt-5 space-y-3 border-t border-gray-100 pt-5 dark:border-white/10">
-            {builds.map(({ build, originalIndex }) => (
+            {builds.map(({ build, originalIndex, position }) => (
               <PublicBuild
                 key={originalIndex}
                 build={build}
                 index={originalIndex}
+                position={position}
                 fallbackImageUrl={groupImage}
                 collectionSlug={collectionSlug}
                 trackerItemId={item.id}
@@ -552,7 +542,7 @@ function PublicKeycapCollectionCard({
   const slides = purchases.map((purchase, index) => ({
     imageUrl: keycapPurchasePhoto(purchase, catalogImage),
     isCustom: purchase.photoSource === "CUSTOM" && Boolean(purchase.imageUrl),
-    buildIndex: index,
+    buildIndex: purchase.rawIndex,
     label: `Purchase ${index + 1}`,
   }));
   const isCustom = isCustomSlug(item.groupBuy.slug);
@@ -696,7 +686,13 @@ function publicKeycapAcquisitions(item: {
       ? item.keycapAcquisitions
       : null,
   } as CollectionItemDetails;
-  return normalizeKeycapAcquisitions(details).filter((purchase) => purchase.isPublic);
+  // rawIndex is the purchase's place in the STORED list (normalizeOne never
+  // drops an entry, so positions line up), which is what the photo-report API
+  // indexes. The position after this filter is not: with a private purchase
+  // ahead of it, a report on "Purchase 1" landed on a different purchase.
+  return normalizeKeycapAcquisitions(details)
+    .map((purchase, rawIndex) => ({ ...purchase, rawIndex }))
+    .filter((purchase) => purchase.isPublic);
 }
 
 function publicKeycapPairing(
@@ -876,6 +872,7 @@ function assemblePublicBuilds(item: {
 function PublicBuild({
   build,
   index,
+  position,
   fallbackImageUrl = null,
   collectionSlug,
   trackerItemId,
@@ -884,7 +881,10 @@ function PublicBuild({
   showSoldStatus = false,
 }: {
   build: PublicBuildShape;
+  // ORIGINAL build index — for the photo-report API only, never shown.
   index: number;
+  // Place among the VISIBLE builds; what an unnamed build is called.
+  position: number;
   // The shared catalog render, shown when this build has no photo of its own.
   // The gallery above already falls back this way for every slide; the rows
   // did not, so a build could appear photographed in one and blank in the other.
@@ -932,7 +932,7 @@ function PublicBuild({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={build.imageUrl || (fallbackImageUrl as string)}
-            alt={buildLabel(build, index)}
+            alt={buildLabel(build, position)}
             className={`h-full w-full rounded-lg bg-gray-100 dark:bg-gray-800 ${
               build.imageUrl ? "object-contain" : "object-cover"
             }`}
@@ -945,7 +945,7 @@ function PublicBuild({
               collectionSlug={collectionSlug}
               trackerItemId={trackerItemId}
               buildIndex={index}
-              label={`${label}, ${buildLabel(build, index)}`}
+              label={`${label}, ${buildLabel(build, position)}`}
               className="absolute -bottom-1.5 -right-1.5 !h-6 !w-6"
             />
           )}
@@ -957,7 +957,7 @@ function PublicBuild({
       )}
       <div className="min-w-0">
         <p className="flex items-center gap-1.5 text-xs font-semibold text-gray-900 dark:text-white">
-          <span className="min-w-0 truncate">{buildLabel(build, index)}</span>
+          <span className="min-w-0 truncate">{buildLabel(build, position)}</span>
           {soldPublicly && (
             <span className="inline-flex items-center rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">
               Sold

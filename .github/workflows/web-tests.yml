@@ -91,6 +91,14 @@ jobs:
       # the homepage rail and the card badge. When the badge scanned rows the
       # filter refused, a set that qualified through a buyable 6% markdown
       # advertised a sold-out shop's 52%.
+      # What a visitor may see of a public collection is decided in one module
+      # and asked by the page, the share poster and the photo-report endpoint.
+      # They used to decide it separately and drifted: the poster drew a hidden
+      # build 1's photo after the page had learned to hide it.
+      - name: public-collection
+        if: always()
+        run: npm run test:public-collection
+
       - name: on-sale
         if: always()
         run: npm run test:on-sale

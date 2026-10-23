@@ -172,6 +172,28 @@ const inheritedOff = normalizeKeycapAcquisitions(
 );
 assert.equal(inheritedOff[0].showPurchasePrice, false);
 
+// "Sold status on, prices off" meant sold-but-not-for-how-much under the
+// record-wide rule. A purchase's own sale switch shows the amount, so it may
+// NOT inherit on from that state — or the first save in the editor publishes
+// an amount the owner kept private. Sold status needs both to carry over.
+const soldButPricesPrivate = normalizeKeycapAcquisitions(
+  {
+    ...baseDetails,
+    showPurchasePrice: false,
+    showSoldStatus: true,
+    keycapAcquisitions: [createKeycapAcquisitionWithoutFlags()],
+  },
+  "SGD"
+);
+assert.equal(soldButPricesPrivate[0].showSoldStatus, false, "the sale amount stays private");
+assert.equal(soldButPricesPrivate[0].showPurchasePrice, false);
+// Same rule for a legacy set with no per-purchase records at all.
+const legacySoldPricesPrivate = normalizeKeycapAcquisitions(
+  { ...baseDetails, showPurchasePrice: false, showSoldStatus: true, keycapAcquisitions: null },
+  "SGD"
+);
+assert.equal(legacySoldPricesPrivate[0].showSoldStatus, false);
+
 // An explicit per-purchase value always wins over the inherited one — that is
 // the whole point of the setting being per purchase.
 const explicitOff = createKeycapAcquisition("SGD");
