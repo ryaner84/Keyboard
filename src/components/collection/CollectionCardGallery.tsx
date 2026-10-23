@@ -12,8 +12,12 @@ export interface GallerySlide {
   // True only when `imageUrl` is the collector's own uploaded photo (so the
   // report button is offered for that specific build).
   isCustom: boolean;
-  // Index of the build within the item (build 1 = 0) — used for reporting.
+  // The slide's PUBLIC position (0-based among what the visitor can see) —
+  // used for reporting; the endpoint maps it to the stored record.
   buildIndex: number;
+  // photoFingerprint of a custom photo, which a report must carry back so it
+  // can only ever land on the photo this slide showed. null for catalog art.
+  photoHash: string | null;
   // What this slide is called: buildLabel for a keyboard build (the owner's
   // name, or "Build N"), "Purchase N" for keycaps. Supplied by the page so the
   // gallery and the build rows under it name a build the same way.
@@ -153,11 +157,12 @@ export function CollectionCardGallery({
       )}
 
       {/* Report only the collector's own uploaded photo for the current build. */}
-      {current?.isCustom && (
+      {current?.isCustom && current.photoHash && (
         <ReportPhotoButton
           collectionSlug={collectionSlug}
           trackerItemId={trackerItemId}
           buildIndex={current.buildIndex}
+          photoHash={current.photoHash}
           label={`${setName}, ${current.label}`}
           className="absolute bottom-4 right-4"
         />

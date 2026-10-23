@@ -39,6 +39,17 @@ export function buildPhotoAt(customImageUrl: unknown, units: unknown, index: num
   return typeof value === "string" && value.trim() ? value : null;
 }
 
+// The fingerprint of a photo exactly as the photo-report endpoint hashes it
+// (sha256 of the trimmed stored value). The page puts it beside each
+// reportable photo and the report must carry it back: a report is about the
+// photo the visitor SAW, and a public position alone can point at a different
+// photo by the time it is submitted (the owner hid or un-hid a build in
+// between). It is a hash of an image already on the page, so it reveals
+// nothing new.
+export function photoFingerprint(photo: string): string {
+  return createHash("sha256").update(photo.trim()).digest("hex");
+}
+
 // ── Keycaps ─────────────────────────────────────────────────────────────────
 
 // The STORED indexes of a keycap set's public purchases, in order. A set with

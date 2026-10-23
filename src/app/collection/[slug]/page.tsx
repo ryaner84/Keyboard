@@ -19,7 +19,13 @@ import {
   collectionSharePath,
 } from "@/lib/collection-share";
 import { buildLabel } from "@/lib/collection-sales";
-import { buildPosterModel, hiddenBuildSet, posterVersion, visibleBuildIndexes } from "@/lib/public-collection";
+import {
+  buildPosterModel,
+  hiddenBuildSet,
+  photoFingerprint,
+  posterVersion,
+  visibleBuildIndexes,
+} from "@/lib/public-collection";
 
 export const dynamic = "force-dynamic";
 
@@ -390,6 +396,7 @@ function PublicCollectionCard({
     imageUrl: build.imageUrl || groupImage,
     isCustom: Boolean(build.imageUrl),
     buildIndex: position,
+    photoHash: build.imageUrl ? photoFingerprint(build.imageUrl) : null,
     label: buildLabel(build, position),
   }));
 
@@ -546,6 +553,10 @@ function PublicKeycapCollectionCard({
   const slides = purchases.map((purchase, index) => ({
     imageUrl: keycapPurchasePhoto(purchase, catalogImage),
     isCustom: purchase.photoSource === "CUSTOM" && Boolean(purchase.imageUrl),
+    photoHash:
+      purchase.photoSource === "CUSTOM" && purchase.imageUrl
+        ? photoFingerprint(purchase.imageUrl)
+        : null,
     // Public position, as for keyboard builds: the stored index would reveal
     // how many private purchases sit ahead of this one.
     buildIndex: index,
@@ -943,6 +954,7 @@ function PublicBuild({
               collectionSlug={collectionSlug}
               trackerItemId={trackerItemId}
               buildIndex={position}
+              photoHash={photoFingerprint(build.imageUrl)}
               label={`${label}, ${buildLabel(build, position)}`}
               className="absolute -bottom-1.5 -right-1.5 !h-6 !w-6"
             />

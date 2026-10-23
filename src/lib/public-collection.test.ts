@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import {
   buildPhotoAt,
+  photoFingerprint,
   publicPurchaseIndexes,
   storedIndexForPublicPosition,
   buildPosterModel,
@@ -60,6 +62,13 @@ const kc = { productType: "KEYCAPS", quantity: 1, hiddenBuilds: null, keycapAcqu
 assert.equal(storedIndexForPublicPosition(kc, 0), 1);
 assert.equal(storedIndexForPublicPosition(kc, 1), 3);
 assert.equal(storedIndexForPublicPosition(kc, 2), null, "a private purchase has no public position");
+
+// A report carries the fingerprint of the photo the visitor SAW, computed
+// exactly as the endpoint hashes the stored photo (trimmed sha256).
+assert.equal(
+  photoFingerprint("  data:image/png;base64,AAAA  "),
+  createHash("sha256").update("data:image/png;base64,AAAA").digest("hex")
+);
 
 // ── the share poster never draws a hidden build's photo ─────────────────────
 const hiddenB1 = keyboard({
@@ -146,6 +155,12 @@ assert.doesNotMatch(page, /buildIndex: (originalIndex|purchase\.rawIndex)/, "no 
 assert.doesNotMatch(page, /key=\{originalIndex\}|buildIndex=\{index\}/, "no stored index as a key or report target");
 assert.match(page, /buildIndex: position,/);
 assert.match(reports, /storedIndexForPublicPosition\(/, "the report endpoint maps public positions on the server");
+assert.match(reports, /if \(imageHash !== seenPhotoHash\)/, "a report can only land on the photo the visitor saw");
+assert.match(reports, /!\/\^\[0-9a-f\]\{64\}\$\/\.test\(seenPhotoHash\)/, "and must carry its fingerprint");
+assert.match(page, /photoHash: build\.imageUrl \? photoFingerprint\(build\.imageUrl\) : null/);
+assert.match(page, /photoHash=\{photoFingerprint\(build\.imageUrl\)\}/);
+assert.match(read("src/components/collection/CollectionCardGallery.tsx"), /photoHash=\{current\.photoHash\}/);
+assert.match(read("src/components/collection/ReportPhotoButton.tsx"), /buildIndex,\s*photoHash,/);
 assert.match(page, /buildLabel\(build, position\)/, "unnamed public builds are numbered among visible builds");
 assert.match(poster, /buildPosterModel\(collection\)/);
 assert.doesNotMatch(poster, /function posterItemImage/, "the poster has no image rule of its own");

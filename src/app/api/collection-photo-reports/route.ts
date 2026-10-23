@@ -31,6 +31,9 @@ export async function POST(req: NextRequest) {
   // never a stored index — that would tell a visitor how many hidden builds or
   // private purchases sit ahead of it. It is mapped to the stored record below.
   const publicPosition = Number(body?.buildIndex);
+  // The fingerprint of the photo the visitor saw (photoFingerprint). Required:
+  // a position alone can point at a different photo by now.
+  const seenPhotoHash = String(body?.photoHash ?? "").trim().toLowerCase();
   const issueType = String(body?.issueType ?? "").trim();
   const notes = String(body?.notes ?? "").trim().slice(0, 1000);
 
@@ -40,6 +43,7 @@ export async function POST(req: NextRequest) {
     !Number.isInteger(publicPosition) ||
     publicPosition < 0 ||
     publicPosition > 98 ||
+    !/^[0-9a-f]{64}$/.test(seenPhotoHash) ||
     !ISSUE_TYPES.has(issueType)
   ) {
     return NextResponse.json({ error: "Invalid report" }, { status: 400 });
@@ -97,6 +101,16 @@ export async function POST(req: NextRequest) {
   if (!photo) {
     return NextResponse.json({ error: "Photo is no longer available" }, { status: 404 });
   }
+  const imageHash = createHash("sha256").update(photo).digest("hex");
+  // The owner hid, un-hid or replaced a photo after the visitor loaded the
+  // page, so this position now holds a different photo than the one reported.
+  // Refuse rather than file the report against a photo nobody flagged.
+  if (imageHash !== seenPhotoHash) {
+    return NextResponse.json(
+      { error: "This photo has changed — reload the page and try again." },
+      { status: 409 }
+    );
+  }
 
   const [reporter, ipHash] = await Promise.all([
     getTrackerSessionUser(),
@@ -123,7 +137,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const imageHash = createHash("sha256").update(photo).digest("hex");
   if (identityFilters.length > 0) {
     const duplicate = await prisma.collectionPhotoReport.findFirst({
       where: {
