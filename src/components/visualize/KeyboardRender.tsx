@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { accentLegend, buildLayout, isLight, layoutKeys, mix, type KeycapColors, type LayoutId, type LayoutOptions } from "@/lib/keycap-visualizer";
+import { accentLegend, buildLayout, isLight, layoutKeys, mix, placeKeys, type KeycapColors, type LayoutId, type LayoutOptions, type Placement } from "@/lib/keycap-visualizer";
 
 const U = 40; // pixels per key unit
 const SIDE = 22; // case bezel left/right
@@ -11,6 +11,7 @@ interface KeyboardRenderProps {
   layout: LayoutId;
   options?: Partial<LayoutOptions>;
   colors: KeycapColors;
+  placement?: Placement;
   profile: "cherry" | "dcs";
   caseHex: string;
   legends?: boolean;
@@ -24,9 +25,11 @@ interface KeyboardRenderProps {
 // diagram: sculpted caps (front wall, dished top, row-by-row height), a case
 // with a lit chamfer and a visible front face, one case color from the edge to
 // the keys (bezel and opening are the same part), and a soft studio shadow. SVG, so it stays sharp at any size.
-export function KeyboardRender({ layout, options, colors, profile, caseHex, legends = true, shadow = true, tilt = false, label }: KeyboardRenderProps) {
+export function KeyboardRender({ layout, options, colors, placement, profile, caseHex, legends = true, shadow = true, tilt = false, label }: KeyboardRenderProps) {
   const id = useId().replace(/:/g, "");
-  const { keys, width, height } = layoutKeys(buildLayout(layout, options));
+  const laid = layoutKeys(buildLayout(layout, options));
+  const { width, height } = laid;
+  const keys = placeKeys(laid.keys, placement);
   const fill = { a: colors.alpha, m: colors.mod, x: colors.accent };
   const ink = { a: colors.alphaLegend, m: colors.modLegend, x: accentLegend(colors) };
   const dcs = profile === "dcs";

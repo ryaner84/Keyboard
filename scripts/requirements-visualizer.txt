@@ -1,0 +1,2 @@
+# For scripts/keycap-colors.py (docs/keycap-visualizer-routine.md).
+Pillow==11.3.0
