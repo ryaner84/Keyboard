@@ -305,8 +305,19 @@ export async function DELETE(
   // removes the backing private GroupBuy too (the TrackerItem goes with it via
   // cascade). Without this, "removing" a custom piece left it orphaned — not
   // tracked, not in the collection, but forever occupying its name in the DB.
+  //
+  // Only when it IS solely this owner's: if any other user's item references
+  // the GroupBuy (attached before notSomeoneElsesCustomPiece existed), deleting
+  // it would cascade onto theirs, so remove just the caller's item instead.
   if (isCustomSlug(slug)) {
-    await prisma.groupBuy.delete({ where: { id: item.groupBuyId } });
+    const othersHoldingIt = await prisma.trackerItem.count({
+      where: { groupBuyId: item.groupBuyId, userId: { not: user.id } },
+    });
+    if (othersHoldingIt === 0) {
+      await prisma.groupBuy.delete({ where: { id: item.groupBuyId } });
+    } else {
+      await prisma.trackerItem.delete({ where: { id: item.id } });
+    }
     return NextResponse.json({ ok: true });
   }
 

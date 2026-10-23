@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   const mode = body?.mode === "collection" ? "collection" : "tracking";
   if (!slug) return NextResponse.json({ error: "Missing slug" }, { status: 400 });
 
-  const [groupBuy, rates] = await Promise.all([getGroupBuyForTracking(slug), getUsdRates()]);
+  const [groupBuy, rates] = await Promise.all([getGroupBuyForTracking(slug, user.id), getUsdRates()]);
   if (!groupBuy) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   await prisma.trackerItem.upsert({

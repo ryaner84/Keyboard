@@ -1,6 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import { CUSTOM_SLUG_PREFIX } from "@/lib/showcase";
 
 export interface TrackerSnapshot {
   lastStatus: string;
@@ -86,9 +87,25 @@ export function trackerSnapshotFromGroupBuy(
   };
 }
 
-export async function getGroupBuyForTracking(slug: string) {
-  return prisma.groupBuy.findUnique({
-    where: { slug },
+// A custom (off-catalog) piece is one owner's private record that happens to
+// live in the GroupBuy table — not a catalog set anyone may add. Its slug is
+// unguessable but PUBLIC once the piece is shown, and DELETE on a custom slug
+// removes the whole GroupBuy (cascading to every TrackerItem on it), so letting
+// a second user attach to it let any signed-in user delete someone else's
+// piece. Every path that attaches a user to a GroupBuy by slug excludes custom
+// pieces another user already holds.
+export function notSomeoneElsesCustomPiece(userId: string) {
+  return {
+    NOT: {
+      slug: { startsWith: CUSTOM_SLUG_PREFIX },
+      trackerItems: { some: { userId: { not: userId } } },
+    },
+  };
+}
+
+export async function getGroupBuyForTracking(slug: string, userId: string) {
+  return prisma.groupBuy.findFirst({
+    where: { slug, ...notSomeoneElsesCustomPiece(userId) },
     include: trackerCatalogInclude,
   });
 }
@@ -132,7 +149,7 @@ export async function syncTrackerSlugsForUser({
   const normalizedSlugs = Array.from(new Set(slugs.map(String).filter(Boolean))).slice(0, 200);
   const [groupBuys, rates] = await Promise.all([
     prisma.groupBuy.findMany({
-      where: { slug: { in: normalizedSlugs } },
+      where: { slug: { in: normalizedSlugs }, ...notSomeoneElsesCustomPiece(userId) },
       include: {
         kits: { include: { vendorKits: { include: { vendor: true } } } },
         devUpdates: { orderBy: { postedAt: "desc" }, take: 1 },

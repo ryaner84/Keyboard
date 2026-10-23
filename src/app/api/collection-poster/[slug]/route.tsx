@@ -2,7 +2,7 @@ import { ImageResponse } from "next/og";
 import sharp from "sharp";
 import { prisma } from "@/lib/prisma";
 import { normalizeImageUrl } from "@/lib/utils";
-import { buildPosterModel } from "@/lib/public-collection";
+import { buildPosterModel, posterVersion } from "@/lib/public-collection";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -109,7 +109,7 @@ async function createGalleryDataUri(
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ slug: string }> }
 ) {
   const { slug } = await params;
@@ -156,6 +156,12 @@ export async function GET(
   // Everything drawn below comes from the shared, tested model — see
   // src/lib/public-collection.ts for what a visitor may see and why.
   const model = buildPosterModel(collection);
+  // The page links this image as ?v=<hash of the model it saw>. Only a request
+  // whose v matches what is drawn NOW may be cached: otherwise an old link
+  // fetched while a since-hidden piece was public would cache that picture
+  // under a version the page can advertise again once the piece is hidden.
+  const requestedVersion = new URL(request.url).searchParams.get("v");
+  const cacheable = requestedVersion === posterVersion(model);
   const { owner, title, keycapCount, layoutCounts, brandCounts, keycapMix } = model;
   const candidates = model.imageUrls.map((imageUrl) => ({ imageUrl }));
   const imageBuffers = await Promise.all(
@@ -401,9 +407,14 @@ export async function GET(
     {
       width: WIDTH,
       height: HEIGHT,
+      // Lowercase on purpose: ImageResponse sets its own lowercase
+      // "cache-control: public, immutable, max-age=31536000" and spreads ours
+      // after it, so a "Cache-Control" key was APPENDED to that default
+      // rather than replacing it — every poster was cached immutable for a year.
       headers: {
-        "Cache-Control":
-          "public, max-age=300, s-maxage=300, stale-while-revalidate=3600",
+        "cache-control": cacheable
+          ? "public, max-age=300, s-maxage=300, stale-while-revalidate=3600"
+          : "no-store",
       },
     }
   );

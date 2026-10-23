@@ -133,4 +133,31 @@ for (const path of ["src/app/api/poster/[slug]/route.tsx", "src/app/share/[slug]
   assert.match(read(path), /isHiddenSlug\(slug\) \|\| isCustomSlug\(slug\)/, `${path} refuses pulled and custom slugs`);
 }
 
+// ── caching: the poster is cached only under its own content's version ──────
+assert.match(poster, /requestedVersion === posterVersion\(model\)/, "a mismatched ?v is never cached");
+assert.match(poster, /"cache-control": cacheable/, "lowercase, so it REPLACES ImageResponse's immutable default");
+assert.doesNotMatch(poster, /"Cache-Control":/);
+assert.doesNotMatch(read("src/app/api/poster/[slug]/route.tsx"), /"Cache-Control":/, "same header trap on the set poster");
+
+// ── writers that could publish or destroy someone's private data ────────────
+const commit = read("src/app/api/tracker/items/import/commit/route.ts");
+assert.match(
+  commit,
+  /isPublic: existing\?\.inCollection \? existing\.isPublic && isPublic : isPublic/,
+  "CSV import never makes a set already in the collection public"
+);
+const trackerData = read("src/lib/tracker-data.ts");
+assert.match(trackerData, /export function notSomeoneElsesCustomPiece/);
+for (const [path, pattern] of [
+  ["src/lib/tracker-data.ts", /where: \{ slug, \.\.\.notSomeoneElsesCustomPiece\(userId\) \}/],
+  ["src/lib/tracker-data.ts", /slug: \{ in: normalizedSlugs \}, \.\.\.notSomeoneElsesCustomPiece\(userId\)/],
+  ["src/app/api/tracker/items/route.ts", /getGroupBuyForTracking\(slug, user\.id\)/],
+  ["src/app/api/tracker/items/import/commit/route.ts", /\.\.\.notSomeoneElsesCustomPiece\(user\.id\)/],
+] as const) {
+  assert.match(read(path), pattern, `${path}: no attaching to another user's custom piece`);
+}
+const itemRoute = read("src/app/api/tracker/items/[slug]/route.ts");
+assert.match(itemRoute, /if \(othersHoldingIt === 0\) \{\s*await prisma\.groupBuy\.delete/, "a custom piece's GroupBuy is deleted only when nobody else holds it");
+assert.doesNotMatch(read("scripts/visitor-inbox-ci.mjs"), /maskEmail|r\.email/, "no visitor email in public Actions logs");
+
 console.log("public collection privacy checks passed");
