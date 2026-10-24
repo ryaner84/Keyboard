@@ -14,7 +14,7 @@ to the start.
 
 `after_slug` for the next run: **`gmk-zm`**
 
-The list held 44 on-sale sets on 2026-10-22, fewer than one batch, so the run
+The list held 43 on-sale sets on 2026-10-24, fewer than one batch, so the run
 read all of them (`dcs-chladni … gmk-zm`). The next run wraps to the
 start again; if the list grows past 50, it continues from the top.
 
@@ -48,6 +48,8 @@ start again; if the list grows past 50, it continues from the top.
 | 2026-10-20 | dcs-chladni … gmk-zm (whole list; the cursor sat at the end, so one run from the start) | 45 | 232 | 8 flagged → 0 confirmed | 0 | [39355365349](https://github.com/ryaner84/Keyboard/actions/runs/39355365349) |
 | 2026-10-21 | dcs-chladni … gmk-zm (whole list; the cursor sat at the end, so one run from the start) | 44 | 231 | 9 flagged → 1 confirmed | 1 (price-report button) | [39529299083](https://github.com/ryaner84/Keyboard/actions/runs/39529299083) (reports: [39529762462](https://github.com/ryaner84/Keyboard/actions/runs/39529762462)) |
 | 2026-10-22 | dcs-chladni … gmk-zm (whole list; the cursor sat at the end, so one run from the start) | 44 | 233 | 9 flagged → 1 confirmed | 1 (price-report button) | [39707683937](https://github.com/ryaner84/Keyboard/actions/runs/39707683937) (reports: [39708249986](https://github.com/ryaner84/Keyboard/actions/runs/39708249986)) |
+| 2026-10-23 | dcs-chladni … gmk-zm (run, not reviewed; see 2026-10-24) | 44 | 232 | 7 flagged | 0 | [39885962899](https://github.com/ryaner84/Keyboard/actions/runs/39885962899) |
+| 2026-10-24 | dcs-chladni … gmk-zm (whole list; the cursor sat at the end, so one run from the start) | 43 | 225 | 7 flagged → 0 confirmed | 0 | [40051362646](https://github.com/ryaner84/Keyboard/actions/runs/40051362646) |
 
 ### 2026-09-26 findings
 
@@ -830,6 +832,34 @@ reports: proto[Typist] (2026-10-19), iLumKB (2026-10-06, 2026-10-21) and now
 Oblotzky. Every one was a buyable pre-order or base kit shown sold out, then
 healed by the next price pass. That points to the price pass sometimes reading
 this product's variants as unavailable, not to the stores.
+
+Items still waiting on the owner, unchanged and not refiled: gmk-2pack-add-on ×
+Swagkeys (a switchkeys.com.au listing on the wrong vendor row; its price and
+stock are right), gmk-finer-things / gmk-cyl-finer-things-r2-keycaps (Mecha MY
++ Mecha.store), and gh-116846 × iLumKB (opened-box price, SGD 79.5).
+
+### 2026-10-24 findings
+
+There are 43 sets on sale (one fewer than on 2026-10-22). The cursor (`gmk-zm`)
+was the last slug, so a single run from the start
+([40051362646](https://github.com/ryaner84/Keyboard/actions/runs/40051362646))
+read the whole list: 225 listings, 7 flagged. None of the flags is new, so
+nothing was filed:
+
+| set | vendor | site | store | verdict | filed |
+|---|---|---|---|---|---|
+| gmk-camping-r3 | NovelKeys | — | — | as 2026-09-27 (pinned leftovers variant correct) | — |
+| gmk-yuri-r2 / gmk-dots-r2 (NovelKeys), gmk-dots-r2 (Oblotzky), gmk-wasabi-r2 (SwitchKeys), gmk-zm (Mekibo), gmk-finer-things (CannonKeys) | — | — | renamed handles redirect to the same product and price | stale handle in URL (as before) | — |
+
+Everything else matched the store on price, markdown and stock.
+gmk-botanical-r2 × Oblotzky Industries, a known stale-handle flag, is no longer
+in the list. gmk-masterpiece-r2, the set behind 2026-10-22's report and the
+one with the most stock reports, has left the On-sale list entirely, so it is the
+set that dropped out. Whether that report healed could not be checked here. The 2026-10-23 audit
+([39885962899](https://github.com/ryaner84/Keyboard/actions/runs/39885962899))
+ran but no one reviewed it or wrote it up. Its 7 flags are the same known
+stale-handle and leftovers items, so it found nothing new. The seven SwitchKeys
+rows still carry the store's AUD shelf price.
 
 Items still waiting on the owner, unchanged and not refiled: gmk-2pack-add-on ×
 Swagkeys (a switchkeys.com.au listing on the wrong vendor row; its price and
